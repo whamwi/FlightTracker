@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 const SB_URL = process.env.SUPABASE_URL!
 const SB_KEY = process.env.SUPABASE_ANON_KEY!
 
-export const revalidate = 3600
+export const dynamic = 'force-dynamic'
 
 export async function GET() {
   const select = [
