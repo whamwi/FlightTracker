@@ -213,15 +213,13 @@ export default function SchedulePage() {
                   </td>
 
                   {/* Departs */}
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <div className="font-mono text-gray-100">{r.dep_time}</div>
-                    <div className="text-[10px] text-gray-500">{r.dep_time_utc} UTC</div>
+                  <td className="px-4 py-3 font-mono text-gray-100 whitespace-nowrap">
+                    {r.dep_time}
                   </td>
 
                   {/* Arrives */}
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <div className="font-mono text-gray-100">{r.arr_time}</div>
-                    <div className="text-[10px] text-gray-500">{r.arr_time_utc} UTC</div>
+                  <td className="px-4 py-3 font-mono text-gray-100 whitespace-nowrap">
+                    {r.arr_time}
                   </td>
 
                   {/* Duration */}
