@@ -30,6 +30,21 @@ async function fetchFeed(): Promise<unknown[]> {
   throw new Error('all feeds failed')
 }
 
+// ── Syria airport proximity fallback ─────────────────────────────────────────
+const SYRIA_AP_COORDS: [number, number, string][] = [
+  [33.4114, 36.5156, 'DAM'],
+  [36.1807, 37.2244, 'ALP'],
+]
+
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R    = 6371
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLon = (lon2 - lon1) * Math.PI / 180
+  const a    = Math.sin(dLat / 2) ** 2
+    + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
 // ── Syria callsign → schedule info cache (1h) ────────────────────────────────
 interface SyriaInfo { airports: string[]; arr_time_utc: string | null; duration_min: number | null }
 type SyriaMap = Map<string, SyriaInfo>
@@ -181,9 +196,25 @@ export async function GET() {
     const annotated = (aircraft as any[]).map(a => {
       const callsign = (a.flight ?? '').trim()
       const info     = syriaMap.get(callsign)
+      let syriaAirports: string[] = info?.airports ?? []
+
+      // Proximity fallback: tag planes within 150 km of DAM/ALP that are below
+      // 20 000 ft (not cruising over Syria on an unrelated route)
+      if (syriaAirports.length === 0 && a.lat != null && a.lon != null) {
+        const altFt = typeof a.alt_baro === 'number' ? a.alt_baro : null
+        if (altFt === null || altFt < 20000) {
+          for (const [apLat, apLon, iata] of SYRIA_AP_COORDS) {
+            if (haversineKm(a.lat, a.lon, apLat, apLon) < 150) {
+              syriaAirports = [iata]
+              break
+            }
+          }
+        }
+      }
+
       return {
         ...a,
-        syria_airports:  info?.airports     ?? [],
+        syria_airports:  syriaAirports,
         arr_time_utc:    info?.arr_time_utc  ?? null,
         duration_min:    info?.duration_min  ?? null,
       }
