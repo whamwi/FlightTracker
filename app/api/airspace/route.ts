@@ -37,44 +37,26 @@ let syriaCache: { map: Map<string, string[]>; ts: number } | null = null
 async function fetchSyriaMap(): Promise<Map<string, string[]>> {
   if (syriaCache && Date.now() - syriaCache.ts < 3_600_000) return syriaCache.map
 
-  try {
-    // Get flight_ids + which Syria airports they touch
-    const schedRes = await fetch(
-      `${SB_URL}/rest/v1/flight_schedule?select=flight_id,dep_iata,arr_iata&or=(dep_iata.in.(DAM,ALP),arr_iata.in.(DAM,ALP))`,
-      { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` } }
-    )
-    const schedRows: { flight_id: number; dep_iata: string; arr_iata: string }[] = await schedRes.json()
+  const res = await fetch(`${SB_URL}/rest/v1/rpc/get_syria_callsigns`, {
+    method: 'POST',
+    headers: {
+      apikey: SB_KEY,
+      Authorization: `Bearer ${SB_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: '{}',
+  })
 
-    // Build flight_id → Syria airports
-    const idToAirports = new Map<number, Set<string>>()
-    for (const row of schedRows) {
-      if (!idToAirports.has(row.flight_id)) idToAirports.set(row.flight_id, new Set())
-      const airports = idToAirports.get(row.flight_id)!
-      if (row.dep_iata === 'DAM' || row.dep_iata === 'ALP') airports.add(row.dep_iata)
-      if (row.arr_iata === 'DAM' || row.arr_iata === 'ALP') airports.add(row.arr_iata)
-    }
-
-    const ids = [...idToAirports.keys()]
-    if (ids.length === 0) return new Map()
-
-    // Resolve flight_ids → broadcast_callsigns
-    const lookupRes = await fetch(
-      `${SB_URL}/rest/v1/flight_lookup?select=id,broadcast_callsign&id=in.(${ids.join(',')})&broadcast_callsign=not.is.null`,
-      { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` } }
-    )
-    const lookupRows: { id: number; broadcast_callsign: string }[] = await lookupRes.json()
-
-    const callsignMap = new Map<string, string[]>()
-    for (const row of lookupRows) {
-      const airports = idToAirports.get(row.id)
-      if (airports) callsignMap.set(row.broadcast_callsign, [...airports])
-    }
-
-    syriaCache = { map: callsignMap, ts: Date.now() }
-    return callsignMap
-  } catch {
+  if (!res.ok) {
+    // Return stale cache if available, otherwise empty
     return syriaCache?.map ?? new Map()
   }
+
+  const rows: { broadcast_callsign: string; syria_airports: string[] }[] = await res.json()
+  const callsignMap = new Map(rows.map(r => [r.broadcast_callsign, r.syria_airports]))
+
+  syriaCache = { map: callsignMap, ts: Date.now() }
+  return callsignMap
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────
