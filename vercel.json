@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/sync/airport-flights",
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/sync/expand-schedule",
+      "schedule": "30 3 * * *"
+    }
+  ]
+}
