@@ -16,19 +16,31 @@ interface Aircraft {
   syria_airports: string[]
 }
 
+interface MarkerMeta {
+  callsign: string
+  isSyria: boolean
+  track: number
+  syria_airports: string[]
+  lostAt: number | null   // timestamp when signal was lost; null = active
+}
+
 const AIRPORT_COORDS: Record<string, [number, number]> = {
   DAM: [33.4114, 36.5156],
   ALP: [36.1807, 37.2244],
 }
 
-function planeIcon(L: typeof import('leaflet'), rotation: number, syria: boolean) {
-  const size = syria ? 40 : 30
-  const color = syria ? '#16a34a' : '#1d4ed8'
+// Markers older than this are removed entirely
+const STALE_TTL_MS = 30 * 60 * 1000
+
+function planeIcon(L: typeof import('leaflet'), rotation: number, syria: boolean, stale: boolean) {
+  const size  = syria ? 40 : 30
+  const color = stale ? '#9ca3af' : syria ? '#16a34a' : '#1d4ed8'
+  const opacity = stale ? 0.5 : 1
   return L.divIcon({
     className: '',
     html: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${size}" height="${size}"
-      style="transform:rotate(${rotation}deg);filter:drop-shadow(0 1px 3px rgba(0,0,0,0.5))">
-      <path fill="${color}" stroke="white" stroke-width="${syria ? 0.4 : 0.6}"
+      style="transform:rotate(${rotation}deg);opacity:${opacity};filter:drop-shadow(0 1px 3px rgba(0,0,0,0.4))">
+      <path fill="${color}" stroke="white" stroke-width="${syria && !stale ? 0.4 : 0.6}"
         d="M21 16v-2l-8-5V3.5C13 2.67 12.33 2 11.5 2S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
     </svg>`,
     iconSize: [size, size],
@@ -36,17 +48,52 @@ function planeIcon(L: typeof import('leaflet'), rotation: number, syria: boolean
   })
 }
 
+function buildPopup(a: Aircraft, lostAt: number | null): string {
+  const callsign = (a.flight ?? a.hex ?? '').trim()
+  const alt = typeof a.alt_baro === 'number' ? `${Math.round(a.alt_baro).toLocaleString()} ft` : '—'
+  const spd = a.gs ? `${Math.round(a.gs)} kts` : '—'
+  const isSyria = a.syria_airports.length > 0
+  const lostLabel = lostAt
+    ? `<br/><span style="color:#ef4444;font-size:11px">⚠ Signal lost at ${new Date(lostAt).toLocaleTimeString()}</span>`
+    : ''
+  return `
+    <div style="font-family:monospace;font-size:12px;line-height:1.6">
+      <b>${callsign || a.hex}</b><br/>
+      ${a.t ? `Type: ${a.t}<br/>` : ''}
+      ${a.r ? `Reg: ${a.r}<br/>` : ''}
+      Alt: ${alt}<br/>
+      Speed: ${spd}
+      ${isSyria ? `<br/><span style="color:#16a34a;font-weight:bold">→ ${a.syria_airports.join(', ')}</span>` : ''}
+      ${lostLabel}
+    </div>`
+}
+
+function buildStalePopup(meta: MarkerMeta): string {
+  const lostLabel = meta.lostAt
+    ? `<span style="color:#ef4444;font-size:11px">⚠ Signal lost at ${new Date(meta.lostAt).toLocaleTimeString()}</span><br/>`
+    : ''
+  const syriaLabel = meta.isSyria
+    ? `<span style="color:#16a34a;font-weight:bold">→ ${meta.syria_airports.join(', ')}</span><br/>`
+    : ''
+  return `
+    <div style="font-family:monospace;font-size:12px;line-height:1.6;color:#6b7280">
+      <b>${meta.callsign}</b> <span style="font-size:10px">(last known position)</span><br/>
+      ${syriaLabel}${lostLabel}
+    </div>`
+}
+
 export default function Map() {
-  const mapRef = useRef<HTMLDivElement>(null)
+  const mapRef        = useRef<HTMLDivElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapInstanceRef = useRef<any>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const markersRef = useRef<Record<string, any>>({})
+  const markersRef    = useRef<Record<string, any>>({})
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const linesRef = useRef<Record<string, any[]>>({})
-  const [count, setCount] = useState(0)
+  const linesRef      = useRef<Record<string, any[]>>({})
+  const metaRef       = useRef<Record<string, MarkerMeta>>({})
+  const [count, setCount]           = useState(0)
   const [lastUpdate, setLastUpdate] = useState<string>('')
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError]           = useState<string | null>(null)
 
   useEffect(() => {
     if (!mapRef.current || mapInstanceRef.current) return
@@ -58,56 +105,42 @@ export default function Map() {
       delete (L.Icon.Default.prototype as any)._getIconUrl
       L.Icon.Default.mergeOptions({
         iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-        iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-        shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+        iconUrl:       'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+        shadowUrl:     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
       })
-
       const map = L.map(mapRef.current!, { center: [33.0, 42.0], zoom: 6 })
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
         maxZoom: 19,
       }).addTo(map)
-
       mapInstanceRef.current = map
     })
 
-    return () => {
-      mapInstanceRef.current?.remove()
-      mapInstanceRef.current = null
-    }
+    return () => { mapInstanceRef.current?.remove(); mapInstanceRef.current = null }
   }, [])
 
   useEffect(() => {
     const fetchAndUpdate = async () => {
       try {
-        const res = await fetch('/api/airspace')
+        const res  = await fetch('/api/airspace')
         const data = await res.json()
         if (!data.ok) { setError(data.error); return }
         setError(null)
 
-        const L = (await import('leaflet')).default
+        const L   = (await import('leaflet')).default
         const map = mapInstanceRef.current
         if (!map) return
 
+        const now  = Date.now()
         const seen = new Set<string>()
 
+        // ── Update / create active aircraft ──────────────────────────────────
         for (const a of data.aircraft as Aircraft[]) {
           seen.add(a.hex)
-          const isSyria = a.syria_airports.length > 0
+          const isSyria  = a.syria_airports.length > 0
           const callsign = (a.flight ?? a.hex ?? '').trim()
-          const alt = typeof a.alt_baro === 'number' ? `${Math.round(a.alt_baro).toLocaleString()} ft` : '—'
-          const spd = a.gs ? `${Math.round(a.gs)} kts` : '—'
-          const popup = `
-            <div style="font-family:monospace;font-size:12px;line-height:1.6">
-              <b>${callsign || a.hex}</b><br/>
-              ${a.t ? `Type: ${a.t}<br/>` : ''}
-              ${a.r ? `Reg: ${a.r}<br/>` : ''}
-              Alt: ${alt}<br/>
-              Speed: ${spd}
-              ${isSyria ? `<br/><span style="color:#16a34a;font-weight:bold">→ ${a.syria_airports.join(', ')}</span>` : ''}
-            </div>`
-
-          const icon = planeIcon(L, a.track ?? 0, isSyria)
+          const icon     = planeIcon(L, a.track ?? 0, isSyria, false)
+          const popup    = buildPopup(a, null)
 
           if (markersRef.current[a.hex]) {
             markersRef.current[a.hex].setLatLng([a.lat, a.lon])
@@ -115,38 +148,47 @@ export default function Map() {
             markersRef.current[a.hex].setPopupContent(popup)
           } else {
             markersRef.current[a.hex] = L.marker([a.lat, a.lon], { icon })
-              .addTo(map)
-              .bindPopup(popup)
+              .addTo(map).bindPopup(popup)
           }
 
-          // Dashed lines to Syria airports
-          const prevLines: unknown[] = linesRef.current[a.hex] ?? []
-          prevLines.forEach((l: any) => l.remove())
+          metaRef.current[a.hex] = {
+            callsign, isSyria, track: a.track ?? 0,
+            syria_airports: a.syria_airports, lostAt: null,
+          }
 
-          if (isSyria) {
-            linesRef.current[a.hex] = a.syria_airports
-              .filter(ap => AIRPORT_COORDS[ap])
-              .map(ap =>
+          // Dashed lines to Syria airports (redraw each tick — plane has moved)
+          linesRef.current[a.hex]?.forEach((l: any) => l.remove())
+          linesRef.current[a.hex] = isSyria
+            ? a.syria_airports.filter(ap => AIRPORT_COORDS[ap]).map(ap =>
                 L.polyline([[a.lat, a.lon], AIRPORT_COORDS[ap]], {
-                  color: '#16a34a',
-                  weight: 1.5,
-                  dashArray: '6 8',
-                  opacity: 0.7,
-                }).addTo(map)
-              )
-          } else {
-            linesRef.current[a.hex] = []
-          }
+                  color: '#16a34a', weight: 1.5, dashArray: '6 8', opacity: 0.7,
+                }).addTo(map))
+            : []
         }
 
-        // Remove stale markers and lines
+        // ── Handle aircraft no longer in feed ────────────────────────────────
         for (const hex of Object.keys(markersRef.current)) {
-          if (!seen.has(hex)) {
+          if (seen.has(hex)) continue
+
+          const meta = metaRef.current[hex]
+          if (!meta) continue
+
+          if (meta.lostAt === null) {
+            // First time missing — stamp it and switch to stale appearance
+            meta.lostAt = now
+            markersRef.current[hex].setIcon(planeIcon(L, meta.track, meta.isSyria, true))
+            markersRef.current[hex].setPopupContent(buildStalePopup(meta))
+            // Dim the dashed lines too
+            linesRef.current[hex]?.forEach((l: any) => l.setStyle({ opacity: 0.3 }))
+          } else if (now - meta.lostAt > STALE_TTL_MS) {
+            // Past retention — remove entirely
             markersRef.current[hex].remove()
             delete markersRef.current[hex]
             linesRef.current[hex]?.forEach((l: any) => l.remove())
             delete linesRef.current[hex]
+            delete metaRef.current[hex]
           }
+          // else: still within TTL, leave as-is (already dimmed)
         }
 
         setCount(data.aircraft.length)
