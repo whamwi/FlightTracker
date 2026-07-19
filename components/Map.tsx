@@ -121,35 +121,35 @@ function bearingAlongPath(lat1: number, lon1: number, lat2: number, lon2: number
   return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360
 }
 
-// Returns fraction (0–1) of flight elapsed, or null if not active right now
+// Returns fraction (0–1) of flight elapsed (second precision), or null if not active right now
 function isFlightActiveNow(depUtc: string, arrUtc: string, days: string[], nowMs: number): number | null {
   if (!depUtc || !arrUtc || depUtc === '—' || arrUtc === '—') return null
-  const toMin = (s: string) => { const [h, m] = s.split(':').map(Number); return h * 60 + m }
-  const depMin = toMin(depUtc)
-  const arrMin = toMin(arrUtc)
-  const durMin = arrMin > depMin ? arrMin - depMin : 1440 - depMin + arrMin
-  if (durMin <= 0) return null
+  const toSec = (s: string) => { const [h, m] = s.split(':').map(Number); return h * 3600 + m * 60 }
+  const depSec = toSec(depUtc)
+  const arrSec = toSec(arrUtc)
+  const durSec = arrSec > depSec ? arrSec - depSec : 86400 - depSec + arrSec
+  if (durSec <= 0) return null
 
-  const now     = new Date(nowMs)
-  const DAYS    = ['sun','mon','tue','wed','thu','fri','sat']
-  const todayI  = now.getUTCDay()
-  const nowMin  = now.getUTCHours() * 60 + now.getUTCMinutes()
+  const now    = new Date(nowMs)
+  const DAYS   = ['sun','mon','tue','wed','thu','fri','sat']
+  const todayI = now.getUTCDay()
+  const nowSec = now.getUTCHours() * 3600 + now.getUTCMinutes() * 60 + now.getUTCSeconds()
 
-  if (arrMin > depMin) {
+  if (arrSec > depSec) {
     // Same-day flight
-    if (days.includes(DAYS[todayI]) && nowMin >= depMin && nowMin <= arrMin)
-      return (nowMin - depMin) / durMin
+    if (days.includes(DAYS[todayI]) && nowSec >= depSec && nowSec <= arrSec)
+      return (nowSec - depSec) / durSec
     return null
   }
 
   // Overnight: departs today before midnight
-  if (days.includes(DAYS[todayI]) && nowMin >= depMin)
-    return (nowMin - depMin) / durMin
+  if (days.includes(DAYS[todayI]) && nowSec >= depSec)
+    return (nowSec - depSec) / durSec
 
   // Overnight: departed yesterday, still flying
   const yIdx = (todayI + 6) % 7
-  if (days.includes(DAYS[yIdx]) && nowMin <= arrMin)
-    return (1440 - depMin + nowMin) / durMin
+  if (days.includes(DAYS[yIdx]) && nowSec <= arrSec)
+    return (86400 - depSec + nowSec) / durSec
 
   return null
 }
