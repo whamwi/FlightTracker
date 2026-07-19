@@ -204,7 +204,7 @@ export async function GET() {
         const altFt = typeof a.alt_baro === 'number' ? a.alt_baro : null
         if (altFt === null || altFt < 20000) {
           for (const [apLat, apLon, iata] of SYRIA_AP_COORDS) {
-            if (haversineKm(a.lat, a.lon, apLat, apLon) < 150) {
+            if (haversineKm(a.lat, a.lon, apLat, apLon) < 60) {
               syriaAirports = [iata]
               break
             }
