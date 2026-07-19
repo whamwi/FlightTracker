@@ -14,6 +14,8 @@ interface Aircraft {
   t: string | null
   r: string | null
   syria_airports: string[]
+  arr_time_utc:   string | null
+  duration_min:   number | null
   seen_at?: string  // present when aircraft comes from DB fallback
 }
 
@@ -51,11 +53,19 @@ function buildPopup(a: Aircraft, lostAt?: number): string {
   const spd      = a.gs ? `${Math.round(a.gs)} kts` : '—'
   const syria    = a.syria_airports.length > 0
 
+  let scheduleLine = ''
+  if (syria && a.arr_time_utc) {
+    const dur = a.duration_min
+      ? ` &nbsp;·&nbsp; ${Math.floor(a.duration_min / 60)}h${a.duration_min % 60 > 0 ? ` ${a.duration_min % 60}m` : ''}`
+      : ''
+    scheduleLine = `<br/><span style="color:#4ade80;font-size:11px">Arrival ${a.arr_time_utc} UTC${dur}</span>`
+  }
+
   return `<div style="font-family:monospace;font-size:12px;line-height:1.7">
     <b>${callsign}</b>${lostAt ? ' <span style="color:#9ca3af;font-size:10px">(last known)</span>' : ''}<br/>
     ${a.t ? `Type: ${a.t}<br/>` : ''}${a.r ? `Reg: ${a.r}<br/>` : ''}
     Alt: ${alt} &nbsp; Speed: ${spd}
-    ${syria ? `<br/><span style="color:#16a34a;font-weight:bold">→ ${a.syria_airports.join(', ')}</span>` : ''}
+    ${syria ? `<br/><span style="color:#16a34a;font-weight:bold">→ ${a.syria_airports.join(', ')}</span>${scheduleLine}` : ''}
     ${lostAt ? `<br/><span style="color:#ef4444;font-size:11px">⚠ Signal lost ${new Date(lostAt).toLocaleTimeString()}</span>` : ''}
   </div>`
 }

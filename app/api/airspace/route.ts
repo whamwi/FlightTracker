@@ -30,10 +30,13 @@ async function fetchFeed(): Promise<unknown[]> {
   throw new Error('all feeds failed')
 }
 
-// ── Syria callsign → airports map cache (1h) ─────────────────────────────────
-let syriaCache: { map: Map<string, string[]>; ts: number } | null = null
+// ── Syria callsign → schedule info cache (1h) ────────────────────────────────
+interface SyriaInfo { airports: string[]; arr_time_utc: string | null; duration_min: number | null }
+type SyriaMap = Map<string, SyriaInfo>
 
-async function fetchSyriaMap(): Promise<Map<string, string[]>> {
+let syriaCache: { map: SyriaMap; ts: number } | null = null
+
+async function fetchSyriaMap(): Promise<SyriaMap> {
   if (syriaCache && Date.now() - syriaCache.ts < 3_600_000) return syriaCache.map
 
   const res = await fetch(`${SB_URL}/rest/v1/rpc/get_syria_callsigns`, {
@@ -48,8 +51,11 @@ async function fetchSyriaMap(): Promise<Map<string, string[]>> {
 
   if (!res.ok) return syriaCache?.map ?? new Map()
 
-  const rows: { broadcast_callsign: string; syria_airports: string[] }[] = await res.json()
-  const callsignMap = new Map(rows.map(r => [r.broadcast_callsign, r.syria_airports]))
+  const rows: { broadcast_callsign: string; syria_airports: string[]; arr_time_utc: string | null; duration_min: number | null }[] = await res.json()
+  const callsignMap: SyriaMap = new Map(rows.map(r => [
+    r.broadcast_callsign,
+    { airports: r.syria_airports, arr_time_utc: r.arr_time_utc, duration_min: r.duration_min },
+  ]))
   syriaCache = { map: callsignMap, ts: Date.now() }
   return callsignMap
 }
@@ -132,9 +138,14 @@ export async function GET() {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const annotated = (aircraft as any[]).map(a => {
-      const callsign    = (a.flight ?? '').trim()
-      const syriaAirports = syriaMap.get(callsign) ?? []
-      return { ...a, syria_airports: syriaAirports }
+      const callsign = (a.flight ?? '').trim()
+      const info     = syriaMap.get(callsign)
+      return {
+        ...a,
+        syria_airports:  info?.airports     ?? [],
+        arr_time_utc:    info?.arr_time_utc  ?? null,
+        duration_min:    info?.duration_min  ?? null,
+      }
     })
 
     // Persist to Supabase (awaited so function doesn't exit before completion)
