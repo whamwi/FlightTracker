@@ -13,6 +13,7 @@ interface Aircraft {
   track: number | null
   t: string | null
   r: string | null
+  syria: boolean
 }
 
 export default function Map() {
@@ -93,11 +94,12 @@ export default function Map() {
 
           // track is degrees from North clockwise; SVG below points North by default
           const rotation = a.track ?? 0
+          const color = a.syria ? '#16a34a' : '#1d4ed8'
           const icon = L.divIcon({
             className: '',
             html: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="30" height="30"
               style="transform:rotate(${rotation}deg);filter:drop-shadow(0 1px 3px rgba(0,0,0,0.5))">
-              <path fill="#1d4ed8" stroke="white" stroke-width="0.6"
+              <path fill="${color}" stroke="white" stroke-width="0.6"
                 d="M21 16v-2l-8-5V3.5C13 2.67 12.33 2 11.5 2S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
             </svg>`,
             iconSize: [30, 30],
