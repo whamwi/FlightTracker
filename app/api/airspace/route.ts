@@ -76,7 +76,12 @@ async function upsertPositions(aircraft: any[]): Promise<void> {
     aircraft_type: a.t ?? null,
     registration:  a.r ?? null,
     syria_airports: a.syria_airports ?? [],
-    seen_at:       now,
+    seen_at:        now,
+    // First-seen fields: preserved by DB trigger on subsequent updates
+    first_seen_at:  now,
+    first_lat:      a.lat,
+    first_lon:      a.lon,
+    first_alt:      typeof a.alt_baro === 'number' ? a.alt_baro : null,
   }))
 
   // Batch in 200-row chunks
