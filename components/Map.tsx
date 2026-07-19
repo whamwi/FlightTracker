@@ -102,6 +102,8 @@ export default function Map() {
       const map = mapInstanceRef.current
       if (!map) return
 
+      const now  = Date.now()
+
       // ── Fetch live feed ───────────────────────────────────────────────────
       let liveAircraft: Aircraft[] = []
       try {
@@ -128,7 +130,6 @@ export default function Map() {
         setError(String(e))
       }
 
-      const now  = Date.now()
       const seen = new Set(liveAircraft.map(a => a.hex))
 
       // ── Update / create active markers ───────────────────────────────────
