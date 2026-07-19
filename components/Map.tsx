@@ -16,7 +16,8 @@ interface Aircraft {
   syria_airports: string[]
   arr_time_utc:   string | null
   duration_min:   number | null
-  seen_at?: string  // present when aircraft comes from DB fallback
+  seen_at?: string   // present on stale DB entries
+  stale?:   boolean  // server-flagged as last-known, not currently in feed
 }
 
 interface LastKnown {
@@ -29,7 +30,8 @@ const AIRPORT_COORDS: Record<string, [number, number]> = {
   ALP: [36.1807, 37.2244],
 }
 
-const STALE_TTL_MS = 30 * 60 * 1000
+const STALE_TTL_MS       = 30 * 60 * 1000        // 30 min — regular aircraft
+const STALE_TTL_SYRIA_MS = 6  * 60 * 60 * 1000   // 6 hours — Syria flights
 
 function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, stale: boolean) {
   const size    = syria ? 40 : 30
@@ -121,7 +123,7 @@ export default function Map() {
         const data = await res.json()
         if (data.ok) {
           if (data.from_db) {
-            // All ADS-B feeds down — seed lastKnownRef from DB positions
+            // All ADS-B feeds down — seed lastKnownRef from full DB fallback
             for (const a of data.aircraft as Aircraft[]) {
               if (!lastKnownRef.current[a.hex]) {
                 const lostAt = a.seen_at ? new Date(a.seen_at).getTime() : now - 5 * 60_000
@@ -130,7 +132,17 @@ export default function Map() {
             }
             setError('Live feed down — showing last known positions')
           } else {
-            liveAircraft = data.aircraft
+            for (const a of data.aircraft as Aircraft[]) {
+              if (a.stale) {
+                // Server-flagged stale Syria position — seed only if not already tracked
+                if (!lastKnownRef.current[a.hex]) {
+                  const lostAt = a.seen_at ? new Date(a.seen_at).getTime() : now - 60_000
+                  lastKnownRef.current[a.hex] = { a, lostAt }
+                }
+              } else {
+                liveAircraft.push(a)
+              }
+            }
             setError(data.warn ? 'Feed degraded' : null)
           }
         } else {
@@ -178,8 +190,9 @@ export default function Map() {
         // Stamp lostAt on first miss
         if (entry.lostAt === 0) entry.lostAt = now
 
-        // Past retention — clean up
-        if (now - entry.lostAt > STALE_TTL_MS) {
+        // Past retention — clean up (Syria flights get a longer TTL)
+        const ttl = entry.a.syria_airports.length > 0 ? STALE_TTL_SYRIA_MS : STALE_TTL_MS
+        if (now - entry.lostAt > ttl) {
           markersRef.current[hex]?.remove()
           delete markersRef.current[hex]
           linesRef.current[hex]?.forEach((l: any) => l.remove())

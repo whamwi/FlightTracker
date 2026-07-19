@@ -94,7 +94,7 @@ async function upsertPositions(aircraft: any[]): Promise<void> {
   }
 }
 
-// ── Fetch last known positions from Supabase (DB fallback) ───────────────────
+// ── Fetch last known positions from Supabase (full feed-down fallback) ───────
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function fetchLastKnownPositions(): Promise<any[]> {
   const cutoff = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
@@ -118,6 +118,47 @@ async function fetchLastKnownPositions(): Promise<any[]> {
     syria_airports: r.syria_airports ?? [],
     seen_at:       r.seen_at,
   }))
+}
+
+// ── Syria stale positions — always appended alongside live feed (30s cache) ──
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let syriaPosCache: { rows: any[]; ts: number } | null = null
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function fetchSyriaStale(excludeHexes: Set<string>, syriaMap: SyriaMap): Promise<any[]> {
+  if (!syriaPosCache || Date.now() - syriaPosCache.ts > 30_000) {
+    const cutoff = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString()
+    const res = await fetch(
+      `${SB_URL}/rest/v1/aircraft_last_seen?syria_airports=ov.{DAM,ALP}&seen_at=gte.${cutoff}&order=seen_at.desc`,
+      { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` } },
+    ).catch(() => null)
+    if (res?.ok) syriaPosCache = { rows: await res.json(), ts: Date.now() }
+  }
+  if (!syriaPosCache?.rows.length) return []
+
+  return syriaPosCache.rows
+    .filter(r => !excludeHexes.has(r.hex))
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .map((r: any) => {
+      const callsign = r.callsign ?? ''
+      const info     = syriaMap.get(callsign)
+      return {
+        hex:           r.hex,
+        flight:        callsign,
+        lat:           r.lat,
+        lon:           r.lon,
+        alt_baro:      r.alt_baro,
+        gs:            r.gs,
+        track:         r.track,
+        t:             r.aircraft_type,
+        r:             r.registration,
+        syria_airports: r.syria_airports ?? [],
+        arr_time_utc:  info?.arr_time_utc  ?? null,
+        duration_min:  info?.duration_min  ?? null,
+        seen_at:       r.seen_at,
+        stale:         true,
+      }
+    })
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────
@@ -148,10 +189,16 @@ export async function GET() {
       }
     })
 
-    // Persist to Supabase (awaited so function doesn't exit before completion)
-    await upsertPositions(annotated)
+    // Persist live positions, then append stale Syria positions not in live feed
+    const liveSyriaHexes = new Set(
+      annotated.filter(a => a.syria_airports.length > 0).map(a => a.hex)
+    )
+    const [, syriaStale] = await Promise.all([
+      upsertPositions(annotated),
+      fetchSyriaStale(liveSyriaHexes, syriaMap),
+    ])
 
-    return NextResponse.json({ ok: true, aircraft: annotated, ts: feedCache!.ts })
+    return NextResponse.json({ ok: true, aircraft: [...annotated, ...syriaStale], ts: feedCache!.ts })
   } catch (err) {
     // In-memory cache fallback
     if (feedCache?.aircraft && feedCache.aircraft.length > 0) {
