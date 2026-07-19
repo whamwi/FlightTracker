@@ -135,10 +135,15 @@ function isFlightActiveNow(depUtc: string, arrUtc: string, days: string[], nowMs
   const todayI = now.getUTCDay()
   const nowSec = now.getUTCHours() * 3600 + now.getUTCMinutes() * 60 + now.getUTCSeconds()
 
+  const POST_SEC = 30 * 60 // 30-min post-arrival freeze at destination
+
   if (arrSec > depSec) {
-    // Same-day flight
+    // Same-day flight — in-flight
     if (days.includes(DAYS[todayI]) && nowSec >= depSec && nowSec <= arrSec)
       return (nowSec - depSec) / durSec
+    // Same-day flight — post-arrival freeze
+    if (days.includes(DAYS[todayI]) && nowSec > arrSec && nowSec <= arrSec + POST_SEC)
+      return 1.1
     return null
   }
 
@@ -150,6 +155,9 @@ function isFlightActiveNow(depUtc: string, arrUtc: string, days: string[], nowMs
   const yIdx = (todayI + 6) % 7
   if (days.includes(DAYS[yIdx]) && nowSec <= arrSec)
     return (86400 - depSec + nowSec) / durSec
+  // Overnight: post-arrival freeze (arrived today, within 30 min)
+  if (days.includes(DAYS[yIdx]) && nowSec > arrSec && nowSec <= arrSec + POST_SEC)
+    return 1.1
 
   return null
 }
@@ -217,8 +225,19 @@ function buildPopup(a: Aircraft, lostAt?: number, projected?: boolean): string {
   </div>`
 }
 
-function buildSchedulePopup(e: ScheduleEntry): string {
+function buildSchedulePopup(e: ScheduleEntry, arrived = false): string {
   const isSyria = AIRPORT_COORDS[e.arr_iata] != null
+  if (arrived && isSyria && e.arr_time_utc && e.arr_time_utc !== '—') {
+    const [h, m]    = e.arr_time_utc.split(':').map(Number)
+    const localH    = (h + 3) % 24
+    const localTime = `${String(localH).padStart(2,'0')}:${String(m).padStart(2,'0')}`
+    return `<div style="font-family:monospace;font-size:12px;line-height:1.7">
+      <b>${e.callsign}</b> <span style="color:#9ca3af;font-size:10px">landed</span><br/>
+      ${e.dep_iata} → ${e.arr_iata}
+      <br/><span style="color:#4ade80;font-size:11px">Arrived ${e.arr_iata} ~${localTime} local</span>
+      <br/><span style="color:#6b7280;font-size:10px">Schedule-estimated · no live signal</span>
+    </div>`
+  }
   let arrLine = ''
   if (isSyria && e.arr_time_utc && e.arr_time_utc !== '—') {
     const [h, m]    = e.arr_time_utc.split(':').map(Number)
@@ -405,7 +424,7 @@ export default function Map() {
         const isSyria    = aps.length > 0
         const elapsed    = now - entry.lostAt
 
-        let dispLat = a.lat, dispLon = a.lon, projected = false
+        let dispLat = a.lat, dispLon = a.lon, projected = false, arrSnapped = false
 
         if (isSyria && a.gs && a.track && elapsed > 30_000) {
           const projDistKm = a.gs * 1.852 * (elapsed / 3_600_000)
@@ -418,16 +437,34 @@ export default function Map() {
             const [pLat, pLon] = projectPosition(a.lat, a.lon, a.track, a.gs, elapsed)
             dispLat = pLat; dispLon = pLon; projected = true
           } else {
+            // Dead reckoning would overshoot the Syria airport.
+            // Check if the plane is heading TOWARD the airport (arriving) or AWAY (departing).
             const bestAp = aps.find(ap => AIRPORT_COORDS[ap]) ?? ''
             if (AIRPORT_COORDS[bestAp]) {
-              dispLat = AIRPORT_COORDS[bestAp][0]; dispLon = AIRPORT_COORDS[bestAp][1]; projected = true
+              const apC = AIRPORT_COORDS[bestAp]
+              const bearingToAp = (Math.atan2(
+                (apC[1] - a.lon) * Math.cos(a.lat * Math.PI / 180),
+                apC[0] - a.lat
+              ) * 180 / Math.PI + 360) % 360
+              const headingDiff = Math.abs(((a.track - bearingToAp) + 180) % 360 - 180)
+
+              if (headingDiff < 90) {
+                // Heading toward airport → arrived
+                dispLat = apC[0]; dispLon = apC[1]; arrSnapped = true
+              } else {
+                // Heading away → departing; project along track, don't snap back
+                const [pLat, pLon] = projectPosition(a.lat, a.lon, a.track, a.gs, elapsed)
+                dispLat = pLat; dispLon = pLon; projected = true
+              }
             }
           }
         }
 
         const cs        = (a.flight ?? '').trim()
-        const staleLabel = isSyria && cs ? (projected ? `${cs}\nESTIMATED` : cs) : undefined
-        const icon       = planeIcon(L, a.track ?? 0, isSyria, !isSyria, staleLabel)
+        const staleLabel = isSyria && cs
+          ? (arrSnapped ? `${cs}\nARRIVED` : projected ? `${cs}\nESTIMATED` : cs)
+          : undefined
+        const icon       = planeIcon(L, a.track ?? 0, isSyria, !isSyria || arrSnapped, staleLabel)
         const popup      = buildPopup({ ...a, syria_airports: aps }, entry.lostAt, projected)
 
         if (markersRef.current[hex]) {
@@ -486,12 +523,15 @@ export default function Map() {
         const arrC = ALL_AIRPORT_COORDS[arr_iata]
         if (!depC || !arrC) continue
 
-        const [lat, lon] = slerpGreatCircle(depC[0], depC[1], arrC[0], arrC[1], fraction)
-        const track      = bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], fraction)
+        const arrived    = fraction >= 1.0
+        const f          = arrived ? 1 : fraction
+        const [lat, lon] = slerpGreatCircle(depC[0], depC[1], arrC[0], arrC[1], f)
+        const track      = bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], f)
         const isSyria    = AIRPORT_COORDS[arr_iata] != null
+        const label      = arrived ? `${callsign}\nARRIVED` : `${callsign}\nESTIMATED`
 
-        const icon  = planeIcon(L, track, isSyria, false, `${callsign}\nESTIMATED`)
-        const popup = buildSchedulePopup(entry)
+        const icon  = planeIcon(L, track, isSyria, arrived, label)
+        const popup = buildSchedulePopup(entry, arrived)
 
         activeSchedKeys.add(callsign)
 
@@ -503,13 +543,13 @@ export default function Map() {
           schedMarkersRef.current[callsign] = L.marker([lat, lon], { icon }).addTo(map).bindPopup(popup)
         }
 
-        // Route line: projected position → destination airport
+        // No route line for arrived flights; clear any existing line
         schedLinesRef.current[callsign]?.forEach((l: any) => l.remove())
-        schedLinesRef.current[callsign] = AIRPORT_COORDS[arr_iata]
-          ? [L.polyline([[lat, lon], AIRPORT_COORDS[arr_iata]], {
+        schedLinesRef.current[callsign] = arrived || !AIRPORT_COORDS[arr_iata]
+          ? []
+          : [L.polyline([[lat, lon], AIRPORT_COORDS[arr_iata]], {
               color: '#16a34a', weight: 1.5, dashArray: '6 8', opacity: 0.6,
             }).addTo(map)]
-          : []
       }
 
       // Remove schedule markers that are no longer active
