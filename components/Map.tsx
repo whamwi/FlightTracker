@@ -14,6 +14,7 @@ interface Aircraft {
   t: string | null
   r: string | null
   syria_airports: string[]
+  seen_at?: string  // present when aircraft comes from DB fallback
 }
 
 interface LastKnown {
@@ -107,10 +108,21 @@ export default function Map() {
         const res  = await fetch('/api/airspace')
         const data = await res.json()
         if (data.ok) {
-          liveAircraft = data.aircraft
-          setError(null)
+          if (data.from_db) {
+            // All ADS-B feeds down — seed lastKnownRef from DB positions
+            for (const a of data.aircraft as Aircraft[]) {
+              if (!lastKnownRef.current[a.hex]) {
+                const lostAt = a.seen_at ? new Date(a.seen_at).getTime() : now - 5 * 60_000
+                lastKnownRef.current[a.hex] = { a, lostAt }
+              }
+            }
+            setError('Live feed down — showing last known positions')
+          } else {
+            liveAircraft = data.aircraft
+            setError(data.warn ? 'Feed degraded' : null)
+          }
         } else {
-          setError(data.error ?? 'feed error')
+          setError(data.warn ?? 'feed error')
         }
       } catch (e) {
         setError(String(e))
