@@ -82,7 +82,7 @@ export async function GET() {
       return { ...a, syria_airports: syriaAirports }
     })
 
-    return NextResponse.json({ ok: true, aircraft: annotated, ts: feedCache!.ts, syria_callsigns: syriaMap.size })
+    return NextResponse.json({ ok: true, aircraft: annotated, ts: feedCache!.ts })
   } catch (err) {
     const fallback = feedCache?.aircraft ?? []
     return NextResponse.json({ ok: true, aircraft: fallback, ts: feedCache?.ts ?? 0, warn: String(err) })
