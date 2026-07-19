@@ -91,12 +91,17 @@ export default function Map() {
               Speed: ${spd}
             </div>`
 
+          // track is degrees from North clockwise; SVG below points North by default
           const rotation = a.track ?? 0
           const icon = L.divIcon({
             className: '',
-            html: `<div style="transform:rotate(${rotation}deg);font-size:18px;line-height:1;filter:drop-shadow(0 0 3px rgba(0,150,255,0.8))">✈</div>`,
-            iconSize: [22, 22],
-            iconAnchor: [11, 11],
+            html: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="30" height="30"
+              style="transform:rotate(${rotation}deg);filter:drop-shadow(0 1px 3px rgba(0,0,0,0.5))">
+              <path fill="#1d4ed8" stroke="white" stroke-width="0.6"
+                d="M21 16v-2l-8-5V3.5C13 2.67 12.33 2 11.5 2S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
+            </svg>`,
+            iconSize: [30, 30],
+            iconAnchor: [15, 15],
           })
 
           if (markersRef.current[a.hex]) {
