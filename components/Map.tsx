@@ -534,8 +534,10 @@ export default function Map() {
             ? isFlightActiveNow(schedEntry.dep_time_utc, schedEntry.arr_time_utc, schedEntry.days_of_week, now)
             : null
 
-          if (wps?.length && fraction !== null && fraction <= 1.0) {
-            const [pathLat, pathLon] = interpolatePath(wps, fraction)
+          if (wps?.length && fraction !== null) {
+            // Clamp fraction: post-arrival (>1) stays at route end
+            const clampedF = Math.min(1, fraction)
+            const [pathLat, pathLon] = interpolatePath(wps, clampedF)
             const distKm = greatCircleKm(a.lat, a.lon, pathLat, pathLon)
             const SNAP_KM = 80  // ~43 NM — if within this, follow path directly
 
@@ -547,8 +549,13 @@ export default function Map() {
               dispLat = a.lat + blend * (pathLat - a.lat)
               dispLon = a.lon + blend * (pathLon - a.lon)
             }
-            dispTrack = bearingFromPath(wps, fraction)
+            dispTrack = bearingFromPath(wps, clampedF)
+            if (fraction > 1.0) arrSnapped = true
             projected = true
+          } else if (schedEntry && fraction !== null && fraction > 1.0) {
+            // No route path but flight arrived — snap to arrival airport coords
+            const arrC = ALL_AIRPORT_COORDS[schedEntry.arr_iata]
+            if (arrC) { dispLat = arrC[0]; dispLon = arrC[1]; arrSnapped = true; projected = true }
           } else if (a.gs && a.track) {
             // ── Fallback: kinematic dead-reckoning ──────────────────────────
             const projDistKm = a.gs * 1.852 * (elapsed / 3_600_000)
