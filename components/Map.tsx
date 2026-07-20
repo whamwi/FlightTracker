@@ -434,6 +434,16 @@ export default function Map() {
 
         const airports = a.syria_airports ?? []
         const isSyria  = airports.length > 0
+
+        // Hide non-Syria flights — remove any existing marker and skip
+        if (!isSyria) {
+          markersRef.current[a.hex]?.remove()
+          delete markersRef.current[a.hex]
+          linesRef.current[a.hex]?.forEach((l: any) => l.remove())
+          delete linesRef.current[a.hex]
+          continue
+        }
+
         const callsign = (a.flight ?? '').trim()
         const icon     = planeIcon(L, a.track ?? 0, isSyria, false, isSyria && callsign ? callsign : undefined)
         const popup    = buildPopup({ ...a, syria_airports: airports })
@@ -462,7 +472,16 @@ export default function Map() {
         const entry = lastKnownRef.current[hex]
         if (entry.lostAt === 0) entry.lostAt = now
 
-        const ttl = (entry.a.syria_airports ?? []).length > 0 ? STALE_TTL_SYRIA_MS : STALE_TTL_MS
+        // Hide non-Syria flights
+        if ((entry.a.syria_airports ?? []).length === 0) {
+          markersRef.current[hex]?.remove()
+          delete markersRef.current[hex]
+          linesRef.current[hex]?.forEach((l: any) => l.remove())
+          delete linesRef.current[hex]
+          continue
+        }
+
+        const ttl = STALE_TTL_SYRIA_MS
         if (now - entry.lostAt > ttl) {
           markersRef.current[hex]?.remove()
           delete markersRef.current[hex]
