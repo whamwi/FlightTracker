@@ -636,14 +636,35 @@ export default function Map() {
           }
         }
 
-        // Stale pre-departure aircraft: snap to scheduled departure airport so the
-        // marker isn't frozen at a misleading en-route position from an old flight.
+        // Stale un-projected aircraft: determine whether pre-departure or post-arrival
+        // by comparing the raw clock, not just isFlightActiveNow (which returns null
+        // for both states). Pre-departure → park at dep airport. Post-arrival (within
+        // 90 min) → snap to arr airport with ARRIVED. Beyond 90 min the expiry check
+        // above already removes the marker, so no further action needed.
         if (a.stale && !projected && isSyria) {
           const scs = (a.flight ?? '').trim()
           const se  = scheduleRef.current.find(e => e.callsign === scs)
           if (se && isFlightActiveNow(se.dep_time_utc, se.arr_time_utc, se.days_of_week, now) === null) {
-            const depC = ALL_AIRPORT_COORDS[se.dep_iata]
-            if (depC) { dispLat = depC[0]; dispLon = depC[1] }
+            const toSec2 = (s: string) => { const [h, m] = s.split(':').map(Number); return h * 3600 + m * 60 }
+            const d2 = new Date(now)
+            const todayDay2 = ['sun','mon','tue','wed','thu','fri','sat'][d2.getUTCDay()]
+            const nowSec2 = d2.getUTCHours() * 3600 + d2.getUTCMinutes() * 60 + d2.getUTCSeconds()
+            const depSec2 = toSec2(se.dep_time_utc)
+            const arrSec2 = toSec2(se.arr_time_utc)
+            const sinceArr2 = (nowSec2 - arrSec2 + 86400) % 86400
+
+            if (se.days_of_week.includes(todayDay2)) {
+              if (nowSec2 < depSec2) {
+                // Genuinely pre-departure: park at departure airport
+                const depC = ALL_AIRPORT_COORDS[se.dep_iata]
+                if (depC) { dispLat = depC[0]; dispLon = depC[1] }
+              } else if (sinceArr2 > 0 && sinceArr2 <= 90 * 60) {
+                // Post-arrival within 90 min: show at arrival airport as ARRIVED
+                const arrC = ALL_AIRPORT_COORDS[se.arr_iata]
+                if (arrC) { dispLat = arrC[0]; dispLon = arrC[1]; arrSnapped = true }
+              }
+              // sinceArr > 90 min: expiry check at top of loop already removed marker
+            }
           }
         }
 
