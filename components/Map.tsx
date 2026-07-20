@@ -659,11 +659,18 @@ export default function Map() {
             if (fraction > 1.0) {
               // Post-arrival freeze: snap to route end.
               dispLat = timeLat; dispLon = timeLon
+              dispTrack = bearingFromPath(wps, useF)
               arrSnapped = true
+            } else if (isFR24Entry && typeof a.gs === 'number' && a.gs > 50 && typeof a.track === 'number') {
+              // Kinematic DR from the actual FR24 fix using reported heading & speed.
+              // Path-following gives the wrong direction when the ATC route deviates
+              // from our stored path (common — filed routes vary day to day).
+              const [drLat, drLon] = projectPosition(a.lat, a.lon, a.track, a.gs, elapsed)
+              dispLat = drLat; dispLon = drLon
+              dispTrack = a.track
             } else if (isFR24Entry || distKm >= SNAP_KM) {
-              // FR24 anchor: always use actual reported position → nearest path point
-              // + elapsed. This prevents the plane jumping to the schedule-fraction
-              // position and avoids track-angle changes on each FR24 refresh.
+              // Path-following fallback: no reliable heading/speed, or stale DB entry
+              // far off the stored path — snap to nearest waypoint + elapsed fraction.
               const liveF = nearestPathFraction(wps, a.lat, a.lon)
               let elapsedFrac = 0
               if (schedEntry && schedEntry.duration_min > 0) {
@@ -683,10 +690,11 @@ export default function Map() {
               useF = Math.min(1, liveF + elapsedFrac)
               const [pathLat, pathLon] = interpolatePath(wps, useF)
               dispLat = pathLat; dispLon = pathLon
+              dispTrack = bearingFromPath(wps, useF)
             } else {
               dispLat = timeLat; dispLon = timeLon
+              dispTrack = bearingFromPath(wps, useF)
             }
-            dispTrack = bearingFromPath(wps, useF)
             projected = true
           } else if (schedEntry && fraction !== null && fraction > 1.0) {
             // No route path but flight arrived — snap to arrival airport coords
