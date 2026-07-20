@@ -476,11 +476,15 @@ export default function Map() {
           // Stale DB entries: preserve lostAt so elapsed grows, then hand off to
           // the last-known loop below for DR + canonical path rejoin.
           const prev = lastKnownRef.current[a.hex]
-          // Use seen_at from DB as lostAt when there's no prior entry, so the
-          // 6h TTL clock is anchored to the actual last-seen time rather than now.
-          // Using 0/now here would restart the clock every poll and keep ghosts alive.
-          const staleLostAt = prev?.lostAt || (a.seen_at ? new Date(a.seen_at).getTime() : now - 5 * 60_000)
-          lastKnownRef.current[a.hex] = { a, lostAt: staleLostAt }
+          // Never overwrite an FR24 entry with a stale DB row — the DB row is often
+          // just a shadow of the FR24 upsert and must not strip the fr24 flag or
+          // reset the position anchor that keeps ESTIMATED suppressed.
+          if (!(prev && (prev.a as any).fr24)) {
+            // Use seen_at from DB as lostAt anchor so the 6h TTL doesn't reset on
+            // every poll cycle when no prior entry exists.
+            const staleLostAt = prev?.lostAt || (a.seen_at ? new Date(a.seen_at).getTime() : now - 5 * 60_000)
+            lastKnownRef.current[a.hex] = { a, lostAt: staleLostAt }
+          }
           // Remove any old live marker so the last-known loop owns the rendering.
           markersRef.current[a.hex]?.remove()
           delete markersRef.current[a.hex]
