@@ -32,7 +32,7 @@ async function fetchFeed(): Promise<unknown[]> {
 }
 
 // ── Syria callsign → schedule info cache (1h) ────────────────────────────────
-interface SyriaInfo { airports: string[]; arr_time_utc: string | null; duration_min: number | null }
+interface SyriaInfo { airports: string[]; arr_time_utc: string | null; duration_min: number | null; dep_syria: boolean; arr_syria: boolean }
 type SyriaMap = Map<string, SyriaInfo>
 
 let syriaCache: { map: SyriaMap; ts: number; day: string } | null = null
@@ -56,10 +56,10 @@ async function fetchSyriaMap(): Promise<SyriaMap> {
 
   if (!res.ok) return syriaCache?.map ?? new Map()
 
-  const rows: { broadcast_callsign: string; syria_airports: string[]; arr_time_utc: string | null; duration_min: number | null }[] = await res.json()
+  const rows: { broadcast_callsign: string; syria_airports: string[]; arr_time_utc: string | null; duration_min: number | null; dep_syria: boolean; arr_syria: boolean }[] = await res.json()
   const callsignMap: SyriaMap = new Map(rows.map(r => [
     r.broadcast_callsign,
-    { airports: r.syria_airports, arr_time_utc: r.arr_time_utc, duration_min: r.duration_min },
+    { airports: r.syria_airports, arr_time_utc: r.arr_time_utc, duration_min: r.duration_min, dep_syria: r.dep_syria ?? false, arr_syria: r.arr_syria ?? false },
   ]))
   syriaCache = { map: callsignMap, ts: Date.now(), day: today }
   return callsignMap
@@ -209,6 +209,8 @@ async function fetchSyriaStale(excludeHexes: Set<string>, syriaMap: SyriaMap): P
         syria_airports: r.syria_airports ?? [],
         arr_time_utc:  info?.arr_time_utc  ?? null,
         duration_min:  info?.duration_min  ?? null,
+        dep_syria:     info?.dep_syria     ?? false,
+        arr_syria:     info?.arr_syria     ?? false,
         seen_at:       r.seen_at,
         stale:         true,
       }
@@ -240,6 +242,8 @@ export async function GET() {
         syria_airports: info?.airports    ?? [],
         arr_time_utc:   info?.arr_time_utc ?? null,
         duration_min:   info?.duration_min ?? null,
+        dep_syria:      info?.dep_syria    ?? false,
+        arr_syria:      info?.arr_syria    ?? false,
       }
     })
 
@@ -281,7 +285,7 @@ export async function GET() {
       .filter((a: any) => !liveCallsigns.has((a.flight ?? '').trim()))
       .map((a: any) => {
         const info = syriaMap.get(a.flight)
-        return { ...a, syria_airports: info?.airports ?? [], arr_time_utc: info?.arr_time_utc ?? null, duration_min: info?.duration_min ?? null }
+        return { ...a, syria_airports: info?.airports ?? [], arr_time_utc: info?.arr_time_utc ?? null, duration_min: info?.duration_min ?? null, dep_syria: info?.dep_syria ?? false, arr_syria: info?.arr_syria ?? false }
       })
     if (fr24Annotated.length > 0) upsertPositions(fr24Annotated).catch(() => {})
 

@@ -19,6 +19,8 @@ interface Aircraft {
   syria_airports: string[]
   arr_time_utc:   string | null
   duration_min:   number | null
+  dep_syria:      boolean
+  arr_syria:      boolean
   seen_at?: string
   stale?:   boolean
 }
@@ -576,7 +578,10 @@ export default function Map() {
         }
 
         linesRef.current[a.hex]?.forEach((l: any) => l.remove())
-        linesRef.current[a.hex] = isSyria
+        // Only draw the green line to Syria airport when the flight is ARRIVING at Syria.
+        // Departing flights (dep_syria=true, arr_syria=false) already left the airport —
+        // drawing a line back toward it would look like the plane is flying the wrong way.
+        linesRef.current[a.hex] = (isSyria && a.arr_syria)
           ? airports.filter(ap => AIRPORT_COORDS[ap]).map(ap =>
               L.polyline([[a.lat, a.lon], AIRPORT_COORDS[ap]], {
                 color: '#16a34a', weight: 1.5, dashArray: '6 8', opacity: 0.7,
@@ -867,7 +872,7 @@ export default function Map() {
             color: '#6b7280', weight: 1.5, dashArray: '4 6', opacity: 0.55,
           }).addTo(map))
         }
-        for (const ap of aps.filter(ap => AIRPORT_COORDS[ap])) {
+        for (const ap of aps.filter(ap => AIRPORT_COORDS[ap] && a.arr_syria)) {
           lines.push(L.polyline([[dispLat, dispLon], AIRPORT_COORDS[ap]], {
             color: '#16a34a', weight: 1.5, dashArray: '6 8', opacity: projected ? 0.4 : 0.3,
           }).addTo(map))
