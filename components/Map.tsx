@@ -25,6 +25,12 @@ interface LastKnown {
   lostAt: number
 }
 
+interface Waypoint {
+  f: number
+  lat: number
+  lon: number
+}
+
 interface ScheduleEntry {
   callsign:     string
   dep_iata:     string
@@ -99,6 +105,34 @@ function projectPosition(lat: number, lon: number, trackDeg: number, speedKts: n
   const newLat   = lat + (distKm * Math.cos(trackRad)) / 111.32
   const newLon   = lon + (distKm * Math.sin(trackRad)) / (111.32 * Math.cos((lat * Math.PI) / 180))
   return [newLat, newLon]
+}
+
+// ── Route-path helpers ────────────────────────────────────────────────────────
+
+function interpolatePath(wps: Waypoint[], f: number): [number, number] {
+  if (!wps.length) return [0, 0]
+  if (f <= wps[0].f) return [wps[0].lat, wps[0].lon]
+  const last = wps[wps.length - 1]
+  if (f >= last.f) return [last.lat, last.lon]
+  let lo = 0, hi = wps.length - 1
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1
+    if (wps[mid].f <= f) lo = mid; else hi = mid
+  }
+  const a = wps[lo], b = wps[hi]
+  const t = (f - a.f) / (b.f - a.f)
+  return [a.lat + t * (b.lat - a.lat), a.lon + t * (b.lon - a.lon)]
+}
+
+function bearingFromPath(wps: Waypoint[], f: number): number {
+  const dt = 0.01
+  const [aLat, aLon] = interpolatePath(wps, Math.max(0, f - dt / 2))
+  const [bLat, bLon] = interpolatePath(wps, Math.min(1, f + dt / 2))
+  const dLon = (bLon - aLon) * Math.PI / 180
+  const y = Math.sin(dLon) * Math.cos(bLat * Math.PI / 180)
+  const x = Math.cos(aLat * Math.PI / 180) * Math.sin(bLat * Math.PI / 180)
+           - Math.sin(aLat * Math.PI / 180) * Math.cos(bLat * Math.PI / 180) * Math.cos(dLon)
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360
 }
 
 function slerpGreatCircle(lat1: number, lon1: number, lat2: number, lon2: number, t: number): [number, number] {
@@ -279,6 +313,7 @@ export default function Map() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const schedLinesRef   = useRef<Record<string, any[]>>({})
   const scheduleRef     = useRef<ScheduleEntry[]>([])
+  const routePathsRef   = useRef<Record<string, Waypoint[]>>({})
 
   const [count, setCount]           = useState(0)
   const [lastUpdate, setLastUpdate] = useState('')
@@ -307,7 +342,7 @@ export default function Map() {
     return () => { mapInstanceRef.current?.remove(); mapInstanceRef.current = null }
   }, [])
 
-  // ── Load schedule once on mount ─────────────────────────────────────────────
+  // ── Load schedule + route paths once on mount ───────────────────────────────
   useEffect(() => {
     fetch('/api/schedule')
       .then(r => r.json())
@@ -326,6 +361,18 @@ export default function Map() {
             days_of_week: r.days_of_week       as string[],
           }))
           .filter(e => e.callsign && e.dep_iata && e.arr_iata)
+      })
+      .catch(() => {})
+
+    fetch('/api/routes')
+      .then(r => r.json())
+      .then(d => {
+        if (!d.ok) return
+        const rec: Record<string, Waypoint[]> = {}
+        for (const p of d.paths as { dep_iata: string; arr_iata: string; waypoints: Waypoint[] }[]) {
+          rec[`${p.dep_iata}|${p.arr_iata}`] = p.waypoints
+        }
+        routePathsRef.current = rec
       })
       .catch(() => {})
   }, [])
@@ -430,7 +477,8 @@ export default function Map() {
         const isSyria    = aps.length > 0
         const elapsed    = now - entry.lostAt
 
-        let dispLat = a.lat, dispLon = a.lon, projected = false, arrSnapped = false
+        let dispLat = a.lat, dispLon = a.lon, dispTrack = a.track ?? 0
+        let projected = false, arrSnapped = false
 
         // Expire stale markers 15+ min past scheduled arrival — let schedule ESTIMATED take over
         if (isSyria && a.arr_time_utc) {
@@ -448,33 +496,55 @@ export default function Map() {
           }
         }
 
-        if (isSyria && a.gs && a.track && elapsed > 30_000) {
-          const projDistKm = a.gs * 1.852 * (elapsed / 3_600_000)
-          const destDists  = aps
-            .filter(ap => AIRPORT_COORDS[ap])
-            .map(ap => greatCircleKm(a.lat, a.lon, AIRPORT_COORDS[ap][0], AIRPORT_COORDS[ap][1]))
-          const minDestKm = destDists.length ? Math.min(...destDists) : Infinity
+        if (isSyria && elapsed > 30_000) {
+          // ── Path-based rejoin ───────────────────────────────────────────────
+          const cs = (a.flight ?? '').trim()
+          const schedEntry = scheduleRef.current.find(e => e.callsign === cs)
+          const pathKey = schedEntry ? `${schedEntry.dep_iata}|${schedEntry.arr_iata}` : ''
+          const wps = pathKey ? routePathsRef.current[pathKey] : undefined
+          const fraction = schedEntry
+            ? isFlightActiveNow(schedEntry.dep_time_utc, schedEntry.arr_time_utc, schedEntry.days_of_week, now)
+            : null
 
-          if (projDistKm < minDestKm) {
-            const [pLat, pLon] = projectPosition(a.lat, a.lon, a.track, a.gs, elapsed)
-            dispLat = pLat; dispLon = pLon; projected = true
-          } else {
-            // Dead reckoning would overshoot the Syria airport.
-            // Check if the plane is heading TOWARD the airport (arriving) or AWAY (departing).
-            const bestAp = aps.find(ap => AIRPORT_COORDS[ap]) ?? ''
-            if (AIRPORT_COORDS[bestAp]) {
-              const apC = AIRPORT_COORDS[bestAp]
-              const bearingToAp = (Math.atan2(
-                (apC[1] - a.lon) * Math.cos(a.lat * Math.PI / 180),
-                apC[0] - a.lat
-              ) * 180 / Math.PI + 360) % 360
-              const headingDiff = Math.abs(((a.track - bearingToAp) + 180) % 360 - 180)
+          if (wps?.length && fraction !== null && fraction <= 1.0) {
+            const [pathLat, pathLon] = interpolatePath(wps, fraction)
+            const distKm = greatCircleKm(a.lat, a.lon, pathLat, pathLon)
+            const SNAP_KM = 80  // ~43 NM — if within this, follow path directly
 
-              if (headingDiff < 90) {
-                // Heading toward airport → arrived
-                dispLat = apC[0]; dispLon = apC[1]; arrSnapped = true
+            if (distKm < SNAP_KM) {
+              dispLat = pathLat; dispLon = pathLon
+            } else {
+              // Blend from last known toward path position over 30s
+              const blend = Math.min(1, elapsed / 30_000)
+              dispLat = a.lat + blend * (pathLat - a.lat)
+              dispLon = a.lon + blend * (pathLon - a.lon)
+            }
+            dispTrack = bearingFromPath(wps, fraction)
+            projected = true
+          } else if (a.gs && a.track) {
+            // ── Fallback: kinematic dead-reckoning ──────────────────────────
+            const projDistKm = a.gs * 1.852 * (elapsed / 3_600_000)
+            const destDists  = aps
+              .filter(ap => AIRPORT_COORDS[ap])
+              .map(ap => greatCircleKm(a.lat, a.lon, AIRPORT_COORDS[ap][0], AIRPORT_COORDS[ap][1]))
+            const minDestKm = destDists.length ? Math.min(...destDists) : Infinity
+
+            if (projDistKm < minDestKm) {
+              const [pLat, pLon] = projectPosition(a.lat, a.lon, a.track, a.gs, elapsed)
+              dispLat = pLat; dispLon = pLon; projected = true
+            } else {
+              const bestAp = aps.find(ap => AIRPORT_COORDS[ap]) ?? ''
+              if (AIRPORT_COORDS[bestAp]) {
+                const apC = AIRPORT_COORDS[bestAp]
+                const bearingToAp = (Math.atan2(
+                  (apC[1] - a.lon) * Math.cos(a.lat * Math.PI / 180),
+                  apC[0] - a.lat
+                ) * 180 / Math.PI + 360) % 360
+                const headingDiff = Math.abs(((a.track - bearingToAp) + 180) % 360 - 180)
+                if (headingDiff < 90) {
+                  dispLat = apC[0]; dispLon = apC[1]; arrSnapped = true
+                }
               }
-              // Heading away → departing; freeze at last known position (no track projection)
             }
           }
         }
@@ -483,7 +553,7 @@ export default function Map() {
         const staleLabel = isSyria && cs
           ? (arrSnapped ? `${cs}\nARRIVED` : projected ? `${cs}\nESTIMATED` : cs)
           : undefined
-        const icon       = planeIcon(L, a.track ?? 0, isSyria, !isSyria || arrSnapped, staleLabel)
+        const icon       = planeIcon(L, dispTrack, isSyria, !isSyria || arrSnapped, staleLabel)
         const popup      = buildPopup({ ...a, syria_airports: aps }, entry.lostAt, projected)
 
         if (markersRef.current[hex]) {
@@ -542,10 +612,16 @@ export default function Map() {
         const arrC = ALL_AIRPORT_COORDS[arr_iata]
         if (!depC || !arrC) continue
 
-        const arrived    = fraction >= 1.0
-        const f          = arrived ? 1 : fraction
-        const [lat, lon] = slerpGreatCircle(depC[0], depC[1], arrC[0], arrC[1], f)
-        const track      = bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], f)
+        const arrived = fraction >= 1.0
+        const f       = arrived ? 1 : fraction
+
+        const wps = routePathsRef.current[`${dep_iata}|${arr_iata}`]
+        const [lat, lon] = wps?.length
+          ? interpolatePath(wps, f)
+          : slerpGreatCircle(depC[0], depC[1], arrC[0], arrC[1], f)
+        const track = wps?.length
+          ? bearingFromPath(wps, f)
+          : bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], f)
         const isSyria    = AIRPORT_COORDS[arr_iata] != null
         const label      = arrived ? `${callsign}\nARRIVED` : `${callsign}\nESTIMATED`
 
