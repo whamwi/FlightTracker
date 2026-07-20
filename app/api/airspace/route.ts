@@ -286,7 +286,8 @@ export async function GET() {
     const excludeHexes = new Set([...liveSyriaHexes, ...fr24Hexes])
     const syriaStale = await fetchSyriaStale(excludeHexes, syriaMap)
 
-    return NextResponse.json({ ok: true, aircraft: [...annotated, ...syriaStale, ...fr24Annotated], ts: feedCache!.ts })
+    const fr24Callsigns = fr24Annotated.map((a: any) => (a.flight ?? '').trim()).filter(Boolean)
+    return NextResponse.json({ ok: true, aircraft: [...annotated, ...syriaStale, ...fr24Annotated], ts: feedCache!.ts, fr24Ts: fr24Cache?.ts ?? 0, fr24Callsigns })
   } catch (err) {
     // In-memory cache fallback
     if (feedCache?.aircraft && feedCache.aircraft.length > 0) {

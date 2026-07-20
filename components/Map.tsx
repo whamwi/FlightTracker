@@ -400,6 +400,7 @@ export default function Map() {
 
       // ── Fetch live feed ───────────────────────────────────────────────────
       let liveAircraft: Aircraft[] = []
+      let fr24CallsignsList: string[] = []
       try {
         const res  = await fetch('/api/airspace')
         const data = await res.json()
@@ -413,12 +414,21 @@ export default function Map() {
             }
             setError('Live feed down — showing last known positions')
           } else {
+            // fr24Ts is when FR24 data was fetched; FR24 aircraft use this as lostAt
+            // so dead-reckoning advances their position between 5-min cache refreshes.
+            const fr24Ts: number = data.fr24Ts ?? 0
+            fr24CallsignsList = (data.fr24Callsigns ?? []) as string[]
             for (const a of data.aircraft as Aircraft[]) {
+              const isFr24 = (a as any).fr24 === true
               if (a.stale) {
                 if (!lastKnownRef.current[a.hex]) {
                   const lostAt = a.seen_at ? new Date(a.seen_at).getTime() : now - 60_000
                   lastKnownRef.current[a.hex] = { a, lostAt }
                 }
+              } else if (isFr24) {
+                // Route FR24 aircraft through last-known DR so position advances
+                // between cache refreshes, and always refresh their lostAt to fr24Ts.
+                lastKnownRef.current[a.hex] = { a, lostAt: fr24Ts || now - 30_000 }
               } else {
                 liveAircraft.push(a)
               }
@@ -438,9 +448,14 @@ export default function Map() {
 
       // Collect callsigns already covered by real data (live or last-known).
       // Stale and pre-departure last-known entries are excluded so ESTIMATED can show.
+      // FR24 callsigns are seeded explicitly — this is the authoritative signal that
+      // overrides ESTIMATED regardless of Vercel instance cache state.
       const realCallsigns = new Set<string>(
         liveAircraft.filter(a => !a.stale).map(a => (a.flight ?? '').trim()).filter(Boolean)
       )
+      for (const cs of fr24CallsignsList) {
+        if (cs) realCallsigns.add(cs)
+      }
       for (const entry of Object.values(lastKnownRef.current)) {
         const cs = (entry.a.flight ?? '').trim()
         if (!cs) continue
