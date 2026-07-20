@@ -11,6 +11,9 @@ interface Aircraft {
   alt_baro: number | string | null
   gs: number | null
   track: number | null
+  true_heading: number | null
+  nic?: number
+  nac_p?: number
   t: string | null
   r: string | null
   syria_airports: string[]
@@ -228,6 +231,18 @@ function isFlightActiveNow(depUtc: string, arrUtc: string, days: string[], nowMs
     return 1.1
 
   return null
+}
+
+// Return the most reliable heading for icon rotation.
+// When nic=0 (GPS unreliable), track can be wildly wrong while true_heading
+// stays accurate (derived from IRS/inertial). If they disagree by >45° use heading.
+function bestHeading(a: Aircraft): number {
+  const trk = a.track
+  const hdg = a.true_heading
+  if (trk == null) return hdg ?? 0
+  if (hdg  == null) return trk
+  const diff = Math.abs(((trk - hdg) + 540) % 360 - 180)
+  return diff > 45 ? hdg : trk
 }
 
 // ── Icon & popup ──────────────────────────────────────────────────────────────
@@ -549,7 +564,7 @@ export default function Map() {
         }
 
         const callsign = (a.flight ?? '').trim()
-        const icon     = planeIcon(L, a.track ?? 0, isSyria, false, isSyria && callsign ? callsign : undefined)
+        const icon     = planeIcon(L, bestHeading(a), isSyria, false, isSyria && callsign ? callsign : undefined)
         const popup    = buildPopup({ ...a, syria_airports: airports }, undefined, false, flightStatusRef.current[callsign])
 
         if (markersRef.current[a.hex]) {
@@ -644,7 +659,7 @@ export default function Map() {
         const isOnGround = (a.alt_baro === 'ground' || (typeof a.alt_baro === 'number' && a.alt_baro < 500))
                         && (typeof a.gs === 'number' ? a.gs < 50 : false)
 
-        let dispLat = a.lat, dispLon = a.lon, dispTrack = a.track ?? 0
+        let dispLat = a.lat, dispLon = a.lon, dispTrack = bestHeading(a)
         let projected = false, arrSnapped = false
 
         // Expire markers past scheduled arrival window.
