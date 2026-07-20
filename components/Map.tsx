@@ -71,6 +71,12 @@ const ALL_AIRPORT_COORDS: Record<string, [number, number]> = {
   EVN: [40.1473, 44.3959],
   KHI: [24.9065, 67.1608],
   LCA: [34.8751, 33.6249],
+  // Added from schedule validation
+  AMS: [52.3086,  4.7639],  // Amsterdam Schiphol
+  DOH: [25.2731, 51.6081],  // Doha Hamad International
+  EBL: [36.2376, 43.9631],  // Erbil International
+  MJI: [32.8942, 13.2759],  // Mitiga (Tripoli)
+  TIP: [32.6635, 13.1515],  // Tripoli International
 }
 
 const STALE_TTL_MS       = 30 * 60 * 1000
@@ -451,11 +457,8 @@ export default function Map() {
               if (headingDiff < 90) {
                 // Heading toward airport → arrived
                 dispLat = apC[0]; dispLon = apC[1]; arrSnapped = true
-              } else {
-                // Heading away → departing; project along track, don't snap back
-                const [pLat, pLon] = projectPosition(a.lat, a.lon, a.track, a.gs, elapsed)
-                dispLat = pLat; dispLon = pLon; projected = true
               }
+              // Heading away → departing; freeze at last known position (no track projection)
             }
           }
         }
