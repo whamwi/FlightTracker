@@ -776,6 +776,16 @@ export default function Map() {
         const icon       = planeIcon(L, dispTrack, isSyria, !isSyria || arrSnapped, staleLabel)
         const popup      = buildPopup({ ...a, syria_airports: aps }, entry.lostAt, projected)
 
+        // Smooth-blend toward the DR target so that when a fresh FR24 fix arrives
+        // at a position slightly different from what DR predicted, the marker
+        // transitions gradually instead of jumping (55% per 10s poll cycle).
+        if (isFR24Entry && !arrSnapped && markersRef.current[hex]) {
+          const p = markersRef.current[hex].getLatLng()
+          const BLEND = 0.55
+          dispLat = p.lat + BLEND * (dispLat - p.lat)
+          dispLon = p.lng + BLEND * (dispLon - p.lng)
+        }
+
         if (markersRef.current[hex]) {
           markersRef.current[hex].setLatLng([dispLat, dispLon])
           markersRef.current[hex].setIcon(icon)
