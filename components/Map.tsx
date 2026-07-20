@@ -420,12 +420,15 @@ export default function Map() {
         setError(String(e))
       }
 
-      const seen = new Set(liveAircraft.map(a => a.hex))
+      // Stale aircraft (from DB last-seen cache) are routed through the last-known
+      // loop so they get full DR + canonical path rejoin, not a frozen marker.
+      const seen = new Set(liveAircraft.filter(a => !a.stale).map(a => a.hex))
 
       // Collect callsigns already covered by real data (live or last-known).
-      // Last-known entries are excluded when their schedule says the flight hasn't
-      // departed yet — the pre-departure stale position should not block ESTIMATED.
-      const realCallsigns = new Set<string>(liveAircraft.map(a => (a.flight ?? '').trim()))
+      // Stale and pre-departure last-known entries are excluded so ESTIMATED can show.
+      const realCallsigns = new Set<string>(
+        liveAircraft.filter(a => !a.stale).map(a => (a.flight ?? '').trim()).filter(Boolean)
+      )
       for (const entry of Object.values(lastKnownRef.current)) {
         const cs = (entry.a.flight ?? '').trim()
         if (!cs) continue
@@ -439,6 +442,18 @@ export default function Map() {
 
       // ── Live markers ──────────────────────────────────────────────────────
       for (const a of liveAircraft) {
+        if (a.stale) {
+          // Stale DB entries: preserve lostAt so elapsed grows, then hand off to
+          // the last-known loop below for DR + canonical path rejoin.
+          const prev = lastKnownRef.current[a.hex]
+          lastKnownRef.current[a.hex] = { a, lostAt: prev?.lostAt ?? 0 }
+          // Remove any old live marker so the last-known loop owns the rendering.
+          markersRef.current[a.hex]?.remove()
+          delete markersRef.current[a.hex]
+          linesRef.current[a.hex]?.forEach((l: any) => l.remove())
+          delete linesRef.current[a.hex]
+          continue
+        }
         lastKnownRef.current[a.hex] = { a, lostAt: 0 }
 
         const airports = a.syria_airports ?? []
