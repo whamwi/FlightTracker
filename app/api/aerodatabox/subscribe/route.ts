@@ -79,8 +79,10 @@ export async function GET(req: Request) {
       adb('/subscriptions/webhook'),
     ])
 
-    const balData = balRes.ok ? await balRes.json() : null
-    const balance: number = balData?.balance ?? balData?.credits ?? 0
+    const safeJson = async (r: Response) => { try { return await r.json() } catch { return null } }
+
+    const balData = balRes.ok ? await safeJson(balRes) : null
+    const balance: number = balData?.balance ?? balData?.credits ?? balData?.availableCredits ?? 0
 
     let refillResult: unknown = null
     if (balance < 120) {
@@ -88,13 +90,13 @@ export async function GET(req: Request) {
         method: 'POST',
         body: JSON.stringify({ credits: 60 }),
       })
-      refillResult = refillRes.ok ? await refillRes.json() : { error: await refillRes.text() }
+      refillResult = refillRes.ok ? await safeJson(refillRes) : { error: await refillRes.text() }
     }
 
     // 2. Collect existing subscriptions
     const existing = new Set<string>()
     if (listRes.ok) {
-      const listData = await listRes.json()
+      const listData = await safeJson(listRes)
       const subs = Array.isArray(listData) ? listData : (listData?.subscriptions ?? [])
       for (const s of subs) {
         const subId: string = s.subjectId ?? s.subject ?? ''
@@ -120,7 +122,7 @@ export async function GET(req: Request) {
           { method: 'POST', body: JSON.stringify({ url: fullUrl, maxDeliveryRetries: 2 }) }
         )
         if (res.ok) created.push(flight)
-        else errors[flight] = `${res.status}: ${await res.text()}`
+        else errors[flight] = `${res.status}: ${await res.text().catch(() => '(no body)')}`
       }))
     }
 
