@@ -522,23 +522,22 @@ export default function Map() {
       // ── Last-known / dead-reckoning markers ───────────────────────────────
       // Deduplicate by callsign: when multiple hexes share a callsign (e.g. a stale
       // DB entry AND a FR24 entry), keep only the best one — FR24 wins, then newest lostAt.
-      const bestHexForCallsign = new Map<string, string>()
+      const bestHexForCallsign: Record<string, string> = {}
       for (const hex of Object.keys(lastKnownRef.current)) {
         if (seen.has(hex)) continue
         const entry = lastKnownRef.current[hex]
         if ((entry.a.syria_airports ?? []).length === 0) continue
         const cs = (entry.a.flight ?? '').trim()
         if (!cs) continue
-        const existing = bestHexForCallsign.get(cs)
-        if (!existing) { bestHexForCallsign.set(cs, hex); continue }
+        const existing = bestHexForCallsign[cs]
+        if (!existing) { bestHexForCallsign[cs] = hex; continue }
         const existEntry = lastKnownRef.current[existing]
-        const isBetter = (entry.a as any).fr24 && !(existEntry.a as any).fr24
+        const isBetter = ((entry.a as any).fr24 && !(existEntry.a as any).fr24)
           || (entry.lostAt > existEntry.lostAt && !((existEntry.a as any).fr24 && !(entry.a as any).fr24))
         if (isBetter) {
-          // Remove the loser's marker now so it doesn't linger
           markersRef.current[existing]?.remove(); delete markersRef.current[existing]
           linesRef.current[existing]?.forEach((l: any) => l.remove()); delete linesRef.current[existing]
-          bestHexForCallsign.set(cs, hex)
+          bestHexForCallsign[cs] = hex
         } else {
           markersRef.current[hex]?.remove(); delete markersRef.current[hex]
           linesRef.current[hex]?.forEach((l: any) => l.remove()); delete linesRef.current[hex]
@@ -562,7 +561,7 @@ export default function Map() {
 
         // Skip the loser hex for this callsign — dedup already cleaned it up
         const cs0 = (entry.a.flight ?? '').trim()
-        if (cs0 && bestHexForCallsign.get(cs0) !== hex) continue
+        if (cs0 && bestHexForCallsign[cs0] !== hex) continue
 
         const ttl = STALE_TTL_SYRIA_MS
         if (now - entry.lostAt > ttl) {
