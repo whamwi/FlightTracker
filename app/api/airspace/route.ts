@@ -272,12 +272,17 @@ export async function GET() {
       fetchFR24Missing(missingCallsigns),
     ])
 
-    // Annotate FR24 aircraft with Syria info and persist them
+    // Annotate FR24 aircraft with Syria info and persist them.
+    // Exclude any callsign the free feed already covers — FR24 is a fallback only.
+    // The 5-min FR24 cache can hold a callsign that just became visible in the free
+    // feed; without this filter both sources would appear in the same response.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const fr24Annotated = fr24Raw.map((a: any) => {
-      const info = syriaMap.get(a.flight)
-      return { ...a, syria_airports: info?.airports ?? [], arr_time_utc: info?.arr_time_utc ?? null, duration_min: info?.duration_min ?? null }
-    })
+    const fr24Annotated = fr24Raw
+      .filter((a: any) => !liveCallsigns.has((a.flight ?? '').trim()))
+      .map((a: any) => {
+        const info = syriaMap.get(a.flight)
+        return { ...a, syria_airports: info?.airports ?? [], arr_time_utc: info?.arr_time_utc ?? null, duration_min: info?.duration_min ?? null }
+      })
     if (fr24Annotated.length > 0) upsertPositions(fr24Annotated).catch(() => {})
 
     // Exclude both live ADS-B and FR24 hexes from stale so there are no duplicates
