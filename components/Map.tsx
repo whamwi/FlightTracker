@@ -476,7 +476,11 @@ export default function Map() {
           // Stale DB entries: preserve lostAt so elapsed grows, then hand off to
           // the last-known loop below for DR + canonical path rejoin.
           const prev = lastKnownRef.current[a.hex]
-          lastKnownRef.current[a.hex] = { a, lostAt: prev?.lostAt ?? 0 }
+          // Use seen_at from DB as lostAt when there's no prior entry, so the
+          // 6h TTL clock is anchored to the actual last-seen time rather than now.
+          // Using 0/now here would restart the clock every poll and keep ghosts alive.
+          const staleLostAt = prev?.lostAt || (a.seen_at ? new Date(a.seen_at).getTime() : now - 5 * 60_000)
+          lastKnownRef.current[a.hex] = { a, lostAt: staleLostAt }
           // Remove any old live marker so the last-known loop owns the rendering.
           markersRef.current[a.hex]?.remove()
           delete markersRef.current[a.hex]
@@ -590,7 +594,7 @@ export default function Map() {
           const [ah, am] = a.arr_time_utc.split(':').map(Number)
           const sinceArr = (nowSec - (ah * 3600 + am * 60) + 86400) % 86400
           const maxSinceArr = a.stale ? 90 * 60 : 15 * 60
-          if (sinceArr > maxSinceArr && sinceArr < 6 * 3600) {
+          if (sinceArr > maxSinceArr && sinceArr < 22 * 3600) {
             markersRef.current[hex]?.remove()
             delete markersRef.current[hex]
             linesRef.current[hex]?.forEach((l: any) => l.remove())
