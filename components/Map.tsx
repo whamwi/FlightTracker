@@ -572,7 +572,12 @@ export default function Map() {
             const SNAP_KM = 80  // ~43 NM — if within this, follow time-based fraction
 
             let useF = clampedF
-            if (distKm < SNAP_KM) {
+            if (fraction > 1.0) {
+              // Post-arrival freeze: last-known may be mid-route; skip distance check and
+              // always show at route end so the plane appears at the arrival airport.
+              dispLat = timeLat; dispLon = timeLon
+              arrSnapped = true
+            } else if (distKm < SNAP_KM) {
               dispLat = timeLat; dispLon = timeLon
             } else {
               // Last live position is off the time-scheduled slot (plane early/late).
@@ -602,7 +607,6 @@ export default function Map() {
               dispLat = pathLat; dispLon = pathLon
             }
             dispTrack = bearingFromPath(wps, useF)
-            if (fraction > 1.0) arrSnapped = true
             projected = true
           } else if (schedEntry && fraction !== null && fraction > 1.0) {
             // No route path but flight arrived — snap to arrival airport coords
