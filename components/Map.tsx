@@ -604,7 +604,8 @@ export default function Map() {
           }
         }
 
-        if (isSyria && elapsed > 30_000) {
+        const isFR24Entry = (entry.a as any).fr24 === true
+        if (isSyria && (elapsed > 30_000 || isFR24Entry)) {
           // ── Path-based rejoin ───────────────────────────────────────────────
           const cs = (a.flight ?? '').trim()
           const schedEntry = scheduleRef.current.find(e => e.callsign === cs)
@@ -623,19 +624,14 @@ export default function Map() {
 
             let useF = clampedF
             if (fraction > 1.0) {
-              // Post-arrival freeze: last-known may be mid-route; skip distance check and
-              // always show at route end so the plane appears at the arrival airport.
+              // Post-arrival freeze: snap to route end.
               dispLat = timeLat; dispLon = timeLon
               arrSnapped = true
-            } else if (distKm < SNAP_KM) {
-              dispLat = timeLat; dispLon = timeLon
-            } else {
-              // Last live position is off the time-scheduled slot (plane early/late).
-              // Anchor to nearest path point, then advance at cruise speed.
+            } else if (isFR24Entry || distKm >= SNAP_KM) {
+              // FR24 anchor: always use actual reported position → nearest path point
+              // + elapsed. This prevents the plane jumping to the schedule-fraction
+              // position and avoids track-angle changes on each FR24 refresh.
               const liveF = nearestPathFraction(wps, a.lat, a.lon)
-
-              // Estimate elapsed fraction: prefer exact duration_min, else derive
-              // from last-known gs (or 450 kts nominal) vs great-circle route distance.
               let elapsedFrac = 0
               if (schedEntry && schedEntry.duration_min > 0) {
                 elapsedFrac = elapsed / (schedEntry.duration_min * 60_000)
@@ -646,15 +642,16 @@ export default function Map() {
                   const routeKm = greatCircleKm(depC2[0], depC2[1], arrC2[0], arrC2[1])
                   if (routeKm > 0) {
                     const speedKts = (a.gs && a.gs > 50) ? a.gs : 450
-                    const distKm   = speedKts * 1.852 * (elapsed / 3_600_000)
-                    elapsedFrac    = distKm / routeKm
+                    const distKm2  = speedKts * 1.852 * (elapsed / 3_600_000)
+                    elapsedFrac    = distKm2 / routeKm
                   }
                 }
               }
-
               useF = Math.min(1, liveF + elapsedFrac)
               const [pathLat, pathLon] = interpolatePath(wps, useF)
               dispLat = pathLat; dispLon = pathLon
+            } else {
+              dispLat = timeLat; dispLon = timeLon
             }
             dispTrack = bearingFromPath(wps, useF)
             projected = true
