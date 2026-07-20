@@ -925,8 +925,24 @@ export default function Map() {
         const arrC = ALL_AIRPORT_COORDS[arr_iata]
         if (!depC || !arrC) continue
 
-        const arrived = fraction >= 1.0
-        const f       = arrived ? 1 : fraction
+        // Schedule fraction >= 1.0 means past scheduled arrival.
+        // Only confirm ARRIVED when AeroDataBox has actual_arr_utc — otherwise
+        // a ghost appears at the airport every day the schedule window reopens.
+        const schedPastArrival = fraction >= 1.0
+        const adbConfirmedArr  = !!(fs?.actual_arr_utc)
+        const arrived = schedPastArrival && adbConfirmedArr
+        // If schedule says flight is over but AeroDataBox hasn't confirmed arrival,
+        // suppress the marker entirely — don't show ESTIMATED past scheduled arrival.
+        if (schedPastArrival && !adbConfirmedArr) {
+          if (schedMarkersRef.current[callsign]) {
+            schedMarkersRef.current[callsign].remove()
+            delete schedMarkersRef.current[callsign]
+            schedLinesRef.current[callsign]?.forEach((l: any) => l.remove())
+            delete schedLinesRef.current[callsign]
+          }
+          continue
+        }
+        const f = arrived ? 1 : fraction
 
         const wps = routePathsRef.current[`${dep_iata}|${arr_iata}`]
         const [lat, lon] = wps?.length

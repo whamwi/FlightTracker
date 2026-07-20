@@ -5,21 +5,8 @@ export const maxDuration = 60
 
 const ADB_KEY  = process.env.AERODATABOX_KEY!
 const ADB_BASE = 'https://prod.api.market/api/v1/aedbx/aerodatabox'
-
-// Key Syrian-route flight numbers — 10 subscriptions × 2 events/day = 20 credits/day
-// 600 free credits ÷ 20 = 30 days coverage. Refill 60 credits every 3 days = 600 units/month.
-const FLIGHT_NUMBERS = [
-  'FYC743',  // FlyOne Armenia  DAM→SHJ
-  'SYR272',  // Syrian Air      DAM→AMS
-  'TK849',   // Turkish         DAM→IST
-  'TK848',   // Turkish         IST→DAM
-  'RJ436',   // Royal Jordanian DAM→AMM
-  'RJ435',   // Royal Jordanian AMM→DAM
-  'G9434',   // Air Arabia      SHJ→DAM
-  'G9433',   // Air Arabia      DAM→SHJ
-  'FZ1116',  // flydubai        DXB→DAM
-  'FZ1115',  // flydubai        DAM→DXB
-]
+const SB_URL   = process.env.SUPABASE_URL!
+const SB_KEY   = process.env.SUPABASE_ANON_KEY!
 
 function adb(path: string, opts: RequestInit = {}) {
   return fetch(`${ADB_BASE}${path}`, {
@@ -32,6 +19,89 @@ function adb(path: string, opts: RequestInit = {}) {
     signal: AbortSignal.timeout(15_000),
   })
 }
+
+// Pull all unique IATA flight numbers that serve Syrian airports from our schedule
+async function getScheduledFlightNumbers(): Promise<string[]> {
+  const res = await fetch(
+    `${SB_URL}/rest/v1/rpc/get_syria_callsigns`,
+    {
+      method: 'POST',
+      headers: {
+        apikey: SB_KEY,
+        Authorization: `Bearer ${SB_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    }
+  )
+  if (!res.ok) return FALLBACK_FLIGHTS
+
+  // get_syria_callsigns returns broadcast_callsign — we need iata_number
+  // Query flight_lookup directly for the iata mapping
+  const flRes = await fetch(
+    `${SB_URL}/rest/v1/flight_lookup?select=iata_number&iata_number=not.is.null`,
+    {
+      headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+    }
+  )
+  if (!flRes.ok) return FALLBACK_FLIGHTS
+
+  const rows: { iata_number: string }[] = await flRes.json()
+
+  // Also need to cross-reference which ones have Syria routes
+  const schedRes = await fetch(
+    `${SB_URL}/rest/v1/flight_schedule?select=flight_id,dep_iata,arr_iata&or=(dep_iata.in.(DAM,ALP),arr_iata.in.(DAM,ALP))`,
+    {
+      headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+    }
+  )
+  if (!schedRes.ok) return FALLBACK_FLIGHTS
+
+  const schedRows: { flight_id: number }[] = await schedRes.json()
+  const syriaFlightIds = new Set(schedRows.map(r => r.flight_id))
+
+  // Get all flight_lookup rows that have Syria schedule entries
+  const lookupRes = await fetch(
+    `${SB_URL}/rest/v1/flight_lookup?select=id,iata_number&iata_number=not.is.null`,
+    {
+      headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+    }
+  )
+  if (!lookupRes.ok) return FALLBACK_FLIGHTS
+
+  const lookupRows: { id: number; iata_number: string }[] = await lookupRes.json()
+  const numbers = lookupRows
+    .filter(r => syriaFlightIds.has(r.id) && r.iata_number)
+    .map(r => r.iata_number)
+
+  return numbers.length > 0 ? [...new Set(numbers)] : FALLBACK_FLIGHTS
+}
+
+// Fallback list if DB is unreachable — covers the most important routes
+const FALLBACK_FLIGHTS = [
+  // Turkish Airlines
+  'TK840', 'TK841', 'TK844', 'TK845', 'TK846', 'TK847', 'TK848', 'TK849',
+  // flydubai
+  'FZ1113', 'FZ1114', 'FZ1115', 'FZ1116', 'FZ1847', 'FZ1848',
+  // Etihad
+  'EY561', 'EY562',
+  // Qatar Airways
+  'QR410', 'QR411',
+  // Royal Jordanian
+  'RJ431', 'RJ432', 'RJ433', 'RJ435', 'RJ436',
+  // Kuwait Airways
+  'KU551', 'KU552',
+  // Jazeera
+  'J9171', 'J9172', 'J9173', 'J9174', 'J9177', 'J9178', 'J9181', 'J9182',
+  // Air Arabia
+  'G9351', 'G9352', 'G9363', 'G9364', 'G9375', 'G9376', 'G9433', 'G9434',
+  // FlyOne Armenia (key routes)
+  'XH485', 'XH486', 'XH743', 'XH744', 'XH727', 'XH728', 'XH701', 'XH702',
+  // Syrian Air (key routes)
+  'RB271', 'RB272', 'RB443', 'RB444', 'RB501', 'RB502',
+  // Pegasus
+  'PC770', 'PC771',
+]
 
 export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET
@@ -52,8 +122,8 @@ export async function GET(req: Request) {
   const balance: number = balData?.balance ?? balData?.credits ?? 0
   results.balance_before = balance
 
-  // 2. Refill if below 60 credits (enough for ~3 days at 20 credits/day)
-  if (balance < 60) {
+  // 2. Refill if below 120 credits (~2 days buffer at 60 credits/refill)
+  if (balance < 120) {
     const refillRes = await adb('/subscriptions/balance/refill', {
       method: 'POST',
       body: JSON.stringify({ credits: 60 }),
@@ -73,9 +143,13 @@ export async function GET(req: Request) {
       if (subId) existing.push(subId.toUpperCase())
     }
   }
-  results.existing = existing
+  results.existing_count = existing.length
 
-  // 4. Subscribe to each flight number not already subscribed
+  // 4. Get full flight number list from schedule DB
+  const flightNumbers = await getScheduledFlightNumbers()
+  results.total_to_subscribe = flightNumbers.length
+
+  // 5. Subscribe to each flight number not already subscribed
   const webhookSecret = process.env.AERODATABOX_WEBHOOK_SECRET
   const fullUrl = webhookSecret ? `${webhookUrl}?secret=${webhookSecret}` : webhookUrl
 
@@ -83,7 +157,7 @@ export async function GET(req: Request) {
   const skipped: string[] = []
   const errors: Record<string, string> = {}
 
-  for (const flight of FLIGHT_NUMBERS) {
+  for (const flight of flightNumbers) {
     if (existing.includes(flight.toUpperCase())) {
       skipped.push(flight)
       continue
