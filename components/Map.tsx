@@ -574,12 +574,27 @@ export default function Map() {
               dispLat = timeLat; dispLon = timeLon
             } else {
               // Last live position is off the time-scheduled slot (plane early/late).
-              // Find the nearest point on the path to the last real coordinates,
-              // then advance forward by elapsed time at nominal cruise speed.
+              // Anchor to nearest path point, then advance at cruise speed.
               const liveF = nearestPathFraction(wps, a.lat, a.lon)
-              const elapsedFrac = schedEntry?.duration_min
-                ? elapsed / (schedEntry.duration_min * 60_000)
-                : 0
+
+              // Estimate elapsed fraction: prefer exact duration_min, else derive
+              // from last-known gs (or 450 kts nominal) vs great-circle route distance.
+              let elapsedFrac = 0
+              if (schedEntry && schedEntry.duration_min > 0) {
+                elapsedFrac = elapsed / (schedEntry.duration_min * 60_000)
+              } else {
+                const depC2 = schedEntry ? ALL_AIRPORT_COORDS[schedEntry.dep_iata] : null
+                const arrC2 = schedEntry ? ALL_AIRPORT_COORDS[schedEntry.arr_iata] : null
+                if (depC2 && arrC2) {
+                  const routeKm = greatCircleKm(depC2[0], depC2[1], arrC2[0], arrC2[1])
+                  if (routeKm > 0) {
+                    const speedKts = (a.gs && a.gs > 50) ? a.gs : 450
+                    const distKm   = speedKts * 1.852 * (elapsed / 3_600_000)
+                    elapsedFrac    = distKm / routeKm
+                  }
+                }
+              }
+
               useF = Math.min(1, liveF + elapsedFrac)
               const [pathLat, pathLon] = interpolatePath(wps, useF)
               dispLat = pathLat; dispLon = pathLon
