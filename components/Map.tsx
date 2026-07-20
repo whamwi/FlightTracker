@@ -535,14 +535,16 @@ export default function Map() {
         let dispLat = a.lat, dispLon = a.lon, dispTrack = a.track ?? 0
         let projected = false, arrSnapped = false
 
-        // Expire stale markers 15+ min past scheduled arrival — let schedule ESTIMATED take over.
-        // Skip for stale DB aircraft: they were not recently live, so honour the full TTL instead.
-        if (isSyria && a.arr_time_utc && !a.stale) {
+        // Expire markers past scheduled arrival window.
+        // Live-then-lost: 15 min (let ESTIMATED take over quickly).
+        // Stale DB aircraft: 90 min (show recently-landed flights, but drop old return-leg data).
+        if (isSyria && a.arr_time_utc) {
           const d = new Date(now)
           const nowSec = d.getUTCHours() * 3600 + d.getUTCMinutes() * 60 + d.getUTCSeconds()
           const [ah, am] = a.arr_time_utc.split(':').map(Number)
           const sinceArr = (nowSec - (ah * 3600 + am * 60) + 86400) % 86400
-          if (sinceArr > 15 * 60 && sinceArr < 6 * 3600) {
+          const maxSinceArr = a.stale ? 90 * 60 : 15 * 60
+          if (sinceArr > maxSinceArr && sinceArr < 6 * 3600) {
             markersRef.current[hex]?.remove()
             delete markersRef.current[hex]
             linesRef.current[hex]?.forEach((l: any) => l.remove())
@@ -606,7 +608,7 @@ export default function Map() {
             // No route path but flight arrived — snap to arrival airport coords
             const arrC = ALL_AIRPORT_COORDS[schedEntry.arr_iata]
             if (arrC) { dispLat = arrC[0]; dispLon = arrC[1]; arrSnapped = true; projected = true }
-          } else if (a.gs && a.track) {
+          } else if (a.gs && a.track && (schedEntry == null || fraction !== null)) {
             // ── Fallback: kinematic dead-reckoning ──────────────────────────
             const projDistKm = a.gs * 1.852 * (elapsed / 3_600_000)
             const destDists  = aps
