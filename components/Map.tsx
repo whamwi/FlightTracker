@@ -124,6 +124,18 @@ function interpolatePath(wps: Waypoint[], f: number): [number, number] {
   return [a.lat + t * (b.lat - a.lat), a.lon + t * (b.lon - a.lon)]
 }
 
+// Finds the waypoint fraction on the path geometrically nearest to (lat, lon).
+// Used to re-anchor the DR projection when the live signal is off-schedule.
+function nearestPathFraction(wps: Waypoint[], lat: number, lon: number): number {
+  let bestF = wps[0]?.f ?? 0
+  let bestDist = Infinity
+  for (const wp of wps) {
+    const d = greatCircleKm(lat, lon, wp.lat, wp.lon)
+    if (d < bestDist) { bestDist = d; bestF = wp.f }
+  }
+  return bestF
+}
+
 function bearingFromPath(wps: Waypoint[], f: number): number {
   const dt = 0.01
   const [aLat, aLon] = interpolatePath(wps, Math.max(0, f - dt / 2))
@@ -552,19 +564,26 @@ export default function Map() {
           if (wps?.length && fraction !== null) {
             // Clamp fraction: post-arrival (>1) stays at route end
             const clampedF = Math.min(1, fraction)
-            const [pathLat, pathLon] = interpolatePath(wps, clampedF)
-            const distKm = greatCircleKm(a.lat, a.lon, pathLat, pathLon)
-            const SNAP_KM = 80  // ~43 NM — if within this, follow path directly
+            const [timeLat, timeLon] = interpolatePath(wps, clampedF)
+            const distKm = greatCircleKm(a.lat, a.lon, timeLat, timeLon)
+            const SNAP_KM = 80  // ~43 NM — if within this, follow time-based fraction
 
+            let useF = clampedF
             if (distKm < SNAP_KM) {
-              dispLat = pathLat; dispLon = pathLon
+              dispLat = timeLat; dispLon = timeLon
             } else {
-              // Blend from last known toward path position over 30s
-              const blend = Math.min(1, elapsed / 30_000)
-              dispLat = a.lat + blend * (pathLat - a.lat)
-              dispLon = a.lon + blend * (pathLon - a.lon)
+              // Last live position is off the time-scheduled slot (plane early/late).
+              // Find the nearest point on the path to the last real coordinates,
+              // then advance forward by elapsed time at nominal cruise speed.
+              const liveF = nearestPathFraction(wps, a.lat, a.lon)
+              const elapsedFrac = schedEntry?.duration_min
+                ? elapsed / (schedEntry.duration_min * 60_000)
+                : 0
+              useF = Math.min(1, liveF + elapsedFrac)
+              const [pathLat, pathLon] = interpolatePath(wps, useF)
+              dispLat = pathLat; dispLon = pathLon
             }
-            dispTrack = bearingFromPath(wps, clampedF)
+            dispTrack = bearingFromPath(wps, useF)
             if (fraction > 1.0) arrSnapped = true
             projected = true
           } else if (schedEntry && fraction !== null && fraction > 1.0) {
