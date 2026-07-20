@@ -641,7 +641,7 @@ export default function Map() {
         const track = wps?.length
           ? bearingFromPath(wps, f)
           : bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], f)
-        const isSyria    = AIRPORT_COORDS[arr_iata] != null
+        const isSyria    = AIRPORT_COORDS[arr_iata] != null || AIRPORT_COORDS[dep_iata] != null
         const label      = arrived ? `${callsign}\nARRIVED` : `${callsign}\nESTIMATED`
 
         const icon  = planeIcon(L, track, isSyria, arrived, label)
