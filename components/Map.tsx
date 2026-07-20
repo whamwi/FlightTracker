@@ -615,12 +615,25 @@ export default function Map() {
           const sinceArr = (nowSec - (ah * 3600 + am * 60) + 86400) % 86400
           const maxSinceArr = (a.stale || isOnGround) ? 90 * 60 : 15 * 60
           if (sinceArr > maxSinceArr && sinceArr < 22 * 3600) {
-            markersRef.current[hex]?.remove()
-            delete markersRef.current[hex]
-            linesRef.current[hex]?.forEach((l: any) => l.remove())
-            delete linesRef.current[hex]
-            delete lastKnownRef.current[hex]
-            continue
+            // Guard against midnight-crossing routes (e.g. dep 21:15, arr 00:51):
+            // sinceArr wraps to ~21h which looks "past arrival" but the flight is
+            // still airborne. isFlightActiveNow handles overnight correctly — skip
+            // removal if the flight is still in progress (fraction 0–1).
+            const cs_ = (a.flight ?? '').trim()
+            const se_ = cs_ ? scheduleRef.current.find(e => e.callsign === cs_) : null
+            const activeFrac = se_
+              ? isFlightActiveNow(se_.dep_time_utc, se_.arr_time_utc, se_.days_of_week, now)
+              : null
+            if (activeFrac !== null && activeFrac <= 1.0) {
+              // Flight still active — don't expire
+            } else {
+              markersRef.current[hex]?.remove()
+              delete markersRef.current[hex]
+              linesRef.current[hex]?.forEach((l: any) => l.remove())
+              delete linesRef.current[hex]
+              delete lastKnownRef.current[hex]
+              continue
+            }
           }
         }
 
