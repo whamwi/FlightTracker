@@ -41,6 +41,22 @@ interface ScheduleEntry {
   days_of_week: string[]
 }
 
+interface FlightStatus {
+  callsign:          string
+  status:            string   // Expected | Departed | Arrived | Unknown | Cancelled
+  actual_dep_utc:    string | null
+  actual_arr_utc:    string | null
+  scheduled_dep_utc: string | null
+  scheduled_arr_utc: string | null
+  dep_delay_min:     number | null
+  arr_delay_min:     number | null
+  aircraft_reg:      string | null
+  aircraft_type:     string | null
+  flight_number:     string | null
+  dep_iata:          string | null
+  arr_iata:          string | null
+}
+
 // Syria destination airports — used for route lines
 const AIRPORT_COORDS: Record<string, [number, number]> = {
   DAM: [33.4114, 36.5156],
@@ -244,12 +260,16 @@ function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, s
   return L.divIcon({ className: '', html, iconSize: [size, size], iconAnchor: [size/2, size/2] })
 }
 
-function buildPopup(a: Aircraft, lostAt?: number, projected?: boolean): string {
+function buildPopup(a: Aircraft, lostAt?: number, projected?: boolean, fs?: FlightStatus | null): string {
   const callsign  = (a.flight ?? '').trim() || a.hex
   const alt       = typeof a.alt_baro === 'number' ? `${Math.round(a.alt_baro).toLocaleString()} ft` : '—'
   const spd       = a.gs ? `${Math.round(a.gs)} kts` : '—'
   const syriaAps  = a.syria_airports ?? []
   const syria     = syriaAps.length > 0
+
+  // Prefer AeroDataBox aircraft info over FR24 when available
+  const acType    = fs?.aircraft_type ?? a.t ?? null
+  const acReg     = fs?.aircraft_reg  ?? a.r ?? null
 
   let scheduleLine = ''
   if (syria && a.arr_time_utc) {
@@ -263,30 +283,45 @@ function buildPopup(a: Aircraft, lostAt?: number, projected?: boolean): string {
     scheduleLine = `<br/><span style="color:#4ade80;font-size:11px">Arrives ${arrAp} ${localTime}${dur}</span>`
   }
 
+  const delayLine = fs?.dep_delay_min != null && Math.abs(fs.dep_delay_min) >= 2
+    ? `<br/><span style="color:${fs.dep_delay_min > 0 ? '#f97316' : '#4ade80'};font-size:11px">${fs.dep_delay_min > 0 ? `+${fs.dep_delay_min}` : fs.dep_delay_min} min delay</span>`
+    : ''
+
   const badge = projected
     ? ' <span style="color:#fbbf24;font-size:10px">~ estimated</span>'
     : lostAt ? ' <span style="color:#9ca3af;font-size:10px">(last known)</span>' : ''
 
   return `<div style="font-family:monospace;font-size:12px;line-height:1.7">
     <b>${callsign}</b>${badge}<br/>
-    ${a.t ? `Type: ${a.t}<br/>` : ''}${a.r ? `Reg: ${a.r}<br/>` : ''}
+    ${acType ? `Type: ${acType}<br/>` : ''}${acReg ? `Reg: ${acReg}<br/>` : ''}
     Alt: ${alt} &nbsp; Speed: ${spd}
     ${syria ? `<br/><span style="color:#16a34a;font-weight:bold">→ ${syriaAps.join(', ')}</span>${scheduleLine}` : ''}
+    ${delayLine}
     ${lostAt && !projected ? `<br/><span style="color:#ef4444;font-size:11px">⚠ Signal lost ${new Date(lostAt).toLocaleTimeString()}</span>` : ''}
     ${projected && lostAt ? `<br/><span style="color:#6b7280;font-size:10px">Dead reckoning from ${new Date(lostAt).toLocaleTimeString()}</span>` : ''}
   </div>`
 }
 
-function buildSchedulePopup(e: ScheduleEntry, arrived = false): string {
+function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus | null): string {
   const isSyria = AIRPORT_COORDS[e.arr_iata] != null
+  const acType  = fs?.aircraft_type ?? null
+  const acReg   = fs?.aircraft_reg  ?? null
+  const depDelay = fs?.dep_delay_min != null && Math.abs(fs.dep_delay_min) >= 2
+    ? `<br/><span style="color:${fs.dep_delay_min > 0 ? '#f97316' : '#4ade80'};font-size:11px">${fs.dep_delay_min > 0 ? `+${fs.dep_delay_min}` : fs.dep_delay_min} min delay</span>`
+    : ''
+  const acLine = (acType || acReg)
+    ? `<br/>${acType ?? ''}${acType && acReg ? ' · ' : ''}${acReg ?? ''}`
+    : ''
+
   if (arrived && isSyria && e.arr_time_utc && e.arr_time_utc !== '—') {
     const [h, m]    = e.arr_time_utc.split(':').map(Number)
     const localH    = (h + 3) % 24
     const localTime = `${String(localH).padStart(2,'0')}:${String(m).padStart(2,'0')}`
     return `<div style="font-family:monospace;font-size:12px;line-height:1.7">
       <b>${e.callsign}</b> <span style="color:#9ca3af;font-size:10px">landed</span><br/>
-      ${e.dep_iata} → ${e.arr_iata}
+      ${e.dep_iata} → ${e.arr_iata}${acLine}
       <br/><span style="color:#4ade80;font-size:11px">Arrived ${e.arr_iata} ~${localTime} local</span>
+      ${depDelay}
       <br/><span style="color:#6b7280;font-size:10px">Schedule-estimated · no live signal</span>
     </div>`
   }
@@ -302,8 +337,9 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false): string {
   }
   return `<div style="font-family:monospace;font-size:12px;line-height:1.7">
     <b>${e.callsign}</b> <span style="color:#fbbf24;font-size:10px">~ estimated</span><br/>
-    ${e.dep_iata} → ${e.arr_iata}
+    ${e.dep_iata} → ${e.arr_iata}${acLine}
     ${isSyria ? `<br/><span style="color:#16a34a;font-weight:bold">→ ${e.arr_iata}</span>${arrLine}` : ''}
+    ${depDelay}
     <br/><span style="color:#6b7280;font-size:10px">Schedule projection · no signal yet</span>
   </div>`
 }
@@ -326,6 +362,7 @@ export default function Map() {
   const schedLinesRef   = useRef<Record<string, any[]>>({})
   const scheduleRef     = useRef<ScheduleEntry[]>([])
   const routePathsRef   = useRef<Record<string, Waypoint[]>>({})
+  const flightStatusRef = useRef<Record<string, FlightStatus>>({})
 
   const [count, setCount]           = useState(0)
   const [lastUpdate, setLastUpdate] = useState('')
@@ -374,6 +411,11 @@ export default function Map() {
           }))
           .filter(e => e.callsign && e.dep_iata && e.arr_iata)
       })
+      .catch(() => {})
+
+    fetch('/api/aerodatabox/status')
+      .then(r => r.json())
+      .then(d => { if (d.ok) flightStatusRef.current = d.status })
       .catch(() => {})
 
     fetch('/api/routes')
@@ -508,7 +550,7 @@ export default function Map() {
 
         const callsign = (a.flight ?? '').trim()
         const icon     = planeIcon(L, a.track ?? 0, isSyria, false, isSyria && callsign ? callsign : undefined)
-        const popup    = buildPopup({ ...a, syria_airports: airports })
+        const popup    = buildPopup({ ...a, syria_airports: airports }, undefined, false, flightStatusRef.current[callsign])
 
         if (markersRef.current[a.hex]) {
           markersRef.current[a.hex].setLatLng([a.lat, a.lon])
@@ -774,7 +816,7 @@ export default function Map() {
           ? (arrSnapped ? `${cs}\nARRIVED` : projected ? `${cs}\nESTIMATED` : cs)
           : undefined
         const icon       = planeIcon(L, dispTrack, isSyria, !isSyria || arrSnapped, staleLabel)
-        const popup      = buildPopup({ ...a, syria_airports: aps }, entry.lostAt, projected)
+        const popup      = buildPopup({ ...a, syria_airports: aps }, entry.lostAt, projected, flightStatusRef.current[cs])
 
         // Smooth-blend toward the DR target so that when a fresh FR24 fix arrives
         // at a position slightly different from what DR predicted, the marker
@@ -826,7 +868,19 @@ export default function Map() {
           continue
         }
 
-        const fraction = isFlightActiveNow(dep_time_utc, arr_time_utc, days_of_week, now)
+        let fraction = isFlightActiveNow(dep_time_utc, arr_time_utc, days_of_week, now)
+        const fs = flightStatusRef.current[callsign]
+
+        // AeroDataBox: if status is still Expected, flight hasn't departed — don't show ESTIMATED
+        if (fraction !== null && fs?.status === 'Expected') {
+          fraction = null
+        }
+        // AeroDataBox: refine position using actual departure time when available
+        else if (fraction !== null && fraction < 1.0 && fs?.actual_dep_utc && duration_min > 0) {
+          const elapsedMs = now - new Date(fs.actual_dep_utc).getTime()
+          if (elapsedMs > 0) fraction = Math.min(1.2, elapsedMs / (duration_min * 60_000))
+        }
+
         if (fraction === null) {
           // Flight not active — remove stale scheduled marker
           if (schedMarkersRef.current[callsign]) {
@@ -856,7 +910,7 @@ export default function Map() {
         const label      = arrived ? `${callsign}\nARRIVED` : `${callsign}\nESTIMATED`
 
         const icon  = planeIcon(L, track, isSyria, arrived, label)
-        const popup = buildSchedulePopup(entry, arrived)
+        const popup = buildSchedulePopup(entry, arrived, fs)
 
         activeSchedKeys.add(callsign)
 
