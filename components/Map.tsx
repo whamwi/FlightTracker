@@ -459,6 +459,9 @@ export default function Map() {
       for (const entry of Object.values(lastKnownRef.current)) {
         const cs = (entry.a.flight ?? '').trim()
         if (!cs) continue
+        // FR24 aircraft always suppress ESTIMATED — they have a confirmed live
+        // position from FR24 and must not be overridden by schedule simulation.
+        if ((entry.a as any).fr24) { realCallsigns.add(cs); continue }
         const sched = scheduleRef.current.find(e => e.callsign === cs)
         if (sched && isFlightActiveNow(sched.dep_time_utc, sched.arr_time_utc, sched.days_of_week, now) === null) {
           // Pre-departure or post-arrival+freeze: let ESTIMATED take over
