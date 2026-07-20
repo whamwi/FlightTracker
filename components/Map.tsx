@@ -422,11 +422,20 @@ export default function Map() {
 
       const seen = new Set(liveAircraft.map(a => a.hex))
 
-      // Collect callsigns already covered by real data (live or last-known)
-      const realCallsigns = new Set<string>([
-        ...liveAircraft.map(a => (a.flight ?? '').trim()),
-        ...Object.values(lastKnownRef.current).map(e => (e.a.flight ?? '').trim()),
-      ])
+      // Collect callsigns already covered by real data (live or last-known).
+      // Last-known entries are excluded when their schedule says the flight hasn't
+      // departed yet — the pre-departure stale position should not block ESTIMATED.
+      const realCallsigns = new Set<string>(liveAircraft.map(a => (a.flight ?? '').trim()))
+      for (const entry of Object.values(lastKnownRef.current)) {
+        const cs = (entry.a.flight ?? '').trim()
+        if (!cs) continue
+        const sched = scheduleRef.current.find(e => e.callsign === cs)
+        if (sched && isFlightActiveNow(sched.dep_time_utc, sched.arr_time_utc, sched.days_of_week, now) === null) {
+          // Pre-departure or post-arrival+freeze: let ESTIMATED take over
+          continue
+        }
+        realCallsigns.add(cs)
+      }
 
       // ── Live markers ──────────────────────────────────────────────────────
       for (const a of liveAircraft) {
