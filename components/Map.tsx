@@ -571,10 +571,11 @@ export default function Map() {
         const cs0 = (entry.a.flight ?? '').trim()
         if (cs0 && bestHexForCallsign[cs0] !== hex) continue
 
-        // If live data already covers this callsign (different hex in the ADS-B feed),
-        // remove any stale DR marker and skip — avoids a second "ESTIMATED" icon
-        // appearing alongside the live plane icon.
-        if (cs0 && realCallsigns.has(cs0) && !liveAircraft.some(la => !la.stale && la.hex === hex)) {
+        // If a LIVE ADS-B entry at a different hex covers this callsign, suppress the
+        // DR marker — avoids a duplicate "ESTIMATED" icon alongside the live plane.
+        // Do NOT suppress when only FR24 cache covers it: the plane may have just
+        // landed and dropped from the ADS-B feed; we still want to show ARRIVED.
+        if (cs0 && liveAircraft.some(la => !la.stale && (la.flight ?? '').trim() === cs0 && la.hex !== hex)) {
           markersRef.current[hex]?.remove()
           delete markersRef.current[hex]
           linesRef.current[hex]?.forEach((l: any) => l.remove())
@@ -596,19 +597,23 @@ export default function Map() {
         const aps        = a.syria_airports ?? []
         const isSyria    = aps.length > 0
         const elapsed    = now - entry.lostAt
+        // True when the aircraft is on the ground — landed early before the schedule
+        // fraction reaches 1.0.  Used to show ARRIVED and extend the expiry window.
+        const isOnGround = (a.alt_baro === 'ground' || (typeof a.alt_baro === 'number' && a.alt_baro < 500))
+                        && (typeof a.gs === 'number' ? a.gs < 50 : false)
 
         let dispLat = a.lat, dispLon = a.lon, dispTrack = a.track ?? 0
         let projected = false, arrSnapped = false
 
         // Expire markers past scheduled arrival window.
-        // Live-then-lost: 15 min (let ESTIMATED take over quickly).
-        // Stale DB aircraft: 90 min (show recently-landed flights, but drop old return-leg data).
+        // Live-then-lost (not on ground): 15 min (let ESTIMATED take over quickly).
+        // Stale DB aircraft or on-ground non-stale: 90 min (full ARRIVED window).
         if (isSyria && a.arr_time_utc) {
           const d = new Date(now)
           const nowSec = d.getUTCHours() * 3600 + d.getUTCMinutes() * 60 + d.getUTCSeconds()
           const [ah, am] = a.arr_time_utc.split(':').map(Number)
           const sinceArr = (nowSec - (ah * 3600 + am * 60) + 86400) % 86400
-          const maxSinceArr = a.stale ? 90 * 60 : 15 * 60
+          const maxSinceArr = (a.stale || isOnGround) ? 90 * 60 : 15 * 60
           if (sinceArr > maxSinceArr && sinceArr < 22 * 3600) {
             markersRef.current[hex]?.remove()
             delete markersRef.current[hex]
@@ -700,6 +705,15 @@ export default function Map() {
               }
             }
           }
+        }
+
+        // On-ground non-stale aircraft (landed early, before schedule fraction hits 1.0):
+        // pin to arrival airport and show ARRIVED badge.
+        if (isSyria && isOnGround && !arrSnapped) {
+          const cs_ = (a.flight ?? '').trim()
+          const se_ = scheduleRef.current.find(e => e.callsign === cs_)
+          const arrC_ = se_ ? ALL_AIRPORT_COORDS[se_.arr_iata] : null
+          if (arrC_) { dispLat = arrC_[0]; dispLon = arrC_[1]; arrSnapped = true; projected = true }
         }
 
         // Stale un-projected aircraft: determine whether pre-departure or post-arrival
