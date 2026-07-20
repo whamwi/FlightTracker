@@ -432,6 +432,22 @@ export default function Map() {
 
         let dispLat = a.lat, dispLon = a.lon, projected = false, arrSnapped = false
 
+        // Expire stale markers 15+ min past scheduled arrival — let schedule ESTIMATED take over
+        if (isSyria && a.arr_time_utc) {
+          const d = new Date(now)
+          const nowSec = d.getUTCHours() * 3600 + d.getUTCMinutes() * 60 + d.getUTCSeconds()
+          const [ah, am] = a.arr_time_utc.split(':').map(Number)
+          const sinceArr = (nowSec - (ah * 3600 + am * 60) + 86400) % 86400
+          if (sinceArr > 15 * 60 && sinceArr < 6 * 3600) {
+            markersRef.current[hex]?.remove()
+            delete markersRef.current[hex]
+            linesRef.current[hex]?.forEach((l: any) => l.remove())
+            delete linesRef.current[hex]
+            delete lastKnownRef.current[hex]
+            continue
+          }
+        }
+
         if (isSyria && a.gs && a.track && elapsed > 30_000) {
           const projDistKm = a.gs * 1.852 * (elapsed / 3_600_000)
           const destDists  = aps
