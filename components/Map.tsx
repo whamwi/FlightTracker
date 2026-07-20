@@ -535,8 +535,9 @@ export default function Map() {
         let dispLat = a.lat, dispLon = a.lon, dispTrack = a.track ?? 0
         let projected = false, arrSnapped = false
 
-        // Expire stale markers 15+ min past scheduled arrival — let schedule ESTIMATED take over
-        if (isSyria && a.arr_time_utc) {
+        // Expire stale markers 15+ min past scheduled arrival — let schedule ESTIMATED take over.
+        // Skip for stale DB aircraft: they were not recently live, so honour the full TTL instead.
+        if (isSyria && a.arr_time_utc && !a.stale) {
           const d = new Date(now)
           const nowSec = d.getUTCHours() * 3600 + d.getUTCMinutes() * 60 + d.getUTCSeconds()
           const [ah, am] = a.arr_time_utc.split(':').map(Number)
@@ -615,6 +616,17 @@ export default function Map() {
                 }
               }
             }
+          }
+        }
+
+        // Stale pre-departure aircraft: snap to scheduled departure airport so the
+        // marker isn't frozen at a misleading en-route position from an old flight.
+        if (a.stale && !projected && isSyria) {
+          const scs = (a.flight ?? '').trim()
+          const se  = scheduleRef.current.find(e => e.callsign === scs)
+          if (se && isFlightActiveNow(se.dep_time_utc, se.arr_time_utc, se.days_of_week, now) === null) {
+            const depC = ALL_AIRPORT_COORDS[se.dep_iata]
+            if (depC) { dispLat = depC[0]; dispLon = depC[1] }
           }
         }
 
