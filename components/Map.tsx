@@ -697,19 +697,28 @@ export default function Map() {
             const distKm = greatCircleKm(a.lat, a.lon, timeLat, timeLon)
             const SNAP_KM = 80  // ~43 NM — if within this, follow time-based fraction
 
+            // Pre-validate kinematic DR: if the projected position moves the plane
+            // further from its destination than the fix itself, the cached track is
+            // stale (e.g. captured mid-turn). In that case fall through to path-following.
+            let drLat = a.lat, drLon = a.lon, drValid = false
+            if (isFR24Entry && typeof a.gs === 'number' && a.gs > 50 && typeof a.track === 'number') {
+              ;[drLat, drLon] = projectPosition(a.lat, a.lon, a.track, a.gs, elapsed)
+              const arrC2  = schedEntry ? ALL_AIRPORT_COORDS[schedEntry.arr_iata] : null
+              const distFix = arrC2 ? greatCircleKm(a.lat,  a.lon,  arrC2[0], arrC2[1]) : 0
+              const distDR  = arrC2 ? greatCircleKm(drLat, drLon, arrC2[0], arrC2[1]) : 0
+              drValid = !arrC2 || distDR <= distFix + 20   // 20 km tolerance for minor overshoot
+            }
+
             let useF = clampedF
             if (fraction > 1.0) {
               // Post-arrival freeze: snap to route end.
               dispLat = timeLat; dispLon = timeLon
               dispTrack = bearingFromPath(wps, useF)
               arrSnapped = true
-            } else if (isFR24Entry && typeof a.gs === 'number' && a.gs > 50 && typeof a.track === 'number') {
-              // Kinematic DR from the actual FR24 fix using reported heading & speed.
-              // Path-following gives the wrong direction when the ATC route deviates
-              // from our stored path (common — filed routes vary day to day).
-              const [drLat, drLon] = projectPosition(a.lat, a.lon, a.track, a.gs, elapsed)
+            } else if (isFR24Entry && drValid) {
+              // Kinematic DR — track is consistent with destination direction.
               dispLat = drLat; dispLon = drLon
-              dispTrack = a.track
+              dispTrack = a.track ?? 0
             } else if (isFR24Entry || distKm >= SNAP_KM) {
               // Path-following fallback: no reliable heading/speed, or stale DB entry
               // far off the stored path — snap to nearest waypoint + elapsed fraction.
