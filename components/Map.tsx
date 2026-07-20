@@ -571,6 +571,17 @@ export default function Map() {
         const cs0 = (entry.a.flight ?? '').trim()
         if (cs0 && bestHexForCallsign[cs0] !== hex) continue
 
+        // If live data already covers this callsign (different hex in the ADS-B feed),
+        // remove any stale DR marker and skip — avoids a second "ESTIMATED" icon
+        // appearing alongside the live plane icon.
+        if (cs0 && realCallsigns.has(cs0) && !liveAircraft.some(la => !la.stale && la.hex === hex)) {
+          markersRef.current[hex]?.remove()
+          delete markersRef.current[hex]
+          linesRef.current[hex]?.forEach((l: any) => l.remove())
+          delete linesRef.current[hex]
+          continue
+        }
+
         const ttl = STALE_TTL_SYRIA_MS
         if (now - entry.lostAt > ttl) {
           markersRef.current[hex]?.remove()
