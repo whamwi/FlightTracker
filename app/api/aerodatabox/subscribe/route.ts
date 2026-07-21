@@ -99,7 +99,9 @@ export async function GET(req: Request) {
       const listData = await safeJson(listRes)
       const subs = Array.isArray(listData) ? listData : (listData?.subscriptions ?? [])
       for (const s of subs) {
-        const subId: string = s.subjectId ?? s.subject ?? ''
+        // subject may be a string ID or an object { type, id } depending on ADB response version
+        const raw = s.subjectId ?? s.subject
+        const subId: string = typeof raw === 'string' ? raw : (raw?.id ?? raw?.value ?? raw?.number ?? '')
         if (subId) existing.add(subId.toUpperCase())
       }
     }
