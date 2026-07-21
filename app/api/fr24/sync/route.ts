@@ -141,7 +141,27 @@ export async function GET(req: Request) {
       })
     }
 
-    // ── 5. Upsert ─────────────────────────────────────────────────────────────
+    // ── 5. Deduplicate by (callsign, operating_date) ──────────────────────────
+    // FR24 may return multiple legs for the same flight number on the same day.
+    // Postgres merge-duplicates rejects a batch with two rows targeting the same PK.
+    // Keep the row with the most complete data (prefer actual_arr_utc > actual_dep_utc > neither).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const deduped = new Map<string, Record<string, any>>()
+    for (const row of rows as Record<string, any>[]) {
+      const key = `${row.callsign}|${row.operating_date}`
+      const existing_ = deduped.get(key)
+      if (!existing_) {
+        deduped.set(key, row)
+      } else {
+        // Prefer whichever row has more actuals set
+        const newScore = (row.actual_arr_utc ? 2 : 0) + (row.actual_dep_utc ? 1 : 0)
+        const oldScore = (existing_.actual_arr_utc ? 2 : 0) + (existing_.actual_dep_utc ? 1 : 0)
+        if (newScore > oldScore) deduped.set(key, row)
+      }
+    }
+    const dedupedRows = [...deduped.values()]
+
+    // ── 6. Upsert ─────────────────────────────────────────────────────────────
     const sbRes = await fetch(`${SB_URL}/rest/v1/flight_status`, {
       method: 'POST',
       headers: {
@@ -150,7 +170,7 @@ export async function GET(req: Request) {
         'Content-Type':  'application/json',
         Prefer:          'resolution=merge-duplicates,return=minimal',
       },
-      body: JSON.stringify(rows),
+      body: JSON.stringify(dedupedRows),
     })
 
     if (!sbRes.ok) {
@@ -159,8 +179,9 @@ export async function GET(req: Request) {
 
     return NextResponse.json({
       ok: true,
-      synced:       rows.length,
+      synced:       dedupedRows.length,
       fr24_results: allResults.length,
+      duplicates_dropped: rows.length - dedupedRows.length,
       skipped_adb:  allResults.length - rows.length,
     })
   } catch (err) {
