@@ -988,8 +988,19 @@ export default function Map() {
             // Confirmed airborne — refine position using actual departure time
             const elapsedMs = now - new Date(fs.actual_dep_utc).getTime()
             fraction = elapsedMs > 0 ? Math.min(1.2, elapsedMs / (duration_min * 60_000)) : null
+          } else if (duration_min > 0) {
+            // Airborne status confirmed but no actual_dep_utc yet.
+            // Back-calculate implied departure from revised_arr_utc if available,
+            // so a delayed flight isn't placed far ahead using the scheduled dep time.
+            const impliedDepMs = fs.revised_arr_utc
+              ? new Date(fs.revised_arr_utc).getTime() - duration_min * 60_000
+              : null
+            if (impliedDepMs) {
+              const elapsedMs = now - impliedDepMs
+              fraction = elapsedMs > 0 ? Math.min(1.2, elapsedMs / (duration_min * 60_000)) : null
+            }
+            // else: no revised_arr_utc either — keep raw schedule fraction as last resort
           }
-          // else: airborne status confirmed but no actual_dep_utc yet — keep schedule fraction
         }
 
         // Confirmed early landing: flight touched down before schedule window closed.
