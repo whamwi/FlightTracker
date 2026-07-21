@@ -28,6 +28,31 @@ function hasLive(quality: string[] | undefined): boolean {
   return Array.isArray(quality) && quality.includes('Live')
 }
 
+const ADB_STATUS: Record<number, string> = {
+  0:  'Unknown',
+  1:  'Expected',
+  2:  'En Route',
+  3:  'CheckIn',
+  4:  'Boarding',
+  5:  'GateClosed',
+  6:  'Departed',
+  7:  'Approaching',
+  8:  'Arrived',
+  9:  'Cancelled',
+  10: 'Diverted',
+  11: 'Cancelled',
+}
+
+function resolveStatus(raw: unknown): string {
+  if (typeof raw === 'number') return ADB_STATUS[raw] ?? 'Unknown'
+  if (typeof raw === 'string') {
+    const n = Number(raw)
+    if (!isNaN(n) && raw.trim() !== '') return ADB_STATUS[n] ?? raw
+    return raw
+  }
+  return 'Unknown'
+}
+
 // Normalise a single AeroDataBox flight object into a flight_status row
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toRow(f: any): object | null {
@@ -54,7 +79,7 @@ function toRow(f: any): object | null {
     arr_iata:          arr.airport?.iata ?? null,
     dep_icao:          dep.airport?.icao ?? null,
     arr_icao:          arr.airport?.icao ?? null,
-    status:            f.status ?? 'Unknown',
+    status:            resolveStatus(f.status),
     scheduled_dep_utc: schedDep  ? new Date(schedDep).toISOString()  : null,
     actual_dep_utc:    actualDep ? new Date(actualDep).toISOString() : null,
     scheduled_arr_utc: schedArr  ? new Date(schedArr).toISOString()  : null,
