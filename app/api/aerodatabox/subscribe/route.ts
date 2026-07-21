@@ -8,11 +8,12 @@ const ADB_BASE = 'https://prod.api.market/api/v1/aedbx/aerodatabox'
 const SB_URL   = process.env.SUPABASE_URL!
 const SB_KEY   = process.env.SUPABASE_ANON_KEY!
 
-// Fetch broadcast callsigns from DB — these are the ICAO identifiers AeroDataBox uses.
-// AeroDataBox FlightByNumber tracks by callsign (e.g. FDB1114, THY848), not IATA (FZ1114, TK848).
-async function fetchBroadcastCallsigns(): Promise<string[]> {
+// Fetch {iata_number, broadcast_callsign} pairs from DB.
+// ADB subscriptions may be stored under either identifier (IATA or broadcast);
+// we need both to skip flights that are already covered under their alias.
+async function fetchFlightPairs(): Promise<{ iata: string; callsign: string }[]> {
   const res = await fetch(
-    `${SB_URL}/rest/v1/rpc/get_syria_broadcast_callsigns`,
+    `${SB_URL}/rest/v1/rpc/get_syria_flight_pairs`,
     {
       method: 'POST',
       headers: {
@@ -24,9 +25,11 @@ async function fetchBroadcastCallsigns(): Promise<string[]> {
       signal: AbortSignal.timeout(10_000),
     },
   )
-  if (!res.ok) throw new Error(`DB callsigns fetch failed: ${res.status}`)
-  const rows: { broadcast_callsign: string }[] = await res.json()
-  return rows.map(r => r.broadcast_callsign).filter(Boolean)
+  if (!res.ok) throw new Error(`DB flight pairs fetch failed: ${res.status}`)
+  const rows: { iata_number: string; broadcast_callsign: string }[] = await res.json()
+  return rows
+    .filter(r => r.broadcast_callsign)
+    .map(r => ({ iata: r.iata_number ?? '', callsign: r.broadcast_callsign }))
 }
 
 function adb(path: string, opts: RequestInit = {}) {
@@ -53,15 +56,15 @@ export async function GET(req: Request) {
     const webhookUrl = process.env.AERODATABOX_WEBHOOK_URL
     if (!webhookUrl) return NextResponse.json({ ok: false, error: 'AERODATABOX_WEBHOOK_URL not set' }, { status: 500 })
 
-    // 1. Fetch broadcast callsigns from DB + check balance/existing subs in parallel
-    const [allCallsigns, balRes, listRes] = await Promise.all([
-      fetchBroadcastCallsigns(),
+    // 1. Fetch flight pairs from DB + check balance/existing subs in parallel
+    const [pairs, balRes, listRes] = await Promise.all([
+      fetchFlightPairs(),
       adb('/subscriptions/balance'),
       adb('/subscriptions/webhook'),
     ])
 
-    if (allCallsigns.length === 0) {
-      return NextResponse.json({ ok: false, error: 'No callsigns returned from DB' }, { status: 500 })
+    if (pairs.length === 0) {
+      return NextResponse.json({ ok: false, error: 'No flights returned from DB' }, { status: 500 })
     }
 
     const safeJson = async (r: Response) => { try { return await r.json() } catch { return null } }
@@ -93,32 +96,47 @@ export async function GET(req: Request) {
     const webhookSecret = process.env.AERODATABOX_WEBHOOK_SECRET
     const fullUrl = webhookSecret ? `${webhookUrl}?secret=${webhookSecret}` : webhookUrl
 
-    // 3. Subscribe missing callsigns in parallel batches of 10
-    const toSubscribe = allCallsigns.filter(cs => !existing.has(cs.toUpperCase()))
+    // 3. Subscribe using broadcast callsign; skip if IATA or callsign already exists.
+    // ADB stores subscriptions under IATA aliases (G9 352 for ABY352) so we check both.
+    const toSubscribe = pairs.filter(
+      p => !existing.has(p.callsign.toUpperCase()) && !existing.has(p.iata.toUpperCase()),
+    )
     const created: string[] = []
+    const alreadyCovered: string[] = []
     const errors: Record<string, string> = {}
 
     const BATCH = 10
     for (let i = 0; i < toSubscribe.length; i += BATCH) {
       const batch = toSubscribe.slice(i, i + BATCH)
-      await Promise.all(batch.map(async callsign => {
+      await Promise.all(batch.map(async ({ callsign }) => {
         const res = await adb(
           `/subscriptions/webhook/FlightByNumber/${encodeURIComponent(callsign)}?useCredits=true`,
           { method: 'POST', body: JSON.stringify({ url: fullUrl, maxDeliveryRetries: 2 }) },
         )
-        if (res.ok) created.push(callsign)
-        else errors[callsign] = `${res.status}: ${await res.text().catch(() => '(no body)')}`
+        if (res.ok) {
+          created.push(callsign)
+        } else {
+          const body = await res.text().catch(() => '')
+          // ADB returns 400 when the flight is already subscribed under its IATA alias —
+          // this is "covered", not a real error.
+          if (res.status === 400 && body.toLowerCase().includes('already')) {
+            alreadyCovered.push(callsign)
+          } else {
+            errors[callsign] = `${res.status}: ${body}`
+          }
+        }
       }))
     }
 
     return NextResponse.json({
       ok: true,
-      balance_before:  balance,
-      refill:          refillResult,
-      total_from_db:   allCallsigns.length,
-      existing_count:  existing.size,
+      balance_before:   balance,
+      refill:           refillResult,
+      total_from_db:    pairs.length,
+      existing_count:   existing.size,
+      skipped_db_match: pairs.length - toSubscribe.length,
       created,
-      skipped_count:   allCallsigns.length - toSubscribe.length,
+      already_covered:  alreadyCovered.length,
       errors,
     })
   } catch (err) {
