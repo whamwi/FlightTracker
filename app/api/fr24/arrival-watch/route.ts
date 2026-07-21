@@ -187,7 +187,7 @@ export async function GET(req: Request) {
   const from = new Date(now.getTime() - 36 * 3_600_000).toISOString().slice(0, 19)
   const to   = now.toISOString().slice(0, 19)
 
-  const params = new URLSearchParams({ flights: toQuery.join(','), flight_datetime_from: from, flight_datetime_to: to })
+  const params = new URLSearchParams({ callsigns: toQuery.join(','), flight_datetime_from: from, flight_datetime_to: to })
   const fr24Res = await fetch(`https://fr24api.flightradar24.com/api/flight-summary/full?${params}`, {
     headers: {
       Accept:           'application/json',
@@ -242,7 +242,41 @@ export async function GET(req: Request) {
     updated = landed.length
   }
 
-  // ── 4b. Project ETA for triggered flights with no confirmed landing ────────
+  // ── 4b. flight_ended:true + no datetime_landed → mark arrived via last_seen ─
+  // FR24 knows the flight is over but never got a runway touchdown (common when
+  // ADS-B coverage drops before landing — e.g. Syria). Use last_seen + 6 min
+  // buffer as the best available arrival estimate.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const endedNoLanding = fr24Data.filter((r: any) => r.flight_ended && !r.datetime_landed && r.last_seen)
+  if (endedNoLanding.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const endedRows = endedNoLanding.map((r: any) => {
+      const approxArr = new Date(new Date(r.last_seen + 'Z').getTime() + 6 * 60_000).toISOString()
+      return {
+        callsign:       r.callsign,
+        operating_date: (r.datetime_takeoff ?? r.last_seen).slice(0, 10),
+        actual_arr_utc: approxArr,
+        arr_iata:       r.dest_iata_actual ?? r.dest_iata ?? null,
+        arr_icao:       r.dest_icao_actual ?? r.dest_icao ?? null,
+        status:         'Arrived',
+        last_synced_at: now.toISOString(),
+      }
+    })
+    const endedRes = await fetch(`${SB_URL}/rest/v1/flight_status`, {
+      method: 'POST',
+      headers: {
+        apikey:         SB_KEY,
+        Authorization:  `Bearer ${SB_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer:         'resolution=merge-duplicates,return=minimal',
+      },
+      body: JSON.stringify(endedRows),
+    })
+    if (endedRes.ok) updated += endedNoLanding.length
+    endedNoLanding.forEach((r: any) => landedCallsigns.add(r.callsign))
+  }
+
+  // ── 4c. Project ETA for triggered flights with no confirmed landing ────────
   // For flights in approach phase where FR24 has no datetime_landed yet,
   // compute estimated arrival from last known altitude + distance and store
   // as revised_arr_utc so the board/map can show it immediately.
@@ -250,7 +284,7 @@ export async function GET(req: Request) {
   const landedCallsigns = new Set(landed.map((r: any) => r.callsign))
 
   for (const callsign of toQuery) {
-    if (landedCallsigns.has(callsign)) continue            // already confirmed — skip
+    if (landedCallsigns.has(callsign)) continue            // confirmed landed or ended — skip
     const candidate = candidates.find(c => c.callsign === callsign)
     if (!candidate) continue
     const eta = projectEta(candidate)
