@@ -7,10 +7,10 @@ const FR24_KEY = process.env.FR24_API_KEY ?? ''
 const SB_URL   = process.env.SUPABASE_URL!
 const SB_KEY   = process.env.SUPABASE_ANON_KEY!
 
-// Fetch flight identifiers for FR24 — returns IATA numbers for most airlines,
-// but for Fly Cham (FYC callsign prefix) uses the broadcast callsign instead,
-// because FR24 tracks those flights under callsign, not IATA.
-async function fetchFr24Identifiers(): Promise<string[]> {
+// Fetch flight identifiers split by how FR24 tracks them:
+// - FYC flights (Fly Cham): queried via callsigns= param (FR24 tracks by callsign, not IATA)
+// - All others: queried via flights= param using IATA flight number
+async function fetchFr24Identifiers(): Promise<{ iataFlights: string[]; callsigns: string[] }> {
   const res = await fetch(
     `${SB_URL}/rest/v1/rpc/get_syria_flight_pairs`,
     {
@@ -26,9 +26,16 @@ async function fetchFr24Identifiers(): Promise<string[]> {
   )
   if (!res.ok) throw new Error(`DB flight pairs fetch failed: ${res.status}`)
   const rows: { iata_number: string; broadcast_callsign: string }[] = await res.json()
-  return rows
-    .map(r => r.broadcast_callsign?.startsWith('FYC') ? r.broadcast_callsign : r.iata_number)
-    .filter(Boolean)
+  const iataFlights: string[] = []
+  const callsigns:   string[] = []
+  for (const r of rows) {
+    if (r.broadcast_callsign?.startsWith('FYC')) {
+      if (r.broadcast_callsign) callsigns.push(r.broadcast_callsign)
+    } else {
+      if (r.iata_number) iataFlights.push(r.iata_number)
+    }
+  }
+  return { iataFlights, callsigns }
 }
 
 // FR24 returns YYYY-MM-DDTHH:MM:SS without Z — normalise to ISO 8601
@@ -60,10 +67,8 @@ export async function GET(req: Request) {
     const to   = now.toISOString().slice(0, 19)
 
     // ── 1. Fetch FR24 identifiers from DB ────────────────────────────────────
-    // Most airlines: IATA number (G9351). Fly Cham (FYC*): broadcast callsign
-    // because FR24 tracks those under callsign, not under XH IATA prefix.
-    const allIata = await fetchFr24Identifiers()
-    if (allIata.length === 0) {
+    const { iataFlights, callsigns: fycCallsigns } = await fetchFr24Identifiers()
+    if (iataFlights.length === 0 && fycCallsigns.length === 0) {
       return NextResponse.json({ ok: true, synced: 0, reason: 'no identifiers from DB' })
     }
 
@@ -72,28 +77,33 @@ export async function GET(req: Request) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const allResults: any[] = []
 
-    for (let i = 0; i < allIata.length; i += BATCH) {
-      const batch  = allIata.slice(i, i + BATCH)
-      const params = new URLSearchParams({
-        flights:              batch.join(','),
-        flight_datetime_from: from,
-        flight_datetime_to:   to,
-      })
-      try {
-        const res = await fetch(`https://fr24api.flightradar24.com/api/flight-summary/full?${params}`, {
-          headers: {
-            Accept:           'application/json',
-            'Accept-Version': 'v1',
-            Authorization:    `Bearer ${FR24_KEY}`,
-          },
-          signal: AbortSignal.timeout(12_000),
+    const fetchBatches = async (ids: string[], paramKey: 'flights' | 'callsigns') => {
+      for (let i = 0; i < ids.length; i += BATCH) {
+        const batch  = ids.slice(i, i + BATCH)
+        const params = new URLSearchParams({
+          [paramKey]:           batch.join(','),
+          flight_datetime_from: from,
+          flight_datetime_to:   to,
         })
-        if (!res.ok) continue
-        const json = await res.json()
-        const data = Array.isArray(json) ? json : (json.data ?? [])
-        allResults.push(...data)
-      } catch { /* skip bad batch, continue */ }
+        try {
+          const res = await fetch(`https://fr24api.flightradar24.com/api/flight-summary/full?${params}`, {
+            headers: {
+              Accept:           'application/json',
+              'Accept-Version': 'v1',
+              Authorization:    `Bearer ${FR24_KEY}`,
+            },
+            signal: AbortSignal.timeout(12_000),
+          })
+          if (!res.ok) continue
+          const json = await res.json()
+          const data = Array.isArray(json) ? json : (json.data ?? [])
+          allResults.push(...data)
+        } catch { /* skip bad batch, continue */ }
+      }
     }
+
+    await fetchBatches(iataFlights, 'flights')
+    await fetchBatches(fycCallsigns, 'callsigns')
 
     if (allResults.length === 0) {
       return NextResponse.json({ ok: true, synced: 0, reason: 'no FR24 results' })
