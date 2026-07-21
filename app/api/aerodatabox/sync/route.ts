@@ -69,15 +69,18 @@ function resolveStatus(raw: unknown): string {
 interface AdbFlight {
   number?: string
   callSign?: string
-  status?: string
+  status?: string | number
   isCargo?: boolean
   aircraft?: { reg?: string; model?: string }
-  airline?: { name?: string }
+  airline?: { name?: string; iata?: string; icao?: string }
   departure?: {
     airport?: { iata?: string; icao?: string }
     scheduledTime?: { utc?: string }
     revisedTime?: { utc?: string }
     runwayTime?: { utc?: string }
+    terminal?: string
+    gate?: string
+    checkInDesk?: string
     quality?: string[]
   }
   arrival?: {
@@ -85,6 +88,9 @@ interface AdbFlight {
     scheduledTime?: { utc?: string }
     revisedTime?: { utc?: string }
     runwayTime?: { utc?: string }
+    terminal?: string
+    gate?: string
+    baggageBelt?: string
     quality?: string[]
   }
 }
@@ -125,35 +131,48 @@ export async function GET(req: Request) {
       const depLive = hasLive(dep?.quality)
       const arrLive = hasLive(arr?.quality)
 
-      const schedDep = dep?.scheduledTime?.utc
+      const schedDep  = dep?.scheduledTime?.utc
       const actualDep = depLive ? (dep?.runwayTime?.utc ?? dep?.revisedTime?.utc) : undefined
-      const schedArr = arr?.scheduledTime?.utc
+      const revisedDep = dep?.revisedTime?.utc
+      const schedArr  = arr?.scheduledTime?.utc
       const actualArr = arrLive ? (arr?.runwayTime?.utc ?? arr?.revisedTime?.utc) : undefined
+      const revisedArr = arr?.revisedTime?.utc
 
       // Derive operating date from scheduled departure (or arrival fallback)
       const opDate = (schedDep ?? schedArr ?? today).slice(0, 10)
 
       return {
-        callsign: f.callSign!,
-        operating_date: opDate,
-        flight_number: f.number ?? null,
-        dep_iata: dep?.airport?.iata ?? null,
-        arr_iata: arr?.airport?.iata ?? null,
-        dep_icao: dep?.airport?.icao ?? null,
-        arr_icao: arr?.airport?.icao ?? null,
-        status: resolveStatus(f.status),
-        scheduled_dep_utc: schedDep ? new Date(schedDep).toISOString() : null,
-        actual_dep_utc: actualDep ? new Date(actualDep).toISOString() : null,
-        scheduled_arr_utc: schedArr ? new Date(schedArr).toISOString() : null,
-        actual_arr_utc: actualArr ? new Date(actualArr).toISOString() : null,
-        dep_delay_min: delayMin(schedDep, actualDep),
-        arr_delay_min: delayMin(schedArr, actualArr),
-        aircraft_reg: f.aircraft?.reg ?? null,
-        aircraft_type: f.aircraft?.model ?? null,
-        airline_name: f.airline?.name ?? null,
-        dep_quality: dep?.quality ?? [],
-        arr_quality: arr?.quality ?? [],
-        last_synced_at: new Date().toISOString(),
+        callsign:          f.callSign!,
+        operating_date:    opDate,
+        flight_number:     f.number ?? null,
+        dep_iata:          dep?.airport?.iata ?? null,
+        arr_iata:          arr?.airport?.iata ?? null,
+        dep_icao:          dep?.airport?.icao ?? null,
+        arr_icao:          arr?.airport?.icao ?? null,
+        status:            resolveStatus(f.status),
+        scheduled_dep_utc: schedDep   ? new Date(schedDep).toISOString()   : null,
+        actual_dep_utc:    actualDep  ? new Date(actualDep).toISOString()  : null,
+        revised_dep_utc:   revisedDep ? new Date(revisedDep).toISOString() : null,
+        scheduled_arr_utc: schedArr   ? new Date(schedArr).toISOString()   : null,
+        actual_arr_utc:    actualArr  ? new Date(actualArr).toISOString()  : null,
+        revised_arr_utc:   revisedArr ? new Date(revisedArr).toISOString() : null,
+        dep_delay_min:     delayMin(schedDep, actualDep),
+        arr_delay_min:     delayMin(schedArr, actualArr),
+        dep_terminal:      dep?.terminal     ?? null,
+        dep_gate:          dep?.gate         ?? null,
+        dep_check_in_desk: dep?.checkInDesk  ?? null,
+        arr_terminal:      arr?.terminal     ?? null,
+        arr_gate:          arr?.gate         ?? null,
+        arr_baggage_belt:  arr?.baggageBelt  ?? null,
+        aircraft_reg:      f.aircraft?.reg   ?? null,
+        aircraft_type:     f.aircraft?.model ?? null,
+        airline_name:      f.airline?.name   ?? null,
+        airline_iata:      f.airline?.iata   ?? null,
+        airline_icao:      f.airline?.icao   ?? null,
+        is_cargo:          f.isCargo         ?? null,
+        dep_quality:       dep?.quality ?? [],
+        arr_quality:       arr?.quality ?? [],
+        last_synced_at:    new Date().toISOString(),
       }
     })
 

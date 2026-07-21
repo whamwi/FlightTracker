@@ -71,6 +71,9 @@ function toRow(f: any): object | null {
 
   const opDate = (schedDep ?? schedArr ?? new Date().toISOString()).slice(0, 10)
 
+  const revisedDep = dep.revisedTime?.utc
+  const revisedArr = arr.revisedTime?.utc
+
   return {
     callsign:          callSign,
     operating_date:    opDate,
@@ -80,15 +83,26 @@ function toRow(f: any): object | null {
     dep_icao:          dep.airport?.icao ?? null,
     arr_icao:          arr.airport?.icao ?? null,
     status:            resolveStatus(f.status),
-    scheduled_dep_utc: schedDep  ? new Date(schedDep).toISOString()  : null,
-    actual_dep_utc:    actualDep ? new Date(actualDep).toISOString() : null,
-    scheduled_arr_utc: schedArr  ? new Date(schedArr).toISOString()  : null,
-    actual_arr_utc:    actualArr ? new Date(actualArr).toISOString() : null,
+    scheduled_dep_utc: schedDep   ? new Date(schedDep).toISOString()   : null,
+    actual_dep_utc:    actualDep  ? new Date(actualDep).toISOString()  : null,
+    revised_dep_utc:   revisedDep ? new Date(revisedDep).toISOString() : null,
+    scheduled_arr_utc: schedArr   ? new Date(schedArr).toISOString()   : null,
+    actual_arr_utc:    actualArr  ? new Date(actualArr).toISOString()  : null,
+    revised_arr_utc:   revisedArr ? new Date(revisedArr).toISOString() : null,
     dep_delay_min:     delayMin(schedDep, actualDep),
     arr_delay_min:     delayMin(schedArr, actualArr),
-    aircraft_reg:      f.aircraft?.reg  ?? null,
+    dep_terminal:      dep.terminal      ?? null,
+    dep_gate:          dep.gate          ?? null,
+    dep_check_in_desk: dep.checkInDesk   ?? null,
+    arr_terminal:      arr.terminal      ?? null,
+    arr_gate:          arr.gate          ?? null,
+    arr_baggage_belt:  arr.baggageBelt   ?? null,
+    aircraft_reg:      f.aircraft?.reg   ?? null,
     aircraft_type:     f.aircraft?.model ?? null,
-    airline_name:      f.airline?.name  ?? null,
+    airline_name:      f.airline?.name   ?? null,
+    airline_iata:      f.airline?.iata   ?? null,
+    airline_icao:      f.airline?.icao   ?? null,
+    is_cargo:          f.isCargo         ?? null,
     dep_quality:       dep.quality ?? [],
     arr_quality:       arr.quality ?? [],
     last_synced_at:    new Date().toISOString(),
