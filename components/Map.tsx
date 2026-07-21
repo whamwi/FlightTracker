@@ -965,8 +965,17 @@ export default function Map() {
         const AIRBORNE = new Set(['En Route', 'Departed', 'Approaching'])
         if (fraction !== null) {
           if (!fs) {
-            // No ADB/FR24 data at all — wait for a live signal or status push
-            fraction = null
+            // No ADB/FR24 status — check if ADS-B itself confirms airborne.
+            // alt_baro > 2,000ft within the last hour is unambiguous proof of departure,
+            // so we activate the schedule-fraction ESTIMATED marker without needing a
+            // flight_status record (which ADB/FR24 sync may have missed).
+            const adsbAirborne = Object.values(lastKnownRef.current).some(e =>
+              (e.a.flight ?? '').trim() === callsign &&
+              typeof e.a.alt_baro === 'number' && e.a.alt_baro > 2_000 &&
+              (now - e.lostAt) < 60 * 60_000
+            )
+            if (!adsbAirborne) fraction = null
+            // else: ADS-B confirms airborne — keep schedule fraction as-is
           } else if (!fs.actual_dep_utc && !AIRBORNE.has(fs.status)) {
             // Known flight but not yet confirmed departed
             fraction = null
