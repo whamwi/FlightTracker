@@ -433,10 +433,15 @@ export default function Map() {
       })
       .catch(() => {})
 
-    fetch('/api/aerodatabox/status')
-      .then(r => r.json())
-      .then(d => { if (d.ok) flightStatusRef.current = d.status })
-      .catch(() => {})
+    const loadStatus = () =>
+      fetch('/api/aerodatabox/status')
+        .then(r => r.json())
+        .then(d => { if (d.ok) flightStatusRef.current = d.status })
+        .catch(() => {})
+    loadStatus()
+    // Refresh every 5 min so webhook-pushed status updates are picked up
+    // without requiring a full page reload.
+    const statusInterval = setInterval(loadStatus, 5 * 60_000)
 
     fetch('/api/routes')
       .then(r => r.json())
@@ -449,6 +454,7 @@ export default function Map() {
         routePathsRef.current = rec
       })
       .catch(() => {})
+    return () => clearInterval(statusInterval)
   }, [])
 
   // ── Poll loop ───────────────────────────────────────────────────────────────
@@ -937,14 +943,23 @@ export default function Map() {
         let fraction = isFlightActiveNow(dep_time_utc, arr_time_utc, days_of_week, now)
         const fs = flightStatusRef.current[callsign]
 
-        // AeroDataBox: if status is still Expected, flight hasn't departed — don't show ESTIMATED
-        if (fraction !== null && fs?.status === 'Expected') {
-          fraction = null
-        }
-        // AeroDataBox: refine position using actual departure time when available
-        else if (fraction !== null && fraction < 1.0 && fs?.actual_dep_utc && duration_min > 0) {
-          const elapsedMs = now - new Date(fs.actual_dep_utc).getTime()
-          if (elapsedMs > 0) fraction = Math.min(1.2, elapsedMs / (duration_min * 60_000))
+        // Only show ESTIMATED when we have confirmed airborne status from ADB/FR24
+        // (actual_dep_utc set, or status is an in-flight state). Pure schedule-window
+        // matches without any data confirmation are suppressed to avoid phantom flights.
+        const AIRBORNE = new Set(['En Route', 'Departed', 'Approaching'])
+        if (fraction !== null) {
+          if (!fs) {
+            // No ADB/FR24 data at all — wait for a live signal or status push
+            fraction = null
+          } else if (!fs.actual_dep_utc && !AIRBORNE.has(fs.status)) {
+            // Known flight but not yet confirmed departed
+            fraction = null
+          } else if (fs.actual_dep_utc && duration_min > 0) {
+            // Confirmed airborne — refine position using actual departure time
+            const elapsedMs = now - new Date(fs.actual_dep_utc).getTime()
+            fraction = elapsedMs > 0 ? Math.min(1.2, elapsedMs / (duration_min * 60_000)) : null
+          }
+          // else: airborne status confirmed but no actual_dep_utc yet — keep schedule fraction
         }
 
         // Confirmed early landing: flight touched down before schedule window closed.
