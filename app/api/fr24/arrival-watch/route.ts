@@ -76,6 +76,7 @@ interface Candidate {
   actual_dep_utc: string | null
   status:         string | null
   best_arr_utc:   string | null
+  fr24_id:        string | null
   lat:            number | null
   lon:            number | null
   alt_baro:       number | null
@@ -189,26 +190,68 @@ export async function GET(req: Request) {
   }
 
   // ── 3. Query FR24 for triggered flights ───────────────────────────────────
+  // Strategy: use flight-events/full (via stored fr24_id) for precision; fall
+  // back to flight-summary/full (via callsign) for any that have no fr24_id yet.
   const from = new Date(now.getTime() - 36 * 3_600_000).toISOString().slice(0, 19)
   const to   = now.toISOString().slice(0, 19)
 
-  const params = new URLSearchParams({ callsigns: toQuery.join(','), flight_datetime_from: from, flight_datetime_to: to })
-  const fr24Res = await fetch(`https://fr24api.flightradar24.com/api/flight-summary/full?${params}`, {
-    headers: {
-      Accept:           'application/json',
-      'Accept-Version': 'v1',
-      Authorization:    `Bearer ${FR24_KEY}`,
-    },
-    signal: AbortSignal.timeout(12_000),
-  })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let fr24Data: any[] = []
 
-  if (!fr24Res.ok) {
-    return NextResponse.json({ ok: false, error: `FR24 ${fr24Res.status}: ${await fr24Res.text()}` }, { status: 502 })
+  // 3a. Flights with stored fr24_id → flight-events endpoint (direct, no lookup step)
+  const withId    = toQuery.map(cs => candidates.find(c => c.callsign === cs)).filter(c => c?.fr24_id)
+  const withoutId = toQuery.filter(cs => !candidates.find(c => c.callsign === cs)?.fr24_id)
+
+  if (withId.length > 0) {
+    const ids = withId.map(c => c!.fr24_id).join(',')
+    const evRes = await fetch(
+      `https://fr24api.flightradar24.com/api/historic/flight-events/full?flight_ids=${ids}&event_types=all`,
+      {
+        headers: { Accept: 'application/json', 'Accept-Version': 'v1', Authorization: `Bearer ${FR24_KEY}` },
+        signal: AbortSignal.timeout(12_000),
+      },
+    )
+    if (evRes.ok) {
+      const evJson = await evRes.json()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const flights: any[] = Array.isArray(evJson) ? evJson : (evJson.data ?? [])
+      // Reshape events into the same shape flight-summary returns so downstream code is uniform
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const flight of flights) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const events: any[] = flight.events ?? []
+        const landed   = events.find((e: any) => e.type === 'landed')
+        const takeoff  = events.find((e: any) => e.type === 'takeoff')
+        const candidate = withId.find(c => c!.fr24_id === flight.id)
+        fr24Data.push({
+          callsign:         candidate?.callsign ?? flight.callsign,
+          id:               flight.id,
+          datetime_takeoff: takeoff?.timestamp  ?? null,
+          datetime_landed:  landed?.timestamp   ?? null,
+          flight_ended:     flight.flight_ended ?? false,
+          last_seen:        flight.last_seen     ?? null,
+          dest_iata_actual: flight.dest_iata_actual ?? flight.dest_iata ?? null,
+          dest_icao_actual: flight.dest_icao_actual ?? flight.dest_icao ?? null,
+        })
+      }
+    }
   }
 
-  const fr24Json = await fr24Res.json()
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fr24Data: any[] = Array.isArray(fr24Json) ? fr24Json : (fr24Json.data ?? [])
+  // 3b. Flights without fr24_id → flight-summary by callsign (existing approach)
+  if (withoutId.length > 0) {
+    const params = new URLSearchParams({ callsigns: withoutId.join(','), flight_datetime_from: from, flight_datetime_to: to })
+    const sumRes = await fetch(`https://fr24api.flightradar24.com/api/flight-summary/full?${params}`, {
+      headers: { Accept: 'application/json', 'Accept-Version': 'v1', Authorization: `Bearer ${FR24_KEY}` },
+      signal: AbortSignal.timeout(12_000),
+    })
+    if (!sumRes.ok) {
+      return NextResponse.json({ ok: false, error: `FR24 ${sumRes.status}: ${await sumRes.text()}` }, { status: 502 })
+    }
+    const sumJson = await sumRes.json()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sumData: any[] = Array.isArray(sumJson) ? sumJson : (sumJson.data ?? [])
+    fr24Data.push(...sumData)
+  }
 
   // ── 4a. Upsert confirmed landings ────────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

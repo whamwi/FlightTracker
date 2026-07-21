@@ -129,6 +129,7 @@ export async function GET(req: Request) {
           arr_icao:       r.dest_icao_actual ?? r.dest_icao ?? null,
           aircraft_type:  r.type      ?? null,
           status:         deriveStatus(r),
+          fr24_id:        r.id        ?? null,
           last_synced_at: now.toISOString(),
         }
         if (!hasActualDep.has(r.callsign)) row.actual_dep_utc = toISO(r.datetime_takeoff)
@@ -160,8 +161,8 @@ export async function GET(req: Request) {
         deduped.set(key, row)
       } else {
         // Prefer whichever row has more actuals set
-        const newScore = (row.actual_arr_utc ? 2 : 0) + (row.actual_dep_utc ? 1 : 0)
-        const oldScore = (existing_.actual_arr_utc ? 2 : 0) + (existing_.actual_dep_utc ? 1 : 0)
+        const newScore = (row.actual_arr_utc ? 4 : 0) + (row.actual_dep_utc ? 2 : 0) + (row.fr24_id ? 1 : 0)
+        const oldScore = (existing_.actual_arr_utc ? 4 : 0) + (existing_.actual_dep_utc ? 2 : 0) + (existing_.fr24_id ? 1 : 0)
         if (newScore > oldScore) deduped.set(key, row)
       }
     }
