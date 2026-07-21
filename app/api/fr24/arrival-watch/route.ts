@@ -73,7 +73,7 @@ function projectEta(c: Candidate): string | null {
 interface Candidate {
   callsign:       string
   arr_iata:       string | null
-  actual_dep_utc: string
+  actual_dep_utc: string | null
   status:         string | null
   best_arr_utc:   string | null
   lat:            number | null
@@ -103,12 +103,17 @@ function runChecklist(c: Candidate, now: Date): ChecklistResult {
     if (now.getTime() > windowEnd) {
       return { callsign: c.callsign, triggered: false, reasons: [], skipped: 'too late — past 90-min window' }
     }
-  } else {
-    // No STA at all — use 4h from departure as a conservative fallback
-    const dep  = new Date(c.actual_dep_utc).getTime()
-    const age  = (now.getTime() - dep) / 3_600_000
+  } else if (c.actual_dep_utc) {
+    // No STA — use 4h from departure as a conservative fallback
+    const dep = new Date(c.actual_dep_utc).getTime()
+    const age = (now.getTime() - dep) / 3_600_000
     if (age < 0.5) return { callsign: c.callsign, triggered: false, reasons: [], skipped: 'departed < 30 min ago' }
     if (age > 6)   return { callsign: c.callsign, triggered: false, reasons: [], skipped: 'departed > 6h ago, no STA — stale' }
+  } else {
+    // No STA and no dep time — only proceed if ADS-B shows it airborne
+    if (!c.seen_at || c.alt_baro == null || c.alt_baro < 2_000) {
+      return { callsign: c.callsign, triggered: false, reasons: [], skipped: 'no dep time and no airborne ADS-B signal' }
+    }
   }
 
   const seenMs  = c.seen_at  ? now.getTime() - new Date(c.seen_at).getTime() : null
@@ -291,7 +296,7 @@ export async function GET(req: Request) {
     if (!eta) continue
     etaRows.push({
       callsign,
-      operating_date: candidate.actual_dep_utc.slice(0, 10),
+      operating_date: (candidate.actual_dep_utc ?? candidate.seen_at ?? now.toISOString()).slice(0, 10),
       revised_arr_utc: eta,
       last_synced_at: now.toISOString(),
     })
