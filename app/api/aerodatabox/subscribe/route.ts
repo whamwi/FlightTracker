@@ -83,10 +83,12 @@ export async function GET(req: Request) {
 
     // 2. Collect existing subscriptions
     const existing = new Set<string>()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let existingSubs: any[] = []
     if (listRes.ok) {
       const listData = await safeJson(listRes)
-      const subs = Array.isArray(listData) ? listData : (listData?.subscriptions ?? [])
-      for (const s of subs) {
+      existingSubs = Array.isArray(listData) ? listData : (listData?.subscriptions ?? [])
+      for (const s of existingSubs) {
         const raw = s.subjectId ?? s.subject
         const subId = typeof raw === 'string' ? raw : (raw?.id ?? raw?.value ?? raw?.number ?? '')
         if (subId) existing.add(String(subId).toUpperCase())
@@ -95,6 +97,34 @@ export async function GET(req: Request) {
 
     const webhookSecret = process.env.AERODATABOX_WEBHOOK_SECRET
     const fullUrl = webhookSecret ? `${webhookUrl}?secret=${webhookSecret}` : webhookUrl
+
+    // ?force=true: delete all existing subscriptions first, then re-subscribe everything.
+    // Use this when the webhook URL changed and old subs point to the wrong endpoint.
+    const url = new URL(req.url)
+    const force = url.searchParams.get('force') === 'true'
+    let deleted: string[] = []
+    if (force && existingSubs.length > 0) {
+      await Promise.all(existingSubs.map(async s => {
+        // Try deletion by subscription numeric ID first, then by subject flight number
+        const numId: string | undefined = s.id ?? s.subscriptionId
+        const subject: string | undefined = (() => {
+          const raw = s.subjectId ?? s.subject
+          return typeof raw === 'string' ? raw : (raw?.id ?? raw?.value ?? raw?.number ?? undefined)
+        })()
+        const delPath = numId
+          ? `/subscriptions/webhook/${numId}`
+          : subject
+            ? `/subscriptions/webhook/FlightByNumber/${encodeURIComponent(subject)}`
+            : null
+        if (!delPath) return
+        try {
+          await adb(delPath, { method: 'DELETE' })
+          deleted.push(numId ?? subject ?? '')
+        } catch { /* best-effort */ }
+      }))
+      // After deletion, everything needs re-subscribing
+      existing.clear()
+    }
 
     // 3. Subscribe using broadcast callsign; skip if IATA or callsign already exists.
     // ADB stores subscriptions under IATA aliases (G9 352 for ABY352) so we check both.
@@ -134,6 +164,7 @@ export async function GET(req: Request) {
       refill:           refillResult,
       total_from_db:    pairs.length,
       existing_count:   existing.size,
+      deleted:          deleted.length,
       skipped_db_match: pairs.length - toSubscribe.length,
       created,
       already_covered:  alreadyCovered.length,
