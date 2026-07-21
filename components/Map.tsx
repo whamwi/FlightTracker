@@ -916,9 +916,10 @@ export default function Map() {
 
         const cs        = (a.flight ?? '').trim()
         const staleLabel = isSyria && cs
-          ? (arrSnapped ? `${cs}\nARRIVED` : projected ? `${cs}\nESTIMATED` : cs)
+          ? (arrSnapped ? `${cs}\nARRIVED` : cs)
           : undefined
-        const icon       = planeIcon(L, dispTrack, isSyria, !isSyria || arrSnapped, staleLabel, aps.includes('ALP'))
+        const isEstimatedStale = projected && !arrSnapped
+        const icon       = planeIcon(L, dispTrack, isSyria, !isSyria || arrSnapped, staleLabel, aps.includes('ALP'), isEstimatedStale)
         const popup      = buildPopup({ ...a, syria_airports: aps }, entry.lostAt, projected, flightStatusRef.current[cs])
 
         // Smooth-blend toward the DR target so that when a fresh FR24 fix arrives
