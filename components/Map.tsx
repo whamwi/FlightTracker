@@ -625,12 +625,7 @@ export default function Map() {
         // Only draw the green line to Syria airport when the flight is ARRIVING at Syria.
         // Departing flights (dep_syria=true, arr_syria=false) already left the airport —
         // drawing a line back toward it would look like the plane is flying the wrong way.
-        linesRef.current[a.hex] = (isSyria && a.arr_syria)
-          ? airports.filter(ap => AIRPORT_COORDS[ap]).map(ap =>
-              L.polyline([[a.lat, a.lon], AIRPORT_COORDS[ap]], {
-                color: '#16a34a', weight: 1.5, dashArray: '6 8', opacity: 0.7,
-              }).addTo(map))
-          : []
+        linesRef.current[a.hex] = []
       }
 
       // ── Last-known / dead-reckoning markers ───────────────────────────────
@@ -941,18 +936,7 @@ export default function Map() {
         }
 
         linesRef.current[hex]?.forEach((l: any) => l.remove())
-        const lines: ReturnType<typeof L.polyline>[] = []
-        if (projected && (dispLat !== a.lat || dispLon !== a.lon)) {
-          lines.push(L.polyline([[a.lat, a.lon], [dispLat, dispLon]], {
-            color: '#6b7280', weight: 1.5, dashArray: '4 6', opacity: 0.55,
-          }).addTo(map))
-        }
-        for (const ap of aps.filter(ap => AIRPORT_COORDS[ap] && a.arr_syria)) {
-          lines.push(L.polyline([[dispLat, dispLon], AIRPORT_COORDS[ap]], {
-            color: '#16a34a', weight: 1.5, dashArray: '6 8', opacity: projected ? 0.4 : 0.3,
-          }).addTo(map))
-        }
-        linesRef.current[hex] = lines
+        linesRef.current[hex] = []
       }
 
       // ── Schedule-based projection (no signal at all) ───────────────────────
@@ -1063,11 +1047,7 @@ export default function Map() {
 
         // No route line for arrived flights; clear any existing line
         schedLinesRef.current[callsign]?.forEach((l: any) => l.remove())
-        schedLinesRef.current[callsign] = arrived || !AIRPORT_COORDS[arr_iata]
-          ? []
-          : [L.polyline([[lat, lon], AIRPORT_COORDS[arr_iata]], {
-              color: '#16a34a', weight: 1.5, dashArray: '6 8', opacity: 0.6,
-            }).addTo(map)]
+        schedLinesRef.current[callsign] = []
       }
 
       // Remove schedule markers that are no longer active
