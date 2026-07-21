@@ -129,10 +129,15 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: `AeroDataBox OSDI: ${body}` }, { status: 502 })
   }
 
-  const dataDam = await resDam.value.json() as { departures?: AdbFlight[]; arrivals?: AdbFlight[] }
-  const dataAlp = resAlp.status === 'fulfilled' && resAlp.value.ok
-    ? await resAlp.value.json() as { departures?: AdbFlight[]; arrivals?: AdbFlight[] }
-    : {}
+  const damText = await resDam.value.text()
+  const dataDam: { departures?: AdbFlight[]; arrivals?: AdbFlight[] } = damText ? JSON.parse(damText) : {}
+
+  let dataAlp: { departures?: AdbFlight[]; arrivals?: AdbFlight[] } = {}
+  if (resAlp.status === 'fulfilled' && resAlp.value.ok) {
+    // OSAP returns 204 (no content) when there are no flights — guard before parsing
+    const alpText = await resAlp.value.text()
+    if (alpText) dataAlp = JSON.parse(alpText)
+  }
 
   // Merge both airports; deduplicate by callsign (OSDI takes precedence for shared flights)
   const seenCallsigns = new Set<string>()
