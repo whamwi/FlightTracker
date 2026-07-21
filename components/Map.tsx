@@ -976,14 +976,17 @@ export default function Map() {
           continue
         }
         const f = arrived ? 1 : fraction
+        // Cap rendered position to 97% of route so the icon never overshoots the
+        // destination airport when waypoints extend slightly past the nominal coords.
+        const fPos = Math.min(f, 0.97)
 
         const wps = routePathsRef.current[`${dep_iata}|${arr_iata}`]
         const [lat, lon] = wps?.length
-          ? interpolatePath(wps, f)
-          : slerpGreatCircle(depC[0], depC[1], arrC[0], arrC[1], f)
+          ? interpolatePath(wps, fPos)
+          : slerpGreatCircle(depC[0], depC[1], arrC[0], arrC[1], fPos)
         const track = wps?.length
-          ? bearingFromPath(wps, f)
-          : bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], f)
+          ? bearingFromPath(wps, fPos)
+          : bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], fPos)
         const isSyria    = AIRPORT_COORDS[arr_iata] != null || AIRPORT_COORDS[dep_iata] != null
         const label      = arrived ? `${callsign}\nARRIVED` : `${callsign}\nESTIMATED`
 
