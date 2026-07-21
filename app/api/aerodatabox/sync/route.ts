@@ -113,7 +113,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: 'AERODATABOX_KEY not set' }, { status: 500 })
   }
 
-  const [resDam, resAlp] = await Promise.all([
+  const [resDam, resAlp] = await Promise.allSettled([
     fetch(`${ADB_BASE}/flights/airports/icao/OSDI?withLeg=true&withCancelled=true&direction=Both`, {
       headers: { 'x-api-market-key': ADB_KEY },
       signal: AbortSignal.timeout(15_000),
@@ -124,13 +124,15 @@ export async function GET(req: Request) {
     }),
   ])
 
-  if (!resDam.ok) {
-    const body = await resDam.text()
-    return NextResponse.json({ ok: false, error: `AeroDataBox OSDI ${resDam.status}: ${body}` }, { status: 502 })
+  if (resDam.status === 'rejected' || !resDam.value.ok) {
+    const body = resDam.status === 'rejected' ? String(resDam.reason) : await resDam.value.text()
+    return NextResponse.json({ ok: false, error: `AeroDataBox OSDI: ${body}` }, { status: 502 })
   }
 
-  const dataDam = await resDam.json() as { departures?: AdbFlight[]; arrivals?: AdbFlight[] }
-  const dataAlp = resAlp.ok ? await resAlp.json() as { departures?: AdbFlight[]; arrivals?: AdbFlight[] } : {}
+  const dataDam = await resDam.value.json() as { departures?: AdbFlight[]; arrivals?: AdbFlight[] }
+  const dataAlp = resAlp.status === 'fulfilled' && resAlp.value.ok
+    ? await resAlp.value.json() as { departures?: AdbFlight[]; arrivals?: AdbFlight[] }
+    : {}
 
   // Merge both airports; deduplicate by callsign (OSDI takes precedence for shared flights)
   const seenCallsigns = new Set<string>()
