@@ -7,10 +7,12 @@ const FR24_KEY = process.env.FR24_API_KEY ?? ''
 const SB_URL   = process.env.SUPABASE_URL!
 const SB_KEY   = process.env.SUPABASE_ANON_KEY!
 
-// Fetch IATA flight numbers from DB — FR24 /api/flight-summary/full queries by IATA number.
-async function fetchIataNumbers(): Promise<string[]> {
+// Fetch flight identifiers for FR24 — returns IATA numbers for most airlines,
+// but for Fly Cham (FYC callsign prefix) uses the broadcast callsign instead,
+// because FR24 tracks those flights under callsign, not IATA.
+async function fetchFr24Identifiers(): Promise<string[]> {
   const res = await fetch(
-    `${SB_URL}/rest/v1/rpc/get_syria_iata_numbers`,
+    `${SB_URL}/rest/v1/rpc/get_syria_flight_pairs`,
     {
       method: 'POST',
       headers: {
@@ -22,9 +24,11 @@ async function fetchIataNumbers(): Promise<string[]> {
       signal: AbortSignal.timeout(10_000),
     },
   )
-  if (!res.ok) throw new Error(`DB IATA numbers fetch failed: ${res.status}`)
-  const rows: { iata_number: string }[] = await res.json()
-  return rows.map(r => r.iata_number).filter(Boolean)
+  if (!res.ok) throw new Error(`DB flight pairs fetch failed: ${res.status}`)
+  const rows: { iata_number: string; broadcast_callsign: string }[] = await res.json()
+  return rows
+    .map(r => r.broadcast_callsign?.startsWith('FYC') ? r.broadcast_callsign : r.iata_number)
+    .filter(Boolean)
 }
 
 // FR24 returns YYYY-MM-DDTHH:MM:SS without Z — normalise to ISO 8601
@@ -55,10 +59,12 @@ export async function GET(req: Request) {
     const from = new Date(now.getTime() - 30 * 3_600_000).toISOString().slice(0, 19)
     const to   = now.toISOString().slice(0, 19)
 
-    // ── 1. Fetch IATA numbers from DB ────────────────────────────────────────
-    const allIata = await fetchIataNumbers()
+    // ── 1. Fetch FR24 identifiers from DB ────────────────────────────────────
+    // Most airlines: IATA number (G9351). Fly Cham (FYC*): broadcast callsign
+    // because FR24 tracks those under callsign, not under XH IATA prefix.
+    const allIata = await fetchFr24Identifiers()
     if (allIata.length === 0) {
-      return NextResponse.json({ ok: true, synced: 0, reason: 'no IATA numbers from DB' })
+      return NextResponse.json({ ok: true, synced: 0, reason: 'no identifiers from DB' })
     }
 
     // ── 2. Fetch FR24 flight summaries in batches of 15 (API max) ────────────
@@ -161,20 +167,38 @@ export async function GET(req: Request) {
     }
     const dedupedRows = [...deduped.values()]
 
-    // ── 6. Upsert ─────────────────────────────────────────────────────────────
-    const sbRes = await fetch(`${SB_URL}/rest/v1/flight_status`, {
-      method: 'POST',
-      headers: {
-        apikey:          SB_KEY,
-        Authorization:   `Bearer ${SB_KEY}`,
-        'Content-Type':  'application/json',
-        Prefer:          'resolution=merge-duplicates,return=minimal',
-      },
-      body: JSON.stringify(dedupedRows),
-    })
+    // ── 6. Upsert — split by present fields to satisfy PGRST102 ─────────────
+    // PostgREST requires all rows in a batch to have identical key sets.
+    // Rows conditionally include actual_dep_utc / actual_arr_utc (to avoid
+    // overwriting ADB-confirmed values), so we split into up to 3 batches.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const batches: Record<string, any[]> = { both: [], dep_only: [], arr_only: [] }
+    for (const r of dedupedRows as Record<string, unknown>[]) {
+      const hasDep = 'actual_dep_utc' in r
+      const hasArr = 'actual_arr_utc' in r
+      if (hasDep && hasArr) batches.both.push(r)
+      else if (hasDep)      batches.dep_only.push(r)
+      else                  batches.arr_only.push(r)
+    }
 
-    if (!sbRes.ok) {
-      return NextResponse.json({ ok: false, error: await sbRes.text() }, { status: 500 })
+    let upsertErrors: string[] = []
+    for (const batch of Object.values(batches)) {
+      if (batch.length === 0) continue
+      const sbRes = await fetch(`${SB_URL}/rest/v1/flight_status`, {
+        method: 'POST',
+        headers: {
+          apikey:          SB_KEY,
+          Authorization:   `Bearer ${SB_KEY}`,
+          'Content-Type':  'application/json',
+          Prefer:          'resolution=merge-duplicates,return=minimal',
+        },
+        body: JSON.stringify(batch),
+      })
+      if (!sbRes.ok) upsertErrors.push(await sbRes.text())
+    }
+
+    if (upsertErrors.length > 0) {
+      return NextResponse.json({ ok: false, error: upsertErrors }, { status: 500 })
     }
 
     return NextResponse.json({
