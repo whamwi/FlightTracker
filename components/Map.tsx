@@ -656,6 +656,17 @@ export default function Map() {
           continue
         }
 
+        // If this callsign has been handed off to the ESTIMATED schedule marker
+        // (not in realCallsigns and has a schedule entry), remove the stale marker
+        // so both don't render simultaneously.
+        if (cs0 && !realCallsigns.has(cs0) && scheduleRef.current.some(e => e.callsign === cs0)) {
+          markersRef.current[hex]?.remove()
+          delete markersRef.current[hex]
+          linesRef.current[hex]?.forEach((l: any) => l.remove())
+          delete linesRef.current[hex]
+          continue
+        }
+
         const ttl = STALE_TTL_SYRIA_MS
         if (now - entry.lostAt > ttl) {
           markersRef.current[hex]?.remove()
