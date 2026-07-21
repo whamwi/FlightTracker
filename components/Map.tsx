@@ -739,8 +739,9 @@ export default function Map() {
             : null
 
           if (wps?.length && fraction !== null) {
-            // Clamp fraction: post-arrival (>1) stays at route end
-            const clampedF = Math.min(1, fraction)
+            // Cap at 0.97 so the icon never overshoots destination via waypoints that
+            // extend slightly past the airport — same cap used in the ESTIMATED path.
+            const clampedF = Math.min(0.97, fraction)
             const [timeLat, timeLon] = interpolatePath(wps, clampedF)
             const distKm = greatCircleKm(a.lat, a.lon, timeLat, timeLon)
             const SNAP_KM = 80  // ~43 NM — if within this, follow time-based fraction
@@ -759,9 +760,12 @@ export default function Map() {
 
             let useF = clampedF
             if (fraction > 1.0) {
-              // Post-arrival freeze: snap to route end.
-              dispLat = timeLat; dispLon = timeLon
-              dispTrack = bearingFromPath(wps, useF)
+              // Post-arrival freeze: snap to arrival airport coords, not the last
+              // waypoint (which may extend past the airport and cause overshoot).
+              const arrC2 = schedEntry ? ALL_AIRPORT_COORDS[schedEntry.arr_iata] : null
+              if (arrC2) { dispLat = arrC2[0]; dispLon = arrC2[1] }
+              else { dispLat = timeLat; dispLon = timeLon }
+              dispTrack = bearingFromPath(wps, Math.min(1, fraction))
               arrSnapped = true
             } else if (isFR24Entry && drValid) {
               // Kinematic DR — track is consistent with destination direction.
@@ -788,7 +792,7 @@ export default function Map() {
                   }
                 }
               }
-              useF = Math.min(1, liveF + elapsedFrac)
+              useF = Math.min(0.97, liveF + elapsedFrac)
               const [pathLat, pathLon] = interpolatePath(wps, useF)
               dispLat = pathLat; dispLon = pathLon
               dispTrack = bearingFromPath(wps, useF)
