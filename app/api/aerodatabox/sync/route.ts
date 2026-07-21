@@ -196,6 +196,70 @@ export async function GET(req: Request) {
   const arrived  = rows.filter(r => r.status === 'Arrived').length
   const withPos  = rows.filter(r => r.actual_dep_utc).length
 
+  // ── Schedule self-healing: correct flight_schedule from ADB's confirmed UTC times ──
+  // ADB's scheduled_dep_utc / scheduled_arr_utc are authoritative UTC.
+  // When they differ from our stored dep_time_utc by > 10 min, update the schedule.
+  // Two batch fetches instead of N×2 individual calls to stay within the 55s budget.
+  let schedFixed = 0
+  try {
+    const rowsWithSched = rows.filter(r => r.scheduled_dep_utc && r.scheduled_arr_utc)
+    if (rowsWithSched.length > 0) {
+      const toMin = (hhmm: string) => { const [h, m] = hhmm.split(':').map(Number); return h * 60 + m }
+
+      // Batch 1: resolve callsigns → flight_lookup ids
+      const callsigns = [...new Set(rowsWithSched.map(r => r.callsign))]
+      const csParam = callsigns.map(c => encodeURIComponent(c)).join(',')
+      const lkRes = await fetch(
+        `${SB_URL}/rest/v1/flight_lookup?broadcast_callsign=in.(${csParam})&select=id,broadcast_callsign`,
+        { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }, signal: AbortSignal.timeout(8_000) }
+      )
+      if (lkRes.ok) {
+        const lkRows: { id: number; broadcast_callsign: string }[] = await lkRes.json()
+        const csToId = Object.fromEntries(lkRows.map(r => [r.broadcast_callsign, r.id]))
+
+        // Batch 2: fetch schedule rows for those flight ids
+        const fids = lkRows.map(r => r.id).join(',')
+        const fsRes2 = await fetch(
+          `${SB_URL}/rest/v1/flight_schedule?flight_id=in.(${fids})&select=id,flight_id,dep_time_utc,arr_time_utc`,
+          { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }, signal: AbortSignal.timeout(8_000) }
+        )
+        if (fsRes2.ok) {
+          const fsRows: { id: number; flight_id: number; dep_time_utc: string; arr_time_utc: string }[] = await fsRes2.json()
+          const fidToSched = Object.fromEntries(fsRows.map(r => [r.flight_id, r]))
+
+          for (const r of rowsWithSched) {
+            const fid = csToId[r.callsign]
+            if (fid == null) continue
+            const stored = fidToSched[fid]
+            if (!stored) continue
+
+            const adbDepHHMM = new Date(r.scheduled_dep_utc!).toISOString().slice(11, 16)
+            const adbArrHHMM = new Date(r.scheduled_arr_utc!).toISOString().slice(11, 16)
+            const storedDepHHMM = stored.dep_time_utc.slice(0, 5)
+            const diffMin = Math.abs(toMin(adbDepHHMM) - toMin(storedDepHHMM))
+
+            // Only correct if 10–300 min off (>300 = different frequency, not a timezone error)
+            if (diffMin < 10 || diffMin > 300) continue
+
+            const durMin = Math.round(
+              (new Date(r.scheduled_arr_utc!).getTime() - new Date(r.scheduled_dep_utc!).getTime()) / 60_000
+            )
+            await sb(`/flight_schedule?id=eq.${stored.id}`, {
+              method: 'PATCH',
+              body: JSON.stringify({
+                dep_time_utc: adbDepHHMM + ':00',
+                arr_time_utc: adbArrHHMM + ':00',
+                duration_min: durMin,
+                source: 'adb_corrected',
+              }),
+            })
+            schedFixed++
+          }
+        }
+      }
+    }
+  } catch { /* non-fatal */ }
+
   // ── Second pass: look up active FYC* (Fly Cham) flights by callsign ──────────
   // FR24 doesn't carry XH/FYC flights. For every FYC flight that should have
   // landed in the last 10 hours but has no actual_arr_utc, we call ADB directly.
@@ -282,6 +346,7 @@ export async function GET(req: Request) {
     departed,
     arrived,
     with_actual_dep: withPos,
+    sched_fixed: schedFixed,
     fyc_arrival_synced: fycSynced,
   })
 }
