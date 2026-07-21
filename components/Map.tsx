@@ -53,6 +53,8 @@ interface FlightStatus {
   actual_arr_utc:    string | null
   scheduled_dep_utc: string | null
   scheduled_arr_utc: string | null
+  revised_dep_utc:   string | null
+  revised_arr_utc:   string | null
   dep_delay_min:     number | null
   arr_delay_min:     number | null
   aircraft_reg:      string | null
@@ -326,40 +328,64 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
   const isSyria = AIRPORT_COORDS[e.arr_iata] != null
   const acType  = fs?.aircraft_type ?? null
   const acReg   = fs?.aircraft_reg  ?? null
-  const depDelay = fs?.dep_delay_min != null && Math.abs(fs.dep_delay_min) >= 2
-    ? `<br/><span style="color:${fs.dep_delay_min > 0 ? '#f97316' : '#4ade80'};font-size:11px">${fs.dep_delay_min > 0 ? `+${fs.dep_delay_min}` : fs.dep_delay_min} min delay</span>`
-    : ''
-  const acLine = (acType || acReg)
+  const acLine  = (acType || acReg)
     ? `<br/>${acType ?? ''}${acType && acReg ? ' · ' : ''}${acReg ?? ''}`
     : ''
 
+  // Delay lines — prefer arr delay for arrivals, dep delay for departures
+  const depDelay = fs?.dep_delay_min != null && Math.abs(fs.dep_delay_min) >= 2
+    ? `<br/><span style="color:${fs.dep_delay_min > 0 ? '#f97316' : '#4ade80'};font-size:11px">Dep ${fs.dep_delay_min > 0 ? `+${fs.dep_delay_min}` : fs.dep_delay_min} min</span>`
+    : ''
+  const arrDelayMin = fs?.arr_delay_min != null ? fs.arr_delay_min
+    : (fs?.revised_arr_utc && fs?.scheduled_arr_utc
+        ? Math.round((new Date(fs.revised_arr_utc).getTime() - new Date(fs.scheduled_arr_utc).getTime()) / 60_000)
+        : null)
+  const arrDelay = arrDelayMin != null && Math.abs(arrDelayMin) >= 2
+    ? `<br/><span style="color:${arrDelayMin > 0 ? '#f97316' : '#4ade80'};font-size:11px">Arr ${arrDelayMin > 0 ? `+${arrDelayMin}` : arrDelayMin} min</span>`
+    : ''
+
+  // Best arrival time: actual → revised → scheduled (converted to local Syria +3)
+  const bestArrISO = fs?.actual_arr_utc ?? fs?.revised_arr_utc ?? null
+  const bestArrLabel = fs?.actual_arr_utc ? 'Arrived' : fs?.revised_arr_utc ? 'Revised arr' : null
+
+  const toLocal = (iso: string) => {
+    const d = new Date(iso)
+    const h = (d.getUTCHours() + 3) % 24
+    return `${String(h).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`
+  }
+  const schedToLocal = (hhmm: string) => {
+    const [h, m] = hhmm.split(':').map(Number)
+    return `${String((h + 3) % 24).padStart(2,'0')}:${String(m).padStart(2,'0')}`
+  }
+
   if (arrived && isSyria && e.arr_time_utc && e.arr_time_utc !== '—') {
-    const [h, m]    = e.arr_time_utc.split(':').map(Number)
-    const localH    = (h + 3) % 24
-    const localTime = `${String(localH).padStart(2,'0')}:${String(m).padStart(2,'0')}`
+    const localTime = bestArrISO ? toLocal(bestArrISO) : schedToLocal(e.arr_time_utc)
     return `<div style="font-family:monospace;font-size:12px;line-height:1.7">
       <b>${e.callsign}</b> <span style="color:#9ca3af;font-size:10px">landed</span><br/>
       ${e.dep_iata} → ${e.arr_iata}${acLine}
       <br/><span style="color:#4ade80;font-size:11px">Arrived ${e.arr_iata} ~${localTime} local</span>
-      ${depDelay}
+      ${depDelay}${arrDelay}
       <br/><span style="color:#6b7280;font-size:10px">Schedule-estimated · no live signal</span>
     </div>`
   }
+
   let arrLine = ''
   if (isSyria && e.arr_time_utc && e.arr_time_utc !== '—') {
-    const [h, m]    = e.arr_time_utc.split(':').map(Number)
-    const localH    = (h + 3) % 24
-    const localTime = `${String(localH).padStart(2,'0')}:${String(m).padStart(2,'0')}`
-    const dur       = e.duration_min
+    const schedLocal = schedToLocal(e.arr_time_utc)
+    const dur = e.duration_min
       ? ` &nbsp;·&nbsp; ${Math.floor(e.duration_min/60)}h${e.duration_min%60>0?` ${e.duration_min%60}m`:''}`
       : ''
-    arrLine = `<br/><span style="color:#4ade80;font-size:11px">Arrives ${e.arr_iata} ${localTime}${dur}</span>`
+    arrLine = `<br/><span style="color:#4ade80;font-size:11px">Sched ${e.arr_iata} ${schedLocal}${dur}</span>`
+    if (bestArrISO && bestArrLabel) {
+      const revisedLocal = toLocal(bestArrISO)
+      arrLine += `<br/><span style="color:#fbbf24;font-size:11px">${bestArrLabel} ${revisedLocal} local</span>`
+    }
   }
   return `<div style="font-family:monospace;font-size:12px;line-height:1.7">
     <b>${e.callsign}</b> <span style="color:#fbbf24;font-size:10px">~ estimated</span><br/>
     ${e.dep_iata} → ${e.arr_iata}${acLine}
     ${isSyria ? `<br/><span style="color:#16a34a;font-weight:bold">→ ${e.arr_iata}</span>${arrLine}` : ''}
-    ${depDelay}
+    ${depDelay}${arrDelay}
     <br/><span style="color:#6b7280;font-size:10px">Schedule projection · no signal yet</span>
   </div>`
 }

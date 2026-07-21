@@ -140,7 +140,7 @@ function FlightCard({ f, view, date }: { f: Flight; view: View; date: string }) 
   const schedTime   = isArr ? f.arr_time_utc  : f.dep_time_utc
   const actualTime  = isArr ? f.actual_arr_utc : f.actual_dep_utc
   const revisedTime = isArr ? f.revised_arr_utc : f.revised_dep_utc
-  const delayMin    = calcDelay(schedTime, actualTime, date)
+  const delayMin    = calcDelay(schedTime, actualTime ?? revisedTime, date)
   const status      = effectiveStatus(f)
 
   // Best estimated time to show: actual → revised → scheduled
