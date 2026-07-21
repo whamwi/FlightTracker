@@ -251,9 +251,9 @@ function bestHeading(a: Aircraft): number {
 
 // ── Icon & popup ──────────────────────────────────────────────────────────────
 
-function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, stale: boolean, label?: string) {
+function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, stale: boolean, label?: string, alp = false) {
   const size    = syria ? 40 : 30
-  const color   = stale ? '#9ca3af' : syria ? '#16a34a' : '#1d4ed8'
+  const color   = stale ? '#9ca3af' : alp ? '#f97316' : syria ? '#16a34a' : '#1d4ed8'
   const opacity = stale ? 0.5 : 1
   const shadow  = syria && !stale ? 'drop-shadow(0 5px 4px rgba(0,0,0,0.45))' : 'drop-shadow(0 1px 3px rgba(0,0,0,0.4))'
   const strokeW = syria && !stale ? 0.4 : 0.6
@@ -609,7 +609,8 @@ export default function Map() {
         }
 
         const callsign = (a.flight ?? '').trim()
-        const icon     = planeIcon(L, bestHeading(a), isSyria, false, isSyria && callsign ? callsign : undefined)
+        const isAlp    = airports.includes('ALP')
+        const icon     = planeIcon(L, bestHeading(a), isSyria, false, isSyria && callsign ? callsign : undefined, isAlp)
         const popup    = buildPopup({ ...a, syria_airports: airports }, undefined, false, flightStatusRef.current[callsign])
 
         if (markersRef.current[a.hex]) {
@@ -917,7 +918,7 @@ export default function Map() {
         const staleLabel = isSyria && cs
           ? (arrSnapped ? `${cs}\nARRIVED` : projected ? `${cs}\nESTIMATED` : cs)
           : undefined
-        const icon       = planeIcon(L, dispTrack, isSyria, !isSyria || arrSnapped, staleLabel)
+        const icon       = planeIcon(L, dispTrack, isSyria, !isSyria || arrSnapped, staleLabel, aps.includes('ALP'))
         const popup      = buildPopup({ ...a, syria_airports: aps }, entry.lostAt, projected, flightStatusRef.current[cs])
 
         // Smooth-blend toward the DR target so that when a fresh FR24 fix arrives
@@ -1046,7 +1047,7 @@ export default function Map() {
         const isSyria    = AIRPORT_COORDS[arr_iata] != null || AIRPORT_COORDS[dep_iata] != null
         const label      = arrived ? `${callsign}\nARRIVED` : `${callsign}\nESTIMATED`
 
-        const icon  = planeIcon(L, track, isSyria, arrived, label)
+        const icon  = planeIcon(L, track, isSyria, arrived, label, dep_iata === 'ALP' || arr_iata === 'ALP')
         const popup = buildSchedulePopup(entry, arrived, fs)
 
         activeSchedKeys.add(callsign)
