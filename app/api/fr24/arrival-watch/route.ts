@@ -40,6 +40,36 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): nu
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
+// Compute projected landing time from last known position + altitude.
+// Uses two independent estimates and takes the larger (most conservative):
+//   • Altitude-based: remaining_alt / standard_descent_rate
+//   • Distance-based: remaining_km / approach_speed
+// Returns ISO string, or null if data is insufficient.
+function projectEta(c: Candidate): string | null {
+  if (!c.seen_at || c.alt_baro == null) return null
+  const seenAt = new Date(c.seen_at).getTime()
+  const ageMs  = Date.now() - seenAt
+  if (ageMs > 40 * 60_000) return null           // signal too stale to project from
+  if (c.alt_baro > 15_000)  return null           // still too high — too early to project
+
+  // Altitude-based: ~1,500 ft/min standard approach descent rate
+  const altMin = c.alt_baro / 1_500
+
+  // Distance-based: speed bracket by altitude (kts → km/min)
+  let distMin: number | null = null
+  const arrCoords = c.arr_iata ? AIRPORT_COORDS[c.arr_iata] : null
+  if (c.lat != null && c.lon != null && arrCoords) {
+    const km = haversineKm(c.lat, c.lon, arrCoords[0], arrCoords[1])
+    const speedKts = c.alt_baro > 8_000 ? 280 : c.alt_baro > 3_000 ? 220 : 160
+    const speedKmMin = speedKts * 1.852 / 60
+    distMin = km / speedKmMin
+  }
+
+  const timeToLandMin = distMin != null ? Math.max(altMin, distMin) : altMin
+  const etaMs = seenAt + timeToLandMin * 60_000
+  return new Date(etaMs).toISOString()
+}
+
 interface Candidate {
   callsign:       string
   arr_iata:       string | null
@@ -175,10 +205,13 @@ export async function GET(req: Request) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fr24Data: any[] = Array.isArray(fr24Json) ? fr24Json : (fr24Json.data ?? [])
 
-  // ── 4. Upsert landed flights ──────────────────────────────────────────────
+  // ── 4a. Upsert confirmed landings ────────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const landed = fr24Data.filter((r: any) => r.datetime_landed)
-  let updated = 0
+  const landed    = fr24Data.filter((r: any) => r.datetime_landed)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fr24ByCs  = Object.fromEntries(fr24Data.map((r: any) => [r.callsign, r]))
+  let updated     = 0
+  let etaProjected = 0
 
   if (landed.length > 0) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -204,23 +237,60 @@ export async function GET(req: Request) {
     })
 
     if (!sbRes.ok) {
-      return NextResponse.json({ ok: false, error: `DB upsert: ${await sbRes.text()}` }, { status: 500 })
+      return NextResponse.json({ ok: false, error: `DB upsert landed: ${await sbRes.text()}` }, { status: 500 })
     }
     updated = landed.length
   }
 
+  // ── 4b. Project ETA for triggered flights with no confirmed landing ────────
+  // For flights in approach phase where FR24 has no datetime_landed yet,
+  // compute estimated arrival from last known altitude + distance and store
+  // as revised_arr_utc so the board/map can show it immediately.
+  const etaRows: object[] = []
+  const landedCallsigns = new Set(landed.map((r: any) => r.callsign))
+
+  for (const callsign of toQuery) {
+    if (landedCallsigns.has(callsign)) continue            // already confirmed — skip
+    const candidate = candidates.find(c => c.callsign === callsign)
+    if (!candidate) continue
+    const eta = projectEta(candidate)
+    if (!eta) continue
+    etaRows.push({
+      callsign,
+      operating_date: candidate.actual_dep_utc.slice(0, 10),
+      revised_arr_utc: eta,
+      last_synced_at: now.toISOString(),
+    })
+  }
+
+  if (etaRows.length > 0) {
+    const etaRes = await fetch(`${SB_URL}/rest/v1/flight_status`, {
+      method: 'POST',
+      headers: {
+        apikey:         SB_KEY,
+        Authorization:  `Bearer ${SB_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer:         'resolution=merge-duplicates,return=minimal',
+      },
+      body: JSON.stringify(etaRows),
+    })
+    if (etaRes.ok) etaProjected = etaRows.length
+  }
+
   return NextResponse.json({
-    ok:        true,
-    checked:   candidates.length,
-    triggered: toQuery.length,
+    ok:            true,
+    checked:       candidates.length,
+    triggered:     toQuery.length,
     updated,
+    eta_projected: etaProjected,
     checklist: results.map(r => ({
       callsign:  r.callsign,
       triggered: r.triggered,
       reasons:   r.reasons,
       skipped:   r.skipped,
     })),
-    fr24_returned: fr24Data.length,
-    landed_callsigns: landed.map((r: any) => r.callsign),
+    fr24_returned:    fr24Data.length,
+    landed_callsigns: [...landedCallsigns],
+    eta_callsigns:    etaRows.map((r: any) => `${r.callsign} → ${r.revised_arr_utc}`),
   })
 }
