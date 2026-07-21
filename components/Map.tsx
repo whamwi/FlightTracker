@@ -739,9 +739,11 @@ export default function Map() {
               // Kinematic DR — track is consistent with destination direction.
               dispLat = drLat; dispLon = drLon
               dispTrack = a.track ?? 0
-            } else if (isFR24Entry || distKm >= SNAP_KM) {
-              // Path-following fallback: no reliable heading/speed, or stale DB entry
-              // far off the stored path — snap to nearest waypoint + elapsed fraction.
+            } else if (isFR24Entry) {
+              // Path-following fallback for FR24 stale entries: walk forward from the
+              // nearest route point + elapsed fraction. Not used for ADS-B stale entries
+              // whose last fix may be wrong (MLAT error, hex mismatch) — those fall
+              // through to the time-based schedule fraction below.
               const liveF = nearestPathFraction(wps, a.lat, a.lon)
               let elapsedFrac = 0
               if (schedEntry && schedEntry.duration_min > 0) {
