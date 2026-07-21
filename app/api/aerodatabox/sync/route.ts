@@ -56,12 +56,20 @@ const ADB_STATUS: Record<number, string> = {
   11: 'Cancelled',
 }
 
+const ADB_STRING_ALIAS: Record<string, string> = {
+  Landed:    'Arrived',
+  Land:      'Arrived',
+  Takeoff:   'Departed',
+  Enroute:   'En Route',
+  EnRoute:   'En Route',
+}
+
 function resolveStatus(raw: unknown): string {
   if (typeof raw === 'number') return ADB_STATUS[raw] ?? 'Unknown'
   if (typeof raw === 'string') {
     const n = Number(raw)
-    if (!isNaN(n) && raw.trim() !== '') return ADB_STATUS[n] ?? raw
-    return raw
+    if (!isNaN(n) && raw.trim() !== '') return ADB_STATUS[n] ?? 'Unknown'
+    return ADB_STRING_ALIAS[raw] ?? raw
   }
   return 'Unknown'
 }

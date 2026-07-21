@@ -29,9 +29,16 @@ const STATUS: Record<string, { label: string; cls: string }> = {
   'En Route':  { label: 'En Route',    cls: 'bg-sky-900 text-sky-200' },
   Approaching: { label: 'Approaching', cls: 'bg-teal-900 text-teal-200' },
   Arrived:     { label: 'Arrived',     cls: 'bg-green-950 text-green-300' },
+  Landed:      { label: 'Arrived',     cls: 'bg-green-950 text-green-300' },
   Cancelled:   { label: 'Cancelled',   cls: 'bg-red-950 text-red-400' },
   Diverted:    { label: 'Diverted',    cls: 'bg-orange-900 text-orange-300' },
   Unknown:     { label: 'Unknown',     cls: 'bg-gray-800 text-gray-500' },
+}
+
+// Normalise string variants ADB sometimes sends before display-level inference
+const STATUS_ALIAS: Record<string, string> = {
+  Landed: 'Arrived',
+  Land:   'Arrived',
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -93,9 +100,10 @@ function durationLabel(min: number): string {
 
 // ── Sub-components ───────────────────────────────────────────────────────────
 
-// Infer a meaningful display status when ADB returns "Unknown" but we have actual times
+// Infer a meaningful display status when ADB returns "Unknown" or unmapped strings
 function effectiveStatus(f: Flight): string {
-  if (f.status !== 'Unknown') return f.status
+  const s = STATUS_ALIAS[f.status] ?? f.status
+  if (s !== 'Unknown') return s
   if (f.actual_arr_utc) return 'Arrived'
   if (f.actual_dep_utc) return 'Departed'
   return 'Unknown'
@@ -273,7 +281,7 @@ export default function BoardPage() {
 
   // Summary counts (use effective status for accuracy)
   const total     = sorted.length
-  const landed    = sorted.filter(f => effectiveStatus(f) === 'Arrived').length
+  const landed    = sorted.filter(f => ['Arrived', 'Landed'].includes(effectiveStatus(f))).length
   const cancelled = sorted.filter(f => effectiveStatus(f) === 'Cancelled').length
   const enroute   = sorted.filter(f => ['En Route', 'Departed', 'Approaching'].includes(effectiveStatus(f))).length
 
