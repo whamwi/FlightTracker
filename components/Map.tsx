@@ -808,6 +808,19 @@ export default function Map() {
           if (arrC_) { dispLat = arrC_[0]; dispLon = arrC_[1]; arrSnapped = true; projected = true }
         }
 
+        // Confirmed arrival from AeroDataBox or FR24: snap to arrival airport even
+        // when the flight landed early (fraction < 1.0 during path-following).
+        // 4 h recency guard prevents yesterday's row from triggering today's flight.
+        if (isSyria && !arrSnapped) {
+          const csFix = (a.flight ?? '').trim()
+          const fsFix = csFix ? flightStatusRef.current[csFix] : null
+          if (fsFix?.actual_arr_utc && (now - new Date(fsFix.actual_arr_utc).getTime() < 4 * 3_600_000)) {
+            const seFix  = scheduleRef.current.find(e => e.callsign === csFix)
+            const arrFix = seFix ? ALL_AIRPORT_COORDS[seFix.arr_iata] : null
+            if (arrFix) { dispLat = arrFix[0]; dispLon = arrFix[1]; arrSnapped = true }
+          }
+        }
+
         // Stale un-projected aircraft: determine whether pre-departure or post-arrival
         // by comparing the raw clock, not just isFlightActiveNow (which returns null
         // for both states). Pre-departure → park at dep airport. Post-arrival (within
@@ -908,6 +921,13 @@ export default function Map() {
         else if (fraction !== null && fraction < 1.0 && fs?.actual_dep_utc && duration_min > 0) {
           const elapsedMs = now - new Date(fs.actual_dep_utc).getTime()
           if (elapsedMs > 0) fraction = Math.min(1.2, elapsedMs / (duration_min * 60_000))
+        }
+
+        // Confirmed early landing: flight touched down before schedule window closed.
+        // actual_arr_utc within 4 h prevents yesterday's row from firing on today's flight.
+        if (fraction !== null && fraction < 1.0 && fs?.actual_arr_utc
+            && (now - new Date(fs.actual_arr_utc).getTime() < 4 * 3_600_000)) {
+          fraction = 1.1
         }
 
         if (fraction === null) {

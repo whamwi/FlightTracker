@@ -3,6 +3,6 @@
     { "path": "/api/sync/airport-flights",  "schedule": "0 3 * * *"  },
     { "path": "/api/sync/expand-schedule",  "schedule": "30 3 * * *" },
     { "path": "/api/aerodatabox/subscribe", "schedule": "0 */6 * * *" },
-    { "path": "/api/fr24/sync",            "schedule": "0 */2 * * *" }
+    { "path": "/api/fr24/sync",            "schedule": "*/30 * * * *" }
   ]
 }
