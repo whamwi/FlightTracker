@@ -251,7 +251,7 @@ function bestHeading(a: Aircraft): number {
 
 // ── Icon & popup ──────────────────────────────────────────────────────────────
 
-function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, stale: boolean, label?: string, alp = false) {
+function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, stale: boolean, label?: string, alp = false, estimated = false) {
   const size    = syria ? 40 : 30
   const color   = stale ? '#9ca3af' : alp ? '#f97316' : syria ? '#16a34a' : '#1d4ed8'
   const opacity = stale ? 0.5 : 1
@@ -266,7 +266,7 @@ function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, s
 
   let html = svg
   if (label) {
-    const textColor = stale ? '#9ca3af' : '#4ade80'
+    const textColor = stale ? '#9ca3af' : estimated ? '#fbbf24' : '#4ade80'
     const labelHtml = label.split('\n').map((line, i) =>
       `<div style="font-size:${i>0?8:9}px;font-weight:bold;color:${i>0?'#fbbf24':textColor};
         text-shadow:0 1px 3px rgba(0,0,0,1),0 0 6px rgba(0,0,0,0.9);letter-spacing:0.3px;
@@ -1045,9 +1045,9 @@ export default function Map() {
           ? bearingFromPath(wps, fPos)
           : bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], fPos)
         const isSyria    = AIRPORT_COORDS[arr_iata] != null || AIRPORT_COORDS[dep_iata] != null
-        const label      = arrived ? `${callsign}\nARRIVED` : `${callsign}\nESTIMATED`
+        const label      = arrived ? `${callsign}\nARRIVED` : callsign
 
-        const icon  = planeIcon(L, track, isSyria, arrived, label, dep_iata === 'ALP' || arr_iata === 'ALP')
+        const icon  = planeIcon(L, track, isSyria, arrived, label, dep_iata === 'ALP' || arr_iata === 'ALP', !arrived)
         const popup = buildSchedulePopup(entry, arrived, fs)
 
         activeSchedKeys.add(callsign)
