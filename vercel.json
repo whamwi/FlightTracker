@@ -4,6 +4,7 @@
     { "path": "/api/sync/expand-schedule",  "schedule": "30 3 * * *" },
     { "path": "/api/aerodatabox/subscribe", "schedule": "0 */6 * * *" },
     { "path": "/api/aerodatabox/sync",      "schedule": "*/30 * * * *" },
-    { "path": "/api/fr24/sync",             "schedule": "*/30 * * * *" }
+    { "path": "/api/fr24/sync",             "schedule": "*/30 * * * *" },
+    { "path": "/api/fr24/arrival-watch",    "schedule": "*/5 * * * *"  }
   ]
 }
