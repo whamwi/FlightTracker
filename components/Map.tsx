@@ -518,17 +518,25 @@ export default function Map() {
       for (const cs of fr24CallsignsList) {
         if (cs) realCallsigns.add(cs)
       }
+      // After this many ms without a new signal, drop the stale entry from
+      // realCallsigns so the schedule-projected ESTIMATED marker can take over.
+      // 3 min ≈ 3 poll cycles — long enough to absorb brief coverage gaps,
+      // short enough that a genuinely lost signal shows ESTIMATED quickly.
+      const STALE_HAND_OFF_MS = 3 * 60_000
+
       for (const entry of Object.values(lastKnownRef.current)) {
         const cs = (entry.a.flight ?? '').trim()
         if (!cs) continue
-        // FR24 aircraft always suppress ESTIMATED — they have a confirmed live
-        // position from FR24 and must not be overridden by schedule simulation.
+        // FR24 aircraft always suppress ESTIMATED — their lostAt is refreshed every
+        // poll to fr24Ts, so elapsed stays near-zero and they never hand off.
         if ((entry.a as any).fr24) { realCallsigns.add(cs); continue }
         const sched = scheduleRef.current.find(e => e.callsign === cs)
         if (sched && isFlightActiveNow(sched.dep_time_utc, sched.arr_time_utc, sched.days_of_week, now) === null) {
           // Pre-departure or post-arrival+freeze: let ESTIMATED take over
           continue
         }
+        // Hand off to ESTIMATED once the stale position is old enough.
+        if (now - entry.lostAt > STALE_HAND_OFF_MS) continue
         realCallsigns.add(cs)
       }
 
