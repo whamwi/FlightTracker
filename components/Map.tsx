@@ -282,14 +282,17 @@ function buildPopup(a: Aircraft, lostAt?: number, projected?: boolean, fs?: Flig
   const alt       = typeof a.alt_baro === 'number' ? `${Math.round(a.alt_baro).toLocaleString()} ft` : '—'
   const spd       = a.gs ? `${Math.round(a.gs)} kts` : '—'
   const syriaAps  = a.syria_airports ?? []
-  const syria     = syriaAps.length > 0
+  // Only highlight the Syrian connection when the flight is arriving IN Syria.
+  // Outbound flights (dep_syria=true, arr_syria=false) depart FROM Syria — showing
+  // "→ DAM" would imply DAM is the destination, which is wrong and confusing.
+  const arrSyria  = a.arr_syria && syriaAps.length > 0
 
   // Prefer AeroDataBox aircraft info over FR24 when available
   const acType    = fs?.aircraft_type ?? a.t ?? null
   const acReg     = fs?.aircraft_reg  ?? a.r ?? null
 
   let scheduleLine = ''
-  if (syria && a.arr_time_utc) {
+  if (arrSyria && a.arr_time_utc) {
     const [h, m]    = a.arr_time_utc.split(':').map(Number)
     const localH    = (h + 3) % 24
     const localTime = `${String(localH).padStart(2,'0')}:${String(m).padStart(2,'0')}`
@@ -312,7 +315,7 @@ function buildPopup(a: Aircraft, lostAt?: number, projected?: boolean, fs?: Flig
     <b>${callsign}</b>${badge}<br/>
     ${acType ? `Type: ${acType}<br/>` : ''}${acReg ? `Reg: ${acReg}<br/>` : ''}
     Alt: ${alt} &nbsp; Speed: ${spd}
-    ${syria ? `<br/><span style="color:#16a34a;font-weight:bold">→ ${syriaAps.join(', ')}</span>${scheduleLine}` : ''}
+    ${arrSyria ? `<br/><span style="color:#16a34a;font-weight:bold">→ ${syriaAps.join(', ')}</span>${scheduleLine}` : ''}
     ${delayLine}
     ${lostAt && !projected ? `<br/><span style="color:#ef4444;font-size:11px">⚠ Signal lost ${new Date(lostAt).toLocaleTimeString()}</span>` : ''}
     ${projected && lostAt ? `<br/><span style="color:#6b7280;font-size:10px">Dead reckoning from ${new Date(lostAt).toLocaleTimeString()}</span>` : ''}
