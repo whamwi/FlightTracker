@@ -93,6 +93,22 @@ function durationLabel(min: number): string {
 
 // ── Sub-components ───────────────────────────────────────────────────────────
 
+// Infer a meaningful display status when ADB returns "Unknown" but we have actual times
+function effectiveStatus(f: Flight): string {
+  if (f.status !== 'Unknown') return f.status
+  if (f.actual_arr_utc) return 'Arrived'
+  if (f.actual_dep_utc) return 'Departed'
+  return 'Unknown'
+}
+
+// Recalculate delay from schedule HH:MM + operating date vs actual ISO timestamp.
+// More reliable than stored arr_delay_min which may reference ADB's own scheduled time.
+function calcDelay(schedHHMM: string, actualISO: string | null, date: string): number | null {
+  if (!actualISO || !schedHHMM || !date) return null
+  const diff = (new Date(actualISO).getTime() - new Date(`${date}T${schedHHMM}:00Z`).getTime()) / 60_000
+  return Math.round(diff)
+}
+
 function StatusBadge({ status }: { status: string }) {
   const cfg = STATUS[status] ?? STATUS.Unknown
   return (
@@ -111,12 +127,13 @@ function DelayBadge({ min }: { min: number | null }) {
   )
 }
 
-function FlightCard({ f, view }: { f: Flight; view: View }) {
+function FlightCard({ f, view, date }: { f: Flight; view: View; date: string }) {
   const isArr = view === 'arr'
   const schedTime   = isArr ? f.arr_time_utc  : f.dep_time_utc
   const actualTime  = isArr ? f.actual_arr_utc : f.actual_dep_utc
   const revisedTime = isArr ? f.revised_arr_utc : f.revised_dep_utc
-  const delayMin    = isArr ? f.arr_delay_min  : f.dep_delay_min
+  const delayMin    = calcDelay(schedTime, actualTime, date)
+  const status      = effectiveStatus(f)
 
   // Best estimated time to show: actual → revised → scheduled
   const bestTime = actualTime ?? revisedTime
@@ -126,7 +143,7 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
   const baggage    = isArr ? f.arr_baggage_belt : null
   const checkin    = isArr ? null             : f.dep_check_in_desk
 
-  const isCancelled = f.status === 'Cancelled'
+  const isCancelled = status === 'Cancelled'
 
   return (
     <div className={`bg-gray-900 border rounded-xl p-4 flex flex-col gap-3 ${isCancelled ? 'border-red-900/60 opacity-60' : 'border-gray-800'}`}>
@@ -140,7 +157,7 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
             <p className="text-gray-500 text-xs">{f.iata_number} · {f.callsign}</p>
           </div>
         </div>
-        <StatusBadge status={f.status} />
+        <StatusBadge status={status} />
       </div>
 
       {/* Row 2: Route */}
@@ -174,10 +191,10 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
               {fmtUTC(schedTime)}
             </p>
           </div>
-          {bestTime && (
+          {bestTime && !isCancelled && (
             <div>
               <p className="text-gray-500 text-xs mb-0.5">{actualTime ? 'Actual' : 'Estimated'}</p>
-              <p className="font-mono font-semibold text-base text-yellow-400">
+              <p className={`font-mono font-semibold text-base ${status === 'Arrived' || status === 'Departed' ? 'text-green-400' : 'text-yellow-400'}`}>
                 {fmtUTC(bestTime)}
               </p>
             </div>
@@ -254,11 +271,11 @@ export default function BoardPage() {
     return ta.localeCompare(tb)
   })
 
-  // Summary counts
+  // Summary counts (use effective status for accuracy)
   const total     = sorted.length
-  const landed    = sorted.filter(f => ['Arrived', 'Landed'].includes(f.status)).length
-  const cancelled = sorted.filter(f => f.status === 'Cancelled').length
-  const enroute   = sorted.filter(f => ['En Route', 'Departed', 'Approaching'].includes(f.status)).length
+  const landed    = sorted.filter(f => effectiveStatus(f) === 'Arrived').length
+  const cancelled = sorted.filter(f => effectiveStatus(f) === 'Cancelled').length
+  const enroute   = sorted.filter(f => ['En Route', 'Departed', 'Approaching'].includes(effectiveStatus(f))).length
 
   const dateLabel = new Date(date + 'T12:00:00Z').toLocaleDateString('en-GB', {
     weekday: 'long', day: 'numeric', month: 'long'
@@ -368,7 +385,7 @@ export default function BoardPage() {
         {!loading && (
           <div className="flex flex-col gap-3">
             {sorted.map(f => (
-              <FlightCard key={`${f.callsign}-${f.dep_iata}-${f.arr_iata}`} f={f} view={view} />
+              <FlightCard key={`${f.callsign}-${f.dep_iata}-${f.arr_iata}`} f={f} view={view} date={date} />
             ))}
           </div>
         )}
