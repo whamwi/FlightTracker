@@ -113,21 +113,35 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: 'AERODATABOX_KEY not set' }, { status: 500 })
   }
 
-  const res = await fetch(
-    `${ADB_BASE}/flights/airports/icao/OSDI?withLeg=true&withCancelled=true&direction=Both`,
-    {
+  const [resDam, resAlp] = await Promise.all([
+    fetch(`${ADB_BASE}/flights/airports/icao/OSDI?withLeg=true&withCancelled=true&direction=Both`, {
       headers: { 'x-api-market-key': ADB_KEY },
       signal: AbortSignal.timeout(15_000),
-    }
-  )
+    }),
+    fetch(`${ADB_BASE}/flights/airports/icao/OSAP?withLeg=true&withCancelled=true&direction=Both`, {
+      headers: { 'x-api-market-key': ADB_KEY },
+      signal: AbortSignal.timeout(15_000),
+    }),
+  ])
 
-  if (!res.ok) {
-    const body = await res.text()
-    return NextResponse.json({ ok: false, error: `AeroDataBox ${res.status}: ${body}` }, { status: 502 })
+  if (!resDam.ok) {
+    const body = await resDam.text()
+    return NextResponse.json({ ok: false, error: `AeroDataBox OSDI ${resDam.status}: ${body}` }, { status: 502 })
   }
 
-  const data = await res.json() as { departures?: AdbFlight[]; arrivals?: AdbFlight[] }
-  const flights: AdbFlight[] = [...(data.departures ?? []), ...(data.arrivals ?? [])]
+  const dataDam = await resDam.json() as { departures?: AdbFlight[]; arrivals?: AdbFlight[] }
+  const dataAlp = resAlp.ok ? await resAlp.json() as { departures?: AdbFlight[]; arrivals?: AdbFlight[] } : {}
+
+  // Merge both airports; deduplicate by callsign (OSDI takes precedence for shared flights)
+  const seenCallsigns = new Set<string>()
+  const flights: AdbFlight[] = []
+  for (const f of [...(dataDam.departures ?? []), ...(dataDam.arrivals ?? [])]) {
+    if (f.callSign) seenCallsigns.add(f.callSign)
+    flights.push(f)
+  }
+  for (const f of [...((dataAlp as typeof dataDam).departures ?? []), ...((dataAlp as typeof dataDam).arrivals ?? [])]) {
+    if (f.callSign && !seenCallsigns.has(f.callSign)) flights.push(f)
+  }
 
   const today = new Date().toISOString().slice(0, 10)
 
