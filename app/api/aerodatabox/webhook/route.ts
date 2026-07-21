@@ -62,10 +62,35 @@ function resolveStatus(raw: unknown): string {
   return 'Unknown'
 }
 
+// Fetch IATA number → broadcast callsign mapping so webhook payloads that
+// omit callSign (sending only number/IATA) can still be keyed correctly.
+async function fetchIataToCallsign(): Promise<Record<string, string>> {
+  try {
+    const res = await fetch(
+      `${SB_URL}/rest/v1/rpc/get_syria_flight_pairs`,
+      {
+        method: 'POST',
+        headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+        signal: AbortSignal.timeout(5_000),
+      },
+    )
+    if (!res.ok) return {}
+    const rows: { iata_number: string; broadcast_callsign: string }[] = await res.json()
+    const map: Record<string, string> = {}
+    for (const r of rows) {
+      if (r.iata_number && r.broadcast_callsign) map[r.iata_number.toUpperCase()] = r.broadcast_callsign
+    }
+    return map
+  } catch { return {} }
+}
+
 // Normalise a single AeroDataBox flight object into a flight_status row
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function toRow(f: any): object | null {
-  const callSign: string | undefined = f.callSign
+function toRow(f: any, iataToCallsign: Record<string, string>): object | null {
+  // ADB webhook payloads sometimes omit callSign and only send number (IATA).
+  const callSign: string | undefined =
+    f.callSign ?? iataToCallsign[(f.number ?? '').toString().toUpperCase()] ?? undefined
   if (!callSign) return null
 
   const dep = f.departure ?? {}
@@ -135,12 +160,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: 'Invalid JSON' }, { status: 400 })
   }
 
-  // Log remaining balance if provided in the notification
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const payload = body as any
   const remainingCredits: number | undefined = payload?.remainingCredits ?? payload?.balance
-  if (remainingCredits !== undefined) {
-    console.log(`[ADB webhook] remaining credits: ${remainingCredits}`)
+  // Log top-level shape to diagnose payload structure issues
+  const topKeys = payload && typeof payload === 'object' ? Object.keys(payload) : []
+  console.log(`[ADB webhook] keys=${topKeys.join(',')} remainingCredits=${remainingCredits} isArray=${Array.isArray(payload)}`)
+  if (payload?.callSign || payload?.number) {
+    console.log(`[ADB webhook] single-flight callSign=${payload.callSign} number=${payload.number} status=${payload.status}`)
   }
 
   // Normalise payload — handles both FlightByNumber and FlightByAirportIcao formats
@@ -156,7 +183,8 @@ export async function POST(req: Request) {
     flights = [payload]
   }
 
-  const rows = flights.map(toRow).filter(Boolean)
+  const iataToCallsign = await fetchIataToCallsign()
+  const rows = flights.map(f => toRow(f, iataToCallsign)).filter(Boolean)
 
   if (rows.length > 0) {
     await sb('/flight_status', {

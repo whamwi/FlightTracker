@@ -7,10 +7,17 @@ const FR24_KEY = process.env.FR24_API_KEY ?? ''
 const SB_URL   = process.env.SUPABASE_URL!
 const SB_KEY   = process.env.SUPABASE_ANON_KEY!
 
-// Fetch flight identifiers split by how FR24 tracks them:
-// - FYC flights (Fly Cham): queried via callsigns= param (FR24 tracks by callsign, not IATA)
-// - All others: queried via flights= param using IATA flight number
-async function fetchFr24Identifiers(): Promise<{ iataFlights: string[]; callsigns: string[] }> {
+// Fetch flight identifiers for FR24 flight-summary lookup.
+// All flights use the flights= param (IATA flight number) — the callsigns= param
+// returns no results from the flight-summary API even when FR24 tracks the callsign live.
+// Flights with no IATA number fall back to callsigns= as a last resort.
+// Returns iataToCallsign map so FR24 results can be re-keyed to broadcast callsign.
+async function fetchFr24Identifiers(): Promise<{
+  iataFlights: string[]
+  callsigns: string[]
+  iataToCallsign: Record<string, string>
+  iataToFr24Id: Record<string, string>
+}> {
   const res = await fetch(
     `${SB_URL}/rest/v1/rpc/get_syria_flight_pairs`,
     {
@@ -25,17 +32,42 @@ async function fetchFr24Identifiers(): Promise<{ iataFlights: string[]; callsign
     },
   )
   if (!res.ok) throw new Error(`DB flight pairs fetch failed: ${res.status}`)
-  const rows: { iata_number: string; broadcast_callsign: string }[] = await res.json()
-  const iataFlights: string[] = []
-  const callsigns:   string[] = []
+  const rows: { iata_number: string; broadcast_callsign: string; fr24_id: string | null }[] = await res.json()
+  const iataFlights:    string[] = []
+  const callsigns:      string[] = []
+  const iataToCallsign: Record<string, string> = {}
+  const iataToFr24Id:   Record<string, string> = {}
   for (const r of rows) {
-    if (r.broadcast_callsign?.startsWith('FYC')) {
-      if (r.broadcast_callsign) callsigns.push(r.broadcast_callsign)
-    } else {
-      if (r.iata_number) iataFlights.push(r.iata_number)
+    if (r.iata_number) {
+      iataFlights.push(r.iata_number)
+      if (r.broadcast_callsign) iataToCallsign[r.iata_number.toUpperCase()] = r.broadcast_callsign
+      if (r.fr24_id) iataToFr24Id[r.iata_number.toUpperCase()] = r.fr24_id
+    } else if (r.broadcast_callsign) {
+      callsigns.push(r.broadcast_callsign)
     }
   }
-  return { iataFlights, callsigns }
+  return { iataFlights, callsigns, iataToCallsign, iataToFr24Id }
+}
+
+// Write newly discovered FR24 IDs back to flight_lookup so future syncs can use them.
+async function backfillFr24Ids(discovered: Record<string, string>): Promise<void> {
+  const entries = Object.entries(discovered)
+  if (entries.length === 0) return
+  await Promise.all(entries.map(([iata, fr24Id]) =>
+    fetch(
+      `${SB_URL}/rest/v1/flight_lookup?iata_number=eq.${encodeURIComponent(iata)}`,
+      {
+        method: 'PATCH',
+        headers: {
+          apikey:         SB_KEY,
+          Authorization:  `Bearer ${SB_KEY}`,
+          'Content-Type': 'application/json',
+          Prefer:         'return=minimal',
+        },
+        body: JSON.stringify({ fr24_id: fr24Id }),
+      },
+    )
+  ))
 }
 
 // FR24 returns YYYY-MM-DDTHH:MM:SS without Z — normalise to ISO 8601
@@ -67,7 +99,7 @@ export async function GET(req: Request) {
     const to   = now.toISOString().slice(0, 19)
 
     // ── 1. Fetch FR24 identifiers from DB ────────────────────────────────────
-    const { iataFlights, callsigns: fycCallsigns } = await fetchFr24Identifiers()
+    const { iataFlights, callsigns: fycCallsigns, iataToCallsign, iataToFr24Id } = await fetchFr24Identifiers()
     if (iataFlights.length === 0 && fycCallsigns.length === 0) {
       return NextResponse.json({ ok: true, synced: 0, reason: 'no identifiers from DB' })
     }
@@ -126,12 +158,22 @@ export async function GET(req: Request) {
     // ── 4. Build upsert rows — only fill nulls, never overwrite ADB data ─────
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rows = allResults
-      .filter(r => r.callsign && (r.datetime_takeoff || r.datetime_landed))
+      .filter(r => (r.callsign || r.flight) && (r.datetime_takeoff || r.datetime_landed))
       .map(r => {
+        // FR24 may omit callsign when queried by IATA number — resolve from our map.
+        const callsign: string = r.callsign ?? iataToCallsign[(r.flight ?? '').toUpperCase()] ?? r.flight
+        if (!callsign) return null
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const row: Record<string, any> = {
-          callsign:       r.callsign,
-          operating_date: (r.datetime_takeoff ?? r.first_seen ?? today).slice(0, 10),
+          callsign,
+          // When FR24 only has the landing (midnight crossers caught at arrival),
+          // back-calculate the departure date using landed - 6h rather than first_seen,
+          // which would otherwise stamp the arrival date as the operating_date.
+          operating_date: r.datetime_takeoff
+            ? r.datetime_takeoff.slice(0, 10)
+            : r.datetime_landed
+              ? new Date(new Date((r.datetime_landed as string).endsWith('Z') ? r.datetime_landed : r.datetime_landed + 'Z').getTime() - 6 * 3_600_000).toISOString().slice(0, 10)
+              : today,
           flight_number:  r.flight    ?? null,
           dep_iata:       r.orig_iata ?? null,
           arr_iata:       r.dest_iata_actual ?? r.dest_iata ?? null,
@@ -139,11 +181,11 @@ export async function GET(req: Request) {
           arr_icao:       r.dest_icao_actual ?? r.dest_icao ?? null,
           aircraft_type:  r.type      ?? null,
           status:         deriveStatus(r),
-          fr24_id:        r.id        ?? null,
+          fr24_id:        r.fr24_id ?? r.id ?? null,
           last_synced_at: now.toISOString(),
         }
-        if (!hasActualDep.has(r.callsign)) row.actual_dep_utc = toISO(r.datetime_takeoff)
-        if (!hasActualArr.has(r.callsign)) row.actual_arr_utc = toISO(r.datetime_landed)
+        if (!hasActualDep.has(callsign)) row.actual_dep_utc = toISO(r.datetime_takeoff)
+        if (!hasActualArr.has(callsign)) row.actual_arr_utc = toISO(r.datetime_landed)
 
         if (row.actual_dep_utc === undefined && row.actual_arr_utc === undefined) return null
         return row
@@ -211,6 +253,20 @@ export async function GET(req: Request) {
     if (upsertErrors.length > 0) {
       return NextResponse.json({ ok: false, error: upsertErrors }, { status: 500 })
     }
+
+    // ── 7. Back-fill flight_lookup.fr24_id for newly discovered IDs ──────────
+    // Collect the first FR24 occurrence ID seen per IATA number this sync run.
+    // Only write for flights that didn't already have an fr24_id in the DB.
+    const newFr24Ids: Record<string, string> = {}
+    for (const r of allResults) {
+      const rid = r.fr24_id ?? r.id
+      if (!rid || !r.flight) continue
+      const iata = (r.flight as string).toUpperCase()
+      if (!iataToFr24Id[iata] && !newFr24Ids[iata]) {
+        newFr24Ids[iata] = rid
+      }
+    }
+    await backfillFr24Ids(newFr24Ids)
 
     return NextResponse.json({
       ok: true,

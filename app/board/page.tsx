@@ -50,6 +50,8 @@ type Flight = {
   country_flag: string
   dep_iata: string
   arr_iata: string
+  dep_time: string
+  arr_time: string
   dep_time_utc: string
   arr_time_utc: string
   duration_min: number
@@ -83,11 +85,13 @@ function syriaDate(offsetDays: number): string {
   return new Date(ms).toISOString().slice(0, 10)
 }
 
-// Format "HH:MM" from ISO timestamp (UTC) or "HH:MM" time string
-function fmtUTC(raw: string | null | undefined): string {
+// Format "HH:MM" in Syria local time.
+// Plain "HH:MM" strings (dep_time/arr_time) are already local — return as-is.
+// ISO UTC timestamps from ADB/FR24 (actual_*/revised_*) need +3h conversion.
+function fmtLocal(raw: string | null | undefined): string {
   if (!raw) return '—'
   if (raw.includes('T')) {
-    const d = new Date(raw)
+    const d = new Date(new Date(raw).getTime() + 3 * 3_600_000)
     return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
   }
   return raw.slice(0, 5)
@@ -137,21 +141,11 @@ function DelayBadge({ min }: { min: number | null }) {
 
 function FlightCard({ f, view, date }: { f: Flight; view: View; date: string }) {
   const isArr = view === 'arr'
-  const schedTime   = isArr ? f.arr_time_utc  : f.dep_time_utc
-  const actualTime  = isArr ? f.actual_arr_utc : f.actual_dep_utc
-  const revisedTime = isArr ? f.revised_arr_utc : f.revised_dep_utc
-  const delayMin    = calcDelay(schedTime, actualTime ?? revisedTime, date)
-  const status      = effectiveStatus(f)
-
-  // Best estimated time to show: actual → revised → scheduled
-  const bestTime = actualTime ?? revisedTime
-
-  const terminal   = isArr ? f.arr_terminal   : f.dep_terminal
-  const gate       = isArr ? f.arr_gate       : f.dep_gate
-  const baggage    = isArr ? f.arr_baggage_belt : null
-  const checkin    = isArr ? null             : f.dep_check_in_desk
-
+  const status = effectiveStatus(f)
   const isCancelled = status === 'Cancelled'
+
+  const depDelay = calcDelay(f.dep_time_utc, f.actual_dep_utc ?? f.revised_dep_utc, date)
+  const arrDelay = calcDelay(f.arr_time_utc, f.actual_arr_utc ?? f.revised_arr_utc, date)
 
   return (
     <div className={`bg-gray-900 border rounded-xl p-4 flex flex-col gap-3 ${isCancelled ? 'border-red-900/60 opacity-60' : 'border-gray-800'}`}>
@@ -162,7 +156,10 @@ function FlightCard({ f, view, date }: { f: Flight; view: View; date: string }) 
           <span className="text-xl leading-none">{f.country_flag}</span>
           <div className="min-w-0">
             <p className="text-white font-semibold text-sm leading-tight truncate">{f.airline_name}</p>
-            <p className="text-gray-500 text-xs">{f.iata_number} · {f.callsign}</p>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="text-gray-300 text-xs font-mono font-medium">{f.iata_number}</span>
+              <span className="text-gray-600 text-xs font-mono">{f.callsign}</span>
+            </div>
           </div>
         </div>
         <StatusBadge status={status} />
@@ -170,7 +167,7 @@ function FlightCard({ f, view, date }: { f: Flight; view: View; date: string }) 
 
       {/* Row 2: Route */}
       <div className="flex items-center gap-2">
-        <div className="text-center min-w-[3rem]">
+        <div className="text-center min-w-[3.5rem]">
           <p className="text-white font-bold text-lg leading-tight">{f.dep_iata}</p>
           <p className="text-gray-400 text-xs truncate">{city(f.dep_iata)}</p>
         </div>
@@ -184,39 +181,64 @@ function FlightCard({ f, view, date }: { f: Flight; view: View; date: string }) 
             <p className="text-gray-600 text-xs">{durationLabel(f.duration_min)}</p>
           )}
         </div>
-        <div className="text-center min-w-[3rem]">
+        <div className="text-center min-w-[3.5rem]">
           <p className="text-white font-bold text-lg leading-tight">{f.arr_iata}</p>
           <p className="text-gray-400 text-xs truncate">{city(f.arr_iata)}</p>
         </div>
       </div>
 
-      {/* Row 3: Times + delay */}
-      <div className="flex items-end justify-between gap-4">
-        <div className="flex items-baseline gap-3">
-          <div>
-            <p className="text-gray-500 text-xs mb-0.5">{isArr ? 'Arr (sched)' : 'Dep (sched)'}</p>
-            <p className={`font-mono font-semibold text-base ${isCancelled ? 'line-through text-gray-600' : 'text-white'}`}>
-              {fmtUTC(schedTime)}
+      {/* Row 3: Dep time (left, under dep airport) — Arr time (right, under arr airport) */}
+      <div className="flex items-start justify-between gap-2">
+
+        {/* Departure time block */}
+        <div className="min-w-[3.5rem]">
+          <p className="text-gray-500 text-xs mb-0.5">Dep</p>
+          <p className={`font-mono font-semibold text-base ${isCancelled ? 'line-through text-gray-600' : 'text-white'}`}>
+            {fmtLocal(f.dep_time)}
+          </p>
+          {(f.actual_dep_utc || f.revised_dep_utc) && !isCancelled && (
+            <p className={`font-mono text-xs mt-0.5 ${f.actual_dep_utc ? 'text-green-400' : 'text-yellow-400'}`}>
+              {fmtLocal(f.actual_dep_utc ?? f.revised_dep_utc ?? null)}
             </p>
-          </div>
-          {bestTime && !isCancelled && (
-            <div>
-              <p className="text-gray-500 text-xs mb-0.5">{actualTime ? 'Actual' : 'Estimated'}</p>
-              <p className={`font-mono font-semibold text-base ${status === 'Arrived' || status === 'Departed' ? 'text-green-400' : 'text-yellow-400'}`}>
-                {fmtUTC(bestTime)}
-              </p>
-            </div>
           )}
-          <DelayBadge min={delayMin} />
+          {!isArr && <DelayBadge min={depDelay} />}
+          {f.dep_check_in_desk && (
+            <p className="text-gray-400 text-xs mt-1">CK <span className="text-white font-medium">{f.dep_check_in_desk}</span></p>
+          )}
+          {!isArr && f.dep_gate && (
+            <p className="text-gray-400 text-xs">Gate <span className="text-white font-medium">{f.dep_gate}</span></p>
+          )}
+          {!isArr && f.dep_terminal && (
+            <p className="text-gray-400 text-xs">T<span className="text-white font-medium">{f.dep_terminal}</span></p>
+          )}
         </div>
 
-        {/* Gate / terminal / extras */}
-        <div className="text-right text-xs text-gray-400 space-y-0.5 shrink-0">
-          {terminal && <p>Terminal <span className="text-white font-medium">{terminal}</span></p>}
-          {gate     && <p>Gate <span className="text-white font-medium">{gate}</span></p>}
-          {checkin  && <p>Check-in <span className="text-white font-medium">{checkin}</span></p>}
-          {baggage  && <p>Belt <span className="text-white font-medium">{baggage}</span></p>}
-          {f.aircraft_type && <p className="text-gray-600">{f.aircraft_type}</p>}
+        {/* Aircraft type in centre */}
+        <div className="flex-1 flex items-start justify-center pt-4">
+          {f.aircraft_type && <p className="text-gray-600 text-xs">{f.aircraft_type}</p>}
+        </div>
+
+        {/* Arrival time block */}
+        <div className="min-w-[3.5rem] text-right">
+          <p className="text-gray-500 text-xs mb-0.5">Arr</p>
+          <p className={`font-mono font-semibold text-base ${isCancelled ? 'line-through text-gray-600' : 'text-white'}`}>
+            {fmtLocal(f.arr_time)}
+          </p>
+          {(f.actual_arr_utc || f.revised_arr_utc) && !isCancelled && (
+            <p className={`font-mono text-xs mt-0.5 ${f.actual_arr_utc ? 'text-green-400' : 'text-yellow-400'}`}>
+              {fmtLocal(f.actual_arr_utc ?? f.revised_arr_utc ?? null)}
+            </p>
+          )}
+          {isArr && <DelayBadge min={arrDelay} />}
+          {isArr && f.arr_gate && (
+            <p className="text-gray-400 text-xs mt-1">Gate <span className="text-white font-medium">{f.arr_gate}</span></p>
+          )}
+          {isArr && f.arr_terminal && (
+            <p className="text-gray-400 text-xs">T<span className="text-white font-medium">{f.arr_terminal}</span></p>
+          )}
+          {isArr && f.arr_baggage_belt && (
+            <p className="text-gray-400 text-xs">Belt <span className="text-white font-medium">{f.arr_baggage_belt}</span></p>
+          )}
         </div>
       </div>
 

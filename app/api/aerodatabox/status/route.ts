@@ -6,11 +6,13 @@ const SB_URL = process.env.SUPABASE_URL!
 const SB_KEY = process.env.SUPABASE_ANON_KEY!
 
 export async function GET() {
-  // Return today's + yesterday's rows so overnight flights are covered
-  const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
+  // Departures are always today or future — never look back.
+  // A flight departing today may arrive the next calendar day; that is handled by
+  // the schedule window (isFlightActiveNow) and today's operating_date row.
+  const today = new Date().toISOString().slice(0, 10)
 
   const res = await fetch(
-    `${SB_URL}/rest/v1/flight_status?operating_date=gte.${yesterday}&select=callsign,status,actual_dep_utc,actual_arr_utc,scheduled_dep_utc,scheduled_arr_utc,revised_dep_utc,revised_arr_utc,dep_delay_min,arr_delay_min,aircraft_reg,aircraft_type,flight_number,dep_iata,arr_iata&order=operating_date.asc`,
+    `${SB_URL}/rest/v1/flight_status?operating_date=eq.${today}&select=callsign,operating_date,status,actual_dep_utc,actual_arr_utc,scheduled_dep_utc,scheduled_arr_utc,revised_dep_utc,revised_arr_utc,dep_delay_min,arr_delay_min,aircraft_reg,aircraft_type,flight_number,dep_iata,arr_iata`,
     {
       headers: {
         apikey: SB_KEY,
@@ -25,7 +27,6 @@ export async function GET() {
   }
 
   const rows = await res.json()
-  // Key by callsign — if same callsign appears twice (yesterday + today), latest wins
   const byCallsign: Record<string, unknown> = {}
   for (const r of rows) {
     byCallsign[r.callsign] = r

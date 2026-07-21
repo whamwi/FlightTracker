@@ -18,7 +18,7 @@ export async function GET() {
   ].join(',')
 
   const res = await fetch(
-    `${SB_URL}/rest/v1/flight_schedule?select=${encodeURIComponent(select)}&order=dep_time_utc.asc`,
+    `${SB_URL}/rest/v1/flight_schedule?select=${encodeURIComponent(select)}&order=dep_time.asc`,
     { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` } },
   )
 

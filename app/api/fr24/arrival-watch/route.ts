@@ -260,6 +260,8 @@ export async function GET(req: Request) {
   const fr24ByCs  = Object.fromEntries(fr24Data.map((r: any) => [r.callsign, r]))
   let updated     = 0
   let etaProjected = 0
+  // Declared here so 4b can add flight_ended entries alongside confirmed landings
+  const landedCallsigns = new Set(landed.map((r: any) => r.callsign))
 
   if (landed.length > 0) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -329,7 +331,6 @@ export async function GET(req: Request) {
   // compute estimated arrival from last known altitude + distance and store
   // as revised_arr_utc so the board/map can show it immediately.
   const etaRows: object[] = []
-  const landedCallsigns = new Set(landed.map((r: any) => r.callsign))
 
   for (const callsign of toQuery) {
     if (landedCallsigns.has(callsign)) continue            // confirmed landed or ended — skip

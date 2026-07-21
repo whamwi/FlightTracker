@@ -200,10 +200,11 @@ export default function SchedulePage() {
                   </td>
 
                   {/* Flight # */}
-                  <td className="px-4 py-3 font-mono text-gray-300 text-xs whitespace-nowrap">
-                    {r.iata_number}
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <p className="font-mono text-gray-200 text-xs font-medium">{r.iata_number}</p>
+                    <p className="font-mono text-gray-500 text-[11px]">{r.broadcast_callsign}</p>
                     {r.codeshare_iata && (
-                      <span className="ml-1.5 text-gray-600 text-[10px]">/ {r.codeshare_iata}</span>
+                      <p className="font-mono text-gray-600 text-[10px]">/ {r.codeshare_iata}</p>
                     )}
                   </td>
 

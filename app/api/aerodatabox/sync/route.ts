@@ -333,27 +333,48 @@ export async function GET(req: Request) {
         for (const f of flList) {
           const dep = f.departure ?? {}
           const arr = f.arrival ?? {}
+          const depLive = hasLive(dep.quality)
           const arrLive = hasLive(arr.quality)
+          const actualDep = depLive ? (dep.runwayTime?.utc ?? dep.revisedTime?.utc) : undefined
           const actualArr = arrLive ? (arr.runwayTime?.utc ?? arr.revisedTime?.utc) : undefined
-          if (!actualArr) continue
-          // Reject stale ADB responses: arrival must be within the last 24 hours
-          if (now2.getTime() - new Date(actualArr).getTime() > 24 * 3_600_000) continue
+
+          // Need at least one confirmed actual time to be worth writing
+          if (!actualDep && !actualArr) continue
+
+          // Reject stale arrivals: actual_arr_utc must be within the last 24 hours
+          if (actualArr && now2.getTime() - new Date(actualArr).getTime() > 24 * 3_600_000) continue
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const row: Record<string, any> = {
+            callsign,
+            operating_date,
+            dep_iata:       dep.airport?.iata ?? null,
+            dep_icao:       dep.airport?.icao ?? null,
+            arr_iata:       arr.airport?.iata ?? null,
+            arr_icao:       arr.airport?.icao ?? null,
+            status:         resolveStatus(f.status),
+            dep_quality:    dep.quality ?? [],
+            arr_quality:    arr.quality ?? [],
+            last_synced_at: now2.toISOString(),
+          }
+          if (actualDep) {
+            // Only accept a departure whose calendar date matches the operating_date.
+            // ADB /flights/callsign may return a previous day's flight for the same callsign.
+            const depDate = new Date(actualDep).toISOString().slice(0, 10)
+            if (depDate === operating_date) {
+              row.actual_dep_utc = new Date(actualDep).toISOString()
+              row.dep_delay_min  = delayMin(dep.scheduledTime?.utc, actualDep)
+            }
+          }
+          if (actualArr) {
+            row.actual_arr_utc = new Date(actualArr).toISOString()
+            row.arr_delay_min  = delayMin(arr.scheduledTime?.utc, actualArr)
+          }
 
           await sb('/flight_status', {
             method: 'POST',
             headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
-            body: JSON.stringify([{
-              callsign,
-              operating_date,
-              arr_iata:       arr.airport?.iata ?? null,
-              arr_icao:       arr.airport?.icao ?? null,
-              dep_iata:       dep.airport?.iata ?? null,
-              status:         f.status ?? 'Arrived',
-              actual_arr_utc: new Date(actualArr).toISOString(),
-              arr_delay_min:  delayMin(arr.scheduledTime?.utc, actualArr),
-              arr_quality:    arr.quality ?? [],
-              last_synced_at: now2.toISOString(),
-            }]),
+            body: JSON.stringify([row]),
           })
           fycSynced++
         }

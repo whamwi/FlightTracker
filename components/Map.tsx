@@ -785,44 +785,88 @@ export default function Map() {
               drValid = !arrC2 || distDR <= distFix + 20   // 20 km tolerance for minor overshoot
             }
 
+            // Floor: if actual_dep_utc is confirmed, the ESTIMATED marker placed the
+            // plane here. Don't let a stale FR24 cache position snap the marker backward
+            // when FR24 takes over — use whichever fraction is further along the route.
+            const csKey = (a.flight ?? '').trim()
+            const fsDr  = csKey ? flightStatusRef.current[csKey] : null
+            const actualDepFrac = (fsDr?.actual_dep_utc && schedEntry && schedEntry.duration_min > 0)
+              ? Math.max(0, Math.min(0.97, (now - new Date(fsDr.actual_dep_utc).getTime()) / (schedEntry.duration_min * 60_000)))
+              : null
+
             let useF = clampedF
             if (fraction > 1.0) {
-              // Post-arrival freeze: snap to arrival airport coords, not the last
-              // waypoint (which may extend past the airport and cause overshoot).
-              const arrC2 = schedEntry ? ALL_AIRPORT_COORDS[schedEntry.arr_iata] : null
-              if (arrC2) { dispLat = arrC2[0]; dispLon = arrC2[1] }
-              else { dispLat = timeLat; dispLon = timeLon }
-              dispTrack = bearingFromPath(wps, Math.min(1, fraction))
-              arrSnapped = true
+              // Post-arrival freeze: snap to arrival airport coords.
+              // Guard: if actual_dep_utc says the flight is still in progress (e.g. delayed
+              // departure or long-haul that outlasts the scheduled arrival), don't snap —
+              // use the actual-dep fraction to keep the plane at the correct enroute position.
+              if (actualDepFrac !== null && actualDepFrac < 1.0) {
+                useF = actualDepFrac
+                const [adfLat, adfLon] = interpolatePath(wps, useF)
+                dispLat = adfLat; dispLon = adfLon
+                dispTrack = bearingFromPath(wps, useF)
+              } else {
+                const arrC2 = schedEntry ? ALL_AIRPORT_COORDS[schedEntry.arr_iata] : null
+                if (arrC2) { dispLat = arrC2[0]; dispLon = arrC2[1] }
+                else { dispLat = timeLat; dispLon = timeLon }
+                dispTrack = bearingFromPath(wps, Math.min(1, fraction))
+                arrSnapped = true
+              }
             } else if (isFR24Entry && drValid) {
-              // Kinematic DR — track is consistent with destination direction.
-              dispLat = drLat; dispLon = drLon
-              dispTrack = a.track ?? 0
+              // Kinematic DR — track consistent with destination direction.
+              // Guard: if actual dep time puts the plane further along the route than
+              // the kinematic DR position, snap forward to the path fraction instead
+              // so the marker doesn't jump backward when FR24 takes over from ESTIMATED.
+              const drPathF = nearestPathFraction(wps, drLat, drLon)
+              if (actualDepFrac !== null && drPathF < actualDepFrac) {
+                useF = actualDepFrac
+                const [pl, pln] = interpolatePath(wps, useF)
+                dispLat = pl; dispLon = pln
+                dispTrack = bearingFromPath(wps, useF)
+              } else {
+                dispLat = drLat; dispLon = drLon
+                dispTrack = a.track ?? 0
+              }
             } else if (isFR24Entry) {
               // Path-following fallback for FR24 stale entries: walk forward from the
               // nearest route point + elapsed fraction. Not used for ADS-B stale entries
               // whose last fix may be wrong (MLAT error, hex mismatch) — those fall
               // through to the time-based schedule fraction below.
               const liveF = nearestPathFraction(wps, a.lat, a.lon)
-              let elapsedFrac = 0
-              if (schedEntry && schedEntry.duration_min > 0) {
-                elapsedFrac = elapsed / (schedEntry.duration_min * 60_000)
+
+              // Guard: if the FR24 track conflicts with the stored path direction by
+              // more than 90°, the schedule dep/arr is likely inverted for this leg
+              // (e.g. return flight operates under the same callsign). In that case,
+              // projecting onto the path gives a wrong position AND wrong bearing —
+              // use the raw FR24 fix + real track instead.
+              const pathBearingAtLive = bearingFromPath(wps, liveF)
+              const trackDiff = typeof a.track === 'number'
+                ? Math.abs(((a.track - pathBearingAtLive) + 180) % 360 - 180)
+                : 0
+              if (trackDiff >= 90) {
+                dispLat = a.lat; dispLon = a.lon
+                dispTrack = a.track ?? 0
               } else {
-                const depC2 = schedEntry ? ALL_AIRPORT_COORDS[schedEntry.dep_iata] : null
-                const arrC2 = schedEntry ? ALL_AIRPORT_COORDS[schedEntry.arr_iata] : null
-                if (depC2 && arrC2) {
-                  const routeKm = greatCircleKm(depC2[0], depC2[1], arrC2[0], arrC2[1])
-                  if (routeKm > 0) {
-                    const speedKts = (a.gs && a.gs > 50) ? a.gs : 450
-                    const distKm2  = speedKts * 1.852 * (elapsed / 3_600_000)
-                    elapsedFrac    = distKm2 / routeKm
+                let elapsedFrac = 0
+                if (schedEntry && schedEntry.duration_min > 0) {
+                  elapsedFrac = elapsed / (schedEntry.duration_min * 60_000)
+                } else {
+                  const depC2 = schedEntry ? ALL_AIRPORT_COORDS[schedEntry.dep_iata] : null
+                  const arrC2 = schedEntry ? ALL_AIRPORT_COORDS[schedEntry.arr_iata] : null
+                  if (depC2 && arrC2) {
+                    const routeKm = greatCircleKm(depC2[0], depC2[1], arrC2[0], arrC2[1])
+                    if (routeKm > 0) {
+                      const speedKts = (a.gs && a.gs > 50) ? a.gs : 450
+                      const distKm2  = speedKts * 1.852 * (elapsed / 3_600_000)
+                      elapsedFrac    = distKm2 / routeKm
+                    }
                   }
                 }
+                useF = Math.min(0.97, Math.max(liveF + elapsedFrac, actualDepFrac ?? 0))
+                const [pathLat, pathLon] = interpolatePath(wps, useF)
+                dispLat = pathLat; dispLon = pathLon
+                dispTrack = bearingFromPath(wps, useF)
               }
-              useF = Math.min(0.97, liveF + elapsedFrac)
-              const [pathLat, pathLon] = interpolatePath(wps, useF)
-              dispLat = pathLat; dispLon = pathLon
-              dispTrack = bearingFromPath(wps, useF)
             } else {
               dispLat = timeLat; dispLon = timeLon
               dispTrack = bearingFromPath(wps, useF)
@@ -961,57 +1005,79 @@ export default function Map() {
           continue
         }
 
-        let fraction = isFlightActiveNow(dep_time_utc, arr_time_utc, days_of_week, now)
         const fs = flightStatusRef.current[callsign]
 
-        // Only show ESTIMATED when we have confirmed airborne status from ADB/FR24
-        // (actual_dep_utc set, or status is an in-flight state). Pure schedule-window
-        // matches without any data confirmation are suppressed to avoid phantom flights.
-        const AIRBORNE = new Set(['En Route', 'Departed', 'Approaching'])
-        if (fraction !== null) {
-          if (!fs) {
-            // No ADB/FR24 status — check if ADS-B itself confirms airborne.
-            // alt_baro > 2,000ft within the last hour is unambiguous proof of departure,
-            // so we activate the schedule-fraction ESTIMATED marker without needing a
-            // flight_status record (which ADB/FR24 sync may have missed).
-            const adsbAirborne = Object.values(lastKnownRef.current).some(e =>
-              (e.a.flight ?? '').trim() === callsign &&
-              typeof e.a.alt_baro === 'number' && e.a.alt_baro > 2_000 &&
-              (now - e.lostAt) < 60 * 60_000
-            )
-            if (!adsbAirborne) fraction = null
-            // else: ADS-B confirms airborne — keep schedule fraction as-is
-          } else if (!fs.actual_dep_utc && !AIRBORNE.has(fs.status)) {
-            // Known flight but not yet confirmed departed
-            fraction = null
-          } else if (fs.actual_dep_utc && duration_min > 0) {
-            // Confirmed airborne — refine position using actual departure time
-            const elapsedMs = now - new Date(fs.actual_dep_utc).getTime()
-            fraction = elapsedMs > 0 ? Math.min(1.2, elapsedMs / (duration_min * 60_000)) : null
-          } else if (duration_min > 0) {
-            // Airborne status confirmed but no actual_dep_utc yet.
-            // Back-calculate implied departure from revised_arr_utc if available,
-            // so a delayed flight isn't placed far ahead using the scheduled dep time.
-            const impliedDepMs = fs.revised_arr_utc
+        // Route progress (0 = at origin, 1 = at destination).
+        //
+        // Priority 1 — actual_dep_utc: real wheels-off time drives position directly,
+        //   works for both early AND delayed departures, regardless of schedule window.
+        // Priority 2 — revised_arr_utc: back-calculate implied departure for a better
+        //   estimate when actual_dep_utc is not yet available.
+        // Priority 3 — schedule window: raw isFlightActiveNow fraction, accepted only
+        //   when at least one other airborne signal confirms the flight is up.
+        //
+        // OVERRUN_LIMIT: beyond this multiple of scheduled duration the plane must be
+        //   on the ground even if ADB has not sent a landing confirmation.
+        const OVERRUN_LIMIT     = 1.5
+        const AIRBORNE_STATUSES = new Set(['En Route', 'Departed', 'Approaching'])
+
+        let fraction: number | null = null
+
+        // If actual_arr_utc is already in the past, the status row belongs to a
+        // completed leg (multi-leg aircraft reusing the same callsign today).
+        // Don't use that leg's actual_dep_utc to compute position for the current leg.
+        const actualArrMs = fs?.actual_arr_utc ? new Date(fs.actual_arr_utc).getTime() : null
+        const priorLegDone = actualArrMs !== null && actualArrMs < now
+
+        if (fs?.actual_dep_utc && !priorLegDone && duration_min > 0) {
+          const elapsed = now - new Date(fs.actual_dep_utc).getTime()
+          if (elapsed > 0 && elapsed < duration_min * OVERRUN_LIMIT * 60_000) {
+            fraction = elapsed / (duration_min * 60_000)
+          }
+          // elapsed ≤ 0 → ADB timestamp in the future (clock skew); suppress
+          // elapsed ≥ OVERRUN_LIMIT × duration → must be on the ground; suppress
+        } else {
+          const schedFrac = isFlightActiveNow(dep_time_utc, arr_time_utc, days_of_week, now)
+          if (schedFrac !== null && duration_min > 0) {
+            const impliedDepMs = fs?.revised_arr_utc
               ? new Date(fs.revised_arr_utc).getTime() - duration_min * 60_000
               : null
+
             if (impliedDepMs) {
-              const elapsedMs = now - impliedDepMs
-              fraction = elapsedMs > 0 ? Math.min(1.2, elapsedMs / (duration_min * 60_000)) : null
+              // revised_arr_utc available: implied departure gives a better position estimate
+              const elapsed = now - impliedDepMs
+              if (elapsed > 0 && elapsed < duration_min * OVERRUN_LIMIT * 60_000) {
+                fraction = elapsed / (duration_min * 60_000)
+              }
+            } else if (fs && AIRBORNE_STATUSES.has(fs.status)) {
+              // Status confirms airborne but no timing data — schedule fraction is the best estimate
+              fraction = schedFrac
+            } else if (!priorLegDone) {
+              // No confirmed airborne status (DB record says Scheduled, or no record at all).
+              // ADS-B is a stronger signal than the DB — if the plane was recently seen at
+              // altitude, trust it regardless of what the status row says.
+              // Guard: priorLegDone means actual_arr_utc is in the past — the flight is done.
+              // Stale ADS-B altitude from a completed flight must NOT project a ghost position.
+              const adsbAirborne = Object.values(lastKnownRef.current).some(e =>
+                (e.a.flight ?? '').trim() === callsign &&
+                typeof e.a.alt_baro === 'number' && e.a.alt_baro > 2_000 &&
+                (now - e.lostAt) < 60 * 60_000
+              )
+              if (adsbAirborne) fraction = schedFrac
+              // else: no confirmation at all → phantom → fraction stays null
             }
-            // else: no revised_arr_utc either — keep raw schedule fraction as last resort
           }
         }
 
-        // Confirmed early landing: flight touched down before schedule window closed.
-        // actual_arr_utc within 4 h prevents yesterday's row from firing on today's flight.
-        if (fraction !== null && fraction < 1.0 && fs?.actual_arr_utc
-            && (now - new Date(fs.actual_arr_utc).getTime() < 4 * 3_600_000)) {
+        // Confirmed early landing: ADB actual_arr_utc received while schedule window was
+        // still open. Guard: actual_arr_utc must belong to THIS leg (not a prior completed
+        // leg), so only fire when priorLegDone is false.
+        if (fraction !== null && fraction < 1.0 && fs?.actual_arr_utc && !priorLegDone
+            && now - new Date(fs.actual_arr_utc).getTime() < 4 * 3_600_000) {
           fraction = 1.1
         }
 
         if (fraction === null) {
-          // Flight not active — remove stale scheduled marker
           if (schedMarkersRef.current[callsign]) {
             schedMarkersRef.current[callsign].remove()
             delete schedMarkersRef.current[callsign]
@@ -1025,15 +1091,13 @@ export default function Map() {
         const arrC = ALL_AIRPORT_COORDS[arr_iata]
         if (!depC || !arrC) continue
 
-        // Schedule fraction >= 1.0 means past scheduled arrival.
-        // Only confirm ARRIVED when AeroDataBox has actual_arr_utc — otherwise
-        // a ghost appears at the airport every day the schedule window reopens.
-        const schedPastArrival = fraction >= 1.0
-        const adbConfirmedArr  = !!(fs?.actual_arr_utc)
-        const arrived = schedPastArrival && adbConfirmedArr
-        // If schedule says flight is over but AeroDataBox hasn't confirmed arrival,
-        // suppress the marker entirely — don't show ESTIMATED past scheduled arrival.
-        if (schedPastArrival && !adbConfirmedArr) {
+        // fraction ≥ 1: the scheduled duration has elapsed.
+        // confirmed arrival (actual_arr_utc) → show as ARRIVED at destination.
+        // no confirmation + no departure record → pure schedule phantom → suppress.
+        // no confirmation + departure confirmed → late flight still airborne → show near dest.
+        const confirmedArr = !!(fs?.actual_arr_utc)
+        const arrived      = fraction >= 1.0 && confirmedArr
+        if (fraction >= 1.0 && !confirmedArr && !fs?.actual_dep_utc) {
           if (schedMarkersRef.current[callsign]) {
             schedMarkersRef.current[callsign].remove()
             delete schedMarkersRef.current[callsign]
@@ -1042,10 +1106,10 @@ export default function Map() {
           }
           continue
         }
-        const f = arrived ? 1 : fraction
-        // Cap rendered position to 97% of route so the icon never overshoots the
-        // destination airport when waypoints extend slightly past the nominal coords.
-        const fPos = Math.min(f, 0.97)
+        // Display cap: icon stays just short of the airport marker until arrival is confirmed.
+        // This is a render-only adjustment — fraction is not modified.
+        const APPROACH_DISPLAY_CAP = 0.97
+        const fPos = arrived ? 1.0 : Math.min(fraction, APPROACH_DISPLAY_CAP)
 
         const wps = routePathsRef.current[`${dep_iata}|${arr_iata}`]
         const [lat, lon] = wps?.length
