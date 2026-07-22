@@ -62,6 +62,16 @@ async function fetchSchedule(airport: string, direction: 'departures' | 'arrival
   return (data?.response?.schedule?.result as ScheduleEntry[]) ?? []
 }
 
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+}
+
+export async function OPTIONS() {
+  return new Response(null, { status: 204, headers: CORS })
+}
+
 // POST: accept pre-fetched data from browser (Cloudflare blocks server-side fetch)
 // Body: { date: "2026-07-22", airport: "DAM", departures: [...], arrivals: [...] }
 export async function POST(req: Request) {
@@ -95,9 +105,9 @@ export async function POST(req: Request) {
       await sb('/schedule_raw', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(rows) })
     }
 
-    return NextResponse.json({ ok: true, date, airport, loaded: rows.length })
+    return NextResponse.json({ ok: true, date, airport, loaded: rows.length }, { headers: CORS })
   } catch (err) {
-    return NextResponse.json({ ok: false, error: String(err) }, { status: 500 })
+    return NextResponse.json({ ok: false, error: String(err) }, { status: 500, headers: CORS })
   }
 }
 
