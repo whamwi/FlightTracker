@@ -194,6 +194,7 @@ export async function POST(req: Request) {
       } else {
         toInsert.push({
           flight_id:    lookup.id,
+          airline_id:   airlineByIata.get(raw.carrier)?.id,
           dep_iata:     raw.iata_from,
           arr_iata:     raw.iata_to,
           dep_time:     depTime,
