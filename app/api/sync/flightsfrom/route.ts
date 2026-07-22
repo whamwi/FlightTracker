@@ -62,6 +62,45 @@ async function fetchSchedule(airport: string, direction: 'departures' | 'arrival
   return (data?.response?.schedule?.result as ScheduleEntry[]) ?? []
 }
 
+// POST: accept pre-fetched data from browser (Cloudflare blocks server-side fetch)
+// Body: { date: "2026-07-22", airport: "DAM", departures: [...], arrivals: [...] }
+export async function POST(req: Request) {
+  const secret = process.env.CRON_SECRET
+  if (secret && req.headers.get('Authorization') !== `Bearer ${secret}`) {
+    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
+  }
+
+  try {
+    const body = await req.json()
+    const { date, airport, departures, arrivals } = body as {
+      date: string
+      airport: string
+      departures: ScheduleEntry[]
+      arrivals: ScheduleEntry[]
+    }
+
+    if (!date || !airport) return NextResponse.json({ ok: false, error: 'date and airport required' }, { status: 400 })
+
+    await sb(`/schedule_raw?schedule_date=eq.${date}&airport_iata=eq.${airport}`, { method: 'DELETE' })
+
+    const rows: object[] = []
+    for (const f of (departures ?? [])) {
+      rows.push({ airport_iata: airport, direction: 'departure', carrier: f.carrier, flightnumber: f.flightnumber, iata_from: f.iata_from, iata_to: f.iata_to, dep_time_local: f.departure_time, arr_time_local: f.arrival_time.slice(0, 5), duration_min: f.elapsed_time, schedule_date: date, date_from: f.date_from || null, date_to: f.date_to || null })
+    }
+    for (const f of (arrivals ?? [])) {
+      rows.push({ airport_iata: airport, direction: 'arrival', carrier: f.carrier, flightnumber: f.flightnumber, iata_from: f.iata_from, iata_to: f.iata_to, dep_time_local: f.departure_time, arr_time_local: f.arrival_time.slice(0, 5), duration_min: f.elapsed_time, schedule_date: date, date_from: f.date_from || null, date_to: f.date_to || null })
+    }
+
+    if (rows.length > 0) {
+      await sb('/schedule_raw', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(rows) })
+    }
+
+    return NextResponse.json({ ok: true, date, airport, loaded: rows.length })
+  } catch (err) {
+    return NextResponse.json({ ok: false, error: String(err) }, { status: 500 })
+  }
+}
+
 export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET
   if (secret && req.headers.get('Authorization') !== `Bearer ${secret}`) {
