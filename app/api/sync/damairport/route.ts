@@ -3,7 +3,10 @@ import { NextResponse } from 'next/server'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
-const DAM_API = 'https://damairport.gov.sy/api/flights.php'
+const AIRPORT_API: Record<string, string> = {
+  DAM: 'https://damairport.gov.sy/api/flights.php',
+  ALP: 'https://alpairport.gov.sy/api/flights.php',
+}
 const SB_URL  = process.env.SUPABASE_URL!
 const SB_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_ANON_KEY!
 
@@ -36,28 +39,27 @@ interface DamFlight {
 const DAM_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
   Accept: 'application/json, text/plain, */*',
-  Referer: 'https://damairport.gov.sy/en',
 }
 
-async function fetchPage(date: string, dir: 'arrival' | 'departure', wfloor: string, page: number): Promise<DamFlight[]> {
+async function fetchPage(apiUrl: string, date: string, dir: 'arrival' | 'departure', wfloor: string, page: number): Promise<DamFlight[]> {
   const params = new URLSearchParams({ paged: '1', dir, wfloor, dexact: date, page: String(page) })
-  const res = await fetch(`${DAM_API}?${params}`, { headers: DAM_HEADERS, signal: AbortSignal.timeout(15_000) })
+  const res = await fetch(`${apiUrl}?${params}`, { headers: DAM_HEADERS, signal: AbortSignal.timeout(15_000) })
   if (!res.ok) return []
   const json = await res.json()
   // API wraps results: { ok: true, flights: [...] }
   return json?.flights ?? json ?? []
 }
 
-async function fetchDirection(date: string, dir: 'arrival' | 'departure'): Promise<DamFlight[]> {
+async function fetchDirection(apiUrl: string, date: string, dir: 'arrival' | 'departure'): Promise<DamFlight[]> {
   const wfloor = new Date(new Date(date).getTime() - 4 * 86400_000).toISOString().slice(0, 10)
 
   // Fetch page 1 first to confirm connectivity, then parallel-fetch remaining pages
-  const firstPage = await fetchPage(date, dir, wfloor, 1)
+  const firstPage = await fetchPage(apiUrl, date, dir, wfloor, 1)
   if (!firstPage.length) return []
 
   // Fetch up to 15 more pages in parallel (covers 80 flights max)
   const remaining = await Promise.all(
-    Array.from({ length: 15 }, (_, i) => fetchPage(date, dir, wfloor, i + 2))
+    Array.from({ length: 15 }, (_, i) => fetchPage(apiUrl, date, dir, wfloor, i + 2))
   )
 
   // Deduplicate by flight identity — the API repeats the last page for out-of-range page numbers
@@ -74,6 +76,7 @@ export async function GET(req: Request) {
   const url     = new URL(req.url)
   const date    = url.searchParams.get('date') ?? new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10)
   const airport = (url.searchParams.get('airport') ?? 'DAM').toUpperCase()
+  const apiUrl  = AIRPORT_API[airport] ?? AIRPORT_API.DAM
 
   // Build IATA → ICAO/broadcast lookup from airlines table
   const airlines: { iata: string; icao: string | null }[] = await sb('/airlines?select=iata,icao')
@@ -81,8 +84,8 @@ export async function GET(req: Request) {
 
   // Fetch both directions concurrently
   const [arrivals, departures] = await Promise.all([
-    fetchDirection(date, 'arrival'),
-    fetchDirection(date, 'departure'),
+    fetchDirection(apiUrl, date, 'arrival'),
+    fetchDirection(apiUrl, date, 'departure'),
   ])
 
   // Clear existing rows for this date + airport before reloading
