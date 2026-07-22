@@ -100,7 +100,7 @@ export async function GET(req: Request) {
 
     const now = new Date()
 
-    // 30-hour lookback catches overnight flights (departed yesterday, landed today)
+    // 30-hour lookback for flights without a stored fr24_id
     const from = new Date(now.getTime() - 30 * 3_600_000).toISOString().slice(0, 19)
     const to   = now.toISOString().slice(0, 19)
 
@@ -110,10 +110,56 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: true, synced: 0, reason: 'no identifiers from DB' })
     }
 
-    // ── 2. Fetch FR24 flight summaries in batches of 15 (API max) ────────────
+    // ── 2. Load today's stored fr24_ids from flight_status ───────────────────
+    // For flights we already know the fr24_id for, call flight-summary/full?flight_ids=
+    // directly — no time window needed, returns the exact flight instance.
+    const today     = now.toISOString().slice(0, 10)
+    const yesterday = new Date(now.getTime() - 86_400_000).toISOString().slice(0, 10)
+
+    const knownIdRes = await fetch(
+      `${SB_URL}/rest/v1/flight_status?operating_date=gte.${yesterday}&fr24_id=not.is.null&select=callsign,fr24_id,operating_date`,
+      { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` } },
+    )
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const knownIdRows: any[] = knownIdRes.ok ? await knownIdRes.json() : []
+    const knownFr24Ids    = knownIdRows.map(r => r.fr24_id as string)
+    const fr24IdToCallsign: Record<string, string> = {}
+    for (const r of knownIdRows) fr24IdToCallsign[r.fr24_id] = r.callsign
+
+    // ── 3. Fetch FR24 flight summaries ───────────────────────────────────────
     const BATCH = 15
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const allResults: any[] = []
+
+    // 3a. Known fr24_ids → flight-summary/full?flight_ids= (most accurate, no time window)
+    for (let i = 0; i < knownFr24Ids.length; i += BATCH) {
+      const batch = knownFr24Ids.slice(i, i + BATCH)
+      try {
+        const res = await fetch(
+          `https://fr24api.flightradar24.com/api/flight-summary/full?flight_ids=${batch.join(',')}`,
+          {
+            headers: { Accept: 'application/json', 'Accept-Version': 'v1', Authorization: `Bearer ${FR24_KEY}` },
+            signal: AbortSignal.timeout(12_000),
+          },
+        )
+        if (!res.ok) continue
+        const json = await res.json()
+        const data: any[] = Array.isArray(json) ? json : (json.data ?? [])
+        // Attach callsign from our map so downstream code can key by it
+        for (const r of data) {
+          if (!r.callsign && r.fr24_id) r.callsign = fr24IdToCallsign[r.fr24_id] ?? r.callsign
+        }
+        allResults.push(...data)
+      } catch { /* skip bad batch */ }
+    }
+
+    // 3b. Flights without a stored fr24_id → search by flight number + time window
+    const knownCallsigns = new Set(knownIdRows.map(r => r.callsign as string))
+    const newIataFlights = iataFlights.filter(id => {
+      const cs = iataToCallsign[id.toUpperCase()]
+      return !cs || !knownCallsigns.has(cs)
+    })
+    const newCallsigns = fycCallsigns.filter(cs => !knownCallsigns.has(cs))
 
     const fetchBatches = async (ids: string[], paramKey: 'flights' | 'callsigns') => {
       for (let i = 0; i < ids.length; i += BATCH) {
@@ -125,11 +171,7 @@ export async function GET(req: Request) {
         })
         try {
           const res = await fetch(`https://fr24api.flightradar24.com/api/flight-summary/full?${params}`, {
-            headers: {
-              Accept:           'application/json',
-              'Accept-Version': 'v1',
-              Authorization:    `Bearer ${FR24_KEY}`,
-            },
+            headers: { Accept: 'application/json', 'Accept-Version': 'v1', Authorization: `Bearer ${FR24_KEY}` },
             signal: AbortSignal.timeout(12_000),
           })
           if (!res.ok) continue
@@ -140,17 +182,14 @@ export async function GET(req: Request) {
       }
     }
 
-    await fetchBatches(iataFlights, 'flights')
-    await fetchBatches(fycCallsigns, 'callsigns')
+    await fetchBatches(newIataFlights, 'flights')
+    await fetchBatches(newCallsigns, 'callsigns')
 
     if (allResults.length === 0) {
       return NextResponse.json({ ok: true, synced: 0, reason: 'no FR24 results' })
     }
 
-    // ── 3. Load existing rows that already have AeroDataBox actuals ──────────
-    const today     = now.toISOString().slice(0, 10)
-    const yesterday = new Date(now.getTime() - 86_400_000).toISOString().slice(0, 10)
-
+    // ── 4. Load existing rows that already have AeroDataBox actuals ──────────
     const existingRes = await fetch(
       `${SB_URL}/rest/v1/flight_status?operating_date=gte.${yesterday}&select=callsign,operating_date,actual_dep_utc,actual_arr_utc`,
       { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` } },
@@ -161,7 +200,7 @@ export async function GET(req: Request) {
     const hasActualDep = new Set(existingRows.filter(r => r.actual_dep_utc).map(r => `${r.callsign}|${r.operating_date}`))
     const hasActualArr = new Set(existingRows.filter(r => r.actual_arr_utc).map(r => `${r.callsign}|${r.operating_date}`))
 
-    // ── 4. Build upsert rows — only fill nulls, never overwrite ADB data ─────
+    // ── 5. Build upsert rows — only fill nulls, never overwrite ADB data ─────
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rows = allResults
       .filter(r => (r.callsign || r.flight) && (r.datetime_takeoff || r.datetime_landed))
@@ -207,7 +246,7 @@ export async function GET(req: Request) {
       })
     }
 
-    // ── 5. Deduplicate by (callsign, operating_date) ──────────────────────────
+    // ── 6. Deduplicate by (callsign, operating_date) ──────────────────────────
     // FR24 may return multiple legs for the same flight number on the same day.
     // Postgres merge-duplicates rejects a batch with two rows targeting the same PK.
     // Keep the row with the most complete data (prefer actual_arr_utc > actual_dep_utc > neither).
@@ -227,7 +266,7 @@ export async function GET(req: Request) {
     }
     const dedupedRows = [...deduped.values()]
 
-    // ── 6. Upsert — split by present fields to satisfy PGRST102 ─────────────
+    // ── 7. Upsert — split by present fields to satisfy PGRST102 ─────────────
     // PostgREST requires all rows in a batch to have identical key sets.
     // Rows conditionally include actual_dep_utc / actual_arr_utc (to avoid
     // overwriting ADB-confirmed values), so we split into up to 3 batches.
@@ -261,7 +300,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: false, error: upsertErrors }, { status: 500 })
     }
 
-    // ── 7. Back-fill flight_lookup.fr24_id for newly discovered IDs ──────────
+    // ── 8. Back-fill flight_lookup.fr24_id for newly discovered IDs ──────────
     // Collect the first FR24 occurrence ID seen per IATA number this sync run.
     // Only write for flights that didn't already have an fr24_id in the DB.
     const newFr24Ids: Record<string, string> = {}
