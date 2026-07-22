@@ -59,7 +59,14 @@ async function fetchDirection(date: string, dir: 'arrival' | 'departure'): Promi
     Array.from({ length: 15 }, (_, i) => fetchPage(date, dir, wfloor, i + 2))
   )
 
-  return [...firstPage, ...remaining.flat()]
+  // Deduplicate by flight identity — the API repeats the last page for out-of-range page numbers
+  const seen = new Set<string>()
+  const all: DamFlight[] = []
+  for (const f of [...firstPage, ...remaining.flat()]) {
+    const key = `${f.flightNumber}|${f.origin}|${f.destination}|${f.time}`
+    if (!seen.has(key)) { seen.add(key); all.push(f) }
+  }
+  return all
 }
 
 export async function GET(req: Request) {
