@@ -162,7 +162,7 @@ export async function POST(req: Request) {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const payload = body as any
-  const remainingCredits: number | undefined = payload?.remainingCredits ?? payload?.balance
+  const remainingCredits: number | undefined = payload?.balance?.creditsRemaining ?? payload?.remainingCredits
   // Log top-level shape to diagnose payload structure issues
   const topKeys = payload && typeof payload === 'object' ? Object.keys(payload) : []
   console.log(`[ADB webhook] keys=${topKeys.join(',')} remainingCredits=${remainingCredits} isArray=${Array.isArray(payload)}`)
