@@ -4,6 +4,14 @@ export const dynamic = 'force-dynamic'
 
 const FR24_KEY = process.env.FR24_API_KEY ?? ''
 
+function fr24(path: string, params: Record<string, string>) {
+  const url = `https://fr24api.flightradar24.com/api/${path}?${new URLSearchParams(params)}`
+  return fetch(url, {
+    headers: { Accept: 'application/json', 'Accept-Version': 'v1', Authorization: `Bearer ${FR24_KEY}` },
+    signal: AbortSignal.timeout(12_000),
+  })
+}
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
   const flight = searchParams.get('flight')
@@ -13,16 +21,29 @@ export async function GET(req: Request) {
   const from = new Date(now.getTime() - 36 * 3_600_000).toISOString().slice(0, 19)
   const to   = now.toISOString().slice(0, 19)
 
-  const params = new URLSearchParams({ flights: flight, flight_datetime_from: from, flight_datetime_to: to })
-  const res = await fetch(`https://fr24api.flightradar24.com/api/flight-summary/full?${params}`, {
-    headers: {
-      Accept: 'application/json',
-      'Accept-Version': 'v1',
-      Authorization: `Bearer ${FR24_KEY}`,
-    },
-    signal: AbortSignal.timeout(12_000),
-  })
+  // 1. Flight summary
+  const sumRes = await fr24('flight-summary/full', { flights: flight, flight_datetime_from: from, flight_datetime_to: to })
+  const sumText = await sumRes.text()
+  const sumData = sumText ? JSON.parse(sumText) : null
+  const fr24_id: string | null = sumData?.data?.[0]?.fr24_id ?? null
 
-  const text = await res.text()
-  return NextResponse.json({ ok: res.ok, status: res.status, data: text ? JSON.parse(text) : null })
+  // 2. If we have a fr24_id, fetch live position + position trail in parallel
+  let liveData = null
+  let trailData = null
+  if (fr24_id) {
+    const [liveRes, trailRes] = await Promise.all([
+      fr24('live/flight-positions/full',     { flight_ids: fr24_id }),
+      fr24('historic/flight-positions/full', { flight_ids: fr24_id }),
+    ])
+    const safeJson = async (r: Response) => { try { return await r.json() } catch { return null } }
+    ;[liveData, trailData] = await Promise.all([safeJson(liveRes), safeJson(trailRes)])
+  }
+
+  return NextResponse.json({
+    ok: sumRes.ok,
+    status: sumRes.status,
+    summary: sumData,
+    live: liveData,
+    trail: trailData,
+  })
 }
