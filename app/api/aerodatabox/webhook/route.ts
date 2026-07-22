@@ -90,7 +90,7 @@ async function fetchIataToCallsign(): Promise<Record<string, string>> {
 function toRow(f: any, iataToCallsign: Record<string, string>): object | null {
   // ADB webhook payloads sometimes omit callSign and only send number (IATA).
   const callSign: string | undefined =
-    f.callSign ?? iataToCallsign[(f.number ?? '').toString().toUpperCase()] ?? undefined
+    f.callSign ?? iataToCallsign[(f.number ?? '').toString().toUpperCase().replace(/\s+/g, '')] ?? undefined
   if (!callSign) return null
 
   const dep = f.departure ?? {}

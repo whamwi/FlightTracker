@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, Fragment } from 'react'
 import Link from 'next/link'
 
 // ── Airport display names ────────────────────────────────────────────────────
@@ -21,21 +21,21 @@ const CITY: Record<string, string> = {
 const city = (iata: string) => CITY[iata] ?? iata
 
 // ── Status badge config ──────────────────────────────────────────────────────
-const STATUS: Record<string, { label: string; cls: string }> = {
-  Scheduled:   { label: 'Scheduled',   cls: 'bg-gray-800 text-gray-400' },
-  Expected:    { label: 'Expected',    cls: 'bg-blue-950 text-blue-300' },
-  CheckIn:     { label: 'Check-in',    cls: 'bg-amber-950 text-amber-300' },
-  Boarding:    { label: 'Boarding',    cls: 'bg-amber-900 text-amber-200' },
-  GateClosed:  { label: 'Gate Closed', cls: 'bg-orange-950 text-orange-300' },
-  Departed:    { label: 'Departed',    cls: 'bg-sky-900 text-sky-200' },
-  'En Route':  { label: 'En Route',    cls: 'bg-sky-900 text-sky-200' },
-  Approaching: { label: 'Approaching', cls: 'bg-teal-900 text-teal-200' },
-  Arrived:     { label: 'Arrived',     cls: 'bg-green-950 text-green-300' },
-  Landed:      { label: 'Arrived',     cls: 'bg-green-950 text-green-300' },
-  Cancelled:   { label: 'Cancelled',   cls: 'bg-red-950 text-red-400' },
-  Diverted:    { label: 'Diverted',    cls: 'bg-orange-900 text-orange-300' },
-  Delayed:     { label: 'Delayed',     cls: 'bg-red-900 text-red-300' },
-  Unknown:     { label: 'Unknown',     cls: 'bg-gray-800 text-gray-500' },
+const STATUS: Record<string, { label: string; cls: string; color: string }> = {
+  Scheduled:   { label: 'Scheduled',   cls: 'bg-gray-800 text-gray-400',     color: '#374151' },
+  Expected:    { label: 'Expected',    cls: 'bg-blue-950 text-blue-300',     color: '#2563eb' },
+  CheckIn:     { label: 'Check-in',    cls: 'bg-amber-950 text-amber-300',   color: '#d97706' },
+  Boarding:    { label: 'Boarding',    cls: 'bg-amber-900 text-amber-200',   color: '#f59e0b' },
+  GateClosed:  { label: 'Gate Closed', cls: 'bg-orange-950 text-orange-300', color: '#ea580c' },
+  Departed:    { label: 'Departed',    cls: 'bg-sky-900 text-sky-200',       color: '#0284c7' },
+  'En Route':  { label: 'En Route',    cls: 'bg-sky-900 text-sky-200',       color: '#0284c7' },
+  Approaching: { label: 'Approaching', cls: 'bg-teal-900 text-teal-200',     color: '#0d9488' },
+  Arrived:     { label: 'Arrived',     cls: 'bg-green-950 text-green-300',   color: '#16a34a' },
+  Landed:      { label: 'Arrived',     cls: 'bg-green-950 text-green-300',   color: '#16a34a' },
+  Cancelled:   { label: 'Cancelled',   cls: 'bg-red-950 text-red-400',       color: '#dc2626' },
+  Diverted:    { label: 'Diverted',    cls: 'bg-orange-900 text-orange-300', color: '#ea580c' },
+  Delayed:     { label: 'Delayed',     cls: 'bg-red-900 text-red-300',       color: '#ef4444' },
+  Unknown:     { label: 'Unknown',     cls: 'bg-gray-800 text-gray-500',     color: '#374151' },
 }
 
 const STATUS_ALIAS: Record<string, string> = {
@@ -192,6 +192,30 @@ function AirlineLogo({ iata, flag, name }: { iata: string; flag: string; name: s
   )
 }
 
+// ── Flight progress bar (en-route only) ─────────────────────────────────────
+function FlightProgress({ depUtc, durationMin }: { depUtc: string; durationMin: number }) {
+  const [pct, setPct] = useState(0)
+  useEffect(() => {
+    const update = () => {
+      const dep = new Date(depUtc).getTime()
+      const p = Math.min(100, Math.max(0, ((Date.now() - dep) / (durationMin * 60_000)) * 100))
+      setPct(p)
+    }
+    update()
+    const t = setInterval(update, 30_000)
+    return () => clearInterval(t)
+  }, [depUtc, durationMin])
+
+  return (
+    <div className="h-0.5 bg-gray-800 rounded-full overflow-hidden">
+      <div
+        className="h-full rounded-full transition-all duration-1000"
+        style={{ width: `${pct.toFixed(1)}%`, background: 'linear-gradient(90deg, #0284c7, #06b6d4)' }}
+      />
+    </div>
+  )
+}
+
 // ── Sub-components ───────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: string }) {
   const cfg = STATUS[status] ?? STATUS.Unknown
@@ -229,8 +253,17 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
   const depDelay = calcDelay(f.dep_time_utc, f.actual_dep_utc ?? f.revised_dep_utc)
   const arrDelay = calcDelay(f.arr_time_utc, f.actual_arr_utc ?? f.revised_arr_utc)
 
+  const statusCfg = STATUS[status] ?? STATUS.Unknown
+  const borderColor = isCancelled ? '#7f1d1d' : statusCfg.color
+  const showProgress = (status === 'Departed' || status === 'En Route' || status === 'Approaching')
+    && !!f.actual_dep_utc && f.duration_min > 0 && !f.actual_arr_utc
+
   return (
-    <div className={`bg-gray-900 border rounded-xl p-4 flex flex-col gap-3 ${isCancelled ? 'border-red-900/60 opacity-60' : 'border-gray-800'}`}>
+    <div
+      className={`bg-gray-900 border border-gray-800 rounded-xl overflow-hidden flex flex-col ${isCancelled ? 'opacity-60' : ''}`}
+      style={{ borderLeftColor: borderColor, borderLeftWidth: '3px' }}
+    >
+      <div className="p-4 flex flex-col gap-3">
 
       {/* Row 1: Airline logo + name + status */}
       <div className="flex items-center justify-between gap-2">
@@ -327,6 +360,10 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
         </div>
       </div>
 
+      </div>
+      {showProgress && (
+        <FlightProgress depUtc={f.actual_dep_utc!} durationMin={f.duration_min} />
+      )}
     </div>
   )
 }
@@ -417,6 +454,18 @@ export default function BoardPage() {
         weekday: 'long', day: 'numeric', month: 'long'
       })
     : ''
+
+  const nowSyriaHHMM = (() => {
+    const d = new Date(Date.now() + 3 * 3_600_000)
+    return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
+  })()
+
+  const nowIdx = tab === 0
+    ? sorted.findIndex(f => {
+        const t = view === 'arr' ? utcHHMMtoLocal(f.arr_time_utc, 3) : utcHHMMtoLocal(f.dep_time_utc, 3)
+        return t >= nowSyriaHHMM
+      })
+    : -1
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
@@ -518,8 +567,17 @@ export default function BoardPage() {
         {/* Flight cards */}
         {!loading && (
           <div className="flex flex-col gap-3">
-            {sorted.map(f => (
-              <FlightCard key={`${f.callsign}-${f.dep_iata}-${f.arr_iata}-${f.dep_time}`} f={f} view={view} />
+            {sorted.map((f, i) => (
+              <Fragment key={`${f.callsign}-${f.dep_iata}-${f.arr_iata}-${f.dep_time}`}>
+                {i === nowIdx && (
+                  <div className="flex items-center gap-2 py-1">
+                    <div className="flex-1 h-px bg-blue-900" />
+                    <span className="text-blue-400 text-xs font-semibold tabular-nums">{nowSyriaHHMM} · Now</span>
+                    <div className="flex-1 h-px bg-blue-900" />
+                  </div>
+                )}
+                <FlightCard f={f} view={view} />
+              </Fragment>
             ))}
           </div>
         )}
