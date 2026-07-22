@@ -32,25 +32,36 @@ interface DamFlight {
   status:       string   // "scheduled" | "landed" | etc.
 }
 
-async function fetchDirection(date: string, dir: 'arrival' | 'departure'): Promise<DamFlight[]> {
-  const wfloor = new Date(new Date(date).getTime() - 7 * 86400_000).toISOString().slice(0, 10)
-  const all: DamFlight[] = []
+async function fetchDirection(
+  date: string,
+  dir: 'arrival' | 'departure',
+): Promise<{ flights: DamFlight[]; probe?: { status: number; body: string } }> {
+  const wfloor = new Date(new Date(date).getTime() - 4 * 86400_000).toISOString().slice(0, 10)
+  const flights: DamFlight[] = []
   let page = 1
+  let probe: { status: number; body: string } | undefined
 
   while (true) {
     const params = new URLSearchParams({ paged: '1', dir, wfloor, dexact: date, page: String(page) })
     const res = await fetch(`${DAM_API}?${params}`, {
-      headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        Accept: 'application/json, text/plain, */*',
+        Referer: 'https://damairport.gov.sy/en',
+      },
       signal: AbortSignal.timeout(12_000),
     })
+
+    if (page === 1) probe = { status: res.status, body: (await res.clone().text()).slice(0, 200) }
     if (!res.ok) break
+
     const data: DamFlight[] = await res.json()
     if (!data?.length) break
-    all.push(...data)
+    flights.push(...data)
     page++
   }
 
-  return all
+  return { flights, probe }
 }
 
 export async function GET(req: Request) {
@@ -63,10 +74,15 @@ export async function GET(req: Request) {
   const iataToIcao = new Map(airlines.map(a => [a.iata, a.icao ?? null]))
 
   // Fetch both directions concurrently
-  const [arrivals, departures] = await Promise.all([
+  const [arrResult, depResult] = await Promise.all([
     fetchDirection(date, 'arrival'),
     fetchDirection(date, 'departure'),
   ])
+  const arrivals   = arrResult.flights
+  const departures = depResult.flights
+  const debug      = url.searchParams.get('debug') === '1'
+    ? { arrProbe: arrResult.probe, depProbe: depResult.probe }
+    : undefined
 
   // Clear existing rows for this date + airport before reloading
   await sb(`/schedule_raw?schedule_date=eq.${date}&airport_iata=eq.${airport}`, { method: 'DELETE' })
@@ -124,5 +140,6 @@ export async function GET(req: Request) {
     arrivals:   arrivals.length,
     departures: departures.length,
     loaded:     rows.length,
+    ...(debug ?? {}),
   })
 }
