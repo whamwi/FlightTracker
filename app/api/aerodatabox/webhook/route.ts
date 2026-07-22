@@ -203,7 +203,7 @@ export async function POST(req: Request) {
         callsign:   firstFlight?.callSign ?? null,
         flight_num: firstFlight?.number   ?? null,
         status:     firstFlight ? String(firstFlight.status ?? '') : null,
-        credits:    remainingCredits ?? null,
+        credits:    remainingCredits != null ? Math.round(remainingCredits) : null,
         payload,
       }),
     })
