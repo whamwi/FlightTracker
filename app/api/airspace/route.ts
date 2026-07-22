@@ -61,13 +61,10 @@ async function fetchActualDeps(): Promise<Map<string, string>> {
   return map
 }
 
-let syriaCache: { map: SyriaMap; ts: number; day: string } | null = null
+let syriaCache: { map: SyriaMap; ts: number } | null = null
 
 async function fetchSyriaMap(): Promise<SyriaMap> {
-  const DAYS = ['sun','mon','tue','wed','thu','fri','sat']
-  const today = DAYS[new Date().getUTCDay()]
-
-  if (syriaCache && Date.now() - syriaCache.ts < 3_600_000 && syriaCache.day === today)
+  if (syriaCache && Date.now() - syriaCache.ts < 3_600_000)
     return syriaCache.map
 
   const res = await fetch(`${SB_URL}/rest/v1/rpc/get_syria_callsigns`, {
@@ -77,7 +74,7 @@ async function fetchSyriaMap(): Promise<SyriaMap> {
       Authorization: `Bearer ${SB_KEY}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ p_day: today }),
+    body: JSON.stringify({}),
   })
 
   if (!res.ok) return syriaCache?.map ?? new Map()
@@ -87,7 +84,7 @@ async function fetchSyriaMap(): Promise<SyriaMap> {
     r.broadcast_callsign,
     { airports: r.syria_airports, arr_time_utc: r.arr_time_utc, duration_min: r.duration_min, dep_syria: r.dep_syria ?? false, arr_syria: r.arr_syria ?? false },
   ]))
-  syriaCache = { map: callsignMap, ts: Date.now(), day: today }
+  syriaCache = { map: callsignMap, ts: Date.now() }
   return callsignMap
 }
 
