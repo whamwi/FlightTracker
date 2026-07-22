@@ -66,24 +66,46 @@ function resolveStatus(raw: unknown): string {
 // Fetch IATA number → broadcast callsign mapping so webhook payloads that
 // omit callSign (sending only number/IATA) can still be keyed correctly.
 async function fetchIataToCallsign(): Promise<Record<string, string>> {
-  try {
-    const res = await fetch(
-      `${SB_URL}/rest/v1/rpc/get_syria_flight_pairs`,
-      {
-        method: 'POST',
-        headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-        signal: AbortSignal.timeout(5_000),
-      },
-    )
-    if (!res.ok) return {}
-    const rows: { iata_number: string; broadcast_callsign: string }[] = await res.json()
+  const buildMap = (rows: { iata_number: string; broadcast_callsign: string }[]) => {
     const map: Record<string, string> = {}
     for (const r of rows) {
       if (r.iata_number && r.broadcast_callsign) map[r.iata_number.toUpperCase()] = r.broadcast_callsign
     }
     return map
-  } catch { return {} }
+  }
+
+  // Primary: RPC (joins flight_lookup + route_master, returns active Syria pairs)
+  try {
+    const res = await fetch(`${SB_URL}/rest/v1/rpc/get_syria_flight_pairs`, {
+      method: 'POST',
+      headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+      signal: AbortSignal.timeout(5_000),
+    })
+    if (res.ok) {
+      const rows: { iata_number: string; broadcast_callsign: string }[] = await res.json()
+      if (rows.length > 0) return buildMap(rows)
+    }
+  } catch { /* fall through to fallback */ }
+
+  // Fallback: direct flight_lookup query — used when RPC times out or returns empty.
+  // This ensures callsign resolution still works for flights like FZ1847 whose
+  // cancellation webhooks arrive with no callSign field.
+  try {
+    const res = await fetch(
+      `${SB_URL}/rest/v1/flight_lookup?select=iata_number,broadcast_callsign&broadcast_callsign=not.is.null`,
+      {
+        headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+        signal: AbortSignal.timeout(5_000),
+      },
+    )
+    if (res.ok) {
+      const rows: { iata_number: string; broadcast_callsign: string }[] = await res.json()
+      return buildMap(rows)
+    }
+  } catch { /* give up */ }
+
+  return {}
 }
 
 // Normalise a single AeroDataBox flight object into a flight_status row
