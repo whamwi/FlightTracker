@@ -120,9 +120,14 @@ export async function POST(req: Request) {
                `&select=id,flight_id,dep_iata,arr_iata,dep_time,arr_time,days_of_week`)
     : []
 
-  // Key: flight_id|dep_iata|arr_iata|time (whichever is set)
-  const schedKey = (r: { flight_id: number; dep_iata: string; arr_iata: string; dep_time: string | null; arr_time: string | null }) =>
-    `${r.flight_id}|${r.dep_iata}|${r.arr_iata}|${(r.dep_time ?? r.arr_time ?? '').slice(0, 5)}`
+  const SY_AIRPORTS = new Set(['DAM', 'ALP'])
+
+  // Key uses the Syria-side time only (arrival time for arrivals, departure for departures).
+  // This stays stable after the fill step adds the missing other-side time.
+  const schedKey = (r: { flight_id: number; dep_iata: string; arr_iata: string; dep_time: string | null; arr_time: string | null }) => {
+    const authTime = SY_AIRPORTS.has(r.arr_iata) ? r.arr_time : r.dep_time
+    return `${r.flight_id}|${r.dep_iata}|${r.arr_iata}|${(authTime ?? '').slice(0, 5)}`
+  }
   const schedMap = new Map(existingSchedule.map(r => [schedKey(r), r]))
 
   const toInsert: object[] = []
@@ -135,9 +140,9 @@ export async function POST(req: Request) {
 
     const depTime = raw.dep_time_local?.slice(0, 5) ?? null
     const arrTime = raw.arr_time_local?.slice(0, 5) ?? null
-    const time    = depTime ?? arrTime ?? ''
-
-    const key      = `${lookup.id}|${raw.iata_from}|${raw.iata_to}|${time}`
+    // Key on the Syria-side time (arr for arrivals, dep for departures)
+    const authTime = SY_AIRPORTS.has(raw.iata_to) ? arrTime : depTime
+    const key      = `${lookup.id}|${raw.iata_from}|${raw.iata_to}|${authTime ?? ''}`
     const existing = schedMap.get(key)
 
     if (existing) {
