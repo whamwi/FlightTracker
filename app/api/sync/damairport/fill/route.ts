@@ -134,6 +134,9 @@ export async function GET(req: Request) {
     const arrUtcHHMM = adbArrUtc.slice(11, 16)
     const dur = durMin(adbDepUtc, adbArrUtc)
 
+    // Sanity check: dep must be before arr (guards against ADB returning bad/swapped data)
+    if (dur <= 0) { skipped++; continue }
+
     const patch: Record<string, string | number> = { duration_min: dur }
 
     if (!row.dep_time) {
