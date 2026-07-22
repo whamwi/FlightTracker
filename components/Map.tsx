@@ -1047,7 +1047,7 @@ export default function Map() {
             if (impliedDepMs) {
               // revised_arr_utc available: implied departure gives a better position estimate
               const elapsed = now - impliedDepMs
-              if (elapsed > 0 && elapsed < duration_min * OVERRUN_LIMIT * 60_000) {
+              if (elapsed > 0 && elapsed < duration_min * 60_000 + POST_ARR_BUFFER_MS) {
                 fraction = elapsed / (duration_min * 60_000)
               }
             } else if (fs && AIRBORNE_STATUSES.has(fs.status)) {
