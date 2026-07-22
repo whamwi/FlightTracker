@@ -36,11 +36,12 @@ const ADB_STATUS: Record<number, string> = {
   4:  'Boarding',
   5:  'GateClosed',
   6:  'Departed',
-  7:  'Approaching',
-  8:  'Arrived',
-  9:  'Cancelled',
-  10: 'Diverted',
-  11: 'Cancelled',
+  7:  'Delayed',
+  8:  'Approaching',
+  9:  'Arrived',
+  10: 'Cancelled',
+  11: 'Diverted',
+  12: 'Cancelled',   // CanceledUncertain — treat as Cancelled
 }
 
 // Normalise string variants ADB sometimes sends instead of numeric codes
@@ -110,10 +111,9 @@ function toRow(f: any, iataToCallsign: Record<string, string>): object | null {
   const revisedDep = dep.revisedTime?.utc
   const revisedArr = arr.revisedTime?.utc
 
-  // ADB sends status=9 (Cancelled) as its subscription-close signal when a flight completes.
-  // If the same payload includes actual times, the flight operated — override the status.
   const rawStatus = resolveStatus(f.status)
-  const status = actualArr ? 'Arrived' : (actualDep && rawStatus === 'Cancelled' ? 'Departed' : rawStatus)
+  // Safety net: actual arrival time is ground truth regardless of status code.
+  const status = actualArr ? 'Arrived' : rawStatus
 
   return {
     callsign:          callSign,
