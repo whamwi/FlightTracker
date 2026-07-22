@@ -99,14 +99,21 @@ function toRow(f: any, iataToCallsign: Record<string, string>): object | null {
   const arrLive = hasLive(arr.quality)
 
   const schedDep = dep.scheduledTime?.utc
-  const actualDep = depLive ? (dep.runwayTime?.utc ?? dep.revisedTime?.utc) : undefined
+  // runwayTime is the actual wheels-off/on — always trust it when present.
+  // revisedTime is estimated/revised scheduled time — only treat as "actual" with live ADS-B quality.
+  const actualDep = dep.runwayTime?.utc ?? (depLive ? dep.revisedTime?.utc : undefined)
   const schedArr  = arr.scheduledTime?.utc
-  const actualArr = arrLive ? (arr.runwayTime?.utc ?? arr.revisedTime?.utc) : undefined
+  const actualArr = arr.runwayTime?.utc ?? (arrLive ? arr.revisedTime?.utc : undefined)
 
   const opDate = (schedDep ?? schedArr ?? new Date().toISOString()).slice(0, 10)
 
   const revisedDep = dep.revisedTime?.utc
   const revisedArr = arr.revisedTime?.utc
+
+  // ADB sends status=9 (Cancelled) as its subscription-close signal when a flight completes.
+  // If the same payload includes actual times, the flight operated — override the status.
+  const rawStatus = resolveStatus(f.status)
+  const status = actualArr ? 'Arrived' : (actualDep && rawStatus === 'Cancelled' ? 'Departed' : rawStatus)
 
   return {
     callsign:          callSign,
@@ -116,7 +123,7 @@ function toRow(f: any, iataToCallsign: Record<string, string>): object | null {
     arr_iata:          arr.airport?.iata ?? null,
     dep_icao:          dep.airport?.icao ?? null,
     arr_icao:          arr.airport?.icao ?? null,
-    status:            resolveStatus(f.status),
+    status,
     scheduled_dep_utc: schedDep   ? new Date(schedDep).toISOString()   : null,
     actual_dep_utc:    actualDep  ? new Date(actualDep).toISOString()  : null,
     revised_dep_utc:   revisedDep ? new Date(revisedDep).toISOString() : null,
