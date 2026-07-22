@@ -41,7 +41,8 @@ interface AdbFlight {
 }
 
 // GET /api/sync/damairport/fill?date=YYYY-MM-DD
-// Reads damairport rows missing dep or arr time, fills them from AeroDatBox
+// Fills route_master rows that are still missing dep or arr time.
+// Uses AeroDatBox real-time schedule data (DAM + ALP).
 export async function GET(req: Request) {
   if (!ADB_KEY) {
     return NextResponse.json({ ok: false, error: 'AERODATABOX_KEY not set' }, { status: 500 })
@@ -50,8 +51,7 @@ export async function GET(req: Request) {
   const url  = new URL(req.url)
   const date = url.searchParams.get('date') ?? new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10)
 
-  // ── 1. Load damairport flight_schedule rows missing one half ────────────────
-  // Join through flight_lookup to get broadcast_callsign + iata_number
+  // ── 1. Load route_master rows missing one half ──────────────────────────────
   const schedRows: {
     id: number
     dep_time: string | null
@@ -63,13 +63,12 @@ export async function GET(req: Request) {
     broadcast_callsign: string | null
     iata_number: string
   }[] = await sb(
-    `/flight_schedule?source=eq.damairport` +
+    `/route_master?source=eq.damairport` +
     `&or=(dep_time.is.null,arr_time.is.null)` +
     `&select=id,dep_time,arr_time,dep_time_utc,arr_time_utc,dep_iata,arr_iata` +
     `,flight_lookup!flight_id(broadcast_callsign,iata_number)` +
     `&limit=200`
   ).then((rows: unknown[]) =>
-    // Flatten nested flight_lookup
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     rows.map((r: any) => ({
       ...r,
@@ -82,8 +81,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: true, date, filled: 0, skipped: 0, note: 'No rows need filling' })
   }
 
-  // ── 2. Call AeroDatBox for OSDI + OSAP ─────────────────────────────────────
-  // ADB caps at 12h windows — split the day into two halves, fetch both airports
+  // ── 2. AeroDatBox fill ─────────────────────────────────────────────────────
   const windows = [
     [`${date}T00:00`, `${date}T12:00`],
     [`${date}T12:00`, `${date}T23:59`],
@@ -103,14 +101,8 @@ export async function GET(req: Request) {
   const results = await Promise.allSettled(
     icaos.flatMap(icao => windows.map(([from, to]) => adbFetch(icao, from, to)))
   )
-  const adbFlights: AdbFlight[] = results
-    .flatMap(r => r.status === 'fulfilled' ? r.value : [])
+  const adbFlights: AdbFlight[] = results.flatMap(r => r.status === 'fulfilled' ? r.value : [])
 
-  if (!adbFlights.length) {
-    return NextResponse.json({ ok: false, error: 'AeroDatBox returned no flights', date })
-  }
-
-  // ── 3. Index ADB flights by callsign + iata_number ─────────────────────────
   const byCallsign = new Map<string, AdbFlight>()
   const byIataNum  = new Map<string, AdbFlight>()
   for (const f of adbFlights) {
@@ -118,9 +110,8 @@ export async function GET(req: Request) {
     if (f.number   && !byIataNum.has(f.number))     byIataNum.set(f.number.replace(/\s+/g, ''), f)
   }
 
-  // ── 4. Fill missing times ───────────────────────────────────────────────────
-  let filled = 0, skipped = 0
-  const updates: { id: number; patch: Record<string, string | number> }[] = []
+  const patches: { id: number; patch: Record<string, string | number> }[] = []
+  let skipped = 0
 
   for (const row of schedRows) {
     const adb = byCallsign.get(row.broadcast_callsign ?? '') ?? byIataNum.get(row.iata_number)
@@ -130,52 +121,39 @@ export async function GET(req: Request) {
     const adbArrUtc = adb.arrival?.scheduledTime?.utc
     if (!adbDepUtc || !adbArrUtc) { skipped++; continue }
 
-    const depUtcHHMM = adbDepUtc.slice(11, 16)  // "HH:MM" UTC
+    const depUtcHHMM = adbDepUtc.slice(11, 16)
     const arrUtcHHMM = adbArrUtc.slice(11, 16)
     const dur = durMin(adbDepUtc, adbArrUtc)
-
-    // Sanity check: dep must be before arr (guards against ADB returning bad/swapped data)
     if (dur <= 0) { skipped++; continue }
 
     const patch: Record<string, string | number> = { duration_min: dur }
-
     if (!row.dep_time) {
-      // Arrival row: fill in dep side from ADB
       patch.dep_time     = utcToSyriaLocal(depUtcHHMM)
       patch.dep_time_utc = depUtcHHMM + ':00'
-      // Also correct arr_time_utc if it was computed from local and may be off
-      patch.arr_time_utc = arrUtcHHMM + ':00'
-    } else if (!row.arr_time) {
-      // Departure row: fill in arr side from ADB
+    } else {
       patch.arr_time     = utcToSyriaLocal(arrUtcHHMM)
       patch.arr_time_utc = arrUtcHHMM + ':00'
-      // Also correct dep_time_utc
-      patch.dep_time_utc = depUtcHHMM + ':00'
     }
-
-    updates.push({ id: row.id, patch })
+    patches.push({ id: row.id, patch })
   }
 
-  // ── 5. Apply updates in parallel ───────────────────────────────────────────
-  if (updates.length) {
+  if (patches.length) {
     await Promise.all(
-      updates.map(u =>
-        sb(`/flight_schedule?id=eq.${u.id}`, {
+      patches.map(u =>
+        sb(`/route_master?id=eq.${u.id}`, {
           method: 'PATCH',
           headers: { Prefer: 'return=minimal' },
           body: JSON.stringify(u.patch),
         })
       )
     )
-    filled = updates.length
   }
 
   return NextResponse.json({
     ok: true,
     date,
-    adb_flights: adbFlights.length,
-    sched_rows:  schedRows.length,
-    filled,
+    sched_rows: schedRows.length,
+    adb_filled: patches.length,
     skipped,
   })
 }

@@ -238,10 +238,9 @@ export async function GET(req: Request) {
   const arrived  = rows.filter(r => r.status === 'Arrived').length
   const withPos  = rows.filter(r => r.actual_dep_utc).length
 
-  // ── Schedule self-healing: correct flight_schedule from ADB's confirmed UTC times ──
+  // ── Schedule self-healing: correct route_master from ADB's confirmed UTC times ──
   // ADB's scheduled_dep_utc / scheduled_arr_utc are authoritative UTC.
   // When they differ from our stored dep_time_utc by > 10 min, update the schedule.
-  // Two batch fetches instead of N×2 individual calls to stay within the 55s budget.
   let schedFixed = 0
   try {
     const rowsWithSched = rows.filter(r => r.scheduled_dep_utc && r.scheduled_arr_utc)
@@ -259,10 +258,10 @@ export async function GET(req: Request) {
         const lkRows: { id: number; broadcast_callsign: string }[] = await lkRes.json()
         const csToId = Object.fromEntries(lkRows.map(r => [r.broadcast_callsign, r.id]))
 
-        // Batch 2: fetch schedule rows for those flight ids
+        // Batch 2: fetch route_master rows for those flight ids
         const fids = lkRows.map(r => r.id).join(',')
         const fsRes2 = await fetch(
-          `${SB_URL}/rest/v1/flight_schedule?flight_id=in.(${fids})&select=id,flight_id,dep_time_utc,arr_time_utc`,
+          `${SB_URL}/rest/v1/route_master?flight_id=in.(${fids})&select=id,flight_id,dep_time_utc,arr_time_utc`,
           { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }, signal: AbortSignal.timeout(8_000) }
         )
         if (fsRes2.ok) {
@@ -286,13 +285,13 @@ export async function GET(req: Request) {
             const durMin = Math.round(
               (new Date(r.scheduled_arr_utc!).getTime() - new Date(r.scheduled_dep_utc!).getTime()) / 60_000
             )
-            await sb(`/flight_schedule?id=eq.${stored.id}`, {
+            await sb(`/route_master?id=eq.${stored.id}`, {
               method: 'PATCH',
               body: JSON.stringify({
                 dep_time_utc: adbDepHHMM + ':00',
                 arr_time_utc: adbArrHHMM + ':00',
                 duration_min: durMin,
-                source: 'adb_corrected',
+                data_updated: new Date().toISOString(),
               }),
             })
             schedFixed++
@@ -308,7 +307,7 @@ export async function GET(req: Request) {
   // FR24 doesn't carry XH/FYC flights. For every FYC flight that should have
   // landed in the last 10 hours but has no actual_arr_utc, we call ADB directly.
   // Source 1: flight_status rows missing arrival (flight already known to system)
-  // Source 2: flight_schedule entries whose arr_time_utc falls in the window
+  // Source 2: route_master entries whose arr_time_utc falls in the window
   //           (catches flights that never got a flight_status row yet)
   let fycSynced = 0, allCallsignsSynced = 0
   if (doBackfill) {
@@ -418,7 +417,7 @@ export async function GET(req: Request) {
 
     // Get scheduled callsigns for today's day-of-week via embedded FK join
     const schedFetch = await fetch(
-      `${SB_URL}/rest/v1/flight_schedule?days_of_week=cs.{${syriaDoW}}` +
+      `${SB_URL}/rest/v1/route_master?days_of_week=cs.{${syriaDoW}}&active=eq.true` +
       `&select=arr_time_utc,flight_lookup!flight_id(broadcast_callsign)`,
       { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }, signal: AbortSignal.timeout(8_000) }
     )

@@ -13,12 +13,11 @@ export async function GET() {
     'dep_time_utc', 'arr_time_utc',
     'duration_min',
     'days_of_week',
-    'codeshare_iata',
     'flight_lookup(iata_number,broadcast_callsign,airlines(name_en,country_flag))',
   ].join(',')
 
   const res = await fetch(
-    `${SB_URL}/rest/v1/flight_schedule?select=${encodeURIComponent(select)}&order=dep_time.asc`,
+    `${SB_URL}/rest/v1/route_master?select=${encodeURIComponent(select)}&active=eq.true&order=dep_time.asc`,
     { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` } },
   )
 
@@ -37,7 +36,6 @@ export async function GET() {
     arr_time_utc:      r.arr_time_utc?.slice(0, 5) ?? '—',
     duration_min:      r.duration_min ?? 0,
     days_of_week:      r.days_of_week ?? [],
-    codeshare_iata:    r.codeshare_iata ?? null,
     iata_number:       r.flight_lookup?.iata_number ?? '—',
     broadcast_callsign: r.flight_lookup?.broadcast_callsign ?? '—',
     airline_name:      r.flight_lookup?.airlines?.name_en ?? '—',

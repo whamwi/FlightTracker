@@ -1,0 +1,121 @@
+import { NextResponse } from 'next/server'
+
+export const dynamic = 'force-dynamic'
+
+const SB_URL = process.env.SUPABASE_URL!
+const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_ANON_KEY!
+
+async function sb(path: string, opts: RequestInit = {}) {
+  const res = await fetch(`${SB_URL}/rest/v1${path}`, {
+    ...opts,
+    headers: {
+      apikey: SB_KEY,
+      Authorization: `Bearer ${SB_KEY}`,
+      'Content-Type': 'application/json',
+      ...(opts.headers as Record<string, string>),
+    },
+  })
+  if (!res.ok) throw new Error(`Supabase ${path}: ${res.status} ${await res.text()}`)
+  const text = await res.text()
+  return text ? JSON.parse(text) : null
+}
+
+function normalizeRow(r: Record<string, unknown>) {
+  const fl = r.flight_lookup as { iata_number: string; broadcast_callsign: string } | null
+  return {
+    id:                 r.id,
+    iata_number:        fl?.iata_number ?? '',
+    broadcast_callsign: fl?.broadcast_callsign ?? '',
+    dep_iata:           r.dep_iata,
+    arr_iata:           r.arr_iata,
+    dep_time:           r.dep_time,
+    arr_time:           r.arr_time,
+    dep_time_utc:       r.dep_time_utc,
+    arr_time_utc:       r.arr_time_utc,
+    duration_min:       r.duration_min,
+    days_of_week:       r.days_of_week,
+    active:             r.active,
+  }
+}
+
+const RM_SELECT =
+  `id,dep_iata,arr_iata,dep_time,arr_time,dep_time_utc,arr_time_utc,duration_min,days_of_week,active` +
+  `,flight_lookup!flight_id(iata_number,broadcast_callsign)`
+
+// GET: returns unfilled and filled route_master rows
+export async function GET() {
+  const [unfilled, filled] = await Promise.all([
+    sb(
+      `/route_master?source=eq.damairport` +
+      `&or=(dep_time.is.null,arr_time.is.null)` +
+      `&select=${RM_SELECT}` +
+      `&order=flight_lookup(iata_number).asc&limit=200`
+    ),
+    sb(
+      `/route_master?source=eq.damairport` +
+      `&dep_time=not.is.null&arr_time=not.is.null` +
+      `&select=${RM_SELECT}` +
+      `&order=flight_lookup(iata_number).asc&limit=500`
+    ),
+  ])
+
+  return NextResponse.json({
+    unfilled: (unfilled as Record<string, unknown>[]).map(r => ({ ...normalizeRow(r), missing: !r.dep_time ? 'dep' : 'arr' })),
+    filled:   (filled   as Record<string, unknown>[]).map(normalizeRow),
+  })
+}
+
+// POST: patch a route_master row by (flight_iata, dep_iata, arr_iata)
+export async function POST(req: Request) {
+  const body = await req.json() as {
+    flight_iata:  string
+    dep_iata:     string
+    arr_iata:     string
+    dep_time_utc: string   // HH:MM
+    arr_time_utc: string   // HH:MM
+    days_of_week: string[]
+  }
+
+  const { flight_iata, dep_iata, arr_iata, dep_time_utc, arr_time_utc, days_of_week } = body
+
+  const [depH, depM] = dep_time_utc.split(':').map(Number)
+  const [arrH, arrM] = arr_time_utc.split(':').map(Number)
+  const duration_min = ((arrH * 60 + arrM) - (depH * 60 + depM) + 1440) % 1440
+
+  function utcToLocal(hhmm: string): string {
+    const [h, m] = hhmm.split(':').map(Number)
+    const local = ((h * 60 + m) + 180) % 1440
+    return `${String(Math.floor(local / 60)).padStart(2, '0')}:${String(local % 60).padStart(2, '0')}`
+  }
+
+  // Resolve flight_id
+  const lookupRows: { id: number }[] = await sb(
+    `/flight_lookup?iata_number=eq.${flight_iata}&select=id`
+  )
+  if (!lookupRows?.length) {
+    return NextResponse.json({ ok: false, error: `flight_lookup not found: ${flight_iata}` }, { status: 404 })
+  }
+  const flight_id = lookupRows[0].id
+
+  // Patch the route_master row directly
+  const patch = {
+    dep_time:     utcToLocal(dep_time_utc),
+    dep_time_utc: dep_time_utc + ':00',
+    arr_time:     utcToLocal(arr_time_utc),
+    arr_time_utc: arr_time_utc + ':00',
+    duration_min,
+    data_updated: new Date().toISOString(),
+    ...(days_of_week?.length ? { days_of_week } : {}),
+  }
+
+  await sb(
+    `/route_master?flight_id=eq.${flight_id}&dep_iata=eq.${dep_iata}&arr_iata=eq.${arr_iata}`,
+    {
+      method:  'PATCH',
+      headers: { Prefer: 'return=minimal' },
+      body:    JSON.stringify(patch),
+    }
+  )
+
+  return NextResponse.json({ ok: true, duration_min, flight_id })
+}

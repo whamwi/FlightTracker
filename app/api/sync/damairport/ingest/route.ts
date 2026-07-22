@@ -30,7 +30,7 @@ function toUtc(hhmm: string): string {
 }
 
 // POST /api/sync/damairport/ingest?date=YYYY-MM-DD&airport=DAM
-// Reads schedule_raw snapshot → validates master data → upserts flight_schedule
+// Reads schedule_raw snapshot → validates master data → upserts route_master
 export async function GET(req: Request) {
   return POST(req)
 }
@@ -109,14 +109,14 @@ export async function POST(req: Request) {
     lookupAdded = missingLookupRows.length
   }
 
-  // ── 4. Upsert flight_schedule ───────────────────────────────────────────────
+  // ── 4. Upsert route_master ──────────────────────────────────────────────────
   // Fetch existing damairport rows for these flight_ids
   const flightIds = [...new Set([...lookupByIata.values()].map(l => l.id))]
   const existingSchedule: {
     id: number; flight_id: number; dep_iata: string; arr_iata: string
     dep_time: string | null; arr_time: string | null; days_of_week: string[]
   }[] = flightIds.length
-    ? await sb(`/flight_schedule?flight_id=in.(${flightIds.join(',')})&source=eq.damairport` +
+    ? await sb(`/route_master?flight_id=in.(${flightIds.join(',')})&source=eq.damairport` +
                `&select=id,flight_id,dep_iata,arr_iata,dep_time,arr_time,days_of_week`)
     : []
 
@@ -209,9 +209,9 @@ export async function POST(req: Request) {
   }
 
   if (toInsert.length) {
-    await sb('/flight_schedule', {
+    await sb('/route_master', {
       method:  'POST',
-      headers: { Prefer: 'return=minimal' },
+      headers: { Prefer: 'return=minimal,resolution=ignore-duplicates' },
       body:    JSON.stringify(toInsert),
     })
   }
@@ -220,7 +220,7 @@ export async function POST(req: Request) {
   if (toUpdate.length) {
     await Promise.all(
       toUpdate.map(({ id, ...fields }) =>
-        sb(`/flight_schedule?id=eq.${id}`, {
+        sb(`/route_master?id=eq.${id}`, {
           method:  'PATCH',
           headers: { Prefer: 'return=minimal' },
           body:    JSON.stringify({ ...fields, data_updated: new Date().toISOString() }),
@@ -232,15 +232,15 @@ export async function POST(req: Request) {
   const driftCount = toUpdate.filter(u => u.dep_time || u.arr_time).length
 
   return NextResponse.json({
-    ok:                true,
+    ok:              true,
     date,
     airport,
     dow,
-    raw_rows:          rawRows.length,
-    airlines_added:    airlinesAdded,
-    lookup_added:      lookupAdded,
-    schedule_inserted: toInsert.length,
-    schedule_updated:  toUpdate.length - driftCount,
-    schedule_drift:    driftCount,
+    raw_rows:        rawRows.length,
+    airlines_added:  airlinesAdded,
+    lookup_added:    lookupAdded,
+    routes_inserted: toInsert.length,
+    routes_updated:  toUpdate.length - driftCount,
+    routes_drift:    driftCount,
   })
 }

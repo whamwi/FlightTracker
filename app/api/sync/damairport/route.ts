@@ -3,13 +3,16 @@ import { NextResponse } from 'next/server'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
-// ── Damascus airport.com Supabase (richer source, covers all carriers) ─────────
-const DAC_URL = 'https://ognrupehzbbckimkaikb.supabase.co'
-const DAC_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9nbnJ1cGVoemJiY2tpbWthaWtiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ2ODc3NTIsImV4cCI6MjA4MDI2Mzc1Mn0.cBh06V2W7ocx8etUixo2lcdl1XH5RR4pTjXNOG59Xsg'
-
-// ── Aleppo official API (no third-party source yet) ───────────────────────────
-const AIRPORT_API: Record<string, string> = {
-  ALP: 'https://alpairport.gov.sy/api/flights.php',
+// ── Airport live-data Supabase sources ────────────────────────────────────────
+const AIRPORT_SOURCES: Record<string, { url: string; key: string }> = {
+  DAM: {
+    url: 'https://ognrupehzbbckimkaikb.supabase.co',
+    key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9nbnJ1cGVoemJiY2tpbWthaWtiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ2ODc3NTIsImV4cCI6MjA4MDI2Mzc1Mn0.cBh06V2W7ocx8etUixo2lcdl1XH5RR4pTjXNOG59Xsg',
+  },
+  ALP: {
+    url: 'https://ttqpvffxbouowufwbfze.supabase.co',
+    key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR0cXB2ZmZ4Ym91b3d1ZndiZnplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY3ODU3NDMsImV4cCI6MjA4MjM2MTc0M30.A3j9iny8RusFtUt8J5mAyaj33cKEQJW9EPJw8iLtVWc',
+  },
 }
 
 // ── Our own Supabase ───────────────────────────────────────────────────────────
@@ -72,7 +75,7 @@ const ROUTE_TO_IATA: Record<string, string> = {
   'Sharjah':     'SHJ',
 }
 
-// ── DAM: fetch from damascusairport.com Supabase ──────────────────────────────
+// ── Flight payload structure (same for both airports) ─────────────────────────
 interface DacFlight {
   type:              'arrival' | 'departure'
   flightNumber:      string
@@ -88,77 +91,24 @@ interface DacFlight {
   aircraft?:         string
 }
 
-async function fetchDAM(date: string): Promise<{ arrivals: DacFlight[]; departures: DacFlight[] }> {
+// ── Fetch from airport Supabase source ────────────────────────────────────────
+async function fetchAirport(airport: string, date: string): Promise<{ arrivals: DacFlight[]; departures: DacFlight[] }> {
+  const src = AIRPORT_SOURCES[airport]
+  if (!src) throw new Error(`No source configured for ${airport}`)
   const res = await fetch(
-    `${DAC_URL}/rest/v1/flight_cache?id=eq.main&select=payload`,
+    `${src.url}/rest/v1/flight_cache?id=eq.main&select=payload`,
     {
-      headers: { apikey: DAC_KEY, Authorization: `Bearer ${DAC_KEY}` },
+      headers: { apikey: src.key, Authorization: `Bearer ${src.key}` },
       signal: AbortSignal.timeout(15_000),
     }
   )
-  if (!res.ok) throw new Error(`damascusairport.com Supabase: ${res.status}`)
+  if (!res.ok) throw new Error(`${airport} source: ${res.status}`)
   const data: [{ payload: DacFlight[] }] = await res.json()
   const today = (data[0]?.payload ?? []).filter(f => f.flightDate === date)
   return {
     arrivals:   today.filter(f => f.type === 'arrival'),
     departures: today.filter(f => f.type === 'departure'),
   }
-}
-
-// ── ALP: fetch from official gov.sy API (paginated) ───────────────────────────
-interface AlpFlight {
-  flightNumber: string
-  airline:      string
-  direction:    string
-  origin:       string
-  destination:  string
-  date:         string
-  time:         string
-  status:       string
-}
-
-// Airport API sometimes returns city codes — normalize to airport IATA
-const IATA_REMAP: Record<string, string> = {
-  BUH: 'OTP',
-}
-function remapIata(code: string): string {
-  return IATA_REMAP[code] ?? code
-}
-
-const ALP_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-  Accept: 'application/json, text/plain, */*',
-}
-
-async function fetchAlpPage(apiUrl: string, date: string, dir: 'arrival' | 'departure', wfloor: string, page: number): Promise<AlpFlight[]> {
-  const params = new URLSearchParams({ paged: '1', dir, wfloor, dexact: date, page: String(page) })
-  const res = await fetch(`${apiUrl}?${params}`, { headers: ALP_HEADERS, signal: AbortSignal.timeout(15_000) })
-  if (!res.ok) return []
-  const json = await res.json()
-  return json?.flights ?? json ?? []
-}
-
-async function fetchALP(date: string): Promise<{ arrivals: AlpFlight[]; departures: AlpFlight[] }> {
-  const apiUrl = AIRPORT_API.ALP
-  const wfloor = new Date(new Date(date).getTime() - 4 * 86400_000).toISOString().slice(0, 10)
-
-  async function fetchDir(dir: 'arrival' | 'departure'): Promise<AlpFlight[]> {
-    const first = await fetchAlpPage(apiUrl, date, dir, wfloor, 1)
-    if (!first.length) return []
-    const rest = await Promise.all(
-      Array.from({ length: 15 }, (_, i) => fetchAlpPage(apiUrl, date, dir, wfloor, i + 2))
-    )
-    const seen = new Set<string>()
-    const all: AlpFlight[] = []
-    for (const f of [...first, ...rest.flat()]) {
-      const key = `${f.flightNumber}|${f.origin}|${f.destination}|${f.time}`
-      if (!seen.has(key)) { seen.add(key); all.push(f) }
-    }
-    return all
-  }
-
-  const [arrivals, departures] = await Promise.all([fetchDir('arrival'), fetchDir('departure')])
-  return { arrivals, departures }
 }
 
 // ── Main handler ──────────────────────────────────────────────────────────────
@@ -174,111 +124,54 @@ export async function GET(req: Request) {
   // Clear existing raw rows for this date+airport
   await sb(`/schedule_raw?schedule_date=eq.${date}&airport_iata=eq.${airport}`, { method: 'DELETE' })
 
+  const { arrivals, departures } = await fetchAirport(airport, date)
   const rows: object[] = []
 
-  if (airport === 'DAM') {
-    const { arrivals, departures } = await fetchDAM(date)
-
-    for (const f of arrivals) {
-      const { carrier, flightnumber } = parseFlight(f.flightNumber)
-      const iata_from = ROUTE_TO_IATA[f.route] ?? f.route
-      rows.push({
-        airport_iata:   'DAM',
-        direction:      'arrival',
-        carrier,
-        carrier_icao:   iataToIcao.get(carrier) ?? null,
-        flightnumber,
-        iata_from,
-        iata_to:        'DAM',
-        arr_time_local: f.scheduledTime,
-        dep_time_local: null,
-        duration_min:   null,
-        schedule_date:  date,
-        status:         f.status,
-        airline_name:   f.airline,
-      })
-    }
-
-    for (const f of departures) {
-      const { carrier, flightnumber } = parseFlight(f.flightNumber)
-      const iata_to = ROUTE_TO_IATA[f.route] ?? f.route
-      rows.push({
-        airport_iata:   'DAM',
-        direction:      'departure',
-        carrier,
-        carrier_icao:   iataToIcao.get(carrier) ?? null,
-        flightnumber,
-        iata_from:      'DAM',
-        iata_to,
-        dep_time_local: f.scheduledTime,
-        arr_time_local: null,
-        duration_min:   null,
-        schedule_date:  date,
-        status:         f.status,
-        airline_name:   f.airline,
-      })
-    }
-
-    if (rows.length) {
-      await sb('/schedule_raw', {
-        method: 'POST',
-        headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify(rows),
-      })
-    }
-
-    return NextResponse.json({ ok: true, date, airport, arrivals: arrivals.length, departures: departures.length, loaded: rows.length })
-
-  } else {
-    // ALP: gov.sy API
-    const { arrivals, departures } = await fetchALP(date)
-
-    for (const f of arrivals) {
-      const { carrier, flightnumber } = parseFlight(f.flightNumber)
-      rows.push({
-        airport_iata:   airport,
-        direction:      'arrival',
-        carrier,
-        carrier_icao:   iataToIcao.get(carrier) ?? null,
-        flightnumber,
-        iata_from:      remapIata(f.origin),
-        iata_to:        remapIata(f.destination),
-        arr_time_local: f.time,
-        dep_time_local: null,
-        duration_min:   null,
-        schedule_date:  date,
-        status:         f.status,
-        airline_name:   f.airline,
-      })
-    }
-
-    for (const f of departures) {
-      const { carrier, flightnumber } = parseFlight(f.flightNumber)
-      rows.push({
-        airport_iata:   airport,
-        direction:      'departure',
-        carrier,
-        carrier_icao:   iataToIcao.get(carrier) ?? null,
-        flightnumber,
-        iata_from:      remapIata(f.origin),
-        iata_to:        remapIata(f.destination),
-        dep_time_local: f.time,
-        arr_time_local: null,
-        duration_min:   null,
-        schedule_date:  date,
-        status:         f.status,
-        airline_name:   f.airline,
-      })
-    }
-
-    if (rows.length) {
-      await sb('/schedule_raw', {
-        method: 'POST',
-        headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify(rows),
-      })
-    }
-
-    return NextResponse.json({ ok: true, date, airport, arrivals: arrivals.length, departures: departures.length, loaded: rows.length })
+  for (const f of arrivals) {
+    const { carrier, flightnumber } = parseFlight(f.flightNumber)
+    rows.push({
+      airport_iata:   airport,
+      direction:      'arrival',
+      carrier,
+      carrier_icao:   iataToIcao.get(carrier) ?? null,
+      flightnumber,
+      iata_from:      ROUTE_TO_IATA[f.route] ?? f.route,
+      iata_to:        airport,
+      arr_time_local: f.scheduledTime,
+      dep_time_local: null,
+      duration_min:   null,
+      schedule_date:  date,
+      status:         f.status,
+      airline_name:   f.airline,
+    })
   }
+
+  for (const f of departures) {
+    const { carrier, flightnumber } = parseFlight(f.flightNumber)
+    rows.push({
+      airport_iata:   airport,
+      direction:      'departure',
+      carrier,
+      carrier_icao:   iataToIcao.get(carrier) ?? null,
+      flightnumber,
+      iata_from:      airport,
+      iata_to:        ROUTE_TO_IATA[f.route] ?? f.route,
+      dep_time_local: f.scheduledTime,
+      arr_time_local: null,
+      duration_min:   null,
+      schedule_date:  date,
+      status:         f.status,
+      airline_name:   f.airline,
+    })
+  }
+
+  if (rows.length) {
+    await sb('/schedule_raw', {
+      method: 'POST',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify(rows),
+    })
+  }
+
+  return NextResponse.json({ ok: true, date, airport, arrivals: arrivals.length, departures: departures.length, loaded: rows.length })
 }

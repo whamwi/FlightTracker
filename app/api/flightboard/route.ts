@@ -18,9 +18,9 @@ export async function GET(req: Request) {
 
   const [schedRes, statusRes] = await Promise.all([
     fetch(
-      `${SB_URL}/rest/v1/flight_schedule` +
-      `?days_of_week=cs.{${dow}}` +
-      `&select=dep_iata,arr_iata,dep_time,arr_time,dep_time_utc,arr_time_utc,duration_min,days_of_week,codeshare_iata` +
+      `${SB_URL}/rest/v1/route_master` +
+      `?days_of_week=cs.{${dow}}&active=eq.true` +
+      `&select=dep_iata,arr_iata,dep_time,arr_time,dep_time_utc,arr_time_utc,duration_min,days_of_week` +
       `,flight_lookup(iata_number,broadcast_callsign,airlines(name_en,iata,country_flag))` +
       `&order=dep_time.asc`,
       { headers: HEADERS }
@@ -69,7 +69,6 @@ export async function GET(req: Request) {
         dep_time_utc:      r.dep_time_utc?.slice(0, 5) ?? '',
         arr_time_utc:      r.arr_time_utc?.slice(0, 5) ?? '',
         duration_min:      r.duration_min    ?? 0,
-        codeshare_iata:    r.codeshare_iata  ?? null,
         // live status — defaults to 'Scheduled' when no data yet
         status:            st?.status             ?? 'Scheduled',
         actual_dep_utc:    st?.actual_dep_utc     ?? null,

@@ -127,8 +127,9 @@ function durationLabel(min: number): string {
 
 function effectiveStatus(f: Flight): string {
   const s = STATUS_ALIAS[f.status] ?? f.status
-  if (s === 'Arrived' || s === 'Landed' || s === 'Cancelled' || s === 'Diverted') return s
+  // actual_arr_utc is ground truth — if the plane landed, override Cancelled/Unknown
   if (f.actual_arr_utc) return 'Arrived'
+  if (s === 'Arrived' || s === 'Landed' || s === 'Cancelled' || s === 'Diverted') return s
   // Departure happened — check if delayed vs schedule
   if (f.actual_dep_utc) {
     const schedMs = new Date(`1970-01-01T${f.dep_time_utc}:00Z`).getTime()
@@ -334,6 +335,11 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
 
 const TAB_LABELS: Record<Tab, string> = { [-1]: 'Yesterday', 0: 'Today', 1: 'Tomorrow' }
 
+function tabDateLabel(offset: number): string {
+  const d = syriaDate(offset)
+  return new Date(d + 'T12:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+}
+
 export default function BoardPage() {
   const [tab, setTab]         = useState<Tab>(0)
   const [view, setView]       = useState<View>('arr')
@@ -376,16 +382,20 @@ export default function BoardPage() {
     return () => clearInterval(t)
   }, [tab, load])
 
-  // Flight arrives in Syria (UTC+3) on the next calendar day relative to its origin departure local time
+  // Flight arrives in Syria (UTC+3) on the next calendar day relative to its origin departure local time.
+  // Guard: if dep_time_utc is unknown (unfilled row), assume no midnight crossing.
   const crossesMidnight = (f: Flight) =>
+    !!f.dep_time_utc &&
     utcHHMMtoLocal(f.arr_time_utc, 3) < utcHHMMtoLocal(f.dep_time_utc, tzOffset(f.dep_iata))
 
   const byViewAndAirport = (() => {
     if (view === 'dep') {
       return flights.filter(f => f.dep_iata === airport)
     }
-    // Arrivals: same-day (no midnight cross from current date) + overnight from prev day
-    const sameDay   = flights.filter(f => f.arr_iata === airport && !crossesMidnight(f))
+    // route_master is keyed by Syria arrival day, so all today's flights are already the right day.
+    // Only add overnight from prevFlights for flights that departed origin on the previous day
+    // (for ADB-sourced schedules stored under yesterday's key — edge case, rarely applies).
+    const sameDay   = flights.filter(f => f.arr_iata === airport)
     const overnight = prevFlights.filter(f => f.arr_iata === airport && crossesMidnight(f))
     return [...sameDay, ...overnight]
   })()
@@ -434,7 +444,10 @@ export default function BoardPage() {
                 tab === t ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
               }`}
             >
-              {TAB_LABELS[t]}
+              <div className="leading-tight">{TAB_LABELS[t]}</div>
+              <div className={`text-xs font-normal mt-0.5 ${tab === t ? 'text-blue-200' : 'text-gray-500'}`}>
+                {tabDateLabel(t)}
+              </div>
             </button>
           ))}
         </div>
