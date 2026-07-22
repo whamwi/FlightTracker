@@ -52,8 +52,7 @@ export async function GET() {
       `&order=flight_lookup(iata_number).asc&limit=200`
     ),
     sb(
-      `/route_master?source=eq.damairport` +
-      `&dep_time=not.is.null&arr_time=not.is.null` +
+      `/route_master?dep_time=not.is.null&arr_time=not.is.null` +
       `&select=${RM_SELECT}` +
       `&order=flight_lookup(iata_number).asc&limit=500`
     ),
