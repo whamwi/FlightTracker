@@ -65,57 +65,68 @@ export async function GET() {
   })
 }
 
-// POST: patch a route_master row by (flight_iata, dep_iata, arr_iata)
+const AIRPORT_UTC_OFFSET: Record<string, number> = {
+  DXB: 4, AUH: 4, SHJ: 4, MCT: 4, EVN: 4,
+  AMS: 2, MJI: 2,
+}
+function utcToLocal(hhmm: string, iata: string): string {
+  const [h, m] = hhmm.split(':').map(Number)
+  const offsetMin = (AIRPORT_UTC_OFFSET[iata] ?? 3) * 60
+  const local = ((h * 60 + m) + offsetMin) % 1440
+  return `${String(Math.floor(local / 60)).padStart(2, '0')}:${String(local % 60).padStart(2, '0')}`
+}
+
+// POST: patch an existing row by id, or insert a new rotation
 export async function POST(req: Request) {
   const body = await req.json() as {
+    id?:          number | null   // present → PATCH; absent/null → INSERT
     flight_iata:  string
     dep_iata:     string
     arr_iata:     string
-    dep_time_utc: string   // HH:MM
-    arr_time_utc: string   // HH:MM
+    dep_time_utc: string          // HH:MM
+    arr_time_utc: string          // HH:MM
     days_of_week: string[]
   }
 
-  const { flight_iata, dep_iata, arr_iata, dep_time_utc, arr_time_utc, days_of_week } = body
+  const { id, flight_iata, dep_iata, arr_iata, dep_time_utc, arr_time_utc, days_of_week } = body
 
   const [depH, depM] = dep_time_utc.split(':').map(Number)
   const [arrH, arrM] = arr_time_utc.split(':').map(Number)
   const duration_min = ((arrH * 60 + arrM) - (depH * 60 + depM) + 1440) % 1440
 
-  function utcToLocal(hhmm: string): string {
-    const [h, m] = hhmm.split(':').map(Number)
-    const local = ((h * 60 + m) + 180) % 1440
-    return `${String(Math.floor(local / 60)).padStart(2, '0')}:${String(local % 60).padStart(2, '0')}`
-  }
-
-  // Resolve flight_id
-  const lookupRows: { id: number }[] = await sb(
-    `/flight_lookup?iata_number=eq.${flight_iata}&select=id`
-  )
-  if (!lookupRows?.length) {
-    return NextResponse.json({ ok: false, error: `flight_lookup not found: ${flight_iata}` }, { status: 404 })
-  }
-  const flight_id = lookupRows[0].id
-
-  // Patch the route_master row directly
-  const patch = {
-    dep_time:     utcToLocal(dep_time_utc),
+  const times = {
+    dep_time:     utcToLocal(dep_time_utc, dep_iata),
     dep_time_utc: dep_time_utc + ':00',
-    arr_time:     utcToLocal(arr_time_utc),
+    arr_time:     utcToLocal(arr_time_utc, arr_iata),
     arr_time_utc: arr_time_utc + ':00',
     duration_min,
     data_updated: new Date().toISOString(),
     ...(days_of_week?.length ? { days_of_week } : {}),
   }
 
-  await sb(
-    `/route_master?flight_id=eq.${flight_id}&dep_iata=eq.${dep_iata}&arr_iata=eq.${arr_iata}`,
-    {
+  if (id) {
+    // PATCH by primary key — unambiguous even with multiple rotations per route
+    await sb(`/route_master?id=eq.${id}`, {
       method:  'PATCH',
       headers: { Prefer: 'return=minimal' },
-      body:    JSON.stringify(patch),
-    }
-  )
+      body:    JSON.stringify(times),
+    })
+    return NextResponse.json({ ok: true, action: 'patched', id, duration_min })
+  }
 
-  return NextResponse.json({ ok: true, duration_min, flight_id })
+  // INSERT — new rotation for an existing flight+route
+  const lookupRows: { id: number; airline_id: number }[] = await sb(
+    `/flight_lookup?iata_number=eq.${flight_iata}&select=id,airline_id`
+  )
+  if (!lookupRows?.length) {
+    return NextResponse.json({ ok: false, error: `flight_lookup not found: ${flight_iata}` }, { status: 404 })
+  }
+  const { id: flight_id, airline_id } = lookupRows[0]
+
+  await sb('/route_master', {
+    method:  'POST',
+    headers: { Prefer: 'return=minimal,resolution=ignore-duplicates' },
+    body:    JSON.stringify({ flight_id, airline_id, dep_iata, arr_iata, source: 'manual', ...times }),
+  })
+  return NextResponse.json({ ok: true, action: 'inserted', flight_id, duration_min })
 }

@@ -32,9 +32,10 @@ interface FilledRow {
 }
 
 interface EditState {
-  flight_iata: string
-  dep_iata: string
-  arr_iata: string
+  id:           number | null   // null = insert new rotation
+  flight_iata:  string
+  dep_iata:     string
+  arr_iata:     string
   dep_time_utc: string
   arr_time_utc: string
   days_of_week: string[]
@@ -114,6 +115,7 @@ export default function AdminRouteCache() {
 
   function openEditFromUnfilled(row: UnfilledRow) {
     setEdit({
+      id:           row.id,
       flight_iata:  row.iata_number,
       dep_iata:     row.dep_iata,
       arr_iata:     row.arr_iata,
@@ -125,12 +127,25 @@ export default function AdminRouteCache() {
 
   function openEditFromFilled(row: FilledRow) {
     setEdit({
+      id:           row.id,
       flight_iata:  row.iata_number,
       dep_iata:     row.dep_iata,
       arr_iata:     row.arr_iata,
       dep_time_utc: row.dep_time_utc?.slice(0, 5) ?? '',
       arr_time_utc: row.arr_time_utc?.slice(0, 5) ?? '',
       days_of_week: row.days_of_week ?? [],
+    })
+  }
+
+  function addRotation(row: FilledRow) {
+    setEdit({
+      id:           null,
+      flight_iata:  row.iata_number,
+      dep_iata:     row.dep_iata,
+      arr_iata:     row.arr_iata,
+      dep_time_utc: '',
+      arr_time_utc: '',
+      days_of_week: [],
     })
   }
 
@@ -149,12 +164,12 @@ export default function AdminRouteCache() {
     const res = await fetch('/api/admin/route-cache', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(edit),
+      body:    JSON.stringify({ ...edit, id: edit.id ?? undefined }),
     })
     const json = await res.json()
     setSaving(false)
     if (res.ok) {
-      setMsg(`Saved ✓ — route_master patched (duration: ${json.duration_min} min)`)
+      setMsg(`Saved ✓ — ${json.action} (duration: ${json.duration_min} min)`)
       setEdit(null)
       await load()
     } else {
@@ -287,6 +302,8 @@ export default function AdminRouteCache() {
                   <td style={s.td}>{(row.days_of_week ?? []).map(d => d.slice(0, 3)).join(' ')}</td>
                   <td style={s.td}>
                     <button onClick={() => openEditFromFilled(row)} style={s.editBtn}>Edit</button>
+                    {' '}
+                    <button onClick={() => addRotation(row)} style={s.rotBtn}>+ Rotation</button>
                   </td>
                 </tr>
               ))}
@@ -300,7 +317,9 @@ export default function AdminRouteCache() {
         <div style={s.overlay} onClick={() => setEdit(null)}>
           <div style={s.modal} onClick={e => e.stopPropagation()}>
             <h2 style={s.modalTitle}>{edit.flight_iata} — {edit.dep_iata} → {edit.arr_iata}</h2>
-            <p style={s.modalSub}>Enter scheduled UTC times (HH:MM). Local shows origin/destination airport time.</p>
+            <p style={s.modalSub}>
+              {edit.id ? `Editing rotation #${edit.id}` : 'New rotation'} · UTC times (HH:MM) · local = airport time
+            </p>
 
             {/* Times — stacked to prevent overflow */}
             <div style={s.field}>
@@ -353,7 +372,7 @@ export default function AdminRouteCache() {
             <div style={s.modalActions}>
               <button onClick={() => setEdit(null)} style={s.cancelBtn}>Cancel</button>
               <button onClick={save} style={s.saveBtn} disabled={saving}>
-                {saving ? 'Saving…' : 'Save & Patch Schedule'}
+                {saving ? 'Saving…' : edit.id ? 'Save & Patch' : 'Insert Rotation'}
               </button>
             </div>
           </div>
@@ -389,6 +408,7 @@ const s: Record<string, React.CSSProperties> = {
   empty:        { color: '#555', fontStyle: 'italic', padding: '20px 0', fontSize: 15 },
   fr24:         { fontWeight: 700, color: '#0070f3', textDecoration: 'none', fontFamily: 'monospace', fontSize: 13 },
   editBtn:      { padding: '4px 12px', fontSize: 13, border: '1px solid #0070f3', background: '#fff', color: '#0070f3', borderRadius: 5, cursor: 'pointer', fontWeight: 600 },
+  rotBtn:       { padding: '4px 10px', fontSize: 12, border: '1px solid #16a34a', background: '#f0fdf4', color: '#16a34a', borderRadius: 5, cursor: 'pointer', fontWeight: 600 },
   fillBtn:      { padding: '8px 18px', background: '#0070f3', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: 14 },
   overlay:      { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '20px' },
   modal:        { background: '#ffffff', borderRadius: 12, padding: 28, width: '100%', maxWidth: 440, boxShadow: '0 20px 60px rgba(0,0,0,0.3)', color: '#1a1a1a', boxSizing: 'border-box' },
