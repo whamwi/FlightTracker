@@ -1016,10 +1016,11 @@ export default function Map() {
         // Priority 3 — schedule window: raw isFlightActiveNow fraction, accepted only
         //   when at least one other airborne signal confirms the flight is up.
         //
-        // OVERRUN_LIMIT: beyond this multiple of scheduled duration the plane must be
-        //   on the ground even if ADB has not sent a landing confirmation.
-        const OVERRUN_LIMIT     = 1.5
-        const AIRBORNE_STATUSES = new Set(['En Route', 'Departed', 'Approaching'])
+        // POST_ARR_BUFFER: keep the marker this many ms past the expected arrival time
+        // (actual_dep_utc + block time). Handles delayed flights that outlast the
+        // scheduled window — a fixed buffer is correct; a multiplier of block time is not.
+        const POST_ARR_BUFFER_MS = 60 * 60_000   // 60 min past expected arrival
+        const AIRBORNE_STATUSES  = new Set(['En Route', 'Departed', 'Approaching'])
 
         let fraction: number | null = null
 
@@ -1031,11 +1032,11 @@ export default function Map() {
 
         if (fs?.actual_dep_utc && !priorLegDone && duration_min > 0) {
           const elapsed = now - new Date(fs.actual_dep_utc).getTime()
-          if (elapsed > 0 && elapsed < duration_min * OVERRUN_LIMIT * 60_000) {
+          // Keep marker while we haven't exceeded expected arrival + 60-min buffer.
+          // elapsed ≤ 0 → timestamp in the future (clock skew); suppress.
+          if (elapsed > 0 && elapsed < duration_min * 60_000 + POST_ARR_BUFFER_MS) {
             fraction = elapsed / (duration_min * 60_000)
           }
-          // elapsed ≤ 0 → ADB timestamp in the future (clock skew); suppress
-          // elapsed ≥ OVERRUN_LIMIT × duration → must be on the ground; suppress
         } else {
           const schedFrac = isFlightActiveNow(dep_time_utc, arr_time_utc, days_of_week, now)
           if (schedFrac !== null && duration_min > 0) {

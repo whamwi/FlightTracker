@@ -39,15 +39,19 @@ async function fetchFr24Identifiers(): Promise<{
   const iataToFr24Id:   Record<string, string> = {}
   for (const r of rows) {
     if (r.iata_number) {
-      // FR24 flight-summary recognises ICAO-format numbers (e.g. FYC486) better than
-      // IATA codes for some operators (Cham Wings XH → FYC). Use the broadcast callsign
-      // as the query key when the IATA prefix is XH; for all other operators use IATA.
-      const queryKey = r.iata_number.startsWith('XH') && r.broadcast_callsign
-        ? r.broadcast_callsign
-        : r.iata_number
-      iataFlights.push(queryKey)
-      if (r.broadcast_callsign) iataToCallsign[queryKey.toUpperCase()] = r.broadcast_callsign
-      if (r.fr24_id) iataToFr24Id[queryKey.toUpperCase()] = r.fr24_id
+      if (r.iata_number.startsWith('XH') && r.broadcast_callsign) {
+        // Cham Wings: FR24 tracks these by broadcast callsign (FYC486), not by IATA (XH486).
+        // The flights= param is for IATA numbers; callsigns= is the correct param here.
+        callsigns.push(r.broadcast_callsign)
+        // Keep IATA → callsign mapping so result rows (which carry r.flight=XH486) can be
+        // re-keyed to the broadcast callsign when FR24 omits the callsign field.
+        iataToCallsign[r.iata_number.toUpperCase()] = r.broadcast_callsign
+        if (r.fr24_id) iataToFr24Id[r.broadcast_callsign.toUpperCase()] = r.fr24_id
+      } else {
+        iataFlights.push(r.iata_number)
+        if (r.broadcast_callsign) iataToCallsign[r.iata_number.toUpperCase()] = r.broadcast_callsign
+        if (r.fr24_id) iataToFr24Id[r.iata_number.toUpperCase()] = r.fr24_id
+      }
     } else if (r.broadcast_callsign) {
       callsigns.push(r.broadcast_callsign)
     }
