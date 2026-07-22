@@ -24,6 +24,7 @@ async function sb(path: string, opts: RequestInit = {}) {
 
 interface DamFlight {
   flightNumber: string   // "XH 524"
+  airline:      string   // "Fly Cham"
   direction:    string   // "arrival" | "departure"
   origin:       string   // IATA
   destination:  string   // IATA
@@ -92,36 +93,38 @@ export async function GET(req: Request) {
   for (const f of arrivals) {
     const [carrier, numStr] = f.flightNumber.trim().split(/\s+/)
     rows.push({
-      airport_iata:  airport,
-      direction:     'arrival',
+      airport_iata:   airport,
+      direction:      'arrival',
       carrier,
-      carrier_icao:  iataToIcao.get(carrier) ?? null,
-      flightnumber:  parseInt(numStr ?? '0', 10),
-      iata_from:     f.origin,
-      iata_to:       f.destination,
-      arr_time_local: f.time,   // scheduled arrival at DAM
+      carrier_icao:   iataToIcao.get(carrier) ?? null,
+      flightnumber:   parseInt(numStr ?? '0', 10),
+      iata_from:      f.origin,
+      iata_to:        f.destination,
+      arr_time_local: f.time,
       dep_time_local: null,
-      duration_min:  null,
-      schedule_date: date,
-      status:        f.status,
+      duration_min:   null,
+      schedule_date:  date,
+      status:         f.status,
+      airline_name:   f.airline,
     })
   }
 
   for (const f of departures) {
     const [carrier, numStr] = f.flightNumber.trim().split(/\s+/)
     rows.push({
-      airport_iata:  airport,
-      direction:     'departure',
+      airport_iata:   airport,
+      direction:      'departure',
       carrier,
-      carrier_icao:  iataToIcao.get(carrier) ?? null,
-      flightnumber:  parseInt(numStr ?? '0', 10),
-      iata_from:     f.origin,
-      iata_to:       f.destination,
-      dep_time_local: f.time,   // scheduled departure from DAM
+      carrier_icao:   iataToIcao.get(carrier) ?? null,
+      flightnumber:   parseInt(numStr ?? '0', 10),
+      iata_from:      f.origin,
+      iata_to:        f.destination,
+      dep_time_local: f.time,
       arr_time_local: null,
-      duration_min:  null,
-      schedule_date: date,
-      status:        f.status,
+      duration_min:   null,
+      schedule_date:  date,
+      status:         f.status,
+      airline_name:   f.airline,
     })
   }
 
