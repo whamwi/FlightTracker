@@ -55,7 +55,9 @@ async function fetchDirection(
     if (page === 1) probe = { status: res.status, body: (await res.clone().text()).slice(0, 200) }
     if (!res.ok) break
 
-    const data: DamFlight[] = await res.json()
+    const json = await res.json()
+    // API wraps results: { ok: true, flights: [...] }
+    const data: DamFlight[] = json?.flights ?? json
     if (!data?.length) break
     flights.push(...data)
     page++
