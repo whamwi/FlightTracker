@@ -100,7 +100,7 @@ export async function POST(req: Request) {
 
   let lookupAdded = 0
   if (missingLookupRows.length) {
-    const inserted: { id: number; iata_number: string }[] = await sb('/flight_lookup', {
+    const inserted: { id: number; iata_number: string; broadcast_callsign: string | null }[] = await sb('/flight_lookup', {
       method:  'POST',
       headers: { Prefer: 'return=representation,resolution=ignore-duplicates' },
       body:    JSON.stringify(missingLookupRows),
