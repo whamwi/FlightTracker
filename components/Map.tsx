@@ -21,6 +21,7 @@ interface Aircraft {
   duration_min:   number | null
   dep_syria:      boolean
   arr_syria:      boolean
+  dest_iata:      string | null
   seen_at?: string
   stale?:   boolean
 }
@@ -141,6 +142,21 @@ const ALL_AIRPORT_COORDS: Record<string, [number, number]> = {
   EBL: [36.2376, 43.9631],  // Erbil International
   MJI: [32.8942, 13.2759],  // Mitiga (Tripoli)
   TIP: [32.6635, 13.1515],  // Tripoli International
+  BAH: [26.2708, 50.6336],  // Bahrain
+  NJF: [31.9890, 44.4042],  // Najaf
+  ADB: [38.2924, 27.1570],  // Izmir
+  ESB: [40.1281, 32.9951],  // Ankara Esenboga
+  THR: [35.6892, 51.3130],  // Tehran Mehrabad
+  MHD: [36.2352, 59.6400],  // Mashhad
+  GYD: [40.4675, 50.0467],  // Baku
+  ATH: [37.9364, 23.9445],  // Athens
+  FCO: [41.8003, 12.2389],  // Rome
+  CDG: [49.0097,  2.5479],  // Paris CDG
+  LHR: [51.4700, -0.4543],  // London Heathrow
+  FRA: [50.0379,  8.5622],  // Frankfurt
+  VIE: [48.1103, 16.5697],  // Vienna
+  ADD: [ 8.9779, 38.7993],  // Addis Ababa
+  NBO: [-1.3192, 36.9275],  // Nairobi
 }
 
 const STALE_TTL_MS       = 30 * 60 * 1000
@@ -333,6 +349,22 @@ function buildPopup(
   const arr       = fs?.arr_iata ?? null
   const aiata     = airlineIataFor(callsign, fs)
 
+  // Distance + ETA to destination
+  const destCode  = fs?.arr_iata ?? a.dest_iata ?? null
+  const destCoord = destCode ? ALL_AIRPORT_COORDS[destCode] : null
+  let distLine = ''
+  if (destCoord && typeof a.lat === 'number' && typeof a.lon === 'number') {
+    const nm  = greatCircleKm(a.lat, a.lon, destCoord[0], destCoord[1]) / 1.852
+    const gs  = typeof a.gs === 'number' && a.gs > 50 ? a.gs : null
+    const eta = gs ? Math.round(nm / gs * 60) : null
+    const etaStr = eta != null
+      ? eta >= 60 ? `${Math.floor(eta / 60)}h ${eta % 60}m` : `${eta}m`
+      : null
+    distLine = `<div style="color:#3b82f6;font-size:11px;margin-top:4px">` +
+      `${Math.round(nm)} nm to ${iataCity(destCode)}${etaStr ? ` · ETA ${etaStr}` : ''}` +
+      `</div>`
+  }
+
   const photoHtml = photoUrl
     ? `<img src="${photoUrl}" style="width:100%;height:110px;object-fit:cover;display:block">`
     : ''
@@ -382,7 +414,7 @@ function buildPopup(
       </div>
       ${routeLine}
       <div style="color:#6b7280;font-size:12px">${alt} · ${spd}</div>
-      ${syriaLine}${delayLine}${lostLine}${drLine}
+      ${distLine}${syriaLine}${delayLine}${lostLine}${drLine}
     </div>
   </div>`
 }
