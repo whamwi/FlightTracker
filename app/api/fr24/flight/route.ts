@@ -31,11 +31,17 @@ export async function GET(req: Request) {
   let liveData = null
   let trailData = null
   if (fr24_id) {
-    const [liveRes, trailRes] = await Promise.all([
-      fr24('live/flight-positions/full',     { flight_ids: fr24_id }),
-      fr24('historic/flight-positions/full', { flight_ids: fr24_id }),
-    ])
+    const nowSec  = Math.floor(Date.now() / 1000)
+    const fromSec = nowSec - 36 * 3600
     const safeJson = async (r: Response) => { try { return await r.json() } catch { return null } }
+    const [liveRes, trailRes] = await Promise.all([
+      fr24('live/flight-positions/full', { flight_ids: fr24_id }),
+      fr24('historic/flight-positions/full', {
+        flight_ids:     fr24_id,
+        timestamp_from: String(fromSec),
+        timestamp_to:   String(nowSec),
+      }),
+    ])
     ;[liveData, trailData] = await Promise.all([safeJson(liveRes), safeJson(trailRes)])
   }
 
