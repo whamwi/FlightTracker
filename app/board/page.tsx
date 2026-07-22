@@ -47,6 +47,7 @@ const STATUS_ALIAS: Record<string, string> = {
 const LOCAL_LOGOS: Record<string, string> = {
   XH: '/airlines/XH.jpg',
   EY: '/airlines/EY.png',
+  '3L': 'https://images.flightsfrom.com/airlines/100/G9_100px.png',
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────

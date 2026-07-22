@@ -106,6 +106,7 @@ function DayBubbles({ days, size = 'md' }: { days: string[]; size?: 'sm' | 'md' 
 const LOCAL_LOGOS: Record<string, string> = {
   XH: '/airlines/XH.jpg',
   EY: '/airlines/EY.png',
+  '3L': 'https://images.flightsfrom.com/airlines/100/G9_100px.png',
 }
 
 function AirlineLogo({ prefix, flag, name, size = 28 }: { prefix: string; flag: string; name: string; size?: number }) {
