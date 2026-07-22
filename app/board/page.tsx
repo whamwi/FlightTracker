@@ -126,10 +126,31 @@ function durationLabel(min: number): string {
 
 function effectiveStatus(f: Flight): string {
   const s = STATUS_ALIAS[f.status] ?? f.status
-  if (s !== 'Unknown') return s
+  if (s === 'Arrived' || s === 'Landed' || s === 'Cancelled' || s === 'Diverted') return s
   if (f.actual_arr_utc) return 'Arrived'
-  if (f.actual_dep_utc) return 'Departed'
+  // Departure happened — check if delayed vs schedule
+  if (f.actual_dep_utc) {
+    const schedMs = new Date(`1970-01-01T${f.dep_time_utc}:00Z`).getTime()
+    const actMs   = new Date(f.actual_dep_utc).getTime()
+    // Extract HH:MM from actual UTC, compare to scheduled HH:MM
+    const actHHMM = f.actual_dep_utc.slice(11, 16)
+    const actMin  = parseInt(actHHMM.slice(0, 2)) * 60 + parseInt(actHHMM.slice(3))
+    const schMin  = schedMs / 60_000
+    const diff    = ((actMin - (schMin % 1440)) + 1440) % 1440
+    const delayMin = diff > 720 ? diff - 1440 : diff // unwrap day boundary
+    if (delayMin > 15) return 'Delayed'
+    return s !== 'Unknown' ? s : 'Departed'
+  }
+  if (s !== 'Unknown') return s
   return 'Unknown'
+}
+
+// Compute estimated arrival from ATD + schedule block time (fallback when no revised_arr_utc)
+function computedETA(f: Flight): string | null {
+  if (!f.actual_dep_utc || !f.duration_min) return null
+  if (f.actual_arr_utc || f.revised_arr_utc) return null
+  const ms = new Date(f.actual_dep_utc).getTime() + f.duration_min * 60_000
+  return new Date(ms).toISOString()
 }
 
 function calcDelay(schedHHMM: string, actualISO: string | null): number | null {
@@ -283,6 +304,12 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
           {(f.actual_arr_utc || f.revised_arr_utc) && !isCancelled && (
             <p className={`font-mono text-xs mt-0.5 ${f.actual_arr_utc ? 'text-green-400' : 'text-yellow-400'}`}>
               {arrActual}
+            </p>
+          )}
+          {/* Computed ETA when airborne but no confirmed/revised arrival yet */}
+          {!f.actual_arr_utc && !f.revised_arr_utc && computedETA(f) && !isCancelled && (
+            <p className="font-mono text-xs mt-0.5 text-orange-400" title="Estimated (ATD + block time)">
+              ~{fmtLocal(computedETA(f), arrOff)}
             </p>
           )}
           {isArr && <DelayBadge min={arrDelay} />}
