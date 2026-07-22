@@ -91,16 +91,22 @@ export async function GET(req: Request) {
   // Clear existing rows for this date + airport before reloading
   await sb(`/schedule_raw?schedule_date=eq.${date}&airport_iata=eq.${airport}`, { method: 'DELETE' })
 
+  // Parse "XH 524" or "XH524" → carrier="XH", flightnumber=524
+  function parseFlight(raw: string): { carrier: string; flightnumber: number } {
+    const m = raw.trim().match(/^([A-Z\d]{2})\s*(\d+)/)
+    return { carrier: m?.[1] ?? raw.trim().slice(0, 2), flightnumber: parseInt(m?.[2] ?? '0', 10) }
+  }
+
   const rows: object[] = []
 
   for (const f of arrivals) {
-    const [carrier, numStr] = f.flightNumber.trim().split(/\s+/)
+    const { carrier, flightnumber } = parseFlight(f.flightNumber)
     rows.push({
       airport_iata:   airport,
       direction:      'arrival',
       carrier,
       carrier_icao:   iataToIcao.get(carrier) ?? null,
-      flightnumber:   parseInt(numStr ?? '0', 10),
+      flightnumber,
       iata_from:      f.origin,
       iata_to:        f.destination,
       arr_time_local: f.time,
@@ -113,13 +119,13 @@ export async function GET(req: Request) {
   }
 
   for (const f of departures) {
-    const [carrier, numStr] = f.flightNumber.trim().split(/\s+/)
+    const { carrier, flightnumber } = parseFlight(f.flightNumber)
     rows.push({
       airport_iata:   airport,
       direction:      'departure',
       carrier,
       carrier_icao:   iataToIcao.get(carrier) ?? null,
-      flightnumber:   parseInt(numStr ?? '0', 10),
+      flightnumber,
       iata_from:      f.origin,
       iata_to:        f.destination,
       dep_time_local: f.time,
