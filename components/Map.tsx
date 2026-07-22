@@ -22,6 +22,7 @@ interface Aircraft {
   dep_syria:      boolean
   arr_syria:      boolean
   dest_iata:      string | null
+  orig_iata:      string | null
   seen_at?: string
   stale?:   boolean
 }
@@ -345,8 +346,8 @@ function buildPopup(
   const arrSyria  = a.arr_syria && syriaAps.length > 0
 
   const acType    = fs?.aircraft_type ?? a.t ?? null
-  const dep       = fs?.dep_iata ?? null
-  const arr       = fs?.arr_iata ?? null
+  const dep       = fs?.dep_iata ?? a.orig_iata ?? null
+  const arr       = fs?.arr_iata ?? a.dest_iata ?? null
   const aiata     = airlineIataFor(callsign, fs)
 
   // Distance + ETA to destination

@@ -32,7 +32,7 @@ async function fetchFeed(): Promise<unknown[]> {
 }
 
 // ── Syria callsign → schedule info cache (1h) ────────────────────────────────
-interface SyriaInfo { airports: string[]; arr_time_utc: string | null; duration_min: number | null; dep_syria: boolean; arr_syria: boolean; dest_iata: string | null }
+interface SyriaInfo { airports: string[]; arr_time_utc: string | null; duration_min: number | null; dep_syria: boolean; arr_syria: boolean; dest_iata: string | null; orig_iata: string | null }
 type SyriaMap = Map<string, SyriaInfo>
 
 // ── Actual departure times from flight_status (2-min cache) ──────────────────
@@ -79,10 +79,10 @@ async function fetchSyriaMap(): Promise<SyriaMap> {
 
   if (!res.ok) return syriaCache?.map ?? new Map()
 
-  const rows: { broadcast_callsign: string; syria_airports: string[]; arr_time_utc: string | null; duration_min: number | null; dep_syria: boolean; arr_syria: boolean; dest_iata: string | null }[] = await res.json()
+  const rows: { broadcast_callsign: string; syria_airports: string[]; arr_time_utc: string | null; duration_min: number | null; dep_syria: boolean; arr_syria: boolean; dest_iata: string | null; orig_iata: string | null }[] = await res.json()
   const callsignMap: SyriaMap = new Map(rows.map(r => [
     r.broadcast_callsign,
-    { airports: r.syria_airports, arr_time_utc: r.arr_time_utc, duration_min: r.duration_min, dep_syria: r.dep_syria ?? false, arr_syria: r.arr_syria ?? false, dest_iata: r.dest_iata ?? null },
+    { airports: r.syria_airports, arr_time_utc: r.arr_time_utc, duration_min: r.duration_min, dep_syria: r.dep_syria ?? false, arr_syria: r.arr_syria ?? false, dest_iata: r.dest_iata ?? null, orig_iata: r.orig_iata ?? null },
   ]))
   syriaCache = { map: callsignMap, ts: Date.now() }
   return callsignMap
@@ -235,6 +235,7 @@ async function fetchSyriaStale(excludeHexes: Set<string>, syriaMap: SyriaMap): P
         dep_syria:     info?.dep_syria     ?? false,
         arr_syria:     info?.arr_syria     ?? false,
         dest_iata:     info?.dest_iata     ?? null,
+        orig_iata:     info?.orig_iata     ?? null,
         seen_at:       r.seen_at,
         stale:         true,
       }
@@ -270,6 +271,7 @@ export async function GET() {
         dep_syria:      info?.dep_syria    ?? false,
         arr_syria:      info?.arr_syria    ?? false,
         dest_iata:      info?.dest_iata    ?? null,
+        orig_iata:      info?.orig_iata    ?? null,
       }
     })
 
@@ -323,7 +325,7 @@ export async function GET() {
       .filter((a: any) => !liveCallsigns.has((a.flight ?? '').trim()))
       .map((a: any) => {
         const info = syriaMap.get(a.flight)
-        return { ...a, syria_airports: info?.airports ?? [], arr_time_utc: info?.arr_time_utc ?? null, duration_min: info?.duration_min ?? null, dep_syria: info?.dep_syria ?? false, arr_syria: info?.arr_syria ?? false, dest_iata: info?.dest_iata ?? null }
+        return { ...a, syria_airports: info?.airports ?? [], arr_time_utc: info?.arr_time_utc ?? null, duration_min: info?.duration_min ?? null, dep_syria: info?.dep_syria ?? false, arr_syria: info?.arr_syria ?? false, dest_iata: info?.dest_iata ?? null, orig_iata: info?.orig_iata ?? null }
       })
     if (fr24Annotated.length > 0) upsertPositions(fr24Annotated).catch(() => {})
 
