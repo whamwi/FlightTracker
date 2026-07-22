@@ -15,6 +15,8 @@ const CITY: Record<string, string> = {
   IKT: 'Irkutsk',        TAS: 'Tashkent',         ALA: 'Almaty',
   DEL: 'Delhi',          BOM: 'Mumbai',           BGW: 'Baghdad',
   ESB: 'Ankara',         SKD: 'Samarkand',        NJF: 'Najaf',
+  OTP: 'Bucharest',      EBL: 'Erbil',            MJI: 'Tripoli',
+  AMS: 'Amsterdam',
 }
 const city = (iata: string) => CITY[iata] ?? iata
 
@@ -32,13 +34,19 @@ const STATUS: Record<string, { label: string; cls: string }> = {
   Landed:      { label: 'Arrived',     cls: 'bg-green-950 text-green-300' },
   Cancelled:   { label: 'Cancelled',   cls: 'bg-red-950 text-red-400' },
   Diverted:    { label: 'Diverted',    cls: 'bg-orange-900 text-orange-300' },
+  Delayed:     { label: 'Delayed',     cls: 'bg-red-900 text-red-300' },
   Unknown:     { label: 'Unknown',     cls: 'bg-gray-800 text-gray-500' },
 }
 
-// Normalise string variants ADB sometimes sends before display-level inference
 const STATUS_ALIAS: Record<string, string> = {
   Landed: 'Arrived',
   Land:   'Arrived',
+}
+
+// ── Local airline logo overrides ─────────────────────────────────────────────
+const LOCAL_LOGOS: Record<string, string> = {
+  XH: '/airlines/XH.jpg',
+  EY: '/airlines/EY.png',
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -73,21 +81,18 @@ type Flight = {
   aircraft_reg: string | null
 }
 
-type Tab = -1 | 0 | 1  // yesterday / today / tomorrow
-type View = 'arr' | 'dep'
-type Airport = 'ALL' | 'DAM' | 'ALP'
+type Tab     = -1 | 0 | 1        // yesterday / today / tomorrow
+type View    = 'arr' | 'dep'
+type Airport = 'DAM' | 'ALP'
+type Filter  = 'next' | 'all'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-// Syria is UTC+3. Compute date string for offset days.
 function syriaDate(offsetDays: number): string {
   const ms = Date.now() + 3 * 3_600_000 + offsetDays * 86_400_000
   return new Date(ms).toISOString().slice(0, 10)
 }
 
-// Format "HH:MM" in Syria local time.
-// Plain "HH:MM" strings (dep_time/arr_time) are already local — return as-is.
-// ISO UTC timestamps from ADB/FR24 (actual_*/revised_*) need +3h conversion.
 function fmtLocal(raw: string | null | undefined): string {
   if (!raw) return '—'
   if (raw.includes('T')) {
@@ -102,9 +107,6 @@ function durationLabel(min: number): string {
   return `${Math.floor(min / 60)}h ${min % 60}m`
 }
 
-// ── Sub-components ───────────────────────────────────────────────────────────
-
-// Infer a meaningful display status when ADB returns "Unknown" or unmapped strings
 function effectiveStatus(f: Flight): string {
   const s = STATUS_ALIAS[f.status] ?? f.status
   if (s !== 'Unknown') return s
@@ -113,14 +115,55 @@ function effectiveStatus(f: Flight): string {
   return 'Unknown'
 }
 
-// Recalculate delay from schedule HH:MM + operating date vs actual ISO timestamp.
-// More reliable than stored arr_delay_min which may reference ADB's own scheduled time.
 function calcDelay(schedHHMM: string, actualISO: string | null, date: string): number | null {
   if (!actualISO || !schedHHMM || !date) return null
   const diff = (new Date(actualISO).getTime() - new Date(`${date}T${schedHHMM}:00Z`).getTime()) / 60_000
   return Math.round(diff)
 }
 
+// "Next" = not in terminal state OR recently departed/arrived (within 60 min)
+const TERMINAL = new Set(['Arrived', 'Landed', 'Cancelled', 'Diverted', 'Departed'])
+
+function isNext(f: Flight, view: View): boolean {
+  const s = effectiveStatus(f)
+  if (!TERMINAL.has(s)) return true
+  const ts = view === 'arr' ? f.actual_arr_utc : f.actual_dep_utc
+  if (ts) return Date.now() - new Date(ts).getTime() <= 60 * 60_000
+  return false
+}
+
+// ── Airline logo with CDN + local fallback ───────────────────────────────────
+function AirlineLogo({ iata, flag, name }: { iata: string; flag: string; name: string }) {
+  const [src, setSrc] = useState<string>(
+    LOCAL_LOGOS[iata] ?? (iata ? `https://images.flightsfrom.com/airlines/100/${iata}_100px.png` : '')
+  )
+  const [failed, setFailed] = useState(!iata)
+
+  const handleError = () => {
+    if (LOCAL_LOGOS[iata] && src === LOCAL_LOGOS[iata]) {
+      setSrc(`https://images.flightsfrom.com/airlines/100/${iata}_100px.png`)
+    } else {
+      setFailed(true)
+    }
+  }
+
+  if (failed || !src) {
+    return <span className="text-xl leading-none" title={name}>{flag}</span>
+  }
+  return (
+    <img
+      src={src}
+      alt={name}
+      title={name}
+      width={32}
+      height={32}
+      className="rounded-lg object-cover shrink-0"
+      onError={handleError}
+    />
+  )
+}
+
+// ── Sub-components ───────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: string }) {
   const cfg = STATUS[status] ?? STATUS.Unknown
   return (
@@ -150,10 +193,10 @@ function FlightCard({ f, view, date }: { f: Flight; view: View; date: string }) 
   return (
     <div className={`bg-gray-900 border rounded-xl p-4 flex flex-col gap-3 ${isCancelled ? 'border-red-900/60 opacity-60' : 'border-gray-800'}`}>
 
-      {/* Row 1: Airline + Flight number */}
+      {/* Row 1: Airline logo + name + status */}
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-xl leading-none">{f.country_flag}</span>
+        <div className="flex items-center gap-2.5 min-w-0">
+          <AirlineLogo iata={f.airline_iata} flag={f.country_flag} name={f.airline_name} />
           <div className="min-w-0">
             <p className="text-white font-semibold text-sm leading-tight truncate">{f.airline_name}</p>
             <div className="flex items-center gap-2 mt-0.5">
@@ -187,10 +230,9 @@ function FlightCard({ f, view, date }: { f: Flight; view: View; date: string }) 
         </div>
       </div>
 
-      {/* Row 3: Dep time (left, under dep airport) — Arr time (right, under arr airport) */}
+      {/* Row 3: Times + details */}
       <div className="flex items-start justify-between gap-2">
 
-        {/* Departure time block */}
         <div className="min-w-[3.5rem]">
           <p className="text-gray-500 text-xs mb-0.5">Dep</p>
           <p className={`font-mono font-semibold text-base ${isCancelled ? 'line-through text-gray-600' : 'text-white'}`}>
@@ -213,12 +255,10 @@ function FlightCard({ f, view, date }: { f: Flight; view: View; date: string }) 
           )}
         </div>
 
-        {/* Aircraft type in centre */}
         <div className="flex-1 flex items-start justify-center pt-4">
           {f.aircraft_type && <p className="text-gray-600 text-xs">{f.aircraft_type}</p>}
         </div>
 
-        {/* Arrival time block */}
         <div className="min-w-[3.5rem] text-right">
           <p className="text-gray-500 text-xs mb-0.5">Arr</p>
           <p className={`font-mono font-semibold text-base ${isCancelled ? 'line-through text-gray-600' : 'text-white'}`}>
@@ -251,12 +291,13 @@ function FlightCard({ f, view, date }: { f: Flight; view: View; date: string }) 
 const TAB_LABELS: Record<Tab, string> = { [-1]: 'Yesterday', 0: 'Today', 1: 'Tomorrow' }
 
 export default function BoardPage() {
-  const [tab, setTab]           = useState<Tab>(0)
-  const [view, setView]         = useState<View>('arr')
-  const [airport, setAirport]   = useState<Airport>('ALL')
-  const [flights, setFlights]   = useState<Flight[]>([])
-  const [loading, setLoading]   = useState(true)
-  const [date, setDate]         = useState('')
+  const [tab, setTab]         = useState<Tab>(0)
+  const [view, setView]       = useState<View>('arr')
+  const [airport, setAirport] = useState<Airport>('DAM')
+  const [filter, setFilter]   = useState<Filter>('next')
+  const [flights, setFlights] = useState<Flight[]>([])
+  const [loading, setLoading] = useState(true)
+  const [date, setDate]       = useState('')
 
   const load = useCallback(async (offsetDays: Tab) => {
     setLoading(true)
@@ -273,7 +314,6 @@ export default function BoardPage() {
     }
   }, [])
 
-  // Initial load + refresh today every 60s
   useEffect(() => { load(tab) }, [tab, load])
   useEffect(() => {
     if (tab !== 0) return
@@ -281,35 +321,33 @@ export default function BoardPage() {
     return () => clearInterval(t)
   }, [tab, load])
 
-  // Filter flights by view (arrivals/departures) and airport
   const SYRIA = ['DAM', 'ALP']
-  const visible = flights.filter(f => {
+  const byViewAndAirport = flights.filter(f => {
     if (view === 'arr') {
-      if (!SYRIA.includes(f.arr_iata)) return false
-      if (airport !== 'ALL' && f.arr_iata !== airport) return false
+      return SYRIA.includes(f.arr_iata) && f.arr_iata === airport
     } else {
-      if (!SYRIA.includes(f.dep_iata)) return false
-      if (airport !== 'ALL' && f.dep_iata !== airport) return false
+      return SYRIA.includes(f.dep_iata) && f.dep_iata === airport
     }
-    return true
   })
 
-  // Sort by relevant time
-  const sorted = [...visible].sort((a, b) => {
+  const sorted = [...byViewAndAirport].sort((a, b) => {
     const ta = view === 'arr' ? a.arr_time_utc : a.dep_time_utc
     const tb = view === 'arr' ? b.arr_time_utc : b.dep_time_utc
     return ta.localeCompare(tb)
   })
 
-  // Summary counts (use effective status for accuracy)
-  const total     = sorted.length
-  const landed    = sorted.filter(f => ['Arrived', 'Landed'].includes(effectiveStatus(f))).length
-  const cancelled = sorted.filter(f => effectiveStatus(f) === 'Cancelled').length
-  const enroute   = sorted.filter(f => ['En Route', 'Departed', 'Approaching'].includes(effectiveStatus(f))).length
+  const visible = filter === 'next' ? sorted.filter(f => isNext(f, view)) : sorted
 
-  const dateLabel = new Date(date + 'T12:00:00Z').toLocaleDateString('en-GB', {
-    weekday: 'long', day: 'numeric', month: 'long'
-  })
+  const total     = visible.length
+  const landed    = visible.filter(f => ['Arrived', 'Landed'].includes(effectiveStatus(f))).length
+  const cancelled = visible.filter(f => effectiveStatus(f) === 'Cancelled').length
+  const enroute   = visible.filter(f => ['En Route', 'Departed', 'Approaching'].includes(effectiveStatus(f))).length
+
+  const dateLabel = date
+    ? new Date(date + 'T12:00:00Z').toLocaleDateString('en-GB', {
+        weekday: 'long', day: 'numeric', month: 'long'
+      })
+    : ''
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
@@ -334,9 +372,7 @@ export default function BoardPage() {
               key={t}
               onClick={() => setTab(t)}
               className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
-                tab === t
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                tab === t ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
               }`}
             >
               {TAB_LABELS[t]}
@@ -344,30 +380,46 @@ export default function BoardPage() {
           ))}
         </div>
 
-        {/* ── ARR / DEP + airport filter ── */}
-        <div className="max-w-2xl mx-auto px-4 pb-3 flex items-center gap-3">
-          {/* ARR / DEP */}
-          <div className="flex bg-gray-800 rounded-lg p-0.5 gap-0.5">
-            {(['arr', 'dep'] as View[]).map(v => (
-              <button
-                key={v}
-                onClick={() => setView(v)}
-                className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${
-                  view === v ? 'bg-white text-gray-900' : 'text-gray-400 hover:text-white'
-                }`}
-              >
-                {v === 'arr' ? '▼ Arrivals' : '▲ Departures'}
-              </button>
-            ))}
+        {/* ── Arrivals | Next/All | Departures ── */}
+        <div className="max-w-2xl mx-auto px-4 pb-2">
+          <div className="flex bg-gray-800 rounded-xl p-1 gap-1">
+            <button
+              onClick={() => setView('arr')}
+              className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
+                view === 'arr' ? 'bg-white text-gray-900' : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              Arrivals
+            </button>
+            <button
+              onClick={() => setFilter(f => f === 'next' ? 'all' : 'next')}
+              className={`flex-1 py-2.5 rounded-lg text-xs font-semibold transition-colors border ${
+                filter === 'next'
+                  ? 'border-blue-500/60 text-blue-300 bg-blue-950/60'
+                  : 'border-gray-600/60 text-gray-400 bg-gray-700/40'
+              }`}
+            >
+              {filter === 'next' ? 'Next' : 'All'}
+            </button>
+            <button
+              onClick={() => setView('dep')}
+              className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
+                view === 'dep' ? 'bg-white text-gray-900' : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              Departures
+            </button>
           </div>
+        </div>
 
-          {/* Airport filter */}
-          <div className="flex bg-gray-800 rounded-lg p-0.5 gap-0.5 ml-auto">
-            {(['ALL', 'DAM', 'ALP'] as Airport[]).map(ap => (
+        {/* ── Airport filter: DAM | ALP ── */}
+        <div className="max-w-2xl mx-auto px-4 pb-3">
+          <div className="flex bg-gray-800 rounded-xl p-1 gap-1">
+            {(['DAM', 'ALP'] as Airport[]).map(ap => (
               <button
                 key={ap}
                 onClick={() => setAirport(ap)}
-                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-colors ${
                   airport === ap ? 'bg-white text-gray-900' : 'text-gray-400 hover:text-white'
                 }`}
               >
@@ -382,11 +434,11 @@ export default function BoardPage() {
       <div className="max-w-2xl mx-auto px-4 py-4">
 
         {/* Summary strip */}
-        {!loading && sorted.length > 0 && (
+        {!loading && visible.length > 0 && (
           <div className="flex gap-4 text-xs text-gray-500 mb-4 px-1">
             <span>{total} flights</span>
-            {enroute  > 0 && <span className="text-sky-400">{enroute} in air</span>}
-            {landed   > 0 && <span className="text-green-400">{landed} arrived</span>}
+            {enroute   > 0 && <span className="text-sky-400">{enroute} in air</span>}
+            {landed    > 0 && <span className="text-green-400">{landed} arrived</span>}
             {cancelled > 0 && <span className="text-red-400">{cancelled} cancelled</span>}
             {tab !== 0 && <span className="ml-auto">{dateLabel}</span>}
           </div>
@@ -401,26 +453,27 @@ export default function BoardPage() {
         )}
 
         {/* Empty */}
-        {!loading && sorted.length === 0 && (
+        {!loading && visible.length === 0 && (
           <div className="flex flex-col items-center justify-center py-20 gap-2 text-center">
             <span className="text-4xl">✈</span>
-            <p className="text-gray-400 font-medium">No {view === 'arr' ? 'arrivals' : 'departures'} found</p>
-            <p className="text-gray-600 text-sm">
-              {airport !== 'ALL' ? `for ${airport} on ${dateLabel}` : `on ${dateLabel}`}
+            <p className="text-gray-400 font-medium">
+              No {view === 'arr' ? 'arrivals' : 'departures'}
+              {filter === 'next' ? ' coming up' : ''}
             </p>
+            <p className="text-gray-600 text-sm">{airport} · {dateLabel}</p>
           </div>
         )}
 
         {/* Flight cards */}
         {!loading && (
           <div className="flex flex-col gap-3">
-            {sorted.map(f => (
+            {visible.map(f => (
               <FlightCard key={`${f.callsign}-${f.dep_iata}-${f.arr_iata}`} f={f} view={view} date={date} />
             ))}
           </div>
         )}
 
-        {tab === 1 && !loading && sorted.length > 0 && (
+        {tab === 1 && !loading && visible.length > 0 && (
           <p className="text-center text-gray-600 text-xs mt-6">
             Tomorrow's flights show scheduled times only · Live data arrives on the day
           </p>
