@@ -122,6 +122,11 @@ export async function POST(req: Request) {
 
   const SY_AIRPORTS = new Set(['DAM', 'ALP'])
 
+  function hhmToMin(hhmm: string): number {
+    const [h, m] = hhmm.split(':').map(Number)
+    return h * 60 + m
+  }
+
   // Key uses the Syria-side time only (arrival time for arrivals, departure for departures).
   // This stays stable after the fill step adds the missing other-side time.
   const schedKey = (r: { flight_id: number; dep_iata: string; arr_iata: string; dep_time: string | null; arr_time: string | null }) => {
@@ -130,8 +135,16 @@ export async function POST(req: Request) {
   }
   const schedMap = new Map(existingSchedule.map(r => [schedKey(r), r]))
 
+  // Index existing rows by flight_id+route for drift detection (same flight, time shifted slightly)
+  type ExistingRow = typeof existingSchedule[number]
+  const byRoute = new Map<string, ExistingRow[]>()
+  for (const r of existingSchedule) {
+    const rk = `${r.flight_id}|${r.dep_iata}|${r.arr_iata}`
+    ;(byRoute.get(rk) ?? byRoute.set(rk, []).get(rk)!).push(r)
+  }
+
   const toInsert: object[] = []
-  const toUpdate: { id: number; days_of_week: string[] }[] = []
+  const toUpdate: { id: number; days_of_week: string[]; dep_time?: string; arr_time?: string; dep_time_utc?: string; arr_time_utc?: string }[] = []
 
   for (const raw of rawRows) {
     const iataNum = `${raw.carrier}${raw.flightnumber}`
@@ -153,18 +166,45 @@ export async function POST(req: Request) {
         })
       }
     } else {
-      toInsert.push({
-        flight_id:    lookup.id,
-        dep_iata:     raw.iata_from,
-        arr_iata:     raw.iata_to,
-        dep_time:     depTime,
-        arr_time:     arrTime,
-        dep_time_utc: depTime ? toUtc(depTime) : null,
-        arr_time_utc: arrTime ? toUtc(arrTime) : null,
-        days_of_week: [dow],
-        source:       'damairport',
-        data_updated: new Date().toISOString(),
-      })
+      // Check for schedule drift: same flight+route with Syria-side time within 30 min
+      const routeKey  = `${lookup.id}|${raw.iata_from}|${raw.iata_to}`
+      const authMin   = authTime ? hhmToMin(authTime) : null
+      const driftMatch = authMin !== null
+        ? (byRoute.get(routeKey) ?? []).find(r => {
+            const existAuth = SY_AIRPORTS.has(r.arr_iata) ? r.arr_time : r.dep_time
+            if (!existAuth) return false
+            const diff = Math.abs(hhmToMin(existAuth.slice(0, 5)) - authMin)
+            return Math.min(diff, 1440 - diff) <= 30
+          })
+        : undefined
+
+      if (driftMatch) {
+        // Schedule drift: update the existing row's time and add today's dow
+        const newDow = [...new Set([...(driftMatch.days_of_week ?? []), dow])].sort()
+        toUpdate.push({
+          id:           driftMatch.id,
+          days_of_week: newDow,
+          ...(SY_AIRPORTS.has(raw.iata_to)
+            ? { arr_time: arrTime!, arr_time_utc: toUtc(arrTime!) + ':00' }
+            : { dep_time: depTime!, dep_time_utc: toUtc(depTime!) + ':00' }),
+        })
+        // Remove old key from map so we don't double-process
+        schedMap.delete(schedKey(driftMatch))
+        schedMap.set(key, driftMatch)
+      } else {
+        toInsert.push({
+          flight_id:    lookup.id,
+          dep_iata:     raw.iata_from,
+          arr_iata:     raw.iata_to,
+          dep_time:     depTime,
+          arr_time:     arrTime,
+          dep_time_utc: depTime ? toUtc(depTime) : null,
+          arr_time_utc: arrTime ? toUtc(arrTime) : null,
+          days_of_week: [dow],
+          source:       'damairport',
+          data_updated: new Date().toISOString(),
+        })
+      }
     }
   }
 
@@ -179,15 +219,17 @@ export async function POST(req: Request) {
   // PATCH updates in parallel (small N, typically < 10)
   if (toUpdate.length) {
     await Promise.all(
-      toUpdate.map(upd =>
-        sb(`/flight_schedule?id=eq.${upd.id}`, {
+      toUpdate.map(({ id, ...fields }) =>
+        sb(`/flight_schedule?id=eq.${id}`, {
           method:  'PATCH',
           headers: { Prefer: 'return=minimal' },
-          body:    JSON.stringify({ days_of_week: upd.days_of_week, data_updated: new Date().toISOString() }),
+          body:    JSON.stringify({ ...fields, data_updated: new Date().toISOString() }),
         })
       )
     )
   }
+
+  const driftCount = toUpdate.filter(u => u.dep_time || u.arr_time).length
 
   return NextResponse.json({
     ok:                true,
@@ -198,6 +240,7 @@ export async function POST(req: Request) {
     airlines_added:    airlinesAdded,
     lookup_added:      lookupAdded,
     schedule_inserted: toInsert.length,
-    schedule_updated:  toUpdate.length,
+    schedule_updated:  toUpdate.length - driftCount,
+    schedule_drift:    driftCount,
   })
 }
