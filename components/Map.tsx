@@ -62,6 +62,41 @@ interface FlightStatus {
   flight_number:     string | null
   dep_iata:          string | null
   arr_iata:          string | null
+  airline_iata:      string | null
+}
+
+// ICAO airline prefix → IATA code (for airline logo)
+const ICAO_TO_IATA: Record<string, string> = {
+  FDB: 'FZ', ABY: 'G9', THY: 'TK', RJA: 'RJ',
+  QTR: 'QR', ETD: 'EY', PGT: 'PC', SYR: 'RB',
+  JZR: 'J9', ADY: 'TK',
+}
+
+// Airport IATA → city name for popup route line
+const IATA_CITY: Record<string, string> = {
+  DAM: 'Damascus',  ALP: 'Aleppo',    DXB: 'Dubai',
+  SHJ: 'Sharjah',  AUH: 'Abu Dhabi', BEY: 'Beirut',
+  AMM: 'Amman',    CAI: 'Cairo',      IST: 'Istanbul',
+  SAW: 'Istanbul', AYT: 'Antalya',    ADB: 'Izmir',
+  ESB: 'Ankara',   BAH: 'Bahrain',    DOH: 'Doha',
+  KWI: 'Kuwait',   MCT: 'Muscat',     BGW: 'Baghdad',
+  BSR: 'Basra',    NJF: 'Najaf',      THR: 'Tehran',
+  MHD: 'Mashhad',  JED: 'Jeddah',     RUH: 'Riyadh',
+  SVO: 'Moscow',   HRG: 'Hurghada',   TBS: 'Tbilisi',
+  GYD: 'Baku',     KBP: 'Kyiv',       VIE: 'Vienna',
+}
+function iataCity(code: string | null | undefined): string {
+  return (code && IATA_CITY[code]) ? IATA_CITY[code] : (code ?? '—')
+}
+function airlineIataFor(callsign: string, fs?: FlightStatus | null): string | null {
+  if (fs?.airline_iata) return fs.airline_iata
+  // flight_number is IATA format like "FZ1847" — first 2 alpha chars = IATA
+  const fn = fs?.flight_number ?? ''
+  const fnLetters = fn.replace(/[^A-Za-z]/g, '')
+  if (fnLetters.length >= 2) return fnLetters.slice(0, 2).toUpperCase()
+  // Fall back: first 3 alpha chars of callsign = ICAO prefix
+  const icao = callsign.replace(/\d/g, '').toUpperCase()
+  return ICAO_TO_IATA[icao] ?? null
 }
 
 // Syria destination airports — used for route lines
@@ -279,73 +314,101 @@ function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, s
   return L.divIcon({ className: '', html, iconSize: [size, size], iconAnchor: [size/2, size/2] })
 }
 
-function buildPopup(a: Aircraft, lostAt?: number, projected?: boolean, fs?: FlightStatus | null): string {
+function buildPopup(
+  a: Aircraft,
+  lostAt?: number,
+  projected?: boolean,
+  fs?: FlightStatus | null,
+  photoUrl?: string | null,
+): string {
   const callsign  = (a.flight ?? '').trim() || a.hex
   const alt       = typeof a.alt_baro === 'number' ? `${Math.round(a.alt_baro).toLocaleString()} ft` : '—'
   const spd       = a.gs ? `${Math.round(a.gs)} kts` : '—'
   const syriaAps  = a.syria_airports ?? []
   // Only highlight the Syrian connection when the flight is arriving IN Syria.
-  // Outbound flights (dep_syria=true, arr_syria=false) depart FROM Syria — showing
-  // "→ DAM" would imply DAM is the destination, which is wrong and confusing.
   const arrSyria  = a.arr_syria && syriaAps.length > 0
 
-  // Prefer AeroDataBox aircraft info over FR24 when available
   const acType    = fs?.aircraft_type ?? a.t ?? null
-  const acReg     = fs?.aircraft_reg  ?? a.r ?? null
+  const dep       = fs?.dep_iata ?? null
+  const arr       = fs?.arr_iata ?? null
+  const aiata     = airlineIataFor(callsign, fs)
 
-  let scheduleLine = ''
-  if (arrSyria && a.arr_time_utc) {
-    const [h, m]    = a.arr_time_utc.split(':').map(Number)
-    const localH    = (h + 3) % 24
-    const localTime = `${String(localH).padStart(2,'0')}:${String(m).padStart(2,'0')}`
-    const arrAp     = syriaAps[0] ?? ''
-    const dur       = a.duration_min
-      ? ` &nbsp;·&nbsp; ${Math.floor(a.duration_min/60)}h${a.duration_min%60>0?` ${a.duration_min%60}m`:''}`
-      : ''
-    scheduleLine = `<br/><span style="color:#4ade80;font-size:11px">Arrives ${arrAp} ${localTime}${dur}</span>`
-  }
+  const photoHtml = photoUrl
+    ? `<img src="${photoUrl}" style="width:100%;height:110px;object-fit:cover;display:block">`
+    : ''
 
-  const delayLine = fs?.dep_delay_min != null && Math.abs(fs.dep_delay_min) >= 2
-    ? `<br/><span style="color:${fs.dep_delay_min > 0 ? '#f97316' : '#4ade80'};font-size:11px">${fs.dep_delay_min > 0 ? `+${fs.dep_delay_min}` : fs.dep_delay_min} min delay</span>`
+  const logoHtml = aiata
+    ? `<img src="https://www.gstatic.com/flights/airline_logos/70px/${aiata}.png" style="height:18px;width:auto;vertical-align:middle;margin-right:5px" onerror="this.style.display='none'">`
     : ''
 
   const badge = projected
-    ? ' <span style="color:#fbbf24;font-size:10px">~ estimated</span>'
-    : lostAt ? ' <span style="color:#9ca3af;font-size:10px">(last known)</span>' : ''
+    ? `<span style="color:#f59e0b;font-size:10px;font-weight:400"> ~ est</span>`
+    : lostAt ? `<span style="color:#9ca3af;font-size:10px"> (last known)</span>` : ''
 
-  return `<div style="font-family:monospace;font-size:12px;line-height:1.7">
-    <b>${callsign}</b>${badge}<br/>
-    ${acType ? `Type: ${acType}<br/>` : ''}${acReg ? `Reg: ${acReg}<br/>` : ''}
-    Alt: ${alt} &nbsp; Speed: ${spd}
-    ${arrSyria ? `<br/><span style="color:#16a34a;font-weight:bold">→ ${syriaAps.join(', ')}</span>${scheduleLine}` : ''}
-    ${delayLine}
-    ${lostAt && !projected ? `<br/><span style="color:#ef4444;font-size:11px">⚠ Signal lost ${new Date(lostAt).toLocaleTimeString()}</span>` : ''}
-    ${projected && lostAt ? `<br/><span style="color:#6b7280;font-size:10px">Dead reckoning from ${new Date(lostAt).toLocaleTimeString()}</span>` : ''}
+  const routeLine = (dep || arr)
+    ? `<div style="color:#374151;font-size:12px;margin-bottom:4px">${iataCity(dep)} to ${iataCity(arr)}</div>`
+    : ''
+
+  let syriaLine = ''
+  if (arrSyria && a.arr_time_utc) {
+    const [h, m] = a.arr_time_utc.split(':').map(Number)
+    const localH = (h + 3) % 24
+    const localTime = `${String(localH).padStart(2,'0')}:${String(m).padStart(2,'0')}`
+    const ap  = syriaAps[0] ?? ''
+    const dur = a.duration_min
+      ? ` · ${Math.floor(a.duration_min/60)}h${a.duration_min%60>0?` ${a.duration_min%60}m`:''}`
+      : ''
+    syriaLine = `<div style="color:#16a34a;font-size:11px;margin-top:4px">→ ${ap}  ${localTime} local${dur}</div>`
+  }
+
+  const delayLine = fs?.dep_delay_min != null && Math.abs(fs.dep_delay_min) >= 2
+    ? `<div style="color:${fs.dep_delay_min > 0 ? '#f97316' : '#16a34a'};font-size:11px;margin-top:2px">${fs.dep_delay_min > 0 ? `+${fs.dep_delay_min}` : fs.dep_delay_min} min delay</div>`
+    : ''
+
+  const lostLine = lostAt && !projected
+    ? `<div style="color:#ef4444;font-size:11px;margin-top:3px">⚠ Signal lost ${new Date(lostAt).toLocaleTimeString()}</div>`
+    : ''
+
+  const drLine = projected && lostAt
+    ? `<div style="color:#9ca3af;font-size:10px;margin-top:2px">Dead reckoning from ${new Date(lostAt).toLocaleTimeString()}</div>`
+    : ''
+
+  return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:200px">
+    ${photoHtml}
+    <div style="padding:9px 13px 11px">
+      <div style="display:flex;align-items:center;margin-bottom:3px">
+        ${logoHtml}<b style="font-size:14px">${callsign}</b>${badge}
+        ${acType ? `<span style="margin-left:auto;color:#9ca3af;font-size:11px">${acType}</span>` : ''}
+      </div>
+      ${routeLine}
+      <div style="color:#6b7280;font-size:12px">${alt} · ${spd}</div>
+      ${syriaLine}${delayLine}${lostLine}${drLine}
+    </div>
   </div>`
 }
 
 function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus | null): string {
   const isSyria = AIRPORT_COORDS[e.arr_iata] != null
   const acType  = fs?.aircraft_type ?? null
-  const acReg   = fs?.aircraft_reg  ?? null
-  const acLine  = (acType || acReg)
-    ? `<br/>${acType ?? ''}${acType && acReg ? ' · ' : ''}${acReg ?? ''}`
+  const aiata   = airlineIataFor(e.callsign, fs)
+
+  const logoHtml = aiata
+    ? `<img src="https://www.gstatic.com/flights/airline_logos/70px/${aiata}.png" style="height:18px;width:auto;vertical-align:middle;margin-right:5px" onerror="this.style.display='none'">`
     : ''
 
-  // Delay lines — prefer arr delay for arrivals, dep delay for departures
+  // Delay lines
   const depDelay = fs?.dep_delay_min != null && Math.abs(fs.dep_delay_min) >= 2
-    ? `<br/><span style="color:${fs.dep_delay_min > 0 ? '#f97316' : '#4ade80'};font-size:11px">Dep ${fs.dep_delay_min > 0 ? `+${fs.dep_delay_min}` : fs.dep_delay_min} min</span>`
+    ? `<div style="color:${fs.dep_delay_min > 0 ? '#f97316' : '#16a34a'};font-size:11px;margin-top:2px">Dep ${fs.dep_delay_min > 0 ? `+${fs.dep_delay_min}` : fs.dep_delay_min} min</div>`
     : ''
   const arrDelayMin = fs?.arr_delay_min != null ? fs.arr_delay_min
     : (fs?.revised_arr_utc && fs?.scheduled_arr_utc
         ? Math.round((new Date(fs.revised_arr_utc).getTime() - new Date(fs.scheduled_arr_utc).getTime()) / 60_000)
         : null)
   const arrDelay = arrDelayMin != null && Math.abs(arrDelayMin) >= 2
-    ? `<br/><span style="color:${arrDelayMin > 0 ? '#f97316' : '#4ade80'};font-size:11px">Arr ${arrDelayMin > 0 ? `+${arrDelayMin}` : arrDelayMin} min</span>`
+    ? `<div style="color:${arrDelayMin > 0 ? '#f97316' : '#16a34a'};font-size:11px;margin-top:2px">Arr ${arrDelayMin > 0 ? `+${arrDelayMin}` : arrDelayMin} min</div>`
     : ''
 
-  // Best arrival time: actual → revised → scheduled (converted to local Syria +3)
-  const bestArrISO = fs?.actual_arr_utc ?? fs?.revised_arr_utc ?? null
+  const bestArrISO   = fs?.actual_arr_utc ?? fs?.revised_arr_utc ?? null
   const bestArrLabel = fs?.actual_arr_utc ? 'Arrived' : fs?.revised_arr_utc ? 'Revised arr' : null
 
   const toLocal = (iso: string) => {
@@ -358,35 +421,44 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
     return `${String((h + 3) % 24).padStart(2,'0')}:${String(m).padStart(2,'0')}`
   }
 
+  const routeLine = `<div style="color:#374151;font-size:12px;margin-bottom:4px">${iataCity(e.dep_iata)} to ${iataCity(e.arr_iata)}</div>`
+
   if (arrived && isSyria && e.arr_time_utc && e.arr_time_utc !== '—') {
     const localTime = bestArrISO ? toLocal(bestArrISO) : schedToLocal(e.arr_time_utc)
-    return `<div style="font-family:monospace;font-size:12px;line-height:1.7">
-      <b>${e.callsign}</b> <span style="color:#9ca3af;font-size:10px">landed</span><br/>
-      ${e.dep_iata} → ${e.arr_iata}${acLine}
-      <br/><span style="color:#4ade80;font-size:11px">Arrived ${e.arr_iata} ~${localTime} local</span>
+    return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:200px;padding:9px 13px 11px">
+      <div style="display:flex;align-items:center;margin-bottom:3px">
+        ${logoHtml}<b style="font-size:14px">${e.callsign}</b>
+        ${acType ? `<span style="margin-left:auto;color:#9ca3af;font-size:11px">${acType}</span>` : ''}
+      </div>
+      ${routeLine}
+      <div style="color:#16a34a;font-size:11px">Arrived ${e.arr_iata} ~${localTime} local</div>
       ${depDelay}${arrDelay}
-      <br/><span style="color:#6b7280;font-size:10px">Schedule-estimated · no live signal</span>
+      <div style="color:#9ca3af;font-size:10px;margin-top:3px">Schedule-estimated · no live signal</div>
     </div>`
   }
 
-  let arrLine = ''
+  let syriaLine = ''
   if (isSyria && e.arr_time_utc && e.arr_time_utc !== '—') {
     const schedLocal = schedToLocal(e.arr_time_utc)
     const dur = e.duration_min
-      ? ` &nbsp;·&nbsp; ${Math.floor(e.duration_min/60)}h${e.duration_min%60>0?` ${e.duration_min%60}m`:''}`
+      ? ` · ${Math.floor(e.duration_min/60)}h${e.duration_min%60>0?` ${e.duration_min%60}m`:''}`
       : ''
-    arrLine = `<br/><span style="color:#4ade80;font-size:11px">Sched ${e.arr_iata} ${schedLocal}${dur}</span>`
+    syriaLine = `<div style="color:#16a34a;font-size:11px;margin-top:4px">→ ${e.arr_iata}  ${schedLocal} local${dur}</div>`
     if (bestArrISO && bestArrLabel) {
-      const revisedLocal = toLocal(bestArrISO)
-      arrLine += `<br/><span style="color:#fbbf24;font-size:11px">${bestArrLabel} ${revisedLocal} local</span>`
+      syriaLine += `<div style="color:#f59e0b;font-size:11px;margin-top:1px">${bestArrLabel} ${toLocal(bestArrISO)} local</div>`
     }
   }
-  return `<div style="font-family:monospace;font-size:12px;line-height:1.7">
-    <b>${e.callsign}</b> <span style="color:#fbbf24;font-size:10px">~ estimated</span><br/>
-    ${e.dep_iata} → ${e.arr_iata}${acLine}
-    ${isSyria ? `<br/><span style="color:#16a34a;font-weight:bold">→ ${e.arr_iata}</span>${arrLine}` : ''}
+
+  return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:200px;padding:9px 13px 11px">
+    <div style="display:flex;align-items:center;margin-bottom:3px">
+      ${logoHtml}<b style="font-size:14px">${e.callsign}</b>
+      <span style="color:#f59e0b;font-size:10px;font-weight:400;margin-left:4px"> ~ est</span>
+      ${acType ? `<span style="margin-left:auto;color:#9ca3af;font-size:11px">${acType}</span>` : ''}
+    </div>
+    ${routeLine}
+    ${syriaLine}
     ${depDelay}${arrDelay}
-    <br/><span style="color:#6b7280;font-size:10px">Schedule projection · no signal yet</span>
+    <div style="color:#9ca3af;font-size:10px;margin-top:3px">Schedule projection · no signal yet</div>
   </div>`
 }
 
@@ -408,7 +480,9 @@ export default function Map() {
   const schedLinesRef   = useRef<Record<string, any[]>>({})
   const scheduleRef     = useRef<ScheduleEntry[]>([])
   const routePathsRef   = useRef<Record<string, Waypoint[]>>({})
-  const flightStatusRef = useRef<Record<string, FlightStatus>>({})
+  const flightStatusRef   = useRef<Record<string, FlightStatus>>({})
+  const photoCacheRef     = useRef<Record<string, string | null>>({})
+  const photoRequestedRef = useRef<Set<string>>(new Set())
 
   const [count, setCount]           = useState(0)
   const [lastUpdate, setLastUpdate] = useState('')
@@ -616,14 +690,38 @@ export default function Map() {
         const callsign = (a.flight ?? '').trim()
         const isAlp    = airports.includes('ALP')
         const icon     = planeIcon(L, bestHeading(a), isSyria, false, isSyria && callsign ? callsign : undefined, isAlp)
-        const popup    = buildPopup({ ...a, syria_airports: airports }, undefined, false, flightStatusRef.current[callsign])
+        const fs_live  = flightStatusRef.current[callsign]
+        const reg_live = fs_live?.aircraft_reg ?? a.r ?? null
+        const photo_live = reg_live ? photoCacheRef.current[reg_live] ?? null : null
+        const popup    = buildPopup({ ...a, syria_airports: airports }, undefined, false, fs_live, photo_live)
 
         if (markersRef.current[a.hex]) {
           markersRef.current[a.hex].setLatLng([a.lat, a.lon])
           markersRef.current[a.hex].setIcon(icon)
           markersRef.current[a.hex].setPopupContent(popup)
         } else {
-          markersRef.current[a.hex] = L.marker([a.lat, a.lon], { icon }).addTo(map).bindPopup(popup)
+          markersRef.current[a.hex] = L.marker([a.lat, a.lon], { icon }).addTo(map).bindPopup(popup, { className: 'fp-popup' })
+        }
+
+        // Fetch aircraft photo from Planespotters once per registration
+        if (reg_live && !photoRequestedRef.current.has(reg_live)) {
+          photoRequestedRef.current.add(reg_live)
+          const capturedHex = a.hex
+          const capturedA   = { ...a, syria_airports: airports }
+          const capturedCS  = callsign
+          fetch(`https://api.planespotters.net/pub/photos/reg/${encodeURIComponent(reg_live)}`)
+            .then(r => r.ok ? r.json() : null)
+            .then(data => {
+              const url: string | null = data?.photos?.[0]?.thumbnail?.src ?? null
+              photoCacheRef.current[reg_live] = url
+              if (url && markersRef.current[capturedHex]) {
+                const fsNow = flightStatusRef.current[capturedCS]
+                markersRef.current[capturedHex].setPopupContent(
+                  buildPopup(capturedA, undefined, false, fsNow, url)
+                )
+              }
+            })
+            .catch(() => { photoCacheRef.current[reg_live] = null })
         }
 
         linesRef.current[a.hex]?.forEach((l: any) => l.remove())
@@ -964,7 +1062,10 @@ export default function Map() {
           : undefined
         const isEstimatedStale = projected && !arrSnapped
         const icon       = planeIcon(L, dispTrack, isSyria, !isSyria || arrSnapped, staleLabel, aps.includes('ALP'), isEstimatedStale)
-        const popup      = buildPopup({ ...a, syria_airports: aps }, entry.lostAt, projected, flightStatusRef.current[cs])
+        const fs_dr    = flightStatusRef.current[cs]
+        const reg_dr   = fs_dr?.aircraft_reg ?? a.r ?? null
+        const photo_dr = reg_dr ? photoCacheRef.current[reg_dr] ?? null : null
+        const popup    = buildPopup({ ...a, syria_airports: aps }, entry.lostAt, projected, fs_dr, photo_dr)
 
         // Smooth-blend toward the DR target so that when a fresh FR24 fix arrives
         // at a position slightly different from what DR predicted, the marker
@@ -981,7 +1082,28 @@ export default function Map() {
           markersRef.current[hex].setIcon(icon)
           markersRef.current[hex].setPopupContent(popup)
         } else {
-          markersRef.current[hex] = L.marker([dispLat, dispLon], { icon }).addTo(map).bindPopup(popup)
+          markersRef.current[hex] = L.marker([dispLat, dispLon], { icon }).addTo(map).bindPopup(popup, { className: 'fp-popup' })
+        }
+
+        // Fetch photo if we have a reg and haven't requested it yet
+        if (reg_dr && !photoRequestedRef.current.has(reg_dr)) {
+          photoRequestedRef.current.add(reg_dr)
+          const capturedHex = hex
+          const capturedA   = { ...a, syria_airports: aps }
+          const capturedCS  = cs
+          fetch(`https://api.planespotters.net/pub/photos/reg/${encodeURIComponent(reg_dr)}`)
+            .then(r => r.ok ? r.json() : null)
+            .then(data => {
+              const url: string | null = data?.photos?.[0]?.thumbnail?.src ?? null
+              photoCacheRef.current[reg_dr] = url
+              if (url && markersRef.current[capturedHex]) {
+                const fsNow = flightStatusRef.current[capturedCS]
+                markersRef.current[capturedHex].setPopupContent(
+                  buildPopup(capturedA, entry.lostAt, projected, fsNow, url)
+                )
+              }
+            })
+            .catch(() => { photoCacheRef.current[reg_dr] = null })
         }
 
         linesRef.current[hex]?.forEach((l: any) => l.remove())
@@ -1132,7 +1254,7 @@ export default function Map() {
           schedMarkersRef.current[callsign].setIcon(icon)
           schedMarkersRef.current[callsign].setPopupContent(popup)
         } else {
-          schedMarkersRef.current[callsign] = L.marker([lat, lon], { icon }).addTo(map).bindPopup(popup)
+          schedMarkersRef.current[callsign] = L.marker([lat, lon], { icon }).addTo(map).bindPopup(popup, { className: 'fp-popup' })
         }
 
         // No route line for arrived flights; clear any existing line

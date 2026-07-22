@@ -12,7 +12,7 @@ export async function GET() {
   const today = new Date().toISOString().slice(0, 10)
 
   const res = await fetch(
-    `${SB_URL}/rest/v1/flight_status?operating_date=eq.${today}&select=callsign,operating_date,status,actual_dep_utc,actual_arr_utc,scheduled_dep_utc,scheduled_arr_utc,revised_dep_utc,revised_arr_utc,dep_delay_min,arr_delay_min,aircraft_reg,aircraft_type,flight_number,dep_iata,arr_iata`,
+    `${SB_URL}/rest/v1/flight_status?operating_date=eq.${today}&select=callsign,operating_date,status,actual_dep_utc,actual_arr_utc,scheduled_dep_utc,scheduled_arr_utc,revised_dep_utc,revised_arr_utc,dep_delay_min,arr_delay_min,aircraft_reg,aircraft_type,flight_number,dep_iata,arr_iata,airline_iata`,
     {
       headers: {
         apikey: SB_KEY,
