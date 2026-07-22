@@ -82,27 +82,29 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: true, date, filled: 0, skipped: 0, note: 'No rows need filling' })
   }
 
-  // ── 2. Call AeroDatBox for OSDI + OSAP (full date window) ──────────────────
-  const from = `${date}T00:00`
-  const to   = `${date}T23:59`
+  // ── 2. Call AeroDatBox for OSDI + OSAP ─────────────────────────────────────
+  // ADB caps at 12h windows — split the day into two halves, fetch both airports
+  const windows = [
+    [`${date}T00:00`, `${date}T12:00`],
+    [`${date}T12:00`, `${date}T23:59`],
+  ]
+  const icaos = ['OSDI', 'OSAP']
 
-  const [resDam, resAlp] = await Promise.allSettled([
-    fetch(`${ADB_BASE}/flights/airports/icao/OSDI/${from}/${to}?withLeg=true&withCancelled=false&direction=Both`, {
-      headers: { 'x-api-market-key': ADB_KEY },
-      signal: AbortSignal.timeout(20_000),
-    }),
-    fetch(`${ADB_BASE}/flights/airports/icao/OSAP/${from}/${to}?withLeg=true&withCancelled=false&direction=Both`, {
-      headers: { 'x-api-market-key': ADB_KEY },
-      signal: AbortSignal.timeout(20_000),
-    }),
-  ])
-
-  const adbFlights: AdbFlight[] = []
-  for (const result of [resDam, resAlp]) {
-    if (result.status === 'rejected' || !result.value.ok) continue
-    const data: { departures?: AdbFlight[]; arrivals?: AdbFlight[] } = await result.value.json()
-    adbFlights.push(...(data.departures ?? []), ...(data.arrivals ?? []))
+  async function adbFetch(icao: string, from: string, to: string): Promise<AdbFlight[]> {
+    const res = await fetch(
+      `${ADB_BASE}/flights/airports/icao/${icao}/${from}/${to}?withLeg=true&withCancelled=false&direction=Both`,
+      { headers: { 'x-api-market-key': ADB_KEY }, signal: AbortSignal.timeout(20_000) }
+    )
+    if (!res.ok) return []
+    const data: { departures?: AdbFlight[]; arrivals?: AdbFlight[] } = await res.json()
+    return [...(data.departures ?? []), ...(data.arrivals ?? [])]
   }
+
+  const results = await Promise.allSettled(
+    icaos.flatMap(icao => windows.map(([from, to]) => adbFetch(icao, from, to)))
+  )
+  const adbFlights: AdbFlight[] = results
+    .flatMap(r => r.status === 'fulfilled' ? r.value : [])
 
   if (!adbFlights.length) {
     return NextResponse.json({ ok: false, error: 'AeroDatBox returned no flights', date })
