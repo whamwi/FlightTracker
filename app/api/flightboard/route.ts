@@ -6,12 +6,19 @@ const SB_URL = process.env.SUPABASE_URL!
 const SB_KEY = process.env.SUPABASE_ANON_KEY!
 const HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 
-// Convert a UTC ISO timestamp to Syria local HH:MM (UTC+3)
-function utcToSyriaHHMM(iso: string | null): string {
+// UTC offset (hours) per airport. Default = 3 (Syria/most Mid-East airports).
+const AIRPORT_UTC_OFFSET: Record<string, number> = {
+  // UTC+4
+  DXB: 4, AUH: 4, SHJ: 4, MCT: 4, EVN: 4,
+  // UTC+2
+  AMS: 2, MJI: 2,
+}
+
+function utcToLocalHHMM(iso: string | null, iata: string): string {
   if (!iso) return ''
   const d = new Date(iso)
-  const min = d.getUTCHours() * 60 + d.getUTCMinutes() + 180
-  const w = ((min % 1440) + 1440) % 1440
+  const offsetMin = (AIRPORT_UTC_OFFSET[iata] ?? 3) * 60
+  const w = ((d.getUTCHours() * 60 + d.getUTCMinutes() + offsetMin) % 1440 + 1440) % 1440
   return `${String(Math.floor(w / 60)).padStart(2, '0')}:${String(w % 60).padStart(2, '0')}`
 }
 
@@ -63,9 +70,9 @@ export async function GET(req: Request) {
     const callsign: string = fl.broadcast_callsign ?? ''
     const st = byCallsign[callsign] ?? null
 
-    // Scheduled times derived from instance UTC timestamps (→ Syria local UTC+3)
-    const dep_time     = utcToSyriaHHMM(r.std)
-    const arr_time     = utcToSyriaHHMM(r.sta)
+    // Scheduled times in origin/destination airport local time
+    const dep_time     = utcToLocalHHMM(r.std, r.dep_iata)
+    const arr_time     = utcToLocalHHMM(r.sta, r.arr_iata)
     const dep_time_utc = r.std ? new Date(r.std).toISOString().slice(11, 16) : ''
     const arr_time_utc = r.sta ? new Date(r.sta).toISOString().slice(11, 16) : ''
 

@@ -42,11 +42,17 @@ interface EditState {
 
 const ALL_DAYS = ['mon','tue','wed','thu','fri','sat','sun']
 
-function fmtLocal(utc: string | null): string {
+const AIRPORT_UTC_OFFSET: Record<string, number> = {
+  DXB: 4, AUH: 4, SHJ: 4, MCT: 4, EVN: 4,  // UTC+4
+  AMS: 2, MJI: 2,                               // UTC+2
+}
+
+function fmtLocal(utc: string | null, iata?: string): string {
   if (!utc) return '—'
   const [h, m] = utc.slice(0, 5).split(':').map(Number)
   if (isNaN(h) || isNaN(m)) return '—'
-  const local = ((h * 60 + m) + 180) % 1440
+  const offsetMin = (AIRPORT_UTC_OFFSET[iata ?? ''] ?? 3) * 60
+  const local = ((h * 60 + m) + offsetMin) % 1440
   return `${String(Math.floor(local / 60)).padStart(2, '0')}:${String(local % 60).padStart(2, '0')}`
 }
 
@@ -222,7 +228,7 @@ export default function AdminRouteCache() {
                           </span>
                         </td>
                         <td style={{ ...s.td, ...s.mono }}>{knownUtc?.slice(0, 5) ?? '—'}</td>
-                        <td style={{ ...s.td, ...s.mono }}>{fmtLocal(knownUtc)}</td>
+                        <td style={{ ...s.td, ...s.mono }}>{fmtLocal(knownUtc, row.missing === 'dep' ? row.arr_iata : row.dep_iata)}</td>
                         <td style={s.td}>{(row.days_of_week ?? []).map(d => d.slice(0, 3)).join(' ')}</td>
                         <td style={s.td}>
                           <button onClick={() => openEditFromUnfilled(row)} style={s.editBtn}>Add Times</button>
@@ -262,8 +268,8 @@ export default function AdminRouteCache() {
                   <td style={s.td}>{row.dep_iata} → {row.arr_iata}</td>
                   <td style={{ ...s.td, ...s.mono }}>{row.dep_time_utc?.slice(0, 5) ?? '—'}</td>
                   <td style={{ ...s.td, ...s.mono }}>{row.arr_time_utc?.slice(0, 5) ?? '—'}</td>
-                  <td style={{ ...s.td, ...s.mono }}>{fmtLocal(row.dep_time_utc)}</td>
-                  <td style={{ ...s.td, ...s.mono }}>{fmtLocal(row.arr_time_utc)}</td>
+                  <td style={{ ...s.td, ...s.mono }}>{fmtLocal(row.dep_time_utc, row.dep_iata)}</td>
+                  <td style={{ ...s.td, ...s.mono }}>{fmtLocal(row.arr_time_utc, row.arr_iata)}</td>
                   <td style={s.td}>{durLabel(row.dep_time_utc ?? '', row.arr_time_utc ?? '')}</td>
                   <td style={s.td}>{(row.days_of_week ?? []).map(d => d.slice(0, 3)).join(' ')}</td>
                   <td style={s.td}>
@@ -281,7 +287,7 @@ export default function AdminRouteCache() {
         <div style={s.overlay} onClick={() => setEdit(null)}>
           <div style={s.modal} onClick={e => e.stopPropagation()}>
             <h2 style={s.modalTitle}>{edit.flight_iata} — {edit.dep_iata} → {edit.arr_iata}</h2>
-            <p style={s.modalSub}>Enter scheduled UTC times (HH:MM). Local shows Syria time (UTC+3).</p>
+            <p style={s.modalSub}>Enter scheduled UTC times (HH:MM). Local shows origin/destination airport time.</p>
 
             {/* Times — stacked to prevent overflow */}
             <div style={s.field}>
@@ -293,7 +299,7 @@ export default function AdminRouteCache() {
                 value={edit.dep_time_utc}
                 onChange={e => setEdit(p => p ? { ...p, dep_time_utc: e.target.value } : p)}
               />
-              {edit.dep_time_utc && <span style={s.hint}>Local: {fmtLocal(edit.dep_time_utc)}</span>}
+              {edit.dep_time_utc && <span style={s.hint}>Local ({edit.dep_iata}): {fmtLocal(edit.dep_time_utc, edit.dep_iata)}</span>}
             </div>
 
             <div style={{ ...s.field, marginTop: 12 }}>
@@ -305,7 +311,7 @@ export default function AdminRouteCache() {
                 value={edit.arr_time_utc}
                 onChange={e => setEdit(p => p ? { ...p, arr_time_utc: e.target.value } : p)}
               />
-              {edit.arr_time_utc && <span style={s.hint}>Local: {fmtLocal(edit.arr_time_utc)}</span>}
+              {edit.arr_time_utc && <span style={s.hint}>Local ({edit.arr_iata}): {fmtLocal(edit.arr_time_utc, edit.arr_iata)}</span>}
             </div>
 
             {edit.dep_time_utc && edit.arr_time_utc && (
