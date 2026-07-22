@@ -73,10 +73,10 @@ export async function GET(req: Request) {
     const balance: number = balData?.balance ?? balData?.credits ?? balData?.availableCredits ?? 0
 
     let refillResult: unknown = null
-    if (balance < 120) {
+    if (balance < 500) {
       const refillRes = await adb('/subscriptions/balance/refill', {
         method: 'POST',
-        body: JSON.stringify({ credits: 60 }),
+        body: JSON.stringify({ credits: 500 }),
       })
       refillResult = refillRes.ok ? await safeJson(refillRes) : { error: await refillRes.text() }
     }

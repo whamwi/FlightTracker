@@ -152,8 +152,8 @@ export async function GET(req: Request) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const existingRows: any[] = existingRes.ok ? await existingRes.json() : []
 
-    const hasActualDep = new Set(existingRows.filter(r => r.actual_dep_utc).map(r => r.callsign))
-    const hasActualArr = new Set(existingRows.filter(r => r.actual_arr_utc).map(r => r.callsign))
+    const hasActualDep = new Set(existingRows.filter(r => r.actual_dep_utc).map(r => `${r.callsign}|${r.operating_date}`))
+    const hasActualArr = new Set(existingRows.filter(r => r.actual_arr_utc).map(r => `${r.callsign}|${r.operating_date}`))
 
     // ── 4. Build upsert rows — only fill nulls, never overwrite ADB data ─────
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -184,8 +184,9 @@ export async function GET(req: Request) {
           fr24_id:        r.fr24_id ?? r.id ?? null,
           last_synced_at: now.toISOString(),
         }
-        if (!hasActualDep.has(callsign)) row.actual_dep_utc = toISO(r.datetime_takeoff)
-        if (!hasActualArr.has(callsign)) row.actual_arr_utc = toISO(r.datetime_landed)
+        const dateKey = `${callsign}|${row.operating_date}`
+        if (!hasActualDep.has(dateKey)) row.actual_dep_utc = toISO(r.datetime_takeoff)
+        if (!hasActualArr.has(dateKey)) row.actual_arr_utc = toISO(r.datetime_landed)
 
         if (row.actual_dep_utc === undefined && row.actual_arr_utc === undefined) return null
         return row

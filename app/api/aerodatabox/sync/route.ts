@@ -113,12 +113,17 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: 'AERODATABOX_KEY not set' }, { status: 500 })
   }
 
+  // ADB airport API requires explicit from/to in URL path; max 12-hour window.
+  // Use -2h to +10h from now: catches recent departures + upcoming arrivals.
+  const adbFrom = new Date(Date.now() -  2 * 3_600_000).toISOString().slice(0, 16)
+  const adbTo   = new Date(Date.now() + 10 * 3_600_000).toISOString().slice(0, 16)
+
   const [resDam, resAlp] = await Promise.allSettled([
-    fetch(`${ADB_BASE}/flights/airports/icao/OSDI?withLeg=true&withCancelled=true&direction=Both`, {
+    fetch(`${ADB_BASE}/flights/airports/icao/OSDI/${adbFrom}/${adbTo}?withLeg=true&withCancelled=true&direction=Both`, {
       headers: { 'x-api-market-key': ADB_KEY },
       signal: AbortSignal.timeout(15_000),
     }),
-    fetch(`${ADB_BASE}/flights/airports/icao/OSAP?withLeg=true&withCancelled=true&direction=Both`, {
+    fetch(`${ADB_BASE}/flights/airports/icao/OSAP/${adbFrom}/${adbTo}?withLeg=true&withCancelled=true&direction=Both`, {
       headers: { 'x-api-market-key': ADB_KEY },
       signal: AbortSignal.timeout(15_000),
     }),
@@ -382,6 +387,101 @@ export async function GET(req: Request) {
     }
   } catch { /* non-fatal: second pass failures don't break the response */ }
 
+  // ── Third pass: backfill ALL callsigns missing today's status ────────────────
+  // Covers flights missed due to ADB webhook credit outage or airport-poll gaps.
+  // Runs after FYC pass since FYC flights are already handled above.
+  let allCallsignsSynced = 0
+  try {
+    const syriaNow = new Date(Date.now() + 3 * 3_600_000)
+    const syriaDate = syriaNow.toISOString().slice(0, 10)
+    const syriaDoW  = ['sun','mon','tue','wed','thu','fri','sat'][syriaNow.getUTCDay()]
+    const now3      = new Date()
+
+    // Get scheduled callsigns for today's day-of-week via embedded FK join
+    const schedFetch = await fetch(
+      `${SB_URL}/rest/v1/flight_schedule?days_of_week=cs.{${syriaDoW}}` +
+      `&select=arr_time_utc,flight_lookup!flight_id(broadcast_callsign)`,
+      { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }, signal: AbortSignal.timeout(8_000) }
+    )
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const schedRows: any[] = schedFetch.ok ? await schedFetch.json() : []
+
+    // Get callsigns already covered in flight_status for today
+    const exStatusFetch = await fetch(
+      `${SB_URL}/rest/v1/flight_status?operating_date=eq.${syriaDate}&select=callsign`,
+      { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }, signal: AbortSignal.timeout(5_000) }
+    )
+    const coveredToday = new Set<string>(
+      exStatusFetch.ok ? (await exStatusFetch.json()).map((r: { callsign: string }) => r.callsign) : []
+    )
+
+    // Find callsigns scheduled today that have no status row yet and arrived within 14h
+    const seen3 = new Set<string>()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const toBackfill: { callsign: string }[] = []
+    for (const r of schedRows) {
+      const cs: string | undefined = r.flight_lookup?.broadcast_callsign
+      if (!cs || coveredToday.has(cs) || cs.startsWith('FYC') || seen3.has(cs)) continue
+      seen3.add(cs)
+      const [h, m] = (r.arr_time_utc as string).split(':').map(Number)
+      const arrMin = h * 60 + m
+      const nowMin = now3.getUTCHours() * 60 + now3.getUTCMinutes()
+      const diffMin = (nowMin - arrMin + 1440) % 1440
+      if (diffMin <= 14 * 60) toBackfill.push({ callsign: cs })
+    }
+
+    for (const { callsign } of toBackfill) {
+      try {
+        const flRes = await adb(`/flights/callsign/${encodeURIComponent(callsign)}`)
+        if (!flRes.ok) continue
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const flData: any = await flRes.json()
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const flList: any[] = Array.isArray(flData) ? flData : (flData ? [flData] : [])
+        for (const f of flList) {
+          const dep = f.departure ?? {}
+          const arr = f.arrival ?? {}
+          const depLive = hasLive(dep.quality)
+          const arrLive = hasLive(arr.quality)
+          const actualDep = depLive ? (dep.runwayTime?.utc ?? dep.revisedTime?.utc) : undefined
+          const actualArr = arrLive ? (arr.runwayTime?.utc ?? arr.revisedTime?.utc) : undefined
+          if (!actualDep && !actualArr) continue
+          if (actualArr && now3.getTime() - new Date(actualArr).getTime() > 24 * 3_600_000) continue
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const row: Record<string, any> = {
+            callsign,
+            operating_date:  syriaDate,
+            dep_iata:        dep.airport?.iata ?? null,
+            arr_iata:        arr.airport?.iata ?? null,
+            status:          resolveStatus(f.status),
+            dep_quality:     dep.quality ?? [],
+            arr_quality:     arr.quality ?? [],
+            last_synced_at:  now3.toISOString(),
+          }
+          if (actualDep) {
+            const depDate = new Date(actualDep).toISOString().slice(0, 10)
+            if (depDate === syriaDate) {
+              row.actual_dep_utc = new Date(actualDep).toISOString()
+              row.dep_delay_min  = delayMin(dep.scheduledTime?.utc, actualDep)
+            }
+          }
+          if (actualArr) {
+            row.actual_arr_utc = new Date(actualArr).toISOString()
+            row.arr_delay_min  = delayMin(arr.scheduledTime?.utc, actualArr)
+          }
+
+          await sb('/flight_status', {
+            method: 'POST',
+            headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+            body: JSON.stringify([row]),
+          })
+          allCallsignsSynced++
+        }
+      } catch { /* skip this callsign, continue */ }
+    }
+  } catch { /* non-fatal */ }
+
   return NextResponse.json({
     ok: true,
     synced: rows.length,
@@ -390,5 +490,6 @@ export async function GET(req: Request) {
     with_actual_dep: withPos,
     sched_fixed: schedFixed,
     fyc_arrival_synced: fycSynced,
+    all_callsigns_synced: allCallsignsSynced,
   })
 }
