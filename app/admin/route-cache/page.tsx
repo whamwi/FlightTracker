@@ -42,6 +42,11 @@ interface EditState {
 
 const ALL_DAYS = ['mon','tue','wed','thu','fri','sat','sun']
 
+function fr24Url(iataNumber: string, callsign: string): string {
+  const slug = iataNumber.startsWith('XH') ? callsign : iataNumber
+  return `https://www.flightradar24.com/data/flights/${slug.toLowerCase()}`
+}
+
 const AIRPORT_UTC_OFFSET: Record<string, number> = {
   DXB: 4, AUH: 4, SHJ: 4, MCT: 4, EVN: 4,  // UTC+4
   AMS: 2, MJI: 2,                               // UTC+2
@@ -219,7 +224,11 @@ export default function AdminRouteCache() {
                     const knownUtc = row.missing === 'dep' ? row.arr_time_utc : row.dep_time_utc
                     return (
                       <tr key={row.id} style={s.tr}>
-                        <td style={s.td}><strong style={{ color: '#111' }}>{row.iata_number}</strong></td>
+                        <td style={s.td}>
+                          <a href={fr24Url(row.iata_number, row.broadcast_callsign)} target="_blank" rel="noreferrer" style={s.fr24}>
+                            {row.iata_number}
+                          </a>
+                        </td>
                         <td style={{ ...s.td, ...s.callsign }}>{row.broadcast_callsign}</td>
                         <td style={s.td}>{row.dep_iata} → {row.arr_iata}</td>
                         <td style={s.td}>
@@ -263,7 +272,11 @@ export default function AdminRouteCache() {
             <tbody>
               {sortRows(filled, sort).map(row => (
                 <tr key={row.id} style={s.tr}>
-                  <td style={s.td}><strong style={{ color: '#111' }}>{row.iata_number}</strong></td>
+                  <td style={s.td}>
+                    <a href={fr24Url(row.iata_number, row.broadcast_callsign)} target="_blank" rel="noreferrer" style={s.fr24}>
+                      {row.iata_number}
+                    </a>
+                  </td>
                   <td style={{ ...s.td, ...s.callsign }}>{row.broadcast_callsign}</td>
                   <td style={s.td}>{row.dep_iata} → {row.arr_iata}</td>
                   <td style={{ ...s.td, ...s.mono }}>{row.dep_time_utc?.slice(0, 5) ?? '—'}</td>
@@ -374,6 +387,7 @@ const s: Record<string, React.CSSProperties> = {
   badgeArr:     { background: '#dbeafe', color: '#1e40af' },
   badgeDep:     { background: '#fef3c7', color: '#78350f' },
   empty:        { color: '#555', fontStyle: 'italic', padding: '20px 0', fontSize: 15 },
+  fr24:         { fontWeight: 700, color: '#0070f3', textDecoration: 'none', fontFamily: 'monospace', fontSize: 13 },
   editBtn:      { padding: '4px 12px', fontSize: 13, border: '1px solid #0070f3', background: '#fff', color: '#0070f3', borderRadius: 5, cursor: 'pointer', fontWeight: 600 },
   fillBtn:      { padding: '8px 18px', background: '#0070f3', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: 14 },
   overlay:      { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '20px' },
