@@ -35,6 +35,32 @@ async function fetchFeed(): Promise<unknown[]> {
 interface SyriaInfo { airports: string[]; arr_time_utc: string | null; duration_min: number | null; dep_syria: boolean; arr_syria: boolean }
 type SyriaMap = Map<string, SyriaInfo>
 
+// ── Actual departure times from flight_status (2-min cache) ──────────────────
+let actualDepsCache: { map: Map<string, string>; ts: number } | null = null
+
+async function fetchActualDeps(): Promise<Map<string, string>> {
+  if (actualDepsCache && Date.now() - actualDepsCache.ts < 2 * 60_000)
+    return actualDepsCache.map
+
+  const syriaDate = new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10)
+  const res = await fetch(
+    `${SB_URL}/rest/v1/flight_status?select=callsign,actual_dep_utc&operating_date=eq.${syriaDate}&actual_dep_utc=not.is.null`,
+    { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` } },
+  ).catch(() => null)
+
+  const map = new Map<string, string>()
+  if (res?.ok) {
+    const rows: { callsign: string; actual_dep_utc: string }[] = await res.json()
+    for (const r of rows) {
+      if (r.callsign && r.actual_dep_utc) {
+        map.set(r.callsign, new Date(r.actual_dep_utc).toISOString().slice(11, 16))
+      }
+    }
+  }
+  actualDepsCache = { map, ts: Date.now() }
+  return map
+}
+
 let syriaCache: { map: SyriaMap; ts: number; day: string } | null = null
 
 async function fetchSyriaMap(): Promise<SyriaMap> {
@@ -220,7 +246,7 @@ async function fetchSyriaStale(excludeHexes: Set<string>, syriaMap: SyriaMap): P
 // ── Handler ───────────────────────────────────────────────────────────────────
 export async function GET() {
   try {
-    const [aircraft, syriaMap] = await Promise.all([
+    const [aircraft, syriaMap, actualDeps] = await Promise.all([
       (async () => {
         if (feedCache && Date.now() - feedCache.ts < 10_000) return feedCache.aircraft
         if (!feedInflight) {
@@ -231,6 +257,7 @@ export async function GET() {
         return feedInflight
       })(),
       fetchSyriaMap(),
+      fetchActualDeps(),
     ])
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -259,11 +286,23 @@ export async function GET() {
       if (liveCallsigns.has(cs)) return false
       const info = syriaMap.get(cs)!
       if (!info.arr_time_utc) return true
-      const [ah, am] = info.arr_time_utc.split(':').map(Number)
-      const arrSec  = ah * 3600 + am * 60
-      const depSec  = arrSec - (info.duration_min ?? 180) * 60
-      const start   = ((depSec  - 30 * 60) + 86400) % 86400
-      const end     = ((arrSec  + 30 * 60) + 86400) % 86400
+
+      // Use actual departure time (from ADB webhook via flight_status) when available;
+      // fall back to scheduled departure = arr_time_utc - duration_min.
+      const actualDep = actualDeps.get(cs)
+      let depSec: number
+      if (actualDep) {
+        const [dh, dm] = actualDep.split(':').map(Number)
+        depSec = dh * 3600 + dm * 60
+      } else {
+        const [ah, am] = info.arr_time_utc.split(':').map(Number)
+        depSec = ah * 3600 + am * 60 - (info.duration_min ?? 180) * 60
+      }
+
+      // Estimated arrival = actual (or scheduled) dep + duration; window closes 90min after that.
+      const estArrSec = depSec + (info.duration_min ?? 180) * 60
+      const start     = ((depSec    - 30 * 60) + 86400) % 86400
+      const end       = ((estArrSec + 90 * 60) + 86400) % 86400
       return start < end ? nowSec >= start && nowSec <= end : nowSec >= start || nowSec <= end
     })
 

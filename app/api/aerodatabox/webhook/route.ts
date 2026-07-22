@@ -193,5 +193,21 @@ export async function POST(req: Request) {
     })
   }
 
+  // Log every webhook hit so we can verify delivery
+  try {
+    const firstFlight = flights[0]
+    await sb('/webhook_log', {
+      method: 'POST',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({
+        callsign:   firstFlight?.callSign ?? null,
+        flight_num: firstFlight?.number   ?? null,
+        status:     firstFlight ? String(firstFlight.status ?? '') : null,
+        credits:    remainingCredits ?? null,
+        payload,
+      }),
+    })
+  } catch { /* non-fatal */ }
+
   return NextResponse.json({ ok: true, processed: rows.length, remainingCredits })
 }

@@ -91,7 +91,8 @@ export async function GET(req: Request) {
       for (const s of existingSubs) {
         const raw = s.subjectId ?? s.subject
         const subId = typeof raw === 'string' ? raw : (raw?.id ?? raw?.value ?? raw?.number ?? '')
-        if (subId) existing.add(String(subId).toUpperCase())
+        // ADB stores subjects as "DN 551" (with space); normalise to "DN551" to match our iata_number format
+        if (subId) existing.add(String(subId).toUpperCase().replace(/\s+/g, ''))
       }
     }
 
@@ -129,7 +130,7 @@ export async function GET(req: Request) {
     // 3. Subscribe using broadcast callsign; skip if IATA or callsign already exists.
     // ADB stores subscriptions under IATA aliases (G9 352 for ABY352) so we check both.
     const toSubscribe = pairs.filter(
-      p => !existing.has(p.callsign.toUpperCase()) && !existing.has(p.iata.toUpperCase()),
+      p => !existing.has(p.callsign.toUpperCase()) && !existing.has(p.iata.toUpperCase().replace(/\s+/g, '')),
     )
     const created: string[] = []
     const alreadyCovered: string[] = []
@@ -158,12 +159,15 @@ export async function GET(req: Request) {
       }))
     }
 
+    const showList = url.searchParams.get('list') === 'true'
+
     return NextResponse.json({
       ok: true,
       balance_before:   balance,
       refill:           refillResult,
       total_from_db:    pairs.length,
       existing_count:   existing.size,
+      existing_subs:    showList ? existingSubs : undefined,
       deleted:          deleted.length,
       skipped_db_match: pairs.length - toSubscribe.length,
       created,

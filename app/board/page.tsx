@@ -102,6 +102,14 @@ function fmtLocal(raw: string | null | undefined): string {
   return raw.slice(0, 5)
 }
 
+// Convert a stored UTC HH:MM time to Syria local (UTC+3)
+function utcToSyria(hhmm: string | null | undefined): string {
+  if (!hhmm) return '—'
+  const [h, m] = hhmm.slice(0, 5).split(':').map(Number)
+  const total = (h * 60 + m + 180) % 1440
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+}
+
 function durationLabel(min: number): string {
   if (!min) return ''
   return `${Math.floor(min / 60)}h ${min % 60}m`
@@ -115,10 +123,10 @@ function effectiveStatus(f: Flight): string {
   return 'Unknown'
 }
 
-function calcDelay(schedHHMM: string, actualISO: string | null, date: string): number | null {
-  if (!actualISO || !schedHHMM || !date) return null
-  const diff = (new Date(actualISO).getTime() - new Date(`${date}T${schedHHMM}:00Z`).getTime()) / 60_000
-  return Math.round(diff)
+function calcDelay(schedHHMM: string, actualISO: string | null): number | null {
+  if (!actualISO || !schedHHMM) return null
+  const opDate = actualISO.slice(0, 10)
+  return Math.round((new Date(actualISO).getTime() - new Date(`${opDate}T${schedHHMM}:00Z`).getTime()) / 60_000)
 }
 
 // "Next" = not in terminal state OR recently departed/arrived (within 60 min)
@@ -182,13 +190,13 @@ function DelayBadge({ min }: { min: number | null }) {
   )
 }
 
-function FlightCard({ f, view, date }: { f: Flight; view: View; date: string }) {
+function FlightCard({ f, view }: { f: Flight; view: View }) {
   const isArr = view === 'arr'
   const status = effectiveStatus(f)
   const isCancelled = status === 'Cancelled'
 
-  const depDelay = calcDelay(f.dep_time_utc, f.actual_dep_utc ?? f.revised_dep_utc, date)
-  const arrDelay = calcDelay(f.arr_time_utc, f.actual_arr_utc ?? f.revised_arr_utc, date)
+  const depDelay = calcDelay(f.dep_time_utc, f.actual_dep_utc ?? f.revised_dep_utc)
+  const arrDelay = calcDelay(f.arr_time_utc, f.actual_arr_utc ?? f.revised_arr_utc)
 
   return (
     <div className={`bg-gray-900 border rounded-xl p-4 flex flex-col gap-3 ${isCancelled ? 'border-red-900/60 opacity-60' : 'border-gray-800'}`}>
@@ -295,12 +303,13 @@ export default function BoardPage() {
   const [view, setView]       = useState<View>('arr')
   const [airport, setAirport] = useState<Airport>('DAM')
   const [filter, setFilter]   = useState<Filter>('next')
-  const [flights, setFlights] = useState<Flight[]>([])
-  const [loading, setLoading] = useState(true)
-  const [date, setDate]       = useState('')
+  const [flights, setFlights]         = useState<Flight[]>([])
+  const [prevFlights, setPrevFlights] = useState<Flight[]>([])
+  const [loading, setLoading]         = useState(true)
+  const [date, setDate]               = useState('')
 
-  const load = useCallback(async (offsetDays: Tab) => {
-    setLoading(true)
+  const load = useCallback(async (offsetDays: number, silent = false) => {
+    if (!silent) setLoading(true)
     const d = syriaDate(offsetDays)
     setDate(d)
     try {
@@ -308,31 +317,46 @@ export default function BoardPage() {
       const json = await res.json()
       setFlights(json.flights ?? [])
     } catch {
-      setFlights([])
+      if (!silent) setFlights([])
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [])
 
-  useEffect(() => { load(tab) }, [tab, load])
+  const loadPrev = useCallback(async (offsetDays: number) => {
+    const dPrev = syriaDate(offsetDays - 1)
+    try {
+      const res = await fetch(`/api/flightboard?date=${dPrev}`)
+      const json = await res.json()
+      setPrevFlights(json.flights ?? [])
+    } catch {
+      setPrevFlights([])
+    }
+  }, [])
+
+  useEffect(() => { load(tab); loadPrev(tab) }, [tab, load, loadPrev])
   useEffect(() => {
     if (tab !== 0) return
-    const t = setInterval(() => load(0), 60_000)
+    const t = setInterval(() => load(0, true), 60_000)
     return () => clearInterval(t)
   }, [tab, load])
 
-  const SYRIA = ['DAM', 'ALP']
-  const byViewAndAirport = flights.filter(f => {
-    if (view === 'arr') {
-      return SYRIA.includes(f.arr_iata) && f.arr_iata === airport
-    } else {
-      return SYRIA.includes(f.dep_iata) && f.dep_iata === airport
+  // Flights that cross midnight: arrive after midnight relative to departure (arr_time < dep_time)
+  const crossesMidnight = (f: Flight) => f.arr_time < f.dep_time
+
+  const byViewAndAirport = (() => {
+    if (view === 'dep') {
+      return flights.filter(f => f.dep_iata === airport)
     }
-  })
+    // Arrivals: same-day (no midnight cross from current date) + overnight from prev day
+    const sameDay   = flights.filter(f => f.arr_iata === airport && !crossesMidnight(f))
+    const overnight = prevFlights.filter(f => f.arr_iata === airport && crossesMidnight(f))
+    return [...sameDay, ...overnight]
+  })()
 
   const sorted = [...byViewAndAirport].sort((a, b) => {
-    const ta = view === 'arr' ? a.arr_time_utc : a.dep_time_utc
-    const tb = view === 'arr' ? b.arr_time_utc : b.dep_time_utc
+    const ta = view === 'arr' ? a.arr_time : a.dep_time
+    const tb = view === 'arr' ? b.arr_time : b.dep_time
     return ta.localeCompare(tb)
   })
 
@@ -380,12 +404,20 @@ export default function BoardPage() {
           ))}
         </div>
 
-        {/* ── Arrivals | Next/All | Departures ── */}
-        <div className="max-w-2xl mx-auto px-4 pb-2">
+        {/* ── All 5 controls on one row ── */}
+        <div className="max-w-2xl mx-auto px-4 pb-3">
           <div className="flex bg-gray-800 rounded-xl p-1 gap-1">
             <button
+              onClick={() => setView('dep')}
+              className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                view === 'dep' ? 'bg-white text-gray-900' : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              Departures
+            </button>
+            <button
               onClick={() => setView('arr')}
-              className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
+              className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
                 view === 'arr' ? 'bg-white text-gray-900' : 'text-gray-400 hover:text-white'
               }`}
             >
@@ -393,7 +425,7 @@ export default function BoardPage() {
             </button>
             <button
               onClick={() => setFilter(f => f === 'next' ? 'all' : 'next')}
-              className={`flex-1 py-2.5 rounded-lg text-xs font-semibold transition-colors border ${
+              className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors border ${
                 filter === 'next'
                   ? 'border-blue-500/60 text-blue-300 bg-blue-950/60'
                   : 'border-gray-600/60 text-gray-400 bg-gray-700/40'
@@ -401,25 +433,12 @@ export default function BoardPage() {
             >
               {filter === 'next' ? 'Next' : 'All'}
             </button>
-            <button
-              onClick={() => setView('dep')}
-              className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
-                view === 'dep' ? 'bg-white text-gray-900' : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              Departures
-            </button>
-          </div>
-        </div>
-
-        {/* ── Airport filter: DAM | ALP ── */}
-        <div className="max-w-2xl mx-auto px-4 pb-3">
-          <div className="flex bg-gray-800 rounded-xl p-1 gap-1">
+            <div className="w-px bg-gray-700 my-1" />
             {(['DAM', 'ALP'] as Airport[]).map(ap => (
               <button
                 key={ap}
                 onClick={() => setAirport(ap)}
-                className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
                   airport === ap ? 'bg-white text-gray-900' : 'text-gray-400 hover:text-white'
                 }`}
               >
@@ -468,7 +487,7 @@ export default function BoardPage() {
         {!loading && (
           <div className="flex flex-col gap-3">
             {visible.map(f => (
-              <FlightCard key={`${f.callsign}-${f.dep_iata}-${f.arr_iata}`} f={f} view={view} date={date} />
+              <FlightCard key={`${f.callsign}-${f.dep_iata}-${f.arr_iata}-${f.dep_time}`} f={f} view={view} />
             ))}
           </div>
         )}

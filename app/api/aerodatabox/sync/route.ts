@@ -113,8 +113,20 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: 'AERODATABOX_KEY not set' }, { status: 500 })
   }
 
-  // ADB airport API requires explicit from/to in URL path; max 12-hour window.
-  // Use -2h to +10h from now: catches recent departures + upcoming arrivals.
+  // ?mode=airport  → airport poll only (fast, 2 API calls) — used by the 30-min cron
+  // ?mode=backfill → FYC + third-pass callsign lookups only — used by the 4-hour cron
+  // (no param)     → all passes (manual trigger / debugging)
+  const url = new URL(req.url)
+  const mode = url.searchParams.get('mode') ?? 'all'
+  const doAirport  = mode === 'all' || mode === 'airport'
+  const doBackfill = mode === 'all' || mode === 'backfill'
+
+  // ── Pass 1: Airport poll (2 API calls — OSDI + OSAP) ────────────────────────
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let rows: any[] = []
+  let departed = 0, arrived = 0, withPos = 0, schedFixed = 0
+
+  if (doAirport) {
   const adbFrom = new Date(Date.now() -  2 * 3_600_000).toISOString().slice(0, 16)
   const adbTo   = new Date(Date.now() + 10 * 3_600_000).toISOString().slice(0, 16)
 
@@ -139,12 +151,10 @@ export async function GET(req: Request) {
 
   let dataAlp: { departures?: AdbFlight[]; arrivals?: AdbFlight[] } = {}
   if (resAlp.status === 'fulfilled' && resAlp.value.ok) {
-    // OSAP returns 204 (no content) when there are no flights — guard before parsing
     const alpText = await resAlp.value.text()
     if (alpText) dataAlp = JSON.parse(alpText)
   }
 
-  // Merge both airports; deduplicate by callsign (OSDI takes precedence for shared flights)
   const seenCallsigns = new Set<string>()
   const flights: AdbFlight[] = []
   for (const f of [...(dataDam.departures ?? []), ...(dataDam.arrivals ?? [])]) {
@@ -157,8 +167,14 @@ export async function GET(req: Request) {
 
   const today = new Date().toISOString().slice(0, 10)
 
-  const rows = flights
-    .filter(f => f.callSign && f.status !== undefined)
+  rows = flights
+    .filter(f => {
+      if (!f.callSign || f.status === undefined) return false
+      // Skip flights with no scheduled times — operating_date can't be determined reliably
+      // and the fallback to `today` misassigns overnight/previous-day flights.
+      const hasSched = f.departure?.scheduledTime?.utc || f.arrival?.scheduledTime?.utc
+      return !!hasSched
+    })
     .map(f => {
       const dep = f.departure
       const arr = f.arrival
@@ -285,14 +301,17 @@ export async function GET(req: Request) {
       }
     }
   } catch { /* non-fatal */ }
+  } // end doAirport
 
+  // ── Pass 2 + 3: per-callsign lookups (expensive — run on slower schedule) ───
   // ── Second pass: look up active FYC* (Fly Cham) flights by callsign ──────────
   // FR24 doesn't carry XH/FYC flights. For every FYC flight that should have
   // landed in the last 10 hours but has no actual_arr_utc, we call ADB directly.
   // Source 1: flight_status rows missing arrival (flight already known to system)
   // Source 2: flight_schedule entries whose arr_time_utc falls in the window
   //           (catches flights that never got a flight_status row yet)
-  let fycSynced = 0
+  let fycSynced = 0, allCallsignsSynced = 0
+  if (doBackfill) {
   try {
     const now2      = new Date()
     const yesterday = new Date(now2.getTime() - 86_400_000).toISOString().slice(0, 10)
@@ -407,13 +426,24 @@ export async function GET(req: Request) {
     const schedRows: any[] = schedFetch.ok ? await schedFetch.json() : []
 
     // Get callsigns already covered in flight_status for today
-    const exStatusFetch = await fetch(
-      `${SB_URL}/rest/v1/flight_status?operating_date=eq.${syriaDate}&select=callsign`,
-      { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }, signal: AbortSignal.timeout(5_000) }
-    )
+    const [exStatusFetch, departedNoArrFetch] = await Promise.all([
+      fetch(
+        `${SB_URL}/rest/v1/flight_status?operating_date=eq.${syriaDate}&select=callsign`,
+        { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }, signal: AbortSignal.timeout(5_000) }
+      ),
+      // Flights that have a "Departed" status row but no actual_arr_utc yet —
+      // the webhook wrote "Departed" at takeoff but no arrival update came through.
+      fetch(
+        `${SB_URL}/rest/v1/flight_status?operating_date=eq.${syriaDate}&status=eq.Departed&actual_arr_utc=is.null&callsign=not.like.FYC*&select=callsign`,
+        { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }, signal: AbortSignal.timeout(5_000) }
+      ),
+    ])
     const coveredToday = new Set<string>(
       exStatusFetch.ok ? (await exStatusFetch.json()).map((r: { callsign: string }) => r.callsign) : []
     )
+    const departedNoArr: string[] = departedNoArrFetch.ok
+      ? (await departedNoArrFetch.json()).map((r: { callsign: string }) => r.callsign)
+      : []
 
     // Find callsigns scheduled today that have no status row yet and arrived within 14h
     const seen3 = new Set<string>()
@@ -429,6 +459,19 @@ export async function GET(req: Request) {
       const diffMin = (nowMin - arrMin + 1440) % 1440
       if (diffMin <= 14 * 60) toBackfill.push({ callsign: cs })
     }
+
+    // Also re-poll flights stuck at "Departed" with no arrival — these were already
+    // covered by the webhook at takeoff but never received an arrival update.
+    for (const cs of departedNoArr) {
+      if (!seen3.has(cs)) {
+        seen3.add(cs)
+        toBackfill.push({ callsign: cs })
+      }
+    }
+
+    // Convert a UTC timestamp to Syria local date (UTC+3) for date validation
+    const toSyriaDate = (utc: string) =>
+      new Date(new Date(utc).getTime() + 3 * 3_600_000).toISOString().slice(0, 10)
 
     for (const { callsign } of toBackfill) {
       try {
@@ -446,7 +489,6 @@ export async function GET(req: Request) {
           const actualDep = depLive ? (dep.runwayTime?.utc ?? dep.revisedTime?.utc) : undefined
           const actualArr = arrLive ? (arr.runwayTime?.utc ?? arr.revisedTime?.utc) : undefined
           if (!actualDep && !actualArr) continue
-          if (actualArr && now3.getTime() - new Date(actualArr).getTime() > 24 * 3_600_000) continue
 
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const row: Record<string, any> = {
@@ -459,17 +501,18 @@ export async function GET(req: Request) {
             arr_quality:     arr.quality ?? [],
             last_synced_at:  now3.toISOString(),
           }
-          if (actualDep) {
-            const depDate = new Date(actualDep).toISOString().slice(0, 10)
-            if (depDate === syriaDate) {
-              row.actual_dep_utc = new Date(actualDep).toISOString()
-              row.dep_delay_min  = delayMin(dep.scheduledTime?.utc, actualDep)
-            }
+          // Validate dates in Syria local time (UTC+3) — ADB may return a previous
+          // day's flight for the same callsign; reject anything not from syriaDate.
+          if (actualDep && toSyriaDate(actualDep) === syriaDate) {
+            row.actual_dep_utc = new Date(actualDep).toISOString()
+            row.dep_delay_min  = delayMin(dep.scheduledTime?.utc, actualDep)
           }
-          if (actualArr) {
+          if (actualArr && toSyriaDate(actualArr) === syriaDate) {
             row.actual_arr_utc = new Date(actualArr).toISOString()
             row.arr_delay_min  = delayMin(arr.scheduledTime?.utc, actualArr)
           }
+          // Nothing valid for today — skip this record entirely
+          if (!row.actual_dep_utc && !row.actual_arr_utc) continue
 
           await sb('/flight_status', {
             method: 'POST',
@@ -481,6 +524,7 @@ export async function GET(req: Request) {
       } catch { /* skip this callsign, continue */ }
     }
   } catch { /* non-fatal */ }
+  } // end doBackfill
 
   return NextResponse.json({
     ok: true,
