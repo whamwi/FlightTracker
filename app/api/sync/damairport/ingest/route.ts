@@ -6,6 +6,7 @@ export const maxDuration = 60
 const SB_URL = process.env.SUPABASE_URL!
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_ANON_KEY!
 const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
+const SY_AIRPORTS = new Set(['DAM', 'ALP'])
 
 async function sb(path: string, opts: RequestInit = {}) {
   const res = await fetch(`${SB_URL}/rest/v1${path}`, {
@@ -29,34 +30,34 @@ function toUtc(hhmm: string): string {
   return `${String(Math.floor(utcMin / 60)).padStart(2, '0')}:${String(utcMin % 60).padStart(2, '0')}`
 }
 
-// POST /api/sync/damairport/ingest?date=YYYY-MM-DD&airport=DAM
-// Reads schedule_raw snapshot → validates master data → upserts route_master
-export async function GET(req: Request) {
-  return POST(req)
+function hhmToMin(hhmm: string): number {
+  const [h, m] = hhmm.split(':').map(Number)
+  return h * 60 + m
 }
 
-export async function POST(req: Request) {
-  const url     = new URL(req.url)
-  const date    = url.searchParams.get('date') ?? new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10)
-  const airport = (url.searchParams.get('airport') ?? 'DAM').toUpperCase()
-  const dow     = DAY_NAMES[new Date(`${date}T12:00:00Z`).getUTCDay()]
+// Combine a date (YYYY-MM-DD) and UTC HH:MM[:SS] time into an ISO timestamp.
+// If stdRef is given and the result precedes it, advances by 1 day (next-day arrival).
+function toTimestamp(date: string, timeUtc: string | null, stdRef?: string | null): string | null {
+  if (!timeUtc) return null
+  const hhmm = timeUtc.slice(0, 5)
+  const ts = new Date(`${date}T${hhmm}:00Z`)
+  if (stdRef && ts.toISOString() < stdRef) ts.setUTCDate(ts.getUTCDate() + 1)
+  return ts.toISOString()
+}
 
-  // ── 1. Read snapshot ────────────────────────────────────────────────────────
-  const rawRows: {
-    carrier: string; carrier_icao: string | null; flightnumber: number
-    iata_from: string; iata_to: string
-    dep_time_local: string | null; arr_time_local: string | null
-    direction: string; status: string; airline_name: string | null
-  }[] = await sb(
-    `/schedule_raw?schedule_date=eq.${date}&airport_iata=eq.${airport}` +
-    `&select=carrier,carrier_icao,flightnumber,iata_from,iata_to,dep_time_local,arr_time_local,direction,status,airline_name`
-  )
+type RawRow = {
+  carrier: string; carrier_icao: string | null; flightnumber: number
+  iata_from: string; iata_to: string
+  dep_time_local: string | null; arr_time_local: string | null
+  direction: string; status: string; airline_name: string | null
+  schedule_date: string
+}
 
-  if (!rawRows.length) {
-    return NextResponse.json({ ok: false, error: 'No snapshot found — run the sync first' }, { status: 400 })
-  }
+// Process one date: ensure master data → upsert route_master → create flight_instance rows
+async function processDate(airport: string, date: string, rawRows: RawRow[]) {
+  const dow = DAY_NAMES[new Date(`${date}T12:00:00Z`).getUTCDay()]
 
-  // ── 2. Ensure airlines master data ─────────────────────────────────────────
+  // ── 2. Ensure airlines master data ─────────────────────────────────────
   const uniqueCarriers = [...new Set(rawRows.map(r => r.carrier))]
 
   const existingAirlines: { id: number; iata: string; icao: string | null }[] =
@@ -81,7 +82,7 @@ export async function POST(req: Request) {
     airlinesAdded = missingAirlineRows.length
   }
 
-  // ── 3. Ensure flight_lookup entries ────────────────────────────────────────
+  // ── 3. Ensure flight_lookup entries ─────────────────────────────────────
   const iataNumbers = [...new Set(rawRows.map(r => `${r.carrier}${r.flightnumber}`))]
 
   const existingLookup: { id: number; iata_number: string; broadcast_callsign: string | null }[] =
@@ -109,8 +110,7 @@ export async function POST(req: Request) {
     lookupAdded = missingLookupRows.length
   }
 
-  // ── 4. Upsert route_master ──────────────────────────────────────────────────
-  // Fetch existing damairport rows for these flight_ids
+  // ── 4. Upsert route_master ───────────────────────────────────────────────
   const flightIds = [...new Set([...lookupByIata.values()].map(l => l.id))]
   const existingSchedule: {
     id: number; flight_id: number; dep_iata: string; arr_iata: string
@@ -120,22 +120,14 @@ export async function POST(req: Request) {
                `&select=id,flight_id,dep_iata,arr_iata,dep_time,arr_time,days_of_week`)
     : []
 
-  const SY_AIRPORTS = new Set(['DAM', 'ALP'])
-
-  function hhmToMin(hhmm: string): number {
-    const [h, m] = hhmm.split(':').map(Number)
-    return h * 60 + m
-  }
-
-  // Key uses the Syria-side time only (arrival time for arrivals, departure for departures).
-  // This stays stable after the fill step adds the missing other-side time.
+  // Key uses the Syria-side time only (arr for arrivals, dep for departures) — stable after fill adds the other side
   const schedKey = (r: { flight_id: number; dep_iata: string; arr_iata: string; dep_time: string | null; arr_time: string | null }) => {
     const authTime = SY_AIRPORTS.has(r.arr_iata) ? r.arr_time : r.dep_time
     return `${r.flight_id}|${r.dep_iata}|${r.arr_iata}|${(authTime ?? '').slice(0, 5)}`
   }
   const schedMap = new Map(existingSchedule.map(r => [schedKey(r), r]))
 
-  // Index existing rows by flight_id+route for drift detection (same flight, time shifted slightly)
+  // Index existing rows by flight_id+route for drift detection
   type ExistingRow = typeof existingSchedule[number]
   const byRoute = new Map<string, ExistingRow[]>()
   for (const r of existingSchedule) {
@@ -153,7 +145,6 @@ export async function POST(req: Request) {
 
     const depTime = raw.dep_time_local?.slice(0, 5) ?? null
     const arrTime = raw.arr_time_local?.slice(0, 5) ?? null
-    // Key on the Syria-side time (arr for arrivals, dep for departures)
     const authTime = SY_AIRPORTS.has(raw.iata_to) ? arrTime : depTime
     const key      = `${lookup.id}|${raw.iata_from}|${raw.iata_to}|${authTime ?? ''}`
     const existing = schedMap.get(key)
@@ -179,7 +170,6 @@ export async function POST(req: Request) {
         : undefined
 
       if (driftMatch) {
-        // Schedule drift: update the existing row's time and add today's dow
         const newDow = [...new Set([...(driftMatch.days_of_week ?? []), dow])].sort()
         toUpdate.push({
           id:           driftMatch.id,
@@ -188,7 +178,6 @@ export async function POST(req: Request) {
             ? { arr_time: arrTime!, arr_time_utc: toUtc(arrTime!) + ':00' }
             : { dep_time: depTime!, dep_time_utc: toUtc(depTime!) + ':00' }),
         })
-        // Remove old key from map so we don't double-process
         schedMap.delete(schedKey(driftMatch))
         schedMap.set(key, driftMatch)
       } else {
@@ -217,7 +206,6 @@ export async function POST(req: Request) {
     })
   }
 
-  // PATCH updates in parallel (small N, typically < 10)
   if (toUpdate.length) {
     await Promise.all(
       toUpdate.map(({ id, ...fields }) =>
@@ -230,18 +218,114 @@ export async function POST(req: Request) {
     )
   }
 
+  // ── 5. Create flight_instance rows for this date ─────────────────────────
+  // Re-read route_master for final dep/arr UTC times (just-inserted rows now visible)
+  const finalRoutes: {
+    id: number; flight_id: number; dep_iata: string; arr_iata: string
+    dep_time_utc: string | null; arr_time_utc: string | null
+  }[] = flightIds.length
+    ? await sb(`/route_master?flight_id=in.(${flightIds.join(',')})&select=id,flight_id,dep_iata,arr_iata,dep_time_utc,arr_time_utc`)
+    : []
+
+  const routeByKey = new Map(finalRoutes.map(r => [`${r.flight_id}|${r.dep_iata}|${r.arr_iata}`, r]))
+
+  const instanceRows: object[] = []
+  for (const raw of rawRows) {
+    const iataNum = `${raw.carrier}${raw.flightnumber}`
+    const lookup  = lookupByIata.get(iataNum)
+    if (!lookup) continue
+
+    const route = routeByKey.get(`${lookup.id}|${raw.iata_from}|${raw.iata_to}`)
+    if (!route?.dep_time_utc) continue  // skip if departure time not yet known; fill will complete it
+
+    const std = toTimestamp(date, route.dep_time_utc)
+    const sta = toTimestamp(date, route.arr_time_utc, std)
+
+    instanceRows.push({
+      flight_id:   lookup.id,
+      route_id:    route.id,
+      flight_date: date,
+      dep_iata:    raw.iata_from,
+      arr_iata:    raw.iata_to,
+      std,
+      sta,
+    })
+  }
+
+  let instancesUpserted = 0
+  if (instanceRows.length) {
+    // merge-duplicates updates route_id/std/sta; leaves atd/ata/status/etd/eta untouched
+    await sb('/flight_instance', {
+      method:  'POST',
+      headers: { Prefer: 'return=minimal,resolution=merge-duplicates' },
+      body:    JSON.stringify(instanceRows),
+    })
+    instancesUpserted = instanceRows.length
+  }
+
   const driftCount = toUpdate.filter(u => u.dep_time || u.arr_time).length
 
-  return NextResponse.json({
-    ok:              true,
+  return {
     date,
-    airport,
     dow,
-    raw_rows:        rawRows.length,
-    airlines_added:  airlinesAdded,
-    lookup_added:    lookupAdded,
-    routes_inserted: toInsert.length,
-    routes_updated:  toUpdate.length - driftCount,
-    routes_drift:    driftCount,
-  })
+    raw_rows:           rawRows.length,
+    airlines_added:     airlinesAdded,
+    lookup_added:       lookupAdded,
+    routes_inserted:    toInsert.length,
+    routes_updated:     toUpdate.length - driftCount,
+    routes_drift:       driftCount,
+    instances_upserted: instancesUpserted,
+  }
+}
+
+// POST /api/sync/damairport/ingest?airport=DAM
+// Reads ALL dates in schedule_raw → validates master data → upserts route_master → creates flight_instance
+export async function GET(req: Request) {
+  return POST(req)
+}
+
+export async function POST(req: Request) {
+  const url     = new URL(req.url)
+  const airport = (url.searchParams.get('airport') ?? 'DAM').toUpperCase()
+
+  // ── 1. Read all snapshot rows for this airport (all dates) ──────────────
+  const allRaw: RawRow[] = await sb(
+    `/schedule_raw?airport_iata=eq.${airport}` +
+    `&select=carrier,carrier_icao,flightnumber,iata_from,iata_to,dep_time_local,arr_time_local,direction,status,airline_name,schedule_date` +
+    `&order=schedule_date.asc&limit=2000`
+  )
+
+  if (!allRaw.length) {
+    return NextResponse.json({ ok: false, error: 'No snapshot found — run the sync first' }, { status: 400 })
+  }
+
+  // Group by date; process sequentially so date N's route_master inserts are visible when date N+1 runs
+  const byDate = new Map<string, RawRow[]>()
+  for (const r of allRaw) {
+    const rows = byDate.get(r.schedule_date) ?? []
+    rows.push(r)
+    byDate.set(r.schedule_date, rows)
+  }
+
+  const dates = [...byDate.keys()].sort()
+  const dateResults = []
+
+  for (const date of dates) {
+    dateResults.push(await processDate(airport, date, byDate.get(date)!))
+  }
+
+  // Aggregate totals across all dates
+  const totals = dateResults.reduce(
+    (acc, r) => ({
+      airlines_added:     acc.airlines_added     + r.airlines_added,
+      lookup_added:       acc.lookup_added       + r.lookup_added,
+      routes_inserted:    acc.routes_inserted    + r.routes_inserted,
+      routes_updated:     acc.routes_updated     + r.routes_updated,
+      routes_drift:       acc.routes_drift       + r.routes_drift,
+      instances_upserted: acc.instances_upserted + r.instances_upserted,
+    }),
+    { airlines_added: 0, lookup_added: 0, routes_inserted: 0, routes_updated: 0, routes_drift: 0, instances_upserted: 0 }
+  )
+
+  return NextResponse.json({ ok: true, airport, dates: dateResults, ...totals })
 }
