@@ -49,11 +49,12 @@ const ADB_STATUS: Record<number, string> = {
   4:  'Boarding',
   5:  'GateClosed',
   6:  'Departed',
-  7:  'Approaching',
-  8:  'Arrived',
-  9:  'Cancelled',
-  10: 'Diverted',
-  11: 'Cancelled',
+  7:  'Delayed',
+  8:  'Approaching',
+  9:  'Arrived',
+  10: 'Cancelled',
+  11: 'Diverted',
+  12: 'Cancelled',   // CanceledUncertain
 }
 
 const ADB_STRING_ALIAS: Record<string, string> = {
@@ -181,15 +182,18 @@ export async function GET(req: Request) {
       const depLive = hasLive(dep?.quality)
       const arrLive = hasLive(arr?.quality)
 
-      const schedDep  = dep?.scheduledTime?.utc
-      const actualDep = depLive ? (dep?.runwayTime?.utc ?? dep?.revisedTime?.utc) : undefined
+      const schedDep   = dep?.scheduledTime?.utc
+      const actualDep  = dep?.runwayTime?.utc ?? (depLive ? dep?.revisedTime?.utc : undefined)
       const revisedDep = dep?.revisedTime?.utc
-      const schedArr  = arr?.scheduledTime?.utc
-      const actualArr = arrLive ? (arr?.runwayTime?.utc ?? arr?.revisedTime?.utc) : undefined
+      const schedArr   = arr?.scheduledTime?.utc
+      const actualArr  = arr?.runwayTime?.utc ?? (arrLive ? arr?.revisedTime?.utc : undefined)
       const revisedArr = arr?.revisedTime?.utc
 
       // Derive operating date from scheduled departure (or arrival fallback)
       const opDate = (schedDep ?? schedArr ?? today).slice(0, 10)
+
+      const rawStatus = resolveStatus(f.status)
+      const status    = actualArr ? 'Arrived' : rawStatus
 
       return {
         callsign:          f.callSign!,
@@ -199,7 +203,7 @@ export async function GET(req: Request) {
         arr_iata:          arr?.airport?.iata ?? null,
         dep_icao:          dep?.airport?.icao ?? null,
         arr_icao:          arr?.airport?.icao ?? null,
-        status:            resolveStatus(f.status),
+        status,
         scheduled_dep_utc: schedDep   ? new Date(schedDep).toISOString()   : null,
         actual_dep_utc:    actualDep  ? new Date(actualDep).toISOString()  : null,
         revised_dep_utc:   revisedDep ? new Date(revisedDep).toISOString() : null,
@@ -358,8 +362,8 @@ export async function GET(req: Request) {
           const arr = f.arrival ?? {}
           const depLive = hasLive(dep.quality)
           const arrLive = hasLive(arr.quality)
-          const actualDep = depLive ? (dep.runwayTime?.utc ?? dep.revisedTime?.utc) : undefined
-          const actualArr = arrLive ? (arr.runwayTime?.utc ?? arr.revisedTime?.utc) : undefined
+          const actualDep = dep.runwayTime?.utc ?? (depLive ? dep.revisedTime?.utc : undefined)
+          const actualArr = arr.runwayTime?.utc ?? (arrLive ? arr.revisedTime?.utc : undefined)
 
           // Need at least one confirmed actual time to be worth writing
           if (!actualDep && !actualArr) continue
@@ -375,7 +379,7 @@ export async function GET(req: Request) {
             dep_icao:       dep.airport?.icao ?? null,
             arr_iata:       arr.airport?.iata ?? null,
             arr_icao:       arr.airport?.icao ?? null,
-            status:         resolveStatus(f.status),
+            status:         actualArr ? 'Arrived' : resolveStatus(f.status),
             dep_quality:    dep.quality ?? [],
             arr_quality:    arr.quality ?? [],
             last_synced_at: now2.toISOString(),
@@ -485,8 +489,8 @@ export async function GET(req: Request) {
           const arr = f.arrival ?? {}
           const depLive = hasLive(dep.quality)
           const arrLive = hasLive(arr.quality)
-          const actualDep = depLive ? (dep.runwayTime?.utc ?? dep.revisedTime?.utc) : undefined
-          const actualArr = arrLive ? (arr.runwayTime?.utc ?? arr.revisedTime?.utc) : undefined
+          const actualDep = dep.runwayTime?.utc ?? (depLive ? dep.revisedTime?.utc : undefined)
+          const actualArr = arr.runwayTime?.utc ?? (arrLive ? arr.revisedTime?.utc : undefined)
           if (!actualDep && !actualArr) continue
 
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -509,6 +513,7 @@ export async function GET(req: Request) {
           if (actualArr && toSyriaDate(actualArr) === syriaDate) {
             row.actual_arr_utc = new Date(actualArr).toISOString()
             row.arr_delay_min  = delayMin(arr.scheduledTime?.utc, actualArr)
+            row.status = 'Arrived'  // safety net: actual arrival time is ground truth
           }
           // Nothing valid for today — skip this record entirely
           if (!row.actual_dep_utc && !row.actual_arr_utc) continue
