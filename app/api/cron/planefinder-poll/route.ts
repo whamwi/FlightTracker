@@ -254,13 +254,15 @@ export async function GET(req: Request) {
     } else if (!hasActualDep && pastStd20 && minSinceSync >= 25) {
       // ── C: No departure yet, past STD+20min → historic to confirm departure
       ops.push(
-        fetchPfHistoric(callsign, flight_date).then(async ({ firstSeen }) => {
+        fetchPfHistoric(callsign, flight_date).then(async ({ firstSeen, lastSeen }) => {
           if (firstSeen) {
+            const landed = !!lastSeen
             await upsertStatus({
               callsign,
               operating_date:    flight_date,
-              status:            'Departed',
+              status:            landed ? 'Landed' : 'Departed',
               actual_dep_utc:    firstSeen,
+              ...(landed ? { actual_arr_utc: lastSeen } : {}),
               dep_iata,
               arr_iata,
               airline_icao:      callsign.slice(0, 3),
@@ -268,7 +270,7 @@ export async function GET(req: Request) {
               scheduled_arr_utc: sta,
               last_synced_at:    now.toISOString(),
             })
-            log.push(`${callsign}: Departed (atd=${firstSeen})`)
+            log.push(`${callsign}: ${landed ? `Landed (atd=${firstSeen} ata=${lastSeen})` : `Departed (atd=${firstSeen})`}`)
           } else {
             // No PF data — throttle retry via last_synced_at
             await upsertStatus({
