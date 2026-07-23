@@ -235,19 +235,47 @@ export async function GET(req: Request) {
 
     } else if (isEnRoute && !hasActualArr && pastSta && minSinceSync >= 20) {
       // ── B1: Was live in Planefinder, now gone, past STA → 20-min grace then historic
+      ops.push(
+        fetchPfHistoric(callsign, flight_date).then(async ({ lastSeen }) => {
+          const staMs      = new Date(sta).getTime()
+          const lastSeenMs = lastSeen ? new Date(lastSeen).getTime() : 0
+          const confirmed  = !!lastSeen && lastSeenMs >= staMs - 30 * 60_000
+          if (confirmed) {
+            await upsertStatus({
+              callsign,
+              operating_date: flight_date,
+              status:         'Landed',
+              actual_arr_utc: lastSeen!,
+              last_synced_at: now.toISOString(),
+            })
+            log.push(`${callsign}: Landed (ata=${lastSeen})`)
+          } else {
+            await upsertStatus({ callsign, operating_date: flight_date, last_synced_at: now.toISOString() })
+            log.push(`${callsign}: signal lost mid-flight (lastSeen=${lastSeen ?? 'none'}, sta=${sta}) — keep tracking`)
+          }
+        })
+      )
 
     } else if (isDeparted && !hasActualArr && pastSta) {
       // ── B2: Confirmed departed (never seen live), past STA → historic immediately
       ops.push(
         fetchPfHistoric(callsign, flight_date).then(async ({ lastSeen }) => {
-          await upsertStatus({
-            callsign,
-            operating_date: flight_date,
-            status:         'Landed',
-            actual_arr_utc: lastSeen ?? now.toISOString(),
-            last_synced_at: now.toISOString(),
-          })
-          log.push(`${callsign}: Landed (ata=${lastSeen ?? 'estimated'})`)
+          const staMs      = new Date(sta).getTime()
+          const lastSeenMs = lastSeen ? new Date(lastSeen).getTime() : 0
+          const confirmed  = !!lastSeen && lastSeenMs >= staMs - 30 * 60_000
+          if (confirmed) {
+            await upsertStatus({
+              callsign,
+              operating_date: flight_date,
+              status:         'Landed',
+              actual_arr_utc: lastSeen!,
+              last_synced_at: now.toISOString(),
+            })
+            log.push(`${callsign}: Landed (ata=${lastSeen})`)
+          } else {
+            await upsertStatus({ callsign, operating_date: flight_date, last_synced_at: now.toISOString() })
+            log.push(`${callsign}: no arrival confirmed yet (lastSeen=${lastSeen ?? 'none'}) — retry next cycle`)
+          }
         })
       )
 
@@ -256,7 +284,9 @@ export async function GET(req: Request) {
       ops.push(
         fetchPfHistoric(callsign, flight_date).then(async ({ firstSeen, lastSeen }) => {
           if (firstSeen) {
-            const landed = !!lastSeen
+            const staMs      = new Date(sta).getTime()
+            const lastSeenMs = lastSeen ? new Date(lastSeen).getTime() : 0
+            const landed     = !!lastSeen && lastSeenMs >= staMs - 30 * 60_000
             await upsertStatus({
               callsign,
               operating_date:    flight_date,
