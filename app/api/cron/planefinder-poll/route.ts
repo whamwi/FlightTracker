@@ -44,7 +44,7 @@ interface PfLive {
 // All active flights in window — all airlines, no callsign filter.
 async function getActiveFlights(now: Date): Promise<ActiveFlight[]> {
   const plus30    = new Date(now.getTime() + 30 * 60_000).toISOString()
-  const minus90   = new Date(now.getTime() - 90 * 60_000).toISOString()
+  const minus90   = new Date(now.getTime() - 60 * 60_000).toISOString()
   const yesterday = new Date(now.getTime() - 24 * 3_600_000).toISOString().slice(0, 10)
 
   const params = new URLSearchParams({
@@ -176,8 +176,14 @@ export async function GET(req: Request) {
   const dbStatuses = await getFlightStatuses(active)
 
   // ── 3. Poll Planefinder live in batches of 10 ─────────────────────────────
+  // Skip already-terminal flights — they don't need live polling
   const liveMap      = new Map<string, PfLive>()
-  const allCallsigns = active.map(f => f.callsign)
+  const allCallsigns = active
+    .filter(f => {
+      const s = dbStatuses.get(`${f.callsign}_${f.flight_date}`)?.status ?? null
+      return s !== 'Landed' && s !== 'Arrived'
+    })
+    .map(f => f.callsign)
   let   liveCredits  = 0
 
   for (let i = 0; i < allCallsigns.length; i += 10) {
@@ -206,7 +212,7 @@ export async function GET(req: Request) {
     const isTerminal   = dbStatus === 'Landed' || dbStatus === 'Arrived'
     const lastSyncMs   = db?.last_synced_at ? new Date(db.last_synced_at).getTime() : 0
     const minSinceSync = (now.getTime() - lastSyncMs) / 60_000
-    const pastStd20    = now.getTime() > new Date(std).getTime() + 20 * 60_000
+    const pastStd20    = now.getTime() > new Date(std).getTime() + 60 * 60_000
     const pastSta      = now.getTime() > new Date(sta).getTime()
 
     if (isTerminal) {
