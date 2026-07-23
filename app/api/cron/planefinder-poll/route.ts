@@ -200,7 +200,7 @@ export async function GET(req: Request) {
     const dbStatus     = db?.status ?? null
     const hasActualDep = !!db?.actual_dep_utc
     const hasActualArr = !!db?.actual_arr_utc
-    const isEnRoute    = dbStatus === 'En Route'
+    const isEnRoute    = dbStatus === 'En Route' || dbStatus === 'Approaching'
     const isDeparted   = dbStatus === 'Departed'
     const isTerminal   = dbStatus === 'Landed' || dbStatus === 'Arrived'
     const lastSyncMs   = db?.last_synced_at ? new Date(db.last_synced_at).getTime() : 0
