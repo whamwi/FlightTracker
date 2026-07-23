@@ -201,7 +201,8 @@ export async function GET(req: Request) {
     const hasActualDep = !!db?.actual_dep_utc
     const hasActualArr = !!db?.actual_arr_utc
     const isEnRoute    = dbStatus === 'En Route' || dbStatus === 'Approaching'
-    const isDeparted   = dbStatus === 'Departed'
+    // 'Delayed' with actual_dep = departed but running late; without actual_dep = still at gate (→ Branch C)
+    const isDeparted   = dbStatus === 'Departed' || (dbStatus === 'Delayed' && hasActualDep)
     const isTerminal   = dbStatus === 'Landed' || dbStatus === 'Arrived'
     const lastSyncMs   = db?.last_synced_at ? new Date(db.last_synced_at).getTime() : 0
     const minSinceSync = (now.getTime() - lastSyncMs) / 60_000
