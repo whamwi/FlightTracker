@@ -44,7 +44,7 @@ interface PfLive {
 // All active flights in window — all airlines, no callsign filter.
 async function getActiveFlights(now: Date): Promise<ActiveFlight[]> {
   const plus30    = new Date(now.getTime() + 30 * 60_000).toISOString()
-  const minus90   = new Date(now.getTime() - 60 * 60_000).toISOString()
+  const minus90   = new Date(now.getTime() - 180 * 60_000).toISOString()
   const yesterday = new Date(now.getTime() - 24 * 3_600_000).toISOString().slice(0, 10)
 
   const params = new URLSearchParams({
@@ -169,21 +169,33 @@ export async function GET(req: Request) {
 
   // ── 1. Active flights from schedule ──────────────────────────────────────
   const active = await getActiveFlights(now)
-  log.push(`active flights: ${active.length}`)
   if (active.length === 0) return NextResponse.json({ ok: true, log, active: 0, live: 0 })
 
   // ── 2. Current DB status ──────────────────────────────────────────────────
   const dbStatuses = await getFlightStatuses(active)
 
+  // ── 2b. Refine active set using actual departure when known ───────────────
+  // Broad DB query catches delayed flights; narrow here using real dep time.
+  // If actual_dep is known: keep until actual_dep + scheduled_duration + 60 min.
+  // If not yet departed: keep (scheduled STD window already handles this).
+  const nowMs   = now.getTime()
+  const refined = active.filter(f => {
+    const db     = dbStatuses.get(`${f.callsign}_${f.flight_date}`)
+    const status = db?.status ?? null
+    if (status === 'Landed' || status === 'Arrived') return false
+    if (db?.actual_dep_utc) {
+      const actualDepMs  = new Date(db.actual_dep_utc).getTime()
+      const schedDurMs   = new Date(f.sta).getTime() - new Date(f.std).getTime()
+      const estArrMs     = actualDepMs + schedDurMs
+      return nowMs <= estArrMs + 60 * 60_000
+    }
+    return true
+  })
+  log.push(`active flights: ${active.length} → refined: ${refined.length}`)
+
   // ── 3. Poll Planefinder live in batches of 10 ─────────────────────────────
-  // Skip already-terminal flights — they don't need live polling
   const liveMap      = new Map<string, PfLive>()
-  const allCallsigns = active
-    .filter(f => {
-      const s = dbStatuses.get(`${f.callsign}_${f.flight_date}`)?.status ?? null
-      return s !== 'Landed' && s !== 'Arrived'
-    })
-    .map(f => f.callsign)
+  const allCallsigns = refined.map(f => f.callsign)
   let   liveCredits  = 0
 
   for (let i = 0; i < allCallsigns.length; i += 10) {
@@ -198,7 +210,7 @@ export async function GET(req: Request) {
   const ops: Promise<void>[] = []
   let   historicCalls = 0
 
-  for (const flight of active) {
+  for (const flight of refined) {
     const { callsign, flight_date, std, sta, dep_iata, arr_iata } = flight
     const pf = liveMap.get(callsign)
     const db = dbStatuses.get(`${callsign}_${flight_date}`)
