@@ -233,8 +233,11 @@ export async function GET(req: Request) {
         })
       )
 
-    } else if ((isEnRoute || isDeparted) && !hasActualArr && pastSta && minSinceSync >= 20) {
-      // ── B: Departed/En Route, past STA, gone from live → historic for landing
+    } else if (isEnRoute && !hasActualArr && pastSta && minSinceSync >= 20) {
+      // ── B1: Was live in Planefinder, now gone, past STA → 20-min grace then historic
+
+    } else if (isDeparted && !hasActualArr && pastSta) {
+      // ── B2: Confirmed departed (never seen live), past STA → historic immediately
       ops.push(
         fetchPfHistoric(callsign, flight_date).then(async ({ lastSeen }) => {
           await upsertStatus({
