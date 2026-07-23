@@ -182,7 +182,7 @@ export async function GET(req: Request) {
   const refined = active.filter(f => {
     const db     = dbStatuses.get(`${f.callsign}_${f.flight_date}`)
     const status = db?.status ?? null
-    if (status === 'Landed' || status === 'Arrived') return false
+    if (status === 'Landed' || status === 'Arrived' || status === 'Cancelled') return false
     if (db?.actual_dep_utc) {
       const actualDepMs  = new Date(db.actual_dep_utc).getTime()
       const schedDurMs   = new Date(f.sta).getTime() - new Date(f.std).getTime()
@@ -340,7 +340,8 @@ export async function GET(req: Request) {
       )
 
     } else {
-      log.push(`${callsign}: ${dbStatus ?? 'Scheduled'} — waiting (std+20: ${pastStd20}, ${Math.round(minSinceSync)}min since sync)`)
+      const syncLabel = db?.last_synced_at ? `${Math.round(minSinceSync)}min since sync` : 'never synced'
+      log.push(`${callsign}: ${dbStatus ?? 'Scheduled'} — waiting (std+20: ${pastStd20}, ${syncLabel})`)
     }
   }
 
