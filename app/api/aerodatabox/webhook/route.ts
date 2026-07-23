@@ -137,6 +137,14 @@ function toRow(f: any, iataToCallsign: Record<string, string>): object | null {
   // Safety net: actual arrival time is ground truth regardless of status code.
   const status = actualArr ? 'Arrived' : rawStatus
 
+  // Drop pre-departure gate ops (Expected/CheckIn/Boarding/GateClosed) that arrive
+  // after scheduled arrival — ADB sometimes batches stale ground ops hours late,
+  // which would regress status and reset last_synced_at, deferring the cron.
+  const PRE_DEP_STATUSES = new Set(['Expected', 'CheckIn', 'Boarding', 'GateClosed'])
+  if (PRE_DEP_STATUSES.has(status) && schedArr && new Date() > new Date(schedArr)) {
+    return null
+  }
+
   return {
     callsign:          callSign,
     operating_date:    opDate,
