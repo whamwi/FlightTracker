@@ -176,18 +176,21 @@ export async function GET(req: Request) {
   const dbStatuses = await getFlightStatuses(active)
 
   // ── 3. Poll Planefinder live in batches of 10 ─────────────────────────────
-  const liveMap     = new Map<string, PfLive>()
+  const liveMap      = new Map<string, PfLive>()
   const allCallsigns = active.map(f => f.callsign)
+  let   liveCredits  = 0
 
   for (let i = 0; i < allCallsigns.length; i += 10) {
     const batch   = allCallsigns.slice(i, i + 10)
     const results = await fetchPfLive(batch)
     for (const r of results) { if (r.callsign) liveMap.set(r.callsign, r) }
+    liveCredits += results.length > 0 ? 10 : 1
     log.push(`batch ${Math.floor(i / 10) + 1}: [${batch.join(',')}] → ${results.length} live`)
   }
 
   // ── 4. Process each flight ─────────────────────────────────────────────────
   const ops: Promise<void>[] = []
+  let   historicCalls = 0
 
   for (const flight of active) {
     const { callsign, flight_date, std, sta, dep_iata, arr_iata } = flight
@@ -235,6 +238,7 @@ export async function GET(req: Request) {
 
     } else if (isEnRoute && !hasActualArr && pastSta && minSinceSync >= 20) {
       // ── B1: Was live in Planefinder, now gone, past STA → 20-min grace then historic
+      historicCalls++
       ops.push(
         fetchPfHistoric(callsign, flight_date).then(async ({ lastSeen }) => {
           const staMs      = new Date(sta).getTime()
@@ -258,6 +262,7 @@ export async function GET(req: Request) {
 
     } else if (isDeparted && !hasActualArr && pastSta) {
       // ── B2: Confirmed departed (never seen live), past STA → historic immediately
+      historicCalls++
       ops.push(
         fetchPfHistoric(callsign, flight_date).then(async ({ lastSeen }) => {
           const staMs      = new Date(sta).getTime()
@@ -281,6 +286,7 @@ export async function GET(req: Request) {
 
     } else if (!hasActualDep && pastStd20 && minSinceSync >= 25) {
       // ── C: No departure yet, past STD+20min → historic to confirm departure
+      historicCalls++
       ops.push(
         fetchPfHistoric(callsign, flight_date).then(async ({ firstSeen, lastSeen }) => {
           if (firstSeen) {
@@ -320,5 +326,24 @@ export async function GET(req: Request) {
   }
 
   await Promise.all(ops)
-  return NextResponse.json({ ok: true, log, active: active.length, live: liveMap.size })
+
+  const creditsEst = liveCredits + historicCalls * 25
+  log.push(`credits est: ${creditsEst} (live=${liveCredits}, historic=${historicCalls}×25)`)
+
+  // ── 5. Write to cron_log ───────────────────────────────────────────────────
+  await fetch(`${SB_URL}/rest/v1/cron_log`, {
+    method:  'POST',
+    headers: { ...SB_HEADERS, Prefer: 'return=minimal' },
+    body:    JSON.stringify({
+      cron:          'planefinder-poll',
+      ran_at:        now.toISOString(),
+      active:        active.length,
+      live:          liveMap.size,
+      historic_calls: historicCalls,
+      credits_est:   creditsEst,
+      log:           log,
+    }),
+  })
+
+  return NextResponse.json({ ok: true, log, active: active.length, live: liveMap.size, credits_est: creditsEst })
 }
