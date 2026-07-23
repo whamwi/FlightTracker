@@ -250,8 +250,10 @@ export async function GET(req: Request) {
           ...(!hasActualDep ? { actual_dep_utc: now.toISOString() } : {}),
           last_synced_at:    now.toISOString(),
         }).then(() => {
-          const from = !isEnRoute ? ` (↑ from ${dbStatus ?? 'Scheduled'})` : ''
-          log.push(`${callsign}: En Route${from}`)
+          const from  = !isEnRoute ? ` (↑ from ${dbStatus ?? 'Scheduled'})` : ''
+          const parts = [pf.reg, pf.type, pf.departureAirport && pf.arrivalAirport ? `${pf.departureAirport}→${pf.arrivalAirport}` : null].filter(Boolean)
+          const info  = parts.length ? ` [${parts.join(', ')}]` : ''
+          log.push(`${callsign}: En Route${from}${info}`)
         })
       )
 
