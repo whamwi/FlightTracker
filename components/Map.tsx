@@ -1007,8 +1007,12 @@ export default function Map() {
             // No route path but flight arrived — snap to arrival airport coords
             const arrC = ALL_AIRPORT_COORDS[schedEntry.arr_iata]
             if (arrC) { dispLat = arrC[0]; dispLon = arrC[1]; arrSnapped = true; projected = true }
-          } else if (a.gs && a.track && (schedEntry == null || fraction !== null)) {
+          } else if (a.gs && a.track &&
+              (schedEntry == null || fraction !== null ||
+               (typeof a.alt_baro === 'number' && a.alt_baro > 2_000))) {
             // ── Fallback: kinematic dead-reckoning ──────────────────────────
+            // Allow DR when confirmed airborne at last signal (alt > 2000 ft),
+            // even if schedule days_of_week don't include today.
             const projDistKm = a.gs * 1.852 * (elapsed / 3_600_000)
             const destDists  = aps
               .filter(ap => AIRPORT_COORDS[ap])
