@@ -7,6 +7,7 @@
     { "path": "/api/sync/damairport/ingest?airport=DAM", "schedule": "15 1 * * *" },
     { "path": "/api/sync/damairport?airport=ALP",     "schedule": "30 1 * * *" },
     { "path": "/api/sync/damairport/ingest?airport=ALP", "schedule": "45 1 * * *" },
-    { "path": "/api/sync/damairport/fill",            "schedule": "0 2 * * *"  }
+    { "path": "/api/sync/damairport/fill",            "schedule": "0 2 * * *"  },
+    { "path": "/api/cron/planefinder-poll",          "schedule": "*/10 * * * *" }
   ]
 }
