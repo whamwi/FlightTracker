@@ -284,8 +284,8 @@ export async function GET(req: Request) {
         })
       )
 
-    } else if (!hasActualDep && pastStd20 && minSinceSync >= 25) {
-      // ── C: No departure yet, past STD+20min → historic to confirm departure
+    } else if (!hasActualDep && pastStd20 && minSinceSync >= 60) {
+      // ── C: No departure yet, past STD+20min → historic to confirm departure (retry max once/hr)
       historicCalls++
       ops.push(
         fetchPfHistoric(callsign, flight_date).then(async ({ firstSeen, lastSeen }) => {
