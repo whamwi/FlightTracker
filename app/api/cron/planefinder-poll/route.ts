@@ -121,21 +121,31 @@ async function fetchPfLive(callsigns: string[]): Promise<PfLive[]> {
 async function fetchPfHistoric(
   callsign: string,
   flightDate: string,
+  log: string[],
 ): Promise<{ firstSeen: string | null; lastSeen: string | null }> {
   const base = Math.floor(new Date(`${flightDate}T00:00:00Z`).getTime() / 1000)
+  const from = base - 12 * 3600
+  const to   = base + 36 * 3600
   const url  = new URL(`${PF_BASE}/historic/flights`)
   url.searchParams.set('callsign', callsign)
-  url.searchParams.set('from', String(base - 12 * 3600))
-  url.searchParams.set('to',   String(base + 36 * 3600))
+  url.searchParams.set('from', String(from))
+  url.searchParams.set('to',   String(to))
+
+  log.push(`${callsign} historic → callsign=${callsign}, from=${new Date(from * 1000).toISOString()}, to=${new Date(to * 1000).toISOString()}`)
 
   const res = await fetch(url.toString(), {
     headers: { Authorization: `Bearer ${PF_KEY}` },
     signal:  AbortSignal.timeout(10_000),
   })
-  if (!res.ok) return { firstSeen: null, lastSeen: null }
+  if (!res.ok) {
+    log.push(`${callsign} historic ← HTTP ${res.status}`)
+    return { firstSeen: null, lastSeen: null }
+  }
 
   const body = await res.json()
   const records: { firstSeen: number; lastSeen: number | null }[] = body?.data ?? []
+  log.push(`${callsign} historic ← ${records.length === 0 ? 'empty' : records.map(r => `{firstSeen:${new Date(r.firstSeen * 1000).toISOString()},lastSeen:${r.lastSeen ? new Date(r.lastSeen * 1000).toISOString() : 'null'}}`).join(', ')}`)
+
   if (records.length === 0) return { firstSeen: null, lastSeen: null }
 
   const best = records.reduce((a, b) => (a.firstSeen > b.firstSeen ? a : b))
@@ -199,11 +209,16 @@ export async function GET(req: Request) {
   let   liveCredits  = 0
 
   for (let i = 0; i < allCallsigns.length; i += 10) {
-    const batch   = allCallsigns.slice(i, i + 10)
-    const results = await fetchPfLive(batch)
+    const batchNum = Math.floor(i / 10) + 1
+    const batch    = allCallsigns.slice(i, i + 10)
+    log.push(`batch ${batchNum} → callsign=${batch.join(',')}`)
+    const results  = await fetchPfLive(batch)
     for (const r of results) { if (r.callsign) liveMap.set(r.callsign, r) }
     liveCredits += results.length > 0 ? 10 : 1
-    log.push(`batch ${Math.floor(i / 10) + 1}: [${batch.join(',')}] → ${results.length} live`)
+    const respLog = results.length === 0
+      ? 'empty'
+      : results.map(r => `{callsign:${r.callsign},reg:${r.reg ?? '?'},type:${r.type ?? '?'},dep:${r.departureAirport ?? '?'},arr:${r.arrivalAirport ?? '?'},alt:${r.altitude ?? '?'},spd:${r.speed ?? '?'}}`).join(', ')
+    log.push(`batch ${batchNum} ← ${respLog}`)
   }
 
   // ── 4. Process each flight ─────────────────────────────────────────────────
@@ -261,7 +276,7 @@ export async function GET(req: Request) {
       // ── B1: Was live in Planefinder, now gone, past STA → 20-min grace then historic
       historicCalls++
       ops.push(
-        fetchPfHistoric(callsign, flight_date).then(async ({ lastSeen }) => {
+        fetchPfHistoric(callsign, flight_date, log).then(async ({ lastSeen }) => {
           const staMs      = new Date(sta).getTime()
           const lastSeenMs = lastSeen ? new Date(lastSeen).getTime() : 0
           const confirmed  = !!lastSeen && lastSeenMs >= staMs - 30 * 60_000
@@ -285,7 +300,7 @@ export async function GET(req: Request) {
       // ── B2: Confirmed departed (never seen live), past STA → historic immediately
       historicCalls++
       ops.push(
-        fetchPfHistoric(callsign, flight_date).then(async ({ lastSeen }) => {
+        fetchPfHistoric(callsign, flight_date, log).then(async ({ lastSeen }) => {
           const staMs      = new Date(sta).getTime()
           const lastSeenMs = lastSeen ? new Date(lastSeen).getTime() : 0
           const confirmed  = !!lastSeen && lastSeenMs >= staMs - 30 * 60_000
@@ -309,7 +324,7 @@ export async function GET(req: Request) {
       // ── C: No departure yet, past STD+20min → historic to confirm departure (retry max once/hr)
       historicCalls++
       ops.push(
-        fetchPfHistoric(callsign, flight_date).then(async ({ firstSeen, lastSeen }) => {
+        fetchPfHistoric(callsign, flight_date, log).then(async ({ firstSeen, lastSeen }) => {
           if (firstSeen) {
             const staMs      = new Date(sta).getTime()
             const lastSeenMs = lastSeen ? new Date(lastSeen).getTime() : 0
