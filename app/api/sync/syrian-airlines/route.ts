@@ -6,6 +6,11 @@ export const maxDuration = 60
 const SB_URL = process.env.SUPABASE_URL!
 const SB_KEY = process.env.SUPABASE_ANON_KEY!
 const SYR_API = 'https://api-v2.syrlines.com'
+const SYR_HEADERS = {
+  'Origin':  'https://syrian-airlines.net',
+  'Referer': 'https://syrian-airlines.net/schedule',
+  'User-Agent': 'Mozilla/5.0 (compatible; FlightTracker/1.0)',
+}
 
 // Local UTC offsets for airports we operate (summer/DST aware for Jul–Aug)
 const TZ_OFFSET: Record<string, number> = {
@@ -82,6 +87,7 @@ function nextDate(jsDow: number): string {
 
 async function fetchRoutes(): Promise<SyrRoute[]> {
   const res = await fetch(`${SYR_API}/api/reservations/flight-days`, {
+    headers: SYR_HEADERS,
     signal: AbortSignal.timeout(10_000),
   })
   if (!res.ok) throw new Error(`flight-days: ${res.status}`)
@@ -97,6 +103,7 @@ async function fetchFlightTime(
   const res = await fetch(`${SYR_API}/api/reservations/available-flights`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    headers: { ...SYR_HEADERS, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       departureAirport: depIata,
       arrivalAirport:   arrIata,
