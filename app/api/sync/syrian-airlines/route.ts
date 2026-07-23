@@ -116,24 +116,35 @@ async function fetchFlightTime(
 }
 
 async function fetchRouteMaster(): Promise<RmRow[]> {
-  const res = await fetch(
-    `${SB_URL}/rest/v1/route_master?select=id,flight_id,dep_iata,arr_iata,dep_time,arr_time,dep_time_utc,arr_time_utc,days_of_week,source,flight_lookup(iata_number,broadcast_callsign)`,
-    {
+  // Two separate queries to avoid PostgREST FK join dependency
+  const [rmRes, flRes] = await Promise.all([
+    fetch(`${SB_URL}/rest/v1/route_master?select=id,flight_id,dep_iata,arr_iata,dep_time,arr_time,dep_time_utc,arr_time_utc,days_of_week,source`, {
       headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
       signal: AbortSignal.timeout(10_000),
-    },
-  )
-  if (!res.ok) throw new Error(`route_master: ${res.status}`)
+    }),
+    fetch(`${SB_URL}/rest/v1/flight_lookup?select=id,iata_number,broadcast_callsign`, {
+      headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+      signal: AbortSignal.timeout(10_000),
+    }),
+  ])
+  if (!rmRes.ok) throw new Error(`route_master: ${rmRes.status} ${await rmRes.text()}`)
+  if (!flRes.ok) throw new Error(`flight_lookup: ${flRes.status} ${await flRes.text()}`)
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows: any[] = await res.json()
-  return rows.map(r => ({
+  const rmRows: any[] = await rmRes.json()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const flRows: any[] = await flRes.json()
+  const flMap = new Map(flRows.map((f: { id: number; iata_number: string; broadcast_callsign: string }) => [f.id, f]))
+
+  return rmRows.map(r => ({
     ...r,
-    iata_number:       r.flight_lookup?.iata_number ?? null,
-    broadcast_callsign: r.flight_lookup?.broadcast_callsign ?? null,
+    iata_number:        flMap.get(r.flight_id)?.iata_number ?? null,
+    broadcast_callsign: flMap.get(r.flight_id)?.broadcast_callsign ?? null,
   }))
 }
 
 export async function GET() {
+  try {
   const [syrRoutes, rmRows] = await Promise.all([fetchRoutes(), fetchRouteMaster()])
 
   // Map route_master by "dep_iata|arr_iata" for fast lookup
@@ -213,4 +224,8 @@ export async function GET() {
     mismatches: mismatches.length,
     results,
   })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return NextResponse.json({ ok: false, error: msg }, { status: 500 })
+  }
 }
