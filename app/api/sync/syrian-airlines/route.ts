@@ -102,7 +102,6 @@ async function fetchFlightTime(
 ): Promise<SyrFlight | null> {
   const res = await fetch(`${SYR_API}/api/reservations/available-flights`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     headers: { ...SYR_HEADERS, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       departureAirport: depIata,
