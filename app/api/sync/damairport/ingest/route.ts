@@ -8,6 +8,10 @@ const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_ANO
 const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
 const SY_AIRPORTS = new Set(['DAM', 'ALP'])
 
+// Flights excluded from damairport ingest — wrong airport code in source data.
+// PC770/771 and VF340/341 are listed as IST but actually operate via SAW.
+const FLIGHT_EXCEPTIONS = new Set(['PC770', 'PC771', 'VF340', 'VF341'])
+
 async function sb(path: string, opts: RequestInit = {}) {
   const res = await fetch(`${SB_URL}/rest/v1${path}`, {
     ...opts,
@@ -55,6 +59,7 @@ type RawRow = {
 
 // Process one date: ensure master data → upsert route_master → create flight_instance rows
 async function processDate(airport: string, date: string, rawRows: RawRow[]) {
+  rawRows = rawRows.filter(r => !FLIGHT_EXCEPTIONS.has(`${r.carrier}${r.flightnumber}`))
   const dow = DAY_NAMES[new Date(`${date}T12:00:00Z`).getUTCDay()]
 
   // ── 2. Ensure airlines master data ─────────────────────────────────────
