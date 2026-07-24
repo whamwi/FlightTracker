@@ -301,19 +301,15 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
 
         <div className="min-w-[3.5rem]">
           <p className="text-gray-500 text-xs mb-0.5">Dep</p>
-          <p className={`font-mono font-semibold text-base ${isCancelled ? 'line-through text-gray-600' : 'text-white'}`}>
-            {depSched}
+          <p className={`font-mono font-semibold text-base ${
+            isCancelled       ? 'line-through text-gray-600' :
+            f.actual_dep_utc  ? 'text-green-400' :
+            f.revised_dep_utc ? 'text-yellow-400' :
+                                'text-white'
+          }`}>
+            {(f.actual_dep_utc || f.revised_dep_utc) ? depActual : depSched}
           </p>
-          {(f.actual_dep_utc || f.revised_dep_utc) && !isCancelled ? (
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <p className={`font-mono text-xs ${actualColor(!!f.actual_dep_utc, depDelay)}`}>
-                {depActual}
-              </p>
-              <DelayBadge min={depDelay} />
-            </div>
-          ) : (
-            <DelayBadge min={depDelay} />
-          )}
+          <DelayBadge min={depDelay} />
         </div>
 
         <div className="flex-1 flex flex-col items-center justify-center gap-0.5">
@@ -322,26 +318,20 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
 
         <div className="min-w-[3.5rem] text-right">
           <p className="text-gray-500 text-xs mb-0.5">Arr</p>
-          <p className={`font-mono font-semibold text-base ${isCancelled ? 'line-through text-gray-600' : 'text-white'}`}>
-            {arrSched}
+          <p className={`font-mono font-semibold text-base ${
+            isCancelled       ? 'line-through text-gray-600' :
+            f.actual_arr_utc  ? 'text-green-400' :
+            f.revised_arr_utc ? 'text-yellow-400' :
+                                'text-white'
+          }`}>
+            {(f.actual_arr_utc || f.revised_arr_utc) ? arrActual : arrSched}
           </p>
-          {(f.actual_arr_utc || f.revised_arr_utc) && !isCancelled ? (
-            <div className="flex items-center justify-end gap-1.5 mt-0.5">
-              {isArr && <DelayBadge min={arrDelay} />}
-              <p className={`font-mono text-xs ${actualColor(!!f.actual_arr_utc, arrDelay)}`}>
-                {arrActual}
-              </p>
-            </div>
-          ) : (
-            <>
-              {computedETA(f) && !isCancelled && (
-                <p className="font-mono text-xs mt-0.5 text-orange-400" title="Estimated (ATD + block time)">
-                  ~{fmtLocal(computedETA(f), arrOff)}
-                </p>
-              )}
-              {isArr && <DelayBadge min={arrDelay} />}
-            </>
+          {computedETA(f) && !f.actual_arr_utc && !f.revised_arr_utc && !isCancelled && (
+            <p className="font-mono text-xs mt-0.5 text-orange-400" title="Estimated (ATD + block time)">
+              ~{fmtLocal(computedETA(f), arrOff)}
+            </p>
           )}
+          {isArr && <DelayBadge min={arrDelay} />}
         </div>
       </div>
 
