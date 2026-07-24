@@ -372,13 +372,15 @@ export async function GET(req: Request) {
     method:  'POST',
     headers: { ...SB_HEADERS, Prefer: 'return=minimal' },
     body:    JSON.stringify({
-      cron:          'planefinder-poll',
-      ran_at:        now.toISOString(),
-      active:        active.length,
-      live:          liveMap.size,
+      cron:           'planefinder-poll',
+      ran_at:         now.toISOString(),
+      active:         active.length,
+      live:           liveMap.size,
       historic_calls: historicCalls,
-      credits_est:   creditsEst,
-      log:           log,
+      credits_est:    creditsEst,
+      log:            log,
+      request:        { callsigns: allCallsigns },
+      response:       [...liveMap.values()],
     }),
   })
 
