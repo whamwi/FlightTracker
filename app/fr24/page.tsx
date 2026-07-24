@@ -38,10 +38,10 @@ function normalizeForCache(data: any): Record<string, { arrivals: object[]; depa
     const fl = f?.flight
     if (!fl) return null
     const reg      = fl.aircraft?.registration ?? null
-    const num      = fl.identification?.number?.default ?? fl.identification?.callsign ?? (reg ? REG_TO_FLIGHT[reg] : null) ?? null
+    const num      = fl.identification?.number?.default ?? fl.identification?.callsign ?? (reg ? REG_TO_FLIGHT[reg] : null) ?? reg ?? null
     const schedDep = fl.time?.scheduled?.departure ?? null
     const schedArr = fl.time?.scheduled?.arrival   ?? null
-    if (!num || !schedDep || !schedArr) return null
+    if (!schedDep || !schedArr) return null
     return {
       num,
       airline:      fl.airline?.name ?? null,
