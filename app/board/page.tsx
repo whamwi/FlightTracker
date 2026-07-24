@@ -310,25 +310,34 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
           <p className={`font-mono font-semibold text-base ${isCancelled ? 'line-through text-gray-600' : 'text-white'}`}>
             {depSched}
           </p>
-          {(f.actual_dep_utc || f.revised_dep_utc) && !isCancelled && (
-            <p className={`font-mono text-xs mt-0.5 ${f.actual_dep_utc ? 'text-green-400' : 'text-yellow-400'}`}>
-              {depActual}
-            </p>
-          )}
-          {!isArr && <DelayBadge min={depDelay} />}
-          {f.dep_check_in_desk && (
-            <p className="text-gray-400 text-xs mt-1">CK <span className="text-white font-medium">{f.dep_check_in_desk}</span></p>
-          )}
-          {f.dep_gate && (
-            <p className="text-gray-400 text-xs">Gate <span className="text-white font-medium">{f.dep_gate}</span></p>
-          )}
-          {f.dep_terminal && (
-            <p className="text-gray-400 text-xs">T<span className="text-white font-medium">{f.dep_terminal}</span></p>
+          {(f.actual_dep_utc || f.revised_dep_utc) && !isCancelled ? (
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <p className={`font-mono text-xs ${f.actual_dep_utc ? 'text-green-400' : 'text-yellow-400'}`}>
+                {depActual}
+              </p>
+              {!isArr && <DelayBadge min={depDelay} />}
+            </div>
+          ) : (
+            !isArr && <DelayBadge min={depDelay} />
           )}
         </div>
 
-        <div className="flex-1 flex items-start justify-center pt-4">
+        <div className="flex-1 flex flex-col items-center justify-center gap-0.5">
           {f.aircraft_type && <p className="text-gray-600 text-xs">{f.aircraft_type}</p>}
+          {(f.dep_check_in_desk || f.dep_gate) && (
+            <p className="text-gray-500 text-xs text-center">
+              {f.dep_check_in_desk && (
+                <>CK <span className="text-gray-200 font-medium">{f.dep_check_in_desk}</span></>
+              )}
+              {f.dep_check_in_desk && f.dep_gate && <span className="mx-1 text-gray-700">·</span>}
+              {f.dep_gate && (
+                <>Gate <span className="text-gray-200 font-medium">{f.dep_gate}</span></>
+              )}
+            </p>
+          )}
+          {f.dep_terminal && (
+            <p className="text-gray-500 text-xs">T<span className="text-gray-200 font-medium">{f.dep_terminal}</span></p>
+          )}
         </div>
 
         <div className="min-w-[3.5rem] text-right">
@@ -336,18 +345,23 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
           <p className={`font-mono font-semibold text-base ${isCancelled ? 'line-through text-gray-600' : 'text-white'}`}>
             {arrSched}
           </p>
-          {(f.actual_arr_utc || f.revised_arr_utc) && !isCancelled && (
-            <p className={`font-mono text-xs mt-0.5 ${f.actual_arr_utc ? 'text-green-400' : 'text-yellow-400'}`}>
-              {arrActual}
-            </p>
+          {(f.actual_arr_utc || f.revised_arr_utc) && !isCancelled ? (
+            <div className="flex items-center justify-end gap-1.5 mt-0.5">
+              <p className={`font-mono text-xs ${f.actual_arr_utc ? 'text-green-400' : 'text-yellow-400'}`}>
+                {arrActual}
+              </p>
+              {isArr && <DelayBadge min={arrDelay} />}
+            </div>
+          ) : (
+            <>
+              {computedETA(f) && !isCancelled && (
+                <p className="font-mono text-xs mt-0.5 text-orange-400" title="Estimated (ATD + block time)">
+                  ~{fmtLocal(computedETA(f), arrOff)}
+                </p>
+              )}
+              {isArr && <DelayBadge min={arrDelay} />}
+            </>
           )}
-          {/* Computed ETA when airborne but no confirmed/revised arrival yet */}
-          {!f.actual_arr_utc && !f.revised_arr_utc && computedETA(f) && !isCancelled && (
-            <p className="font-mono text-xs mt-0.5 text-orange-400" title="Estimated (ATD + block time)">
-              ~{fmtLocal(computedETA(f), arrOff)}
-            </p>
-          )}
-          {isArr && <DelayBadge min={arrDelay} />}
           {isArr && f.arr_gate && (
             <p className="text-gray-400 text-xs mt-1">Gate <span className="text-white font-medium">{f.arr_gate}</span></p>
           )}
