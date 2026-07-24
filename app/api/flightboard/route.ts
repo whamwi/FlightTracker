@@ -138,8 +138,11 @@ export async function GET(req: Request) {
   }
 
   for (const row of cacheRows) {
-    for (const f of (row.departures ?? [])) addFlight(f)
-    for (const f of (row.arrivals   ?? [])) addFlight(f)
+    const ap = row.airport_iata as string
+    // For departures from this airport: dep_iata = this airport (widget omits it)
+    for (const f of (row.departures ?? [])) addFlight({ ...f, dep_iata: f.dep_iata || ap })
+    // For arrivals at this airport: arr_iata = this airport (widget omits it)
+    for (const f of (row.arrivals   ?? [])) addFlight({ ...f, arr_iata: f.arr_iata || ap })
   }
 
   return NextResponse.json({ ok: true, date, flights })
