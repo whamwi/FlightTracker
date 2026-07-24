@@ -341,10 +341,35 @@ export async function GET() {
     }
     if (trackedExtra.length) upsertPositions(trackedExtra).catch(() => {})
 
+    // Board flights confirmed departed but not found by any ADS-B feed
+    // (no coverage over central Saudi Arabia, Iraqi desert, etc.).
+    // Returned separately so the Map can drive ESTIMATED ghost markers
+    // without a live position — the route_paths waypoints + actual_dep_utc
+    // are enough to compute the correct enroute position.
+    const seenCallsigns = new Set<string>([
+      ...annotated.map((a: any) => (a.flight ?? '').trim().toUpperCase()),
+      ...trackedExtra.map((a: any) => (a.flight ?? '').trim().toUpperCase()),
+    ])
+    const boardDeparted = resolvedBoard
+      .filter(f =>
+        f.actual_dep_utc &&
+        f.dep_iata && f.arr_iata && f.duration_min &&
+        !seenCallsigns.has(f.callsign)
+      )
+      .map(f => ({
+        callsign:       f.callsign,
+        dep_iata:       f.dep_iata,
+        arr_iata:       f.arr_iata,
+        duration_min:   f.duration_min,
+        actual_dep_utc: f.actual_dep_utc,
+        iata_number:    f.num,
+      }))
+
     return NextResponse.json({
-      ok:       true,
-      aircraft: [...annotated, ...trackedExtra],
-      ts:       feedCache!.ts,
+      ok:           true,
+      aircraft:     [...annotated, ...trackedExtra],
+      boardDeparted,
+      ts:           feedCache!.ts,
     })
   } catch (err) {
     if (feedCache?.aircraft.length) {

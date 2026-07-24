@@ -651,6 +651,53 @@ export default function Map() {
                 }
               }
             }
+            // Board flights confirmed departed but not found by any ADS-B feed
+            // (no coverage over central Saudi Arabia, Iraqi desert, etc.).
+            // Inject into scheduleRef + flightStatusRef so the schedule overlay
+            // renders an ESTIMATED ghost marker at the correct enroute position.
+            for (const bd of (data.boardDeparted ?? []) as {
+              callsign: string; dep_iata: string; arr_iata: string
+              duration_min: number; actual_dep_utc: string; iata_number: string
+            }[]) {
+              const { callsign: cs, dep_iata, arr_iata, duration_min, actual_dep_utc, iata_number } = bd
+              if (!cs || !dep_iata || !arr_iata) continue
+
+              // Seed flightStatusRef so the schedule overlay uses actual dep time
+              if (!flightStatusRef.current[cs]?.actual_dep_utc) {
+                flightStatusRef.current[cs] = {
+                  callsign:          cs,
+                  status:            'Departed',
+                  actual_dep_utc,
+                  actual_arr_utc:    null,
+                  scheduled_dep_utc: null,
+                  scheduled_arr_utc: null,
+                  revised_dep_utc:   null,
+                  revised_arr_utc:   null,
+                  dep_delay_min:     null,
+                  arr_delay_min:     null,
+                  aircraft_reg:      null,
+                  aircraft_type:     null,
+                  flight_number:     iata_number,
+                  dep_iata,
+                  arr_iata,
+                  airline_iata:      null,
+                }
+              }
+
+              // Inject into scheduleRef if missing — stub dep/arr times are fine
+              // because the schedule overlay uses actual_dep_utc from flightStatusRef
+              if (!scheduleRef.current.some(e => e.callsign === cs)) {
+                scheduleRef.current.push({
+                  callsign:     cs,
+                  dep_iata,
+                  arr_iata,
+                  dep_time_utc: '00:00',
+                  arr_time_utc: '00:00',
+                  duration_min,
+                  days_of_week: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],
+                })
+              }
+            }
             setError(data.warn ? 'Feed degraded' : null)
           }
         } else {
