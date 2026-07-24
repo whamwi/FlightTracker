@@ -319,10 +319,10 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
           {f.dep_check_in_desk && (
             <p className="text-gray-400 text-xs mt-1">CK <span className="text-white font-medium">{f.dep_check_in_desk}</span></p>
           )}
-          {!isArr && f.dep_gate && (
+          {f.dep_gate && (
             <p className="text-gray-400 text-xs">Gate <span className="text-white font-medium">{f.dep_gate}</span></p>
           )}
-          {!isArr && f.dep_terminal && (
+          {f.dep_terminal && (
             <p className="text-gray-400 text-xs">T<span className="text-white font-medium">{f.dep_terminal}</span></p>
           )}
         </div>
