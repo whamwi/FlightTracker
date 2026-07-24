@@ -20,17 +20,21 @@ function diffMin(sched: number | null, actual: number | null): number | null {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function normalizeForCache(data: any): { arrivals: object[]; departures: object[] } {
+function normalizeForCache(data: any, todayDate: string): { arrivals: object[]; departures: object[] } {
   const sched = data?.result?.response?.airport?.pluginData?.schedule ?? {}
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const norm = (f: any) => {
+  const norm = (f: any, useArrDate: boolean) => {
     const fl = f?.flight
     if (!fl) return null
     const num      = fl.identification?.number?.default
     const schedDep = fl.time?.scheduled?.departure ?? null
     const schedArr = fl.time?.scheduled?.arrival   ?? null
     if (!num || !schedDep || !schedArr) return null
+    // Filter: only keep flights whose operating time falls on todayDate in Syria time
+    const opUnix = useArrDate ? schedArr : schedDep
+    const flightDate = new Date(opUnix * 1000).toLocaleDateString('en-CA', { timeZone: TZ })
+    if (flightDate !== todayDate) return null
     return {
       num,
       airline:      fl.airline?.name ?? null,
@@ -45,8 +49,10 @@ function normalizeForCache(data: any): { arrivals: object[]; departures: object[
   }
 
   return {
-    arrivals:   (sched.arrivals?.data  ?? []).map(norm).filter(Boolean) as object[],
-    departures: (sched.departures?.data ?? []).map(norm).filter(Boolean) as object[],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    arrivals:   (sched.arrivals?.data  ?? []).map((f: any) => norm(f, true)).filter(Boolean)  as object[],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    departures: (sched.departures?.data ?? []).map((f: any) => norm(f, false)).filter(Boolean) as object[],
   }
 }
 
@@ -126,7 +132,7 @@ export default function Fr24DumpPage() {
       setUpdatedAt(new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }))
 
       // Write-through: persist to DB in the background (browser bypasses Cloudflare)
-      const { arrivals, departures } = normalizeForCache(data)
+      const { arrivals, departures } = normalizeForCache(data, flightDate)
       fetch('/api/fr24-cache', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },

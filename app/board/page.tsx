@@ -46,6 +46,7 @@ const STATUS_ALIAS: Record<string, string> = {
 // ── Local airline logo overrides ─────────────────────────────────────────────
 const LOCAL_LOGOS: Record<string, string> = {
   XH: '/airlines/XH.jpg',
+  TK: '/airlines/TK.jpg',
   EY: '/airlines/EY.png',
   '3L': 'https://images.flightsfrom.com/airlines/100/G9_100px.png',
 }
