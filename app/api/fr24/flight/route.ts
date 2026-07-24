@@ -27,22 +27,21 @@ export async function GET(req: Request) {
   const sumData = sumText ? JSON.parse(sumText) : null
   const fr24_id: string | null = sumData?.data?.[0]?.fr24_id ?? null
 
-  // 2. If we have a fr24_id, fetch live position + position trail in parallel
+  // 2. If we have a fr24_id, fetch position trail only.
+  // live/flight-positions/full disabled until tracking stage (~13 credits per call).
   let liveData = null
   let trailData = null
   if (fr24_id) {
     const nowSec  = Math.floor(Date.now() / 1000)
     const fromSec = nowSec - 36 * 3600
-    const safeJson = async (r: Response) => { try { return await r.json() } catch { return null } }
-    const [liveRes, trailRes] = await Promise.all([
-      fr24('live/flight-positions/full', { flight_ids: fr24_id }),
-      fr24('historic/flight-positions/full', {
+    try {
+      const trailRes = await fr24('historic/flight-positions/full', {
         flight_ids:     fr24_id,
         timestamp_from: String(fromSec),
         timestamp_to:   String(nowSec),
-      }),
-    ])
-    ;[liveData, trailData] = await Promise.all([safeJson(liveRes), safeJson(trailRes)])
+      })
+      trailData = await trailRes.json().catch(() => null)
+    } catch { /* silent */ }
   }
 
   return NextResponse.json({
