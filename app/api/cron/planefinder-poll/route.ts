@@ -249,27 +249,43 @@ export async function GET(req: Request) {
 
     if (pf) {
       // ── A: Visible in live → En Route ─────────────────────────────────────
+      // If we don't have a departure time and the aircraft is already at altitude,
+      // it departed before we first saw it — fetch historic to get the real firstSeen
+      // instead of stamping "now" as actual_dep_utc.
+      const needsHistoric = !hasActualDep && (pf.altitude ?? 0) > 3000
+      if (needsHistoric) historicCalls++
       ops.push(
-        upsertStatus({
-          callsign,
-          operating_date:    flight_date,
-          status:            'En Route',
-          dep_iata:          pf.departureAirport ?? dep_iata,
-          arr_iata:          pf.arrivalAirport   ?? arr_iata,
-          flight_number:     pf.flightNumber ?? null,
-          aircraft_reg:      pf.reg  ?? null,
-          aircraft_type:     pf.type ?? null,
-          airline_icao:      callsign.slice(0, 3),
-          scheduled_dep_utc: std,
-          scheduled_arr_utc: sta,
-          ...(!hasActualDep ? { actual_dep_utc: now.toISOString() } : {}),
-          last_synced_at:    now.toISOString(),
-        }).then(() => {
+        (async () => {
+          let setDep: string | undefined
+          if (!hasActualDep) {
+            if (needsHistoric) {
+              const { firstSeen } = await fetchPfHistoric(callsign, flight_date, log)
+              setDep = firstSeen ?? undefined
+            } else {
+              // Low altitude — aircraft just took off, now is accurate
+              setDep = now.toISOString()
+            }
+          }
+          await upsertStatus({
+            callsign,
+            operating_date:    flight_date,
+            status:            'En Route',
+            dep_iata:          pf.departureAirport ?? dep_iata,
+            arr_iata:          pf.arrivalAirport   ?? arr_iata,
+            flight_number:     pf.flightNumber ?? null,
+            aircraft_reg:      pf.reg  ?? null,
+            aircraft_type:     pf.type ?? null,
+            airline_icao:      callsign.slice(0, 3),
+            scheduled_dep_utc: std,
+            scheduled_arr_utc: sta,
+            ...(setDep ? { actual_dep_utc: setDep } : {}),
+            last_synced_at:    now.toISOString(),
+          })
           const from  = !isEnRoute ? ` (↑ from ${dbStatus ?? 'Scheduled'})` : ''
           const parts = [pf.reg, pf.type, pf.departureAirport && pf.arrivalAirport ? `${pf.departureAirport}→${pf.arrivalAirport}` : null].filter(Boolean)
           const info  = parts.length ? ` [${parts.join(', ')}]` : ''
           log.push(`${callsign}: En Route${from}${info}`)
-        })
+        })()
       )
 
     } else if (isEnRoute && !hasActualArr && pastSta && minSinceSync >= 20) {
