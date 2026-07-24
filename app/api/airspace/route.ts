@@ -97,7 +97,7 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<Bo
     return boardCache.flights
 
   const res = await fetch(
-    `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${date}&select=departures,arrivals`,
+    `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${date}&select=airport_iata,departures,arrivals`,
     { headers: SB_HEADERS },
   )
   if (!res.ok) return boardCache?.flights ?? []
@@ -108,6 +108,7 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<Bo
   const flights: BoardFlight[] = []
 
   for (const row of rows) {
+    const ap = (row.airport_iata as string) || ''
     for (const section of ['departures', 'arrivals'] as const) {
       for (const f of (row[section] ?? [])) {
         const num = (f.num ?? '').toString()
@@ -116,11 +117,13 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<Bo
         if (seen.has(key)) continue
         seen.add(key)
         const status = (f.status ?? '').toLowerCase()
+        // FR24 cache omits the implicit airport — fill dep_iata for departures
+        // and arr_iata for arrivals from the row's airport_iata.
         flights.push({
           num,
           callsign:       toCallsign(num, iataToIcao),
-          dep_iata:       f.dep_iata     ?? null,
-          arr_iata:       f.arr_iata     ?? null,
+          dep_iata:       f.dep_iata || (section === 'departures' ? ap : null) || null,
+          arr_iata:       f.arr_iata || (section === 'arrivals'   ? ap : null) || null,
           sched_dep:      f.sched_dep    ?? null,
           sched_arr:      f.sched_arr    ?? null,
           duration_min:   f.duration_min ?? null,
@@ -136,8 +139,11 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<Bo
 }
 
 // ── Callsign-based ADS-B lookup for active flights (10s cache) ────────────────
-// Active = FR24 status suggests the plane is airborne.
-const ACTIVE_KEYWORDS = ['departed', 'took off', 'en route', 'in flight', 'boarding', 'gate close', 'approaching']
+// Active = FR24 status suggests the plane is airborne or about to depart.
+// "estimated" covers "Estimated dep HH:MM" — the daily cache is frozen after the 02:00 UTC
+// cron, so flights that departed later in the day still show "Estimated dep" all day.
+// Querying adsb.fi for them is cheap — if they're on the ground it returns nothing.
+const ACTIVE_KEYWORDS = ['departed', 'took off', 'en route', 'in flight', 'boarding', 'gate close', 'approaching', 'estimated']
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let trackedCache: { map: Record<string, any>; ts: number } | null = null

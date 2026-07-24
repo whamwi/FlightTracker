@@ -621,6 +621,36 @@ export default function Map() {
                 liveAircraft.push(a)
               }
             }
+            // Seed flightStatusRef from board data so the schedule overlay can
+            // position delayed flights that are in route_master.
+            // The FR24 daily cache is frozen after the 02:00 UTC cron, so actual_dep_utc
+            // (extracted from "Departed HH:MM") is the only intraday timing signal we have.
+            for (const a of data.aircraft as Aircraft[]) {
+              if (!a.board_match || !a.actual_dep_utc) continue
+              const cs = (a.flight ?? '').trim()
+              if (!cs) continue
+              const existing = flightStatusRef.current[cs]
+              if (!existing?.actual_dep_utc) {
+                flightStatusRef.current[cs] = {
+                  callsign:          cs,
+                  status:            'Departed',
+                  actual_dep_utc:    a.actual_dep_utc,
+                  actual_arr_utc:    existing?.actual_arr_utc    ?? null,
+                  scheduled_dep_utc: existing?.scheduled_dep_utc ?? null,
+                  scheduled_arr_utc: existing?.scheduled_arr_utc ?? null,
+                  revised_dep_utc:   existing?.revised_dep_utc   ?? null,
+                  revised_arr_utc:   existing?.revised_arr_utc   ?? null,
+                  dep_delay_min:     existing?.dep_delay_min      ?? null,
+                  arr_delay_min:     existing?.arr_delay_min      ?? null,
+                  aircraft_reg:      a.r ?? existing?.aircraft_reg   ?? null,
+                  aircraft_type:     a.t ?? existing?.aircraft_type  ?? null,
+                  flight_number:     a.iata_number ?? existing?.flight_number ?? null,
+                  dep_iata:          a.dep_iata ?? existing?.dep_iata ?? null,
+                  arr_iata:          a.arr_iata ?? existing?.arr_iata ?? null,
+                  airline_iata:      existing?.airline_iata ?? null,
+                }
+              }
+            }
             setError(data.warn ? 'Feed degraded' : null)
           }
         } else {
