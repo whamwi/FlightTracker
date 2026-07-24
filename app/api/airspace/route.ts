@@ -153,68 +153,10 @@ async function fetchLastKnownPositions(): Promise<any[]> {
   }))
 }
 
-// ── FR24 live enrichment for callsigns missed by free feeds (5-min Supabase cache) ──
-// In-memory cache is useless on Vercel (fresh process per invocation).
-// We persist the result in fr24_live_cache and reuse it for 5 minutes.
+// ── FR24 live enrichment — disabled until live tracking stage ────────────────
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function fetchFR24Missing(callsigns: string[]): Promise<any[]> {
-  if (!FR24_KEY || callsigns.length === 0) return []
-
-  // Check Supabase cache first
-  try {
-    const cacheRes = await fetch(
-      `${SB_URL}/rest/v1/fr24_live_cache?id=eq.airspace&select=data,cached_at`,
-      { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` } }
-    )
-    if (cacheRes.ok) {
-      const rows = await cacheRes.json()
-      if (rows[0] && Date.now() - new Date(rows[0].cached_at).getTime() < 5 * 60_000) {
-        return rows[0].data ?? []
-      }
-    }
-  } catch { /* fall through to fresh fetch */ }
-
-  try {
-    const res = await fetch(
-      `https://fr24api.flightradar24.com/api/live/flight-positions/full?callsigns=${callsigns.join(',')}`,
-      {
-        headers: {
-          Accept: 'application/json',
-          'Accept-Version': 'v1',
-          Authorization: `Bearer ${FR24_KEY}`,
-        },
-        signal: AbortSignal.timeout(8000),
-      },
-    )
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const aircraft: any[] = res.ok ? (await res.json()).data?.map((a: any) => ({
-      hex:      a.hex,
-      flight:   (a.callsign ?? a.flight ?? '').trim(),
-      lat:      a.lat,
-      lon:      a.lon,
-      alt_baro: a.alt,
-      gs:       a.gspeed,
-      track:    a.track,
-      t:        a.type,
-      r:        a.reg,
-      fr24:     true,
-    })) ?? [] : []
-
-    // Persist to Supabase cache (fire-and-forget)
-    fetch(`${SB_URL}/rest/v1/fr24_live_cache`, {
-      method: 'POST',
-      headers: {
-        apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`,
-        'Content-Type': 'application/json',
-        Prefer: 'resolution=merge-duplicates,return=minimal',
-      },
-      body: JSON.stringify({ id: 'airspace', data: aircraft, cached_at: new Date().toISOString() }),
-    }).catch(() => {})
-
-    return aircraft
-  } catch {
-    return []
-  }
+async function fetchFR24Missing(_callsigns: string[]): Promise<any[]> {
+  return []
 }
 
 // ── Syria stale positions — always appended alongside live feed (30s cache) ──
