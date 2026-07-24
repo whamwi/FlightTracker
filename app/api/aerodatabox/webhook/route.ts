@@ -69,7 +69,11 @@ async function fetchIataToCallsign(): Promise<Record<string, string>> {
   const buildMap = (rows: { iata_number: string; broadcast_callsign: string }[]) => {
     const map: Record<string, string> = {}
     for (const r of rows) {
+      // Index by IATA number (e.g. XH728 → FYC728) for airlines where ADB sends IATA
       if (r.iata_number && r.broadcast_callsign) map[r.iata_number.toUpperCase()] = r.broadcast_callsign
+      // Also index by broadcast callsign itself (e.g. FYC728 → FYC728) for airlines
+      // where ADB sends the ICAO number instead of IATA (e.g. Fly Cham sends "FYC 728")
+      if (r.broadcast_callsign) map[r.broadcast_callsign.toUpperCase()] = r.broadcast_callsign
     }
     return map
   }
