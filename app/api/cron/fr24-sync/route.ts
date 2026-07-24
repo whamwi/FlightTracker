@@ -129,21 +129,39 @@ export async function GET(req: Request) {
   }
 
   if (rows.length > 0) {
-    const res = await fetch(`${SB_URL}/rest/v1/fr24_daily_cache`, {
-      method:  'POST',
-      headers: {
-        apikey:         SB_KEY,
-        Authorization:  `Bearer ${SB_KEY}`,
-        'Content-Type': 'application/json',
-        Prefer:         'resolution=merge-duplicates,return=minimal',
-      },
-      body: JSON.stringify(rows),
+    // Only upsert rows where Business API has more arrivals than what's cached
+    // (browser write-through from widget is more complete for DAM due to partial ADS-B coverage)
+    const existRes = await fetch(
+      `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${targetDate}&select=airport_iata,arr_count`,
+      { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` } }
+    )
+    const existing: { airport_iata: string; arr_count: number }[] = existRes.ok ? await existRes.json() : []
+    const existMap = Object.fromEntries(existing.map(r => [r.airport_iata, r.arr_count]))
+
+    const toUpsert = rows.filter((r: object) => {
+      const row = r as { airport_iata: string; arr_count: number }
+      const cached = existMap[row.airport_iata] ?? 0
+      return row.arr_count > cached  // only replace if we have more data
     })
-    if (!res.ok) {
-      const err = await res.text()
-      console.error('[fr24-sync] upsert failed:', err)
-      return NextResponse.json({ ok: false, error: err }, { status: 502 })
+
+    if (toUpsert.length > 0) {
+      const res = await fetch(`${SB_URL}/rest/v1/fr24_daily_cache`, {
+        method:  'POST',
+        headers: {
+          apikey:         SB_KEY,
+          Authorization:  `Bearer ${SB_KEY}`,
+          'Content-Type': 'application/json',
+          Prefer:         'resolution=merge-duplicates,return=minimal',
+        },
+        body: JSON.stringify(toUpsert),
+      })
+      if (!res.ok) {
+        const err = await res.text()
+        console.error('[fr24-sync] upsert failed:', err)
+        return NextResponse.json({ ok: false, error: err }, { status: 502 })
+      }
     }
+    summary.push(`upserted ${toUpsert.length}/${rows.length} (skipped where browser had more data)`)
   }
 
   return NextResponse.json({ ok: true, date: targetDate, summary, upserted: rows.length })
