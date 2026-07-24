@@ -6,20 +6,26 @@ const SB_URL = process.env.SUPABASE_URL!
 const SB_KEY = process.env.SUPABASE_ANON_KEY!
 const HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 
-// UTC offset (hours) per airport. Default = 3 (Syria/most Mid-East airports).
-const AIRPORT_UTC_OFFSET: Record<string, number> = {
-  // UTC+4
-  DXB: 4, AUH: 4, SHJ: 4, MCT: 4, EVN: 4,
-  // UTC+2
-  AMS: 2, MJI: 2,
+function unixToUtcHHMM(unix: number | null): string {
+  if (!unix) return ''
+  const d = new Date(unix * 1000)
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
 }
 
-function utcToLocalHHMM(iso: string | null, iata: string): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  const offsetMin = (AIRPORT_UTC_OFFSET[iata] ?? 3) * 60
-  const w = ((d.getUTCHours() * 60 + d.getUTCMinutes() + offsetMin) % 1440 + 1440) % 1440
-  return `${String(Math.floor(w / 60)).padStart(2, '0')}:${String(w % 60).padStart(2, '0')}`
+// Normalise the raw FR24 status text to a board status key
+function normaliseStatus(raw: string | null): string {
+  if (!raw) return 'Scheduled'
+  const t = raw.toLowerCase()
+  if (t === 'scheduled')                                    return 'Scheduled'
+  if (t.startsWith('estimated') || t.startsWith('expect')) return 'Expected'
+  if (t.includes('boarding'))                               return 'Boarding'
+  if (t.includes('gate close'))                             return 'GateClosed'
+  if (t.includes('departed') || t.includes('took off'))     return 'Departed'
+  if (t.includes('en route') || t.includes('in flight'))   return 'En Route'
+  if (t.includes('approach'))                               return 'Approaching'
+  if (t.includes('landed') || t.includes('arrived'))       return 'Arrived'
+  if (t.includes('cancel'))                                 return 'Cancelled'
+  return 'Scheduled'
 }
 
 export async function GET(req: Request) {
@@ -27,75 +33,97 @@ export async function GET(req: Request) {
   const date = searchParams.get('date')
   if (!date) return NextResponse.json({ ok: false, error: 'date required' }, { status: 400 })
 
-  const [instanceRes, statusRes] = await Promise.all([
-    // flight_instance for this date, joined to flight_lookup → airlines and route_master
+  // Fetch all three in parallel
+  const [cacheRes, airlinesRes, statusRes] = await Promise.all([
     fetch(
-      `${SB_URL}/rest/v1/flight_instance` +
-      `?flight_date=eq.${date}` +
-      `&select=dep_iata,arr_iata,std,sta,atd,ata,etd,eta,status` +
-      `,flight_lookup!flight_id(iata_number,broadcast_callsign,airlines(name_en,iata,country_flag))` +
-      `,route_master!route_id(duration_min,days_of_week)` +
-      `&order=std.asc`,
+      `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${date}&select=airport_iata,arrivals,departures`,
       { headers: HEADERS }
     ),
-    // flight_status for live overlay
+    fetch(
+      `${SB_URL}/rest/v1/airlines?select=iata,name_en,country_flag`,
+      { headers: HEADERS }
+    ),
     fetch(
       `${SB_URL}/rest/v1/flight_status` +
       `?operating_date=eq.${date}` +
-      `&select=callsign,status,actual_dep_utc,actual_arr_utc,revised_dep_utc,revised_arr_utc` +
-      `,dep_delay_min,arr_delay_min,dep_terminal,dep_gate,dep_check_in_desk` +
-      `,arr_terminal,arr_gate,arr_baggage_belt,aircraft_type,aircraft_reg`,
+      `&select=flight_number,callsign,status,actual_dep_utc,actual_arr_utc` +
+      `,revised_dep_utc,revised_arr_utc,dep_delay_min,arr_delay_min` +
+      `,dep_terminal,dep_gate,dep_check_in_desk,arr_terminal,arr_gate,arr_baggage_belt` +
+      `,aircraft_type,aircraft_reg`,
       { headers: HEADERS }
     ),
   ])
 
-  if (!instanceRes.ok) {
-    return NextResponse.json({ ok: false, error: `instance fetch failed: ${instanceRes.status}` }, { status: 502 })
+  if (!cacheRes.ok) {
+    return NextResponse.json({ ok: false, error: `cache fetch failed: ${cacheRes.status}` }, { status: 502 })
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const instanceRows: any[] = await instanceRes.json()
+  const cacheRows: any[]    = await cacheRes.json()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const statusRows: any[] = statusRes.ok ? await statusRes.json() : []
-
-  // Index flight_status by callsign — last row wins if duplicates
+  const airlineRows: any[]  = airlinesRes.ok ? await airlinesRes.json() : []
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const byCallsign: Record<string, any> = {}
-  for (const s of statusRows) byCallsign[s.callsign] = s
+  const statusRows: any[]   = statusRes.ok  ? await statusRes.json()  : []
 
-  const flights = instanceRows.map(r => {
-    const fl = r.flight_lookup ?? {}
-    const al = fl.airlines ?? {}
-    const rm = r.route_master ?? {}
-    const callsign: string = fl.broadcast_callsign ?? ''
-    const st = byCallsign[callsign] ?? null
+  // ── Lookups ──────────────────────────────────────────────────────────────────
+  const airlineMap: Record<string, { name: string; flag: string }> = {}
+  for (const a of airlineRows) {
+    airlineMap[a.iata] = { name: a.name_en ?? a.iata, flag: a.country_flag ?? '' }
+  }
 
-    // Scheduled times in origin/destination airport local time
-    const dep_time     = utcToLocalHHMM(r.std, r.dep_iata)
-    const arr_time     = utcToLocalHHMM(r.sta, r.arr_iata)
-    const dep_time_utc = r.std ? new Date(r.std).toISOString().slice(11, 16) : ''
-    const arr_time_utc = r.sta ? new Date(r.sta).toISOString().slice(11, 16) : ''
+  // Index flight_status by flight_number (last write wins on duplicates)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const statusMap: Record<string, any> = {}
+  for (const s of statusRows) {
+    const key = s.flight_number ?? s.callsign
+    if (key) statusMap[key] = s
+  }
 
-    return {
-      callsign,
-      iata_number:       fl.iata_number   ?? '',
-      airline_name:      al.name_en       ?? '',
-      airline_iata:      al.iata          ?? '',
-      country_flag:      al.country_flag  ?? '',
-      dep_iata:          r.dep_iata       ?? '',
-      arr_iata:          r.arr_iata       ?? '',
-      dep_time,
-      arr_time,
+  // ── Flatten JSONB arrays from all airports ────────────────────────────────
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const seen  = new Set<string>()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const flights: any[] = []
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function addFlight(f: any) {
+    const num      = f.num       ?? ''
+    const depIata  = f.dep_iata  ?? ''
+    const arrIata  = f.arr_iata  ?? ''
+    const schedDep = f.sched_dep ?? null
+    const schedArr = f.sched_arr ?? null
+
+    // Dedup: same flight number + route → one row (arrivals + departures share flights)
+    const key = `${num}|${depIata}|${arrIata}`
+    if (seen.has(key)) return
+    seen.add(key)
+
+    const al  = airlineMap[f.airline_iata ?? ''] ?? { name: f.airline ?? f.airline_iata ?? '', flag: '' }
+    const st  = statusMap[num] ?? null
+
+    const dep_time_utc = unixToUtcHHMM(schedDep)
+    const arr_time_utc = unixToUtcHHMM(schedArr)
+
+    flights.push({
+      callsign:          num,                            // widget doesn't give callsign; flight num is close enough
+      iata_number:       num,
+      airline_name:      al.name,
+      airline_iata:      f.airline_iata ?? '',
+      country_flag:      al.flag,
+      dep_iata:          depIata,
+      arr_iata:          arrIata,
+      dep_time:          dep_time_utc,                   // used only as React key fallback
+      arr_time:          arr_time_utc,
       dep_time_utc,
       arr_time_utc,
-      duration_min:      rm.duration_min  ?? 0,
-      days_of_week:      rm.days_of_week  ?? [],
-      // instance status (scheduled/departed/arrived) — overridden by flight_status when available
-      status:            st?.status             ?? r.status ?? 'Scheduled',
-      actual_dep_utc:    st?.actual_dep_utc     ?? (r.atd ?? null),
-      actual_arr_utc:    st?.actual_arr_utc     ?? (r.ata ?? null),
-      revised_dep_utc:   st?.revised_dep_utc    ?? (r.etd ?? null),
-      revised_arr_utc:   st?.revised_arr_utc    ?? (r.eta ?? null),
+      duration_min:      f.duration_min ?? 0,
+      codeshare_iata:    null,
+      // Status: flight_status overlay wins, then FR24 widget status
+      status:            st?.status             ?? normaliseStatus(f.status),
+      actual_dep_utc:    st?.actual_dep_utc     ?? null,
+      actual_arr_utc:    st?.actual_arr_utc     ?? null,
+      revised_dep_utc:   st?.revised_dep_utc    ?? null,
+      revised_arr_utc:   st?.revised_arr_utc    ?? null,
       dep_delay_min:     st?.dep_delay_min      ?? null,
       arr_delay_min:     st?.arr_delay_min      ?? null,
       dep_terminal:      st?.dep_terminal       ?? null,
@@ -104,10 +132,15 @@ export async function GET(req: Request) {
       arr_terminal:      st?.arr_terminal       ?? null,
       arr_gate:          st?.arr_gate           ?? null,
       arr_baggage_belt:  st?.arr_baggage_belt   ?? null,
-      aircraft_type:     st?.aircraft_type      ?? null,
-      aircraft_reg:      st?.aircraft_reg       ?? null,
-    }
-  })
+      aircraft_type:     st?.aircraft_type      ?? f.aircraft ?? null,
+      aircraft_reg:      st?.aircraft_reg       ?? f.reg      ?? null,
+    })
+  }
+
+  for (const row of cacheRows) {
+    for (const f of (row.departures ?? [])) addFlight(f)
+    for (const f of (row.arrivals   ?? [])) addFlight(f)
+  }
 
   return NextResponse.json({ ok: true, date, flights })
 }
