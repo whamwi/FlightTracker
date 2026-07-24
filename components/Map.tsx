@@ -16,12 +16,13 @@ interface Aircraft {
   nac_p?: number
   t: string | null
   r: string | null
-  board_match:  boolean
-  dep_iata:     string | null
-  arr_iata:     string | null
-  arr_time_utc: string | null
-  duration_min: number | null
-  iata_number:  string | null
+  board_match:    boolean
+  dep_iata:       string | null
+  arr_iata:       string | null
+  arr_time_utc:   string | null
+  duration_min:   number | null
+  iata_number:    string | null
+  actual_dep_utc: string | null
   seen_at?: string
   stale?:   boolean
 }
@@ -695,6 +696,15 @@ export default function Map() {
         lastKnownRef.current[a.hex] = { a, lostAt: 0 }
 
         const isSyria  = a.board_match
+        // Non-board-match aircraft are tracked in lastKnownRef for future geofence
+        // features but not rendered — only Syria board flights are shown on the map.
+        if (!isSyria) {
+          markersRef.current[a.hex]?.remove()
+          delete markersRef.current[a.hex]
+          linesRef.current[a.hex]?.forEach((l: any) => l.remove())
+          delete linesRef.current[a.hex]
+          continue
+        }
         const callsign = (a.flight ?? '').trim()
         const isAlp    = a.arr_iata === 'ALP' || a.dep_iata === 'ALP'
         const icon     = planeIcon(L, bestHeading(a), isSyria, false, isSyria && callsign ? callsign : undefined, isAlp)
@@ -856,11 +866,23 @@ export default function Map() {
           // ── Path-based rejoin ───────────────────────────────────────────────
           const cs = (a.flight ?? '').trim()
           const schedEntry = scheduleRef.current.find(e => e.callsign === cs)
-          const pathKey = schedEntry ? `${schedEntry.dep_iata}|${schedEntry.arr_iata}` : ''
+          // Board flights carry dep_iata/arr_iata directly — use them as fallback
+          // so route_paths waypoints work even for callsigns absent from route_master.
+          const pathKey = schedEntry
+            ? `${schedEntry.dep_iata}|${schedEntry.arr_iata}`
+            : (a.dep_iata && a.arr_iata ? `${a.dep_iata}|${a.arr_iata}` : '')
           const wps = pathKey ? routePathsRef.current[pathKey] : undefined
-          const fraction = schedEntry
-            ? isFlightActiveNow(schedEntry.dep_time_utc, schedEntry.arr_time_utc, schedEntry.days_of_week, now)
-            : null
+          const durationMin = schedEntry?.duration_min ?? a.duration_min ?? 0
+          // Use actual dep time from board when available (handles delayed flights).
+          // Falls back to schedule-based fraction when actual_dep_utc is absent.
+          const fraction = (() => {
+            if (a.actual_dep_utc && durationMin > 0) {
+              const f = (now - new Date(a.actual_dep_utc).getTime()) / (durationMin * 60_000)
+              if (f >= 0) return f
+            }
+            if (!schedEntry) return null
+            return isFlightActiveNow(schedEntry.dep_time_utc, schedEntry.arr_time_utc, schedEntry.days_of_week, now)
+          })()
 
           if (wps?.length && fraction !== null) {
             // Cap at 0.97 so the icon never overshoots destination via waypoints that
@@ -887,8 +909,9 @@ export default function Map() {
             // when FR24 takes over — use whichever fraction is further along the route.
             const csKey = (a.flight ?? '').trim()
             const fsDr  = csKey ? flightStatusRef.current[csKey] : null
-            const actualDepFrac = (fsDr?.actual_dep_utc && schedEntry && schedEntry.duration_min > 0)
-              ? Math.max(0, Math.min(0.97, (now - new Date(fsDr.actual_dep_utc).getTime()) / (schedEntry.duration_min * 60_000)))
+            const depUtcDr = a.actual_dep_utc ?? fsDr?.actual_dep_utc ?? null
+            const actualDepFrac = (depUtcDr && durationMin > 0)
+              ? Math.max(0, Math.min(0.97, (now - new Date(depUtcDr).getTime()) / (durationMin * 60_000)))
               : null
 
             let useF = clampedF
@@ -945,11 +968,11 @@ export default function Map() {
                 dispTrack = a.track ?? 0
               } else {
                 let elapsedFrac = 0
-                if (schedEntry && schedEntry.duration_min > 0) {
-                  elapsedFrac = elapsed / (schedEntry.duration_min * 60_000)
+                if (durationMin > 0) {
+                  elapsedFrac = elapsed / (durationMin * 60_000)
                 } else {
-                  const depC2 = schedEntry ? ALL_AIRPORT_COORDS[schedEntry.dep_iata] : null
-                  const arrC2 = schedEntry ? ALL_AIRPORT_COORDS[schedEntry.arr_iata] : null
+                  const depC2 = ALL_AIRPORT_COORDS[schedEntry?.dep_iata ?? a.dep_iata ?? ''] ?? null
+                  const arrC2 = ALL_AIRPORT_COORDS[schedEntry?.arr_iata ?? a.arr_iata ?? ''] ?? null
                   if (depC2 && arrC2) {
                     const routeKm = greatCircleKm(depC2[0], depC2[1], arrC2[0], arrC2[1])
                     if (routeKm > 0) {

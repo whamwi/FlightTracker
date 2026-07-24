@@ -50,6 +50,17 @@ async function fetchIataToIcao(): Promise<Record<string, string>> {
   return map
 }
 
+// Extract actual departure UTC from FR24 status string ("Departed 01:55" → ISO).
+// Time in status is Syria local (UTC+3); date is the Syria operating date.
+function extractActualDepUtc(status: string, date: string): string | null {
+  const t = status.toLowerCase()
+  if (!t.includes('departed') && !t.includes('took off')) return null
+  const match = status.match(/\b(\d{1,2}):(\d{2})\b/)
+  if (!match) return null
+  const baseMs = new Date(date + 'T00:00:00Z').getTime()
+  return new Date(baseMs + (parseInt(match[1]) * 60 + parseInt(match[2]) - 180) * 60_000).toISOString()
+}
+
 // Convert FR24 flight number → ADS-B broadcast callsign.
 // FR24 uses IATA format (TK849, G9434, FZ1234) or already-ICAO (FYC490, SYR123).
 // ADS-B always broadcasts ICAO prefix (THY849, ABY434, FDB1234, FYC490).
@@ -67,14 +78,15 @@ function toCallsign(num: string, iataToIcao: Record<string, string>): string {
 
 // ── Board flights (fr24_daily_cache, Syria op date = UTC+3, 60s cache) ────────
 interface BoardFlight {
-  num:          string
-  callsign:     string        // ADS-B broadcast callsign derived from num
-  dep_iata:     string | null
-  arr_iata:     string | null
-  sched_dep:    number | null // unix
-  sched_arr:    number | null // unix
-  duration_min: number | null
-  status:       string        // raw FR24 status, lowercased
+  num:            string
+  callsign:       string        // ADS-B broadcast callsign derived from num
+  dep_iata:       string | null
+  arr_iata:       string | null
+  sched_dep:      number | null // unix
+  sched_arr:      number | null // unix
+  duration_min:   number | null
+  status:         string        // raw FR24 status, lowercased
+  actual_dep_utc: string | null // extracted from "Departed HH:MM" in status
 }
 
 let boardCache: { flights: BoardFlight[]; date: string; ts: number } | null = null
@@ -103,15 +115,17 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<Bo
         const key = `${num}|${f.sched_dep ?? ''}`
         if (seen.has(key)) continue
         seen.add(key)
+        const status = (f.status ?? '').toLowerCase()
         flights.push({
           num,
-          callsign:     toCallsign(num, iataToIcao),
-          dep_iata:     f.dep_iata     ?? null,
-          arr_iata:     f.arr_iata     ?? null,
-          sched_dep:    f.sched_dep    ?? null,
-          sched_arr:    f.sched_arr    ?? null,
-          duration_min: f.duration_min ?? null,
-          status:       (f.status ?? '').toLowerCase(),
+          callsign:       toCallsign(num, iataToIcao),
+          dep_iata:       f.dep_iata     ?? null,
+          arr_iata:       f.arr_iata     ?? null,
+          sched_dep:      f.sched_dep    ?? null,
+          sched_arr:      f.sched_arr    ?? null,
+          duration_min:   f.duration_min ?? null,
+          status,
+          actual_dep_utc: extractActualDepUtc(status, date),
         })
       }
     }
@@ -208,14 +222,15 @@ async function fetchLastKnownPositions(): Promise<any[]> {
     track:        r.track,
     t:            r.aircraft_type,
     r:            r.registration,
-    board_match:  false,
-    dep_iata:     null,
-    arr_iata:     null,
-    arr_time_utc: null,
-    duration_min: null,
-    iata_number:  null,
-    seen_at:      r.seen_at,
-    stale:        true,
+    board_match:    false,
+    dep_iata:       null,
+    arr_iata:       null,
+    arr_time_utc:   null,
+    duration_min:   null,
+    iata_number:    null,
+    actual_dep_utc: null,
+    seen_at:        r.seen_at,
+    stale:          true,
   }))
 }
 
@@ -290,12 +305,13 @@ export async function GET() {
       const info = boardMap.get(cs)
       annotated.push({
         ...a,
-        board_match:  !!info,
-        dep_iata:     info?.dep_iata    ?? null,
-        arr_iata:     info?.arr_iata    ?? null,
-        arr_time_utc: info?.sched_arr   != null ? unixToHHMM(info.sched_arr) : null,
-        duration_min: info?.duration_min ?? null,
-        iata_number:  info?.num         ?? null,
+        board_match:    !!info,
+        dep_iata:       info?.dep_iata      ?? null,
+        arr_iata:       info?.arr_iata      ?? null,
+        arr_time_utc:   info?.sched_arr     != null ? unixToHHMM(info.sched_arr) : null,
+        duration_min:   info?.duration_min  ?? null,
+        iata_number:    info?.num           ?? null,
+        actual_dep_utc: info?.actual_dep_utc ?? null,
       })
     }
 
@@ -308,12 +324,13 @@ export async function GET() {
       const info = boardMap.get(cs)
       trackedExtra.push({
         ...a,
-        board_match:  true,
-        dep_iata:     info?.dep_iata    ?? null,
-        arr_iata:     info?.arr_iata    ?? null,
-        arr_time_utc: info?.sched_arr   != null ? unixToHHMM(info.sched_arr) : null,
-        duration_min: info?.duration_min ?? null,
-        iata_number:  info?.num         ?? null,
+        board_match:    true,
+        dep_iata:       info?.dep_iata      ?? null,
+        arr_iata:       info?.arr_iata      ?? null,
+        arr_time_utc:   info?.sched_arr     != null ? unixToHHMM(info.sched_arr) : null,
+        duration_min:   info?.duration_min  ?? null,
+        iata_number:    info?.num           ?? null,
+        actual_dep_utc: info?.actual_dep_utc ?? null,
       })
     }
     if (trackedExtra.length) upsertPositions(trackedExtra).catch(() => {})
