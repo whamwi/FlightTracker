@@ -23,7 +23,7 @@ const city = (iata: string) => CITY[iata] ?? iata
 // ── Status badge config ──────────────────────────────────────────────────────
 const STATUS: Record<string, { label: string; cls: string; color: string }> = {
   Scheduled:   { label: 'Scheduled',   cls: 'bg-gray-800 text-gray-400',     color: '#374151' },
-  Expected:    { label: 'Expected',    cls: 'bg-blue-950 text-blue-300',     color: '#2563eb' },
+  Expected:    { label: 'Expected',    cls: 'bg-yellow-950 text-yellow-300', color: '#ca8a04' },
   CheckIn:     { label: 'Check-in',    cls: 'bg-amber-950 text-amber-300',   color: '#d97706' },
   Boarding:    { label: 'Boarding',    cls: 'bg-amber-900 text-amber-200',   color: '#f59e0b' },
   GateClosed:  { label: 'Gate Closed', cls: 'bg-orange-950 text-orange-300', color: '#ea580c' },
