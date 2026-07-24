@@ -10,7 +10,8 @@ const SY_AIRPORTS = new Set(['DAM', 'ALP'])
 
 // Flights excluded from damairport ingest — wrong airport code in source data.
 // PC770/771 and VF340/341 are listed as IST but actually operate via SAW.
-const FLIGHT_EXCEPTIONS = new Set(['PC770', 'PC771', 'VF340', 'VF341'])
+// XH490 is listed as IST→DAM but actually departs from SAW (Sabiha Gökçen).
+const FLIGHT_EXCEPTIONS = new Set(['PC770', 'PC771', 'VF340', 'VF341', 'XH490'])
 
 async function sb(path: string, opts: RequestInit = {}) {
   const res = await fetch(`${SB_URL}/rest/v1${path}`, {

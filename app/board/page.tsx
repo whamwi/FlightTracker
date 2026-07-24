@@ -434,10 +434,10 @@ export default function BoardPage() {
     if (view === 'dep') {
       return flights.filter(f => f.dep_iata === airport)
     }
-    // route_master is keyed by Syria arrival day, so all today's flights are already the right day.
-    // Only add overnight from prevFlights for flights that departed origin on the previous day
-    // (for ADB-sourced schedules stored under yesterday's key — edge case, rarely applies).
-    const sameDay   = flights.filter(f => f.arr_iata === airport)
+    // flight_date = departure date at origin. Overnight flights (dep Friday evening, arr Saturday early)
+    // must NOT show on Friday's arrivals board — exclude them from sameDay and include via overnight
+    // from Saturday's prevFlights load instead.
+    const sameDay   = flights.filter(f => f.arr_iata === airport && !crossesMidnight(f))
     const overnight = prevFlights.filter(f => f.arr_iata === airport && crossesMidnight(f))
     return [...sameDay, ...overnight]
   })()
