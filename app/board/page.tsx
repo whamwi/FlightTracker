@@ -280,7 +280,6 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
             <p className="text-white font-semibold text-sm leading-tight truncate">{f.airline_name}</p>
             <div className="flex items-center gap-2 mt-0.5">
               <span className="text-gray-300 text-xs font-mono font-medium">{f.iata_number}</span>
-              <span className="text-gray-600 text-xs font-mono">{f.callsign}</span>
             </div>
           </div>
         </div>
