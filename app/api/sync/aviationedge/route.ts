@@ -146,7 +146,8 @@ export async function GET() {
     const arrIata = rec.arrival.iataCode
     if (!rec.departure.scheduledTime) return
 
-    const flight_date = localDate(rec.departure.scheduledTime)
+    const utcDep      = localToUtc(rec.departure.scheduledTime, depIata)
+    const flight_date = utcDep ? utcDep.slice(0, 10) : localDate(rec.departure.scheduledTime)
     const key = `${flight_id}|${flight_date}|${depIata}`
 
     const spec: UpdateSpec = updatesMap.get(key) ?? { flight_id, flight_date, dep_iata: depIata, arr_iata: arrIata }
