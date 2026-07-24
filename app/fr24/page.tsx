@@ -19,6 +19,11 @@ function diffMin(sched: number | null, actual: number | null): number | null {
   return Math.round((actual - sched) / 60)
 }
 
+// Aircraft registration → flight number override for flights FR24 widget doesn't carry a number for.
+const REG_TO_FLIGHT: Record<string, string> = {
+  'YK-BAA': 'FYC728',
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 // Returns flights bucketed by their actual operating date in Syria time.
 // Departures are keyed by sched_dep, arrivals by sched_arr — so overnight
@@ -32,7 +37,8 @@ function normalizeForCache(data: any): Record<string, { arrivals: object[]; depa
   const normFlight = (f: any) => {
     const fl = f?.flight
     if (!fl) return null
-    const num      = fl.identification?.number?.default ?? fl.identification?.callsign ?? null
+    const reg      = fl.aircraft?.registration ?? null
+    const num      = fl.identification?.number?.default ?? fl.identification?.callsign ?? (reg ? REG_TO_FLIGHT[reg] : null) ?? null
     const schedDep = fl.time?.scheduled?.departure ?? null
     const schedArr = fl.time?.scheduled?.arrival   ?? null
     if (!num || !schedDep || !schedArr) return null
