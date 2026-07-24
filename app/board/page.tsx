@@ -312,10 +312,10 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
           </p>
           {(f.actual_dep_utc || f.revised_dep_utc) && !isCancelled ? (
             <div className="flex items-center gap-1.5 mt-0.5">
-              {!isArr && <DelayBadge min={depDelay} />}
               <p className={`font-mono text-xs ${f.actual_dep_utc ? 'text-green-400' : 'text-yellow-400'}`}>
                 {depActual}
               </p>
+              {!isArr && <DelayBadge min={depDelay} />}
             </div>
           ) : (
             !isArr && <DelayBadge min={depDelay} />
@@ -347,10 +347,10 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
           </p>
           {(f.actual_arr_utc || f.revised_arr_utc) && !isCancelled ? (
             <div className="flex items-center justify-end gap-1.5 mt-0.5">
-              {isArr && <DelayBadge min={arrDelay} />}
               <p className={`font-mono text-xs ${f.actual_arr_utc ? 'text-green-400' : 'text-yellow-400'}`}>
                 {arrActual}
               </p>
+              {isArr && <DelayBadge min={arrDelay} />}
             </div>
           ) : (
             <>
