@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, Fragment } from 'react'
+import { useEffect, useState, useCallback, useRef, Fragment } from 'react'
 import Link from 'next/link'
 
 // ── Airport display names ────────────────────────────────────────────────────
@@ -386,18 +386,23 @@ export default function BoardPage() {
   const [loading, setLoading]         = useState(true)
   const [date, setDate]               = useState('')
 
+  // Version counter: each load call captures a version; stale completions are discarded.
+  // Prevents the silent auto-refresh (tab=0) from overwriting a newer tab switch load.
+  const loadVer = useRef(0)
+
   const load = useCallback(async (offsetDays: number, silent = false) => {
+    const ver = ++loadVer.current
     if (!silent) setLoading(true)
     const d = syriaDate(offsetDays)
     setDate(d)
     try {
       const res = await fetch(`/api/flightboard?date=${d}`)
       const json = await res.json()
-      setFlights(json.flights ?? [])
+      if (ver === loadVer.current) setFlights(json.flights ?? [])
     } catch {
-      if (!silent) setFlights([])
+      if (!silent && ver === loadVer.current) setFlights([])
     } finally {
-      if (!silent) setLoading(false)
+      if (!silent && ver === loadVer.current) setLoading(false)
     }
   }, [])
 
