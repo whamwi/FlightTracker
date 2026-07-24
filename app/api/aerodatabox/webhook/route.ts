@@ -121,11 +121,11 @@ interface StatusRow {
   revised_arr_utc:   string | null
 }
 
-// For future-dated webhook rows: patch flight_instance std/sta if ADB times
-// differ by ≥15 min, and write a log entry for each change.
+// For today's and future-dated webhook rows: patch flight_instance std/sta if ADB
+// times differ by ≥5 min, and write a log entry for each change.
 async function syncFutureInstances(rows: StatusRow[]) {
   const today = new Date().toISOString().slice(0, 10)
-  const future = rows.filter(r => r.operating_date > today)
+  const future = rows.filter(r => r.operating_date >= today)
   if (future.length === 0) return
 
   // Step 1: callsign → flight_id
