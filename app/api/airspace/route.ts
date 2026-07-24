@@ -153,14 +153,26 @@ async function fetchLastKnownPositions(): Promise<any[]> {
   }))
 }
 
-// ── FR24 live enrichment for callsigns missed by free feeds (5-min cache) ────
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let fr24Cache: { aircraft: any[]; ts: number } | null = null
-
+// ── FR24 live enrichment for callsigns missed by free feeds (5-min Supabase cache) ──
+// In-memory cache is useless on Vercel (fresh process per invocation).
+// We persist the result in fr24_live_cache and reuse it for 5 minutes.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function fetchFR24Missing(callsigns: string[]): Promise<any[]> {
   if (!FR24_KEY || callsigns.length === 0) return []
-  if (fr24Cache && Date.now() - fr24Cache.ts < 5 * 60_000) return fr24Cache.aircraft
+
+  // Check Supabase cache first
+  try {
+    const cacheRes = await fetch(
+      `${SB_URL}/rest/v1/fr24_live_cache?id=eq.airspace&select=data,cached_at`,
+      { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` } }
+    )
+    if (cacheRes.ok) {
+      const rows = await cacheRes.json()
+      if (rows[0] && Date.now() - new Date(rows[0].cached_at).getTime() < 5 * 60_000) {
+        return rows[0].data ?? []
+      }
+    }
+  } catch { /* fall through to fresh fetch */ }
 
   try {
     const res = await fetch(
@@ -174,10 +186,8 @@ async function fetchFR24Missing(callsigns: string[]): Promise<any[]> {
         signal: AbortSignal.timeout(8000),
       },
     )
-    if (!res.ok) { fr24Cache = { aircraft: [], ts: Date.now() }; return [] }
-    const json = await res.json()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const aircraft = (json.data ?? []).map((a: any) => ({
+    const aircraft: any[] = res.ok ? (await res.json()).data?.map((a: any) => ({
       hex:      a.hex,
       flight:   (a.callsign ?? a.flight ?? '').trim(),
       lat:      a.lat,
@@ -188,8 +198,19 @@ async function fetchFR24Missing(callsigns: string[]): Promise<any[]> {
       t:        a.type,
       r:        a.reg,
       fr24:     true,
-    }))
-    fr24Cache = { aircraft, ts: Date.now() }
+    })) ?? [] : []
+
+    // Persist to Supabase cache (fire-and-forget)
+    fetch(`${SB_URL}/rest/v1/fr24_live_cache`, {
+      method: 'POST',
+      headers: {
+        apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer: 'resolution=merge-duplicates,return=minimal',
+      },
+      body: JSON.stringify({ id: 'airspace', data: aircraft, cached_at: new Date().toISOString() }),
+    }).catch(() => {})
+
     return aircraft
   } catch {
     fr24Cache = { aircraft: [], ts: Date.now() }
