@@ -287,12 +287,19 @@ async function processDate(airport: string, date: string, rawRows: RawRow[]) {
 
   let instancesUpserted = 0
   if (instanceRows.length) {
-    // merge-duplicates updates route_id/std/sta; leaves atd/ata/status/etd/eta untouched
-    await sb('/flight_instance', {
+    // Use ?on_conflict= to target the secondary unique index (flight_id, flight_date, dep_iata).
+    // PostgREST merge-duplicates without on_conflict targets only the PK, which 409s on this index.
+    const fiRes = await fetch(`${SB_URL}/rest/v1/flight_instance?on_conflict=flight_id,flight_date,dep_iata`, {
       method:  'POST',
-      headers: { Prefer: 'return=minimal,resolution=merge-duplicates' },
-      body:    JSON.stringify(instanceRows),
+      headers: {
+        apikey:         SB_KEY,
+        Authorization:  `Bearer ${SB_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer:         'return=minimal,resolution=merge-duplicates',
+      },
+      body: JSON.stringify(instanceRows),
     })
+    if (!fiRes.ok) throw new Error(`Supabase /flight_instance: ${fiRes.status} ${await fiRes.text()}`)
     instancesUpserted = instanceRows.length
   }
 
