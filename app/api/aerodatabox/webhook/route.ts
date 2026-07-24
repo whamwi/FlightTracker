@@ -167,12 +167,12 @@ async function syncFutureInstances(rows: StatusRow[]) {
 
     if (effDep && inst.std) {
       const diffMin = Math.round((new Date(effDep).getTime() - new Date(inst.std).getTime()) / 60_000)
-      if (Math.abs(diffMin) >= 15) changes.push({ field: 'std', old_utc: inst.std, new_utc: effDep, diff_min: diffMin })
+      if (Math.abs(diffMin) >= 5) changes.push({ field: 'std', old_utc: inst.std, new_utc: effDep, diff_min: diffMin })
     }
 
     if (effArr && inst.sta) {
       const diffMin = Math.round((new Date(effArr).getTime() - new Date(inst.sta).getTime()) / 60_000)
-      if (Math.abs(diffMin) >= 15) changes.push({ field: 'sta', old_utc: inst.sta, new_utc: effArr, diff_min: diffMin })
+      if (Math.abs(diffMin) >= 5) changes.push({ field: 'sta', old_utc: inst.sta, new_utc: effArr, diff_min: diffMin })
     }
 
     if (changes.length === 0) continue
