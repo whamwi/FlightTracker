@@ -108,9 +108,113 @@ async function fetchIataToCallsign(): Promise<Record<string, string>> {
   return {}
 }
 
+interface StatusRow {
+  callsign:          string
+  operating_date:    string
+  scheduled_dep_utc: string | null
+  revised_dep_utc:   string | null
+  scheduled_arr_utc: string | null
+  revised_arr_utc:   string | null
+}
+
+// For future-dated webhook rows: patch flight_instance std/sta if ADB times
+// differ by ≥15 min, and write a log entry for each change.
+async function syncFutureInstances(rows: StatusRow[]) {
+  const today = new Date().toISOString().slice(0, 10)
+  const future = rows.filter(r => r.operating_date > today)
+  if (future.length === 0) return
+
+  // Step 1: callsign → flight_id
+  const callsigns = [...new Set(future.map(r => r.callsign))]
+  const flRes = await fetch(
+    `${SB_URL}/rest/v1/flight_lookup?select=id,broadcast_callsign&broadcast_callsign=in.(${callsigns.join(',')})`,
+    { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` } },
+  )
+  if (!flRes.ok) return
+  const flRows: { id: number; broadcast_callsign: string }[] = await flRes.json()
+  const callsignToFlightId: Record<string, number> = {}
+  for (const r of flRows) callsignToFlightId[r.broadcast_callsign] = r.id
+
+  const flightIds = Object.values(callsignToFlightId)
+  if (flightIds.length === 0) return
+
+  // Step 2: load matching flight_instances
+  const dates = [...new Set(future.map(r => r.operating_date))]
+  const fiRes = await fetch(
+    `${SB_URL}/rest/v1/flight_instance?select=id,flight_id,flight_date,std,sta` +
+    `&flight_id=in.(${flightIds.join(',')})&flight_date=in.(${dates.join(',')})`,
+    { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` } },
+  )
+  if (!fiRes.ok) return
+  const instances: { id: number; flight_id: number; flight_date: string; std: string | null; sta: string | null }[] =
+    await fiRes.json()
+
+  const instanceMap: Record<string, typeof instances[0]> = {}
+  for (const inst of instances) instanceMap[`${inst.flight_id}|${inst.flight_date}`] = inst
+
+  // Step 3: compare and patch
+  const now = new Date().toISOString()
+  for (const row of future) {
+    const flightId = callsignToFlightId[row.callsign]
+    if (!flightId) continue
+    const inst = instanceMap[`${flightId}|${row.operating_date}`]
+    if (!inst) continue
+
+    const effDep = row.revised_dep_utc ?? row.scheduled_dep_utc
+    const effArr = row.revised_arr_utc ?? row.scheduled_arr_utc
+
+    const changes: Array<{ field: 'std' | 'sta'; old_utc: string | null; new_utc: string; diff_min: number }> = []
+
+    if (effDep && inst.std) {
+      const diffMin = Math.round((new Date(effDep).getTime() - new Date(inst.std).getTime()) / 60_000)
+      if (Math.abs(diffMin) >= 15) changes.push({ field: 'std', old_utc: inst.std, new_utc: effDep, diff_min: diffMin })
+    }
+
+    if (effArr && inst.sta) {
+      const diffMin = Math.round((new Date(effArr).getTime() - new Date(inst.sta).getTime()) / 60_000)
+      if (Math.abs(diffMin) >= 15) changes.push({ field: 'sta', old_utc: inst.sta, new_utc: effArr, diff_min: diffMin })
+    }
+
+    if (changes.length === 0) continue
+
+    // Patch flight_instance (only std/sta — never touches ata/atd/status)
+    const patch: Record<string, string> = {}
+    for (const c of changes) patch[c.field] = c.new_utc
+    await fetch(`${SB_URL}/rest/v1/flight_instance?id=eq.${inst.id}`, {
+      method: 'PATCH',
+      headers: {
+        apikey: SB_KEY,
+        Authorization: `Bearer ${SB_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=minimal',
+      },
+      body: JSON.stringify(patch),
+    })
+
+    // Log every change
+    await sb('/instance_time_log', {
+      method: 'POST',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify(
+        changes.map(c => ({
+          flight_instance_id: inst.id,
+          callsign:           row.callsign,
+          flight_date:        row.operating_date,
+          field:              c.field,
+          old_utc:            c.old_utc,
+          new_utc:            c.new_utc,
+          diff_min:           c.diff_min,
+          source:             'adb_webhook',
+          logged_at:          now,
+        })),
+      ),
+    })
+  }
+}
+
 // Normalise a single AeroDataBox flight object into a flight_status row
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function toRow(f: any, iataToCallsign: Record<string, string>): object | null {
+function toRow(f: any, iataToCallsign: Record<string, string>): StatusRow | null {
   // ADB webhook payloads sometimes omit callSign and only send number (IATA).
   const callSign: string | undefined =
     f.callSign ?? iataToCallsign[(f.number ?? '').toString().toUpperCase().replace(/\s+/g, '')] ?? undefined
@@ -177,7 +281,7 @@ function toRow(f: any, iataToCallsign: Record<string, string>): object | null {
     dep_quality:       dep.quality ?? [],
     arr_quality:       arr.quality ?? [],
     last_synced_at:    new Date().toISOString(),
-  }
+  } as StatusRow & Record<string, unknown>
 }
 
 export async function POST(req: Request) {
@@ -221,23 +325,29 @@ export async function POST(req: Request) {
   }
 
   const iataToCallsign = await fetchIataToCallsign()
-  const rows = flights.map(f => toRow(f, iataToCallsign)).filter(Boolean)
+  const rows = flights.map(f => toRow(f, iataToCallsign)).filter(Boolean) as StatusRow[]
 
   if (rows.length > 0) {
     await sb('/flight_status', {
       method: 'POST',
       body: JSON.stringify(rows),
     })
+
+    // Patch future flight_instances whose std/sta diverge from ADB by ≥15 min
+    try {
+      await syncFutureInstances(rows)
+    } catch { /* non-fatal — status write already succeeded */ }
   }
 
-  // Log every webhook hit so we can verify delivery
+  // Log every webhook hit — use resolved callsign so NULL doesn't obscure which flight it was
   try {
     const firstFlight = flights[0]
+    const resolvedCallsign = rows[0]?.callsign ?? firstFlight?.callSign ?? null
     await sb('/webhook_log', {
       method: 'POST',
       headers: { Prefer: 'return=minimal' },
       body: JSON.stringify({
-        callsign:   firstFlight?.callSign ?? null,
+        callsign:   resolvedCallsign,
         flight_num: firstFlight?.number   ?? null,
         status:     firstFlight ? String(firstFlight.status ?? '') : null,
         credits:    remainingCredits != null ? Math.round(remainingCredits) : null,
