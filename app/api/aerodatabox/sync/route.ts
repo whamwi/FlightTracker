@@ -156,6 +156,15 @@ export async function GET(req: Request) {
     if (alpText) dataAlp = JSON.parse(alpText)
   }
 
+  // Log raw responses to adb_sync_log for inspection
+  try {
+    const logRows = [
+      { airport: 'OSDI', window_from: adbFrom, window_to: adbTo, flight_count: (dataDam.departures?.length ?? 0) + (dataDam.arrivals?.length ?? 0), payload: dataDam },
+      { airport: 'OSAP', window_from: adbFrom, window_to: adbTo, flight_count: (dataAlp.departures?.length ?? 0) + (dataAlp.arrivals?.length ?? 0), payload: dataAlp },
+    ]
+    await sb('/adb_sync_log', { method: 'POST', body: JSON.stringify(logRows) })
+  } catch { /* non-fatal */ }
+
   const seenCallsigns = new Set<string>()
   const flights: AdbFlight[] = []
   for (const f of [...(dataDam.departures ?? []), ...(dataDam.arrivals ?? [])]) {
