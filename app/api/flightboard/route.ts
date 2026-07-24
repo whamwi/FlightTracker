@@ -19,6 +19,18 @@ function unixToUtcHHMM(unix: number | null): string {
   return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
 }
 
+// Extract HH:MM time embedded in an FR24 status string and convert to UTC ISO.
+// All times in the DAM widget are in Syria local time (UTC+3).
+function extractStatusUtc(raw: string | null, operatingDate: string): string | null {
+  if (!raw) return null
+  const match = raw.match(/\b(\d{1,2}):(\d{2})\b/)
+  if (!match) return null
+  const localHH = parseInt(match[1])
+  const localMM = parseInt(match[2])
+  const baseMs = new Date(operatingDate + 'T00:00:00Z').getTime()
+  return new Date(baseMs + (localHH * 60 + localMM - 3 * 60) * 60_000).toISOString()
+}
+
 // Normalise the raw FR24 status text to a board status key
 function normaliseStatus(raw: string | null): string {
   if (!raw) return 'Scheduled'
@@ -128,12 +140,13 @@ export async function GET(req: Request) {
       arr_time_utc,
       duration_min:      f.duration_min ?? 0,
       codeshare_iata:    null,
-      // Status: flight_status overlay wins, then FR24 widget status
+      // Status: flight_status overlay wins → FR24 widget status
+      // Actual/revised times: flight_status wins → parsed from FR24 widget status text
       status:            st?.status             ?? normaliseStatus(f.status),
-      actual_dep_utc:    st?.actual_dep_utc     ?? null,
-      actual_arr_utc:    st?.actual_arr_utc     ?? null,
-      revised_dep_utc:   st?.revised_dep_utc    ?? null,
-      revised_arr_utc:   st?.revised_arr_utc    ?? null,
+      actual_dep_utc:    st?.actual_dep_utc     ?? f.fr24_actual_dep  ?? null,
+      actual_arr_utc:    st?.actual_arr_utc     ?? f.fr24_actual_arr  ?? null,
+      revised_dep_utc:   st?.revised_dep_utc    ?? f.fr24_revised_dep ?? null,
+      revised_arr_utc:   st?.revised_arr_utc    ?? f.fr24_revised_arr ?? null,
       dep_delay_min:     st?.dep_delay_min      ?? null,
       arr_delay_min:     st?.arr_delay_min      ?? null,
       dep_terminal:      st?.dep_terminal       ?? null,
@@ -149,10 +162,28 @@ export async function GET(req: Request) {
 
   for (const row of cacheRows) {
     const ap = row.airport_iata as string
-    // For departures from this airport: dep_iata = this airport (widget omits it)
-    for (const f of (row.departures ?? [])) addFlight({ ...f, dep_iata: f.dep_iata || ap })
-    // For arrivals at this airport: arr_iata = this airport (widget omits it)
-    for (const f of (row.arrivals   ?? [])) addFlight({ ...f, arr_iata: f.arr_iata || ap })
+    for (const f of (row.departures ?? [])) {
+      const t = (f.status ?? '').toLowerCase()
+      const isActualDep = t.includes('departed') || t.includes('took off')
+      const isRevised   = t.startsWith('estimated') || t.startsWith('expect')
+      addFlight({
+        ...f,
+        dep_iata: f.dep_iata || ap,
+        fr24_actual_dep:  isActualDep ? extractStatusUtc(f.status, date) : null,
+        fr24_revised_dep: isRevised   ? extractStatusUtc(f.status, date) : null,
+      })
+    }
+    for (const f of (row.arrivals ?? [])) {
+      const t = (f.status ?? '').toLowerCase()
+      const isActualArr = t.includes('landed') || t.includes('arrived')
+      const isRevised   = t.startsWith('estimated') || t.startsWith('expect')
+      addFlight({
+        ...f,
+        arr_iata: f.arr_iata || ap,
+        fr24_actual_arr:  isActualArr ? extractStatusUtc(f.status, date) : null,
+        fr24_revised_arr: isRevised   ? extractStatusUtc(f.status, date) : null,
+      })
+    }
   }
 
   return NextResponse.json({ ok: true, date, flights })
