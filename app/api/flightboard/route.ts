@@ -100,8 +100,9 @@ export async function GET(req: Request) {
     const schedDep = f.sched_dep ?? null
     const schedArr = f.sched_arr ?? null
 
-    // Dedup: same flight number + route → one row (arrivals + departures share flights)
-    const key = `${num}|${depIata}|${arrIata}`
+    // Dedup: same flight number + route + dep time → one row.
+    // Include dep time so same-numbered flights at different hours (e.g. FYC501 at 09:00 and 18:30) both appear.
+    const key = `${num}|${depIata}|${arrIata}|${schedDep ?? ''}`
     if (seen.has(key)) return
     seen.add(key)
 
