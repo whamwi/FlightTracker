@@ -285,8 +285,19 @@ async function processDate(airport: string, date: string, rawRows: RawRow[]) {
     })
   }
 
+  // Deduplicate by (flight_id, flight_date, dep_iata) — PostgreSQL rejects ON CONFLICT DO UPDATE
+  // when two rows in the same batch target the same unique key ("cannot affect row a second time").
+  const seenInstanceKeys = new Set<string>()
+  const dedupedRows = instanceRows.filter(row => {
+    const r = row as { flight_id: number; flight_date: string; dep_iata: string }
+    const k = `${r.flight_id}|${r.flight_date}|${r.dep_iata}`
+    if (seenInstanceKeys.has(k)) return false
+    seenInstanceKeys.add(k)
+    return true
+  })
+
   let instancesUpserted = 0
-  if (instanceRows.length) {
+  if (dedupedRows.length) {
     // Use ?on_conflict= to target the secondary unique index (flight_id, flight_date, dep_iata).
     // PostgREST merge-duplicates without on_conflict targets only the PK, which 409s on this index.
     const fiRes = await fetch(`${SB_URL}/rest/v1/flight_instance?on_conflict=flight_id,flight_date,dep_iata`, {
@@ -297,10 +308,10 @@ async function processDate(airport: string, date: string, rawRows: RawRow[]) {
         'Content-Type': 'application/json',
         Prefer:         'return=minimal,resolution=merge-duplicates',
       },
-      body: JSON.stringify(instanceRows),
+      body: JSON.stringify(dedupedRows),
     })
     if (!fiRes.ok) throw new Error(`Supabase /flight_instance: ${fiRes.status} ${await fiRes.text()}`)
-    instancesUpserted = instanceRows.length
+    instancesUpserted = dedupedRows.length
   }
 
   const driftCount = toUpdate.filter(u => u.dep_time || u.arr_time).length
