@@ -20,21 +20,22 @@ function diffMin(sched: number | null, actual: number | null): number | null {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function normalizeForCache(data: any, todayDate: string): { arrivals: object[]; departures: object[] } {
+// Returns flights bucketed by their actual operating date in Syria time.
+// Departures are keyed by sched_dep, arrivals by sched_arr — so overnight
+// flights (depart Jul 24, arrive DAM Jul 25) land in the correct date bucket,
+// and next-day flights visible in the widget are saved to their own date.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizeForCache(data: any): Record<string, { arrivals: object[]; departures: object[] }> {
   const sched = data?.result?.response?.airport?.pluginData?.schedule ?? {}
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const norm = (f: any, useArrDate: boolean) => {
+  const normFlight = (f: any) => {
     const fl = f?.flight
     if (!fl) return null
     const num      = fl.identification?.number?.default
     const schedDep = fl.time?.scheduled?.departure ?? null
     const schedArr = fl.time?.scheduled?.arrival   ?? null
     if (!num || !schedDep || !schedArr) return null
-    // Filter: only keep flights whose operating time falls on todayDate in Syria time
-    const opUnix = useArrDate ? schedArr : schedDep
-    const flightDate = new Date(opUnix * 1000).toLocaleDateString('en-CA', { timeZone: TZ })
-    if (flightDate !== todayDate) return null
     return {
       num,
       airline:      fl.airline?.name ?? null,
@@ -48,12 +49,27 @@ function normalizeForCache(data: any, todayDate: string): { arrivals: object[]; 
     }
   }
 
-  return {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    arrivals:   (sched.arrivals?.data  ?? []).map((f: any) => norm(f, true)).filter(Boolean)  as object[],
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    departures: (sched.departures?.data ?? []).map((f: any) => norm(f, false)).filter(Boolean) as object[],
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const byDate: Record<string, { arrivals: object[]; departures: object[] }> = {}
+  const bucket = (date: string) => {
+    if (!byDate[date]) byDate[date] = { arrivals: [], departures: [] }
+    return byDate[date]
   }
+
+  for (const f of (sched.departures?.data ?? [])) {
+    const flight = normFlight(f)
+    if (!flight) continue
+    const date = new Date(flight.sched_dep * 1000).toLocaleDateString('en-CA', { timeZone: TZ })
+    bucket(date).departures.push(flight)
+  }
+  for (const f of (sched.arrivals?.data ?? [])) {
+    const flight = normFlight(f)
+    if (!flight) continue
+    const date = new Date(flight.sched_arr * 1000).toLocaleDateString('en-CA', { timeZone: TZ })
+    bucket(date).arrivals.push(flight)
+  }
+
+  return byDate
 }
 
 function statusClass(text: string): string {
@@ -131,15 +147,25 @@ export default function Fr24DumpPage() {
       setCache(prev => ({ ...prev, [ap]: data }))
       setUpdatedAt(new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }))
 
-      // Write-through: persist to DB in the background (browser bypasses Cloudflare)
-      const { arrivals, departures } = normalizeForCache(data, flightDate)
-      fetch('/api/fr24-cache', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ airport_iata: ap, flight_date: flightDate, arrivals, departures }),
-      }).then(res => res.json()).then(j => {
-        if (j.ok) setSaved(`Saved ${j.arr} arr / ${j.dep} dep`)
-      }).catch(() => {/* silent — UI still works */})
+      // Write-through: persist to DB bucketed by actual flight date.
+      // One POST per date — covers overnight flights and next-day scheduled entries.
+      const byDate = normalizeForCache(data)
+      const dates = Object.keys(byDate)
+      Promise.all(dates.map(date =>
+        fetch('/api/fr24-cache', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({
+            airport_iata: ap,
+            flight_date:  date,
+            arrivals:     byDate[date].arrivals,
+            departures:   byDate[date].departures,
+          }),
+        }).then(r => r.json())
+      )).then(results => {
+        const saved = results.filter(j => j.ok)
+        if (saved.length) setSaved(`Saved ${dates.join(', ')}`)
+      }).catch(() => {/* silent */})
     } catch (e) {
       setError(String(e))
     } finally {
