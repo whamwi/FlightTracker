@@ -444,9 +444,21 @@ export default function BoardPage() {
     !!f.dep_time_utc &&
     utcHHMMtoLocal(f.arr_time_utc, 3) < utcHHMMtoLocal(f.dep_time_utc, tzOffset(f.dep_iata))
 
+  // Departure local time is on the NEXT calendar day relative to flight_date (which is UTC-based).
+  // e.g. dep_time_utc=21:05 + DAM offset(+3) = 00:05 next day → belongs on tomorrow's dep board.
+  const crossesMidnightDep = (f: Flight) => {
+    if (!f.dep_time_utc) return false
+    const utcHour = parseInt(f.dep_time_utc.slice(0, 2))
+    return utcHour + tzOffset(f.dep_iata) >= 24
+  }
+
   const byViewAndAirport = (() => {
     if (view === 'dep') {
-      return flights.filter(f => f.dep_iata === airport)
+      // Exclude flights whose local dep time crosses into the next calendar day;
+      // include them from prevFlights (day-1) so they appear on the correct day.
+      const sameDay = flights.filter(f => f.dep_iata === airport && !crossesMidnightDep(f))
+      const nextDay = prevFlights.filter(f => f.dep_iata === airport && crossesMidnightDep(f))
+      return [...sameDay, ...nextDay]
     }
     // flight_date = departure date at origin. Overnight flights (dep Friday evening, arr Saturday early)
     // must NOT show on Friday's arrivals board — exclude them from sameDay and include via overnight
