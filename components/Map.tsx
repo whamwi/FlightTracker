@@ -16,13 +16,12 @@ interface Aircraft {
   nac_p?: number
   t: string | null
   r: string | null
-  syria_airports: string[]
-  arr_time_utc:   string | null
-  duration_min:   number | null
-  dep_syria:      boolean
-  arr_syria:      boolean
-  dest_iata:      string | null
-  orig_iata:      string | null
+  board_match:  boolean
+  dep_iata:     string | null
+  arr_iata:     string | null
+  arr_time_utc: string | null
+  duration_min: number | null
+  iata_number:  string | null
   seen_at?: string
   stale?:   boolean
 }
@@ -341,17 +340,15 @@ function buildPopup(
   const callsign  = (a.flight ?? '').trim() || a.hex
   const alt       = typeof a.alt_baro === 'number' ? `${Math.round(a.alt_baro).toLocaleString()} ft` : '—'
   const spd       = a.gs ? `${Math.round(a.gs)} kts` : '—'
-  const syriaAps  = a.syria_airports ?? []
-  // Only highlight the Syrian connection when the flight is arriving IN Syria.
-  const arrSyria  = a.arr_syria && syriaAps.length > 0
+  const arrSyria  = a.board_match && !!a.arr_iata && !!AIRPORT_COORDS[a.arr_iata]
 
   const acType    = fs?.aircraft_type ?? a.t ?? null
-  const dep       = fs?.dep_iata ?? a.orig_iata ?? null
-  const arr       = fs?.arr_iata ?? a.dest_iata ?? null
+  const dep       = fs?.dep_iata ?? a.dep_iata ?? null
+  const arr       = fs?.arr_iata ?? a.arr_iata ?? null
   const aiata     = airlineIataFor(callsign, fs)
 
   // Distance + ETA to destination
-  const destCode  = fs?.arr_iata ?? a.dest_iata ?? null
+  const destCode  = fs?.arr_iata ?? a.arr_iata ?? null
   const destCoord = destCode ? ALL_AIRPORT_COORDS[destCode] : null
   let distLine = ''
   if (destCoord && typeof a.lat === 'number' && typeof a.lon === 'number') {
@@ -387,7 +384,7 @@ function buildPopup(
     const [h, m] = a.arr_time_utc.split(':').map(Number)
     const localH = (h + 3) % 24
     const localTime = `${String(localH).padStart(2,'0')}:${String(m).padStart(2,'0')}`
-    const ap  = syriaAps[0] ?? ''
+    const ap  = a.arr_iata ?? ''
     const dur = a.duration_min
       ? ` · ${Math.floor(a.duration_min/60)}h${a.duration_min%60>0?` ${a.duration_min%60}m`:''}`
       : ''
@@ -566,16 +563,6 @@ export default function Map() {
       })
       .catch(() => {})
 
-    const loadStatus = () =>
-      fetch('/api/aerodatabox/status')
-        .then(r => r.json())
-        .then(d => { if (d.ok) flightStatusRef.current = d.status })
-        .catch(() => {})
-    loadStatus()
-    // Refresh every 5 min so webhook-pushed status updates are picked up
-    // without requiring a full page reload.
-    const statusInterval = setInterval(loadStatus, 5 * 60_000)
-
     fetch('/api/routes')
       .then(r => r.json())
       .then(d => {
@@ -587,7 +574,6 @@ export default function Map() {
         routePathsRef.current = rec
       })
       .catch(() => {})
-    return () => clearInterval(statusInterval)
   }, [])
 
   // ── Poll loop ───────────────────────────────────────────────────────────────
@@ -708,25 +694,14 @@ export default function Map() {
         }
         lastKnownRef.current[a.hex] = { a, lostAt: 0 }
 
-        const airports = a.syria_airports ?? []
-        const isSyria  = airports.length > 0
-
-        // Hide non-Syria flights — remove any existing marker and skip
-        if (!isSyria) {
-          markersRef.current[a.hex]?.remove()
-          delete markersRef.current[a.hex]
-          linesRef.current[a.hex]?.forEach((l: any) => l.remove())
-          delete linesRef.current[a.hex]
-          continue
-        }
-
+        const isSyria  = a.board_match
         const callsign = (a.flight ?? '').trim()
-        const isAlp    = airports.includes('ALP')
+        const isAlp    = a.arr_iata === 'ALP' || a.dep_iata === 'ALP'
         const icon     = planeIcon(L, bestHeading(a), isSyria, false, isSyria && callsign ? callsign : undefined, isAlp)
         const fs_live  = flightStatusRef.current[callsign]
         const reg_live = fs_live?.aircraft_reg ?? a.r ?? null
         const photo_live = reg_live ? photoCacheRef.current[reg_live] ?? null : null
-        const popup    = buildPopup({ ...a, syria_airports: airports }, undefined, false, fs_live, photo_live)
+        const popup    = buildPopup(a, undefined, false, fs_live, photo_live)
 
         if (markersRef.current[a.hex]) {
           markersRef.current[a.hex].setLatLng([a.lat, a.lon])
@@ -740,7 +715,7 @@ export default function Map() {
         if (reg_live && !photoRequestedRef.current.has(reg_live)) {
           photoRequestedRef.current.add(reg_live)
           const capturedHex = a.hex
-          const capturedA   = { ...a, syria_airports: airports }
+          const capturedA   = a
           const capturedCS  = callsign
           fetch(`https://api.planespotters.net/pub/photos/reg/${encodeURIComponent(reg_live)}`)
             .then(r => r.ok ? r.json() : null)
@@ -771,7 +746,7 @@ export default function Map() {
       for (const hex of Object.keys(lastKnownRef.current)) {
         if (seen.has(hex)) continue
         const entry = lastKnownRef.current[hex]
-        if ((entry.a.syria_airports ?? []).length === 0) continue
+        if (!entry.a.board_match) continue
         const cs = (entry.a.flight ?? '').trim()
         if (!cs) continue
         const existing = bestHexForCallsign[cs]
@@ -794,15 +769,6 @@ export default function Map() {
 
         const entry = lastKnownRef.current[hex]
         if (entry.lostAt === 0) entry.lostAt = now
-
-        // Hide non-Syria flights
-        if ((entry.a.syria_airports ?? []).length === 0) {
-          markersRef.current[hex]?.remove()
-          delete markersRef.current[hex]
-          linesRef.current[hex]?.forEach((l: any) => l.remove())
-          delete linesRef.current[hex]
-          continue
-        }
 
         // Skip the loser hex for this callsign — dedup already cleaned it up
         const cs0 = (entry.a.flight ?? '').trim()
@@ -831,7 +797,11 @@ export default function Map() {
           continue
         }
 
-        const ttl = STALE_TTL_SYRIA_MS
+        const { a }   = entry
+        const isSyria = a.board_match
+        const isAlp   = a.arr_iata === 'ALP' || a.dep_iata === 'ALP'
+
+        const ttl = isSyria ? STALE_TTL_SYRIA_MS : STALE_TTL_MS
         if (now - entry.lostAt > ttl) {
           markersRef.current[hex]?.remove()
           delete markersRef.current[hex]
@@ -840,11 +810,7 @@ export default function Map() {
           delete lastKnownRef.current[hex]
           continue
         }
-
-        const { a }      = entry
-        const aps        = a.syria_airports ?? []
-        const isSyria    = aps.length > 0
-        const elapsed    = now - entry.lostAt
+        const elapsed = now - entry.lostAt
         // True when the aircraft is on the ground — landed early before the schedule
         // fraction reaches 1.0.  Used to show ARRIVED and extend the expiry window.
         const isOnGround = (a.alt_baro === 'ground' || (typeof a.alt_baro === 'number' && a.alt_baro < 500))
@@ -1014,8 +980,8 @@ export default function Map() {
             // Allow DR when confirmed airborne at last signal (alt > 2000 ft),
             // even if schedule days_of_week don't include today.
             const projDistKm = a.gs * 1.852 * (elapsed / 3_600_000)
-            const destDists  = aps
-              .filter(ap => AIRPORT_COORDS[ap])
+            const destDists  = [a.dep_iata, a.arr_iata]
+              .filter((ap): ap is string => !!ap && !!AIRPORT_COORDS[ap])
               .map(ap => greatCircleKm(a.lat, a.lon, AIRPORT_COORDS[ap][0], AIRPORT_COORDS[ap][1]))
             const minDestKm = destDists.length ? Math.min(...destDists) : Infinity
 
@@ -1023,7 +989,7 @@ export default function Map() {
               const [pLat, pLon] = projectPosition(a.lat, a.lon, a.track, a.gs, elapsed)
               dispLat = pLat; dispLon = pLon; projected = true
             } else {
-              const bestAp = aps.find(ap => AIRPORT_COORDS[ap]) ?? ''
+              const bestAp = ([a.arr_iata, a.dep_iata].find(ap => ap && AIRPORT_COORDS[ap]) ?? '')
               if (AIRPORT_COORDS[bestAp]) {
                 const apC = AIRPORT_COORDS[bestAp]
                 const bearingToAp = (Math.atan2(
@@ -1098,11 +1064,11 @@ export default function Map() {
           ? (arrSnapped ? `${cs}\nARRIVED` : cs)
           : undefined
         const isEstimatedStale = projected && !arrSnapped
-        const icon       = planeIcon(L, dispTrack, isSyria, !isSyria || arrSnapped, staleLabel, aps.includes('ALP'), isEstimatedStale)
+        const icon       = planeIcon(L, dispTrack, isSyria, !isSyria || arrSnapped, staleLabel, isAlp, isEstimatedStale)
         const fs_dr    = flightStatusRef.current[cs]
         const reg_dr   = fs_dr?.aircraft_reg ?? a.r ?? null
         const photo_dr = reg_dr ? photoCacheRef.current[reg_dr] ?? null : null
-        const popup    = buildPopup({ ...a, syria_airports: aps }, entry.lostAt, projected, fs_dr, photo_dr)
+        const popup    = buildPopup(a, entry.lostAt, projected, fs_dr, photo_dr)
 
         // Smooth-blend toward the DR target so that when a fresh FR24 fix arrives
         // at a position slightly different from what DR predicted, the marker
@@ -1126,7 +1092,7 @@ export default function Map() {
         if (reg_dr && !photoRequestedRef.current.has(reg_dr)) {
           photoRequestedRef.current.add(reg_dr)
           const capturedHex = hex
-          const capturedA   = { ...a, syria_airports: aps }
+          const capturedA   = a
           const capturedCS  = cs
           fetch(`https://api.planespotters.net/pub/photos/reg/${encodeURIComponent(reg_dr)}`)
             .then(r => r.ok ? r.json() : null)
