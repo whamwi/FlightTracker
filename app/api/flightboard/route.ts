@@ -6,6 +6,13 @@ const SB_URL = process.env.SUPABASE_URL!
 const SB_KEY = process.env.SUPABASE_ANON_KEY!
 const HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 
+// Callsign prefix → airline IATA for carriers FR24 widget doesn't carry an IATA for
+const PREFIX_TO_IATA: Record<string, string> = {
+  FYC: 'XH',  // Fly Cham
+  SYR: 'RB',  // Syrian Air
+  HST: 'RB',  // Syrian Air (operating_as code)
+}
+
 function unixToUtcHHMM(unix: number | null): string {
   if (!unix) return ''
   const d = new Date(unix * 1000)
@@ -71,11 +78,11 @@ export async function GET(req: Request) {
     airlineMap[a.iata] = { name: a.name_en ?? a.iata, flag: a.country_flag ?? '' }
   }
 
-  // Index flight_status by flight_number (last write wins on duplicates)
+  // Index flight_status by flight_number — strip spaces so "FYC 741" matches "FYC741"
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const statusMap: Record<string, any> = {}
   for (const s of statusRows) {
-    const key = s.flight_number ?? s.callsign
+    const key = (s.flight_number ?? s.callsign ?? '').replace(/\s+/g, '')
     if (key) statusMap[key] = s
   }
 
@@ -98,7 +105,9 @@ export async function GET(req: Request) {
     if (seen.has(key)) return
     seen.add(key)
 
-    const al  = airlineMap[f.airline_iata ?? ''] ?? { name: f.airline ?? f.airline_iata ?? '', flag: '' }
+    // Derive airline IATA from callsign prefix when FR24 widget omits it
+    const airlineIata = f.airline_iata || PREFIX_TO_IATA[num.slice(0, 3)] || ''
+    const al  = airlineMap[airlineIata] ?? { name: f.airline ?? airlineIata, flag: '' }
     const st  = statusMap[num] ?? null
 
     const dep_time_utc = unixToUtcHHMM(schedDep)
@@ -108,7 +117,7 @@ export async function GET(req: Request) {
       callsign:          num,                            // widget doesn't give callsign; flight num is close enough
       iata_number:       num,
       airline_name:      al.name,
-      airline_iata:      f.airline_iata ?? '',
+      airline_iata:      airlineIata,
       country_flag:      al.flag,
       dep_iata:          depIata,
       arr_iata:          arrIata,
