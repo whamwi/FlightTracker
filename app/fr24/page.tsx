@@ -32,7 +32,7 @@ function normalizeForCache(data: any): Record<string, { arrivals: object[]; depa
   const normFlight = (f: any) => {
     const fl = f?.flight
     if (!fl) return null
-    const num      = fl.identification?.number?.default
+    const num      = fl.identification?.number?.default ?? fl.identification?.callsign ?? null
     const schedDep = fl.time?.scheduled?.departure ?? null
     const schedArr = fl.time?.scheduled?.arrival   ?? null
     if (!num || !schedDep || !schedArr) return null
