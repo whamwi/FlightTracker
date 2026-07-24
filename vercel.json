@@ -1,10 +1,5 @@
 {
   "crons": [
-    { "path": "/api/cron/fr24-sync",        "schedule": "0 2 * * *"    },
-    { "path": "/api/sync/airport-flights",  "schedule": "0 3 * * *"    },
-    { "path": "/api/aerodatabox/subscribe", "schedule": "0 3 * * *"    },
-    { "path": "/api/cron/planefinder-poll", "schedule": "*/10 * * * *" },
-    { "path": "/api/sync/aviationedge",     "schedule": "*/10 * * * *" },
-    { "path": "/api/cron/ae-tracking",      "schedule": "*/5 * * * *"  }
+    { "path": "/api/cron/fr24-sync", "schedule": "0 2 * * *" }
   ]
 }

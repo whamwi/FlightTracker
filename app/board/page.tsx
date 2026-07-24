@@ -53,32 +53,20 @@ const LOCAL_LOGOS: Record<string, string> = {
 
 // ── Types ────────────────────────────────────────────────────────────────────
 type Flight = {
-  callsign: string
   iata_number: string
   airline_name: string
   airline_iata: string
   country_flag: string
   dep_iata: string
   arr_iata: string
-  dep_time: string
-  arr_time: string
   dep_time_utc: string
   arr_time_utc: string
   duration_min: number
-  codeshare_iata: string | null
   status: string
   actual_dep_utc: string | null
   actual_arr_utc: string | null
   revised_dep_utc: string | null
   revised_arr_utc: string | null
-  dep_delay_min: number | null
-  arr_delay_min: number | null
-  dep_terminal: string | null
-  dep_gate: string | null
-  dep_check_in_desk: string | null
-  arr_terminal: string | null
-  arr_gate: string | null
-  arr_baggage_belt: string | null
   aircraft_type: string | null
   aircraft_reg: string | null
 }
@@ -330,20 +318,6 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
 
         <div className="flex-1 flex flex-col items-center justify-center gap-0.5">
           {f.aircraft_type && <p className="text-gray-600 text-xs">{f.aircraft_type}</p>}
-          {(f.dep_check_in_desk || f.dep_gate) && (
-            <p className="text-gray-500 text-xs text-center">
-              {f.dep_check_in_desk && (
-                <>CK <span className="text-gray-200 font-medium">{f.dep_check_in_desk}</span></>
-              )}
-              {f.dep_check_in_desk && f.dep_gate && <span className="mx-1 text-gray-700">·</span>}
-              {f.dep_gate && (
-                <>Gate <span className="text-gray-200 font-medium">{f.dep_gate}</span></>
-              )}
-            </p>
-          )}
-          {f.dep_terminal && (
-            <p className="text-gray-500 text-xs">T<span className="text-gray-200 font-medium">{f.dep_terminal}</span></p>
-          )}
         </div>
 
         <div className="min-w-[3.5rem] text-right">
@@ -367,15 +341,6 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
               )}
               {isArr && <DelayBadge min={arrDelay} />}
             </>
-          )}
-          {isArr && f.arr_gate && (
-            <p className="text-gray-400 text-xs mt-1">Gate <span className="text-white font-medium">{f.arr_gate}</span></p>
-          )}
-          {isArr && f.arr_terminal && (
-            <p className="text-gray-400 text-xs">T<span className="text-white font-medium">{f.arr_terminal}</span></p>
-          )}
-          {isArr && f.arr_baggage_belt && (
-            <p className="text-gray-400 text-xs">Belt <span className="text-white font-medium">{f.arr_baggage_belt}</span></p>
           )}
         </div>
       </div>
@@ -431,6 +396,49 @@ export default function BoardPage() {
     const t = setInterval(() => load(0, true), 60_000)
     return () => clearInterval(t)
   }, [tab, load])
+
+  // Silently warm the FR24 cache for DAM on every board visit.
+  // Any visitor triggers a fresh widget fetch → write-through to fr24_daily_cache.
+  // The 60s auto-refresh then picks up the updated data without any user action.
+  useEffect(() => {
+    const TZ = 'Asia/Damascus'
+    const flightDate = new Date().toLocaleDateString('en-CA', { timeZone: TZ })
+    const damMidnight = new Date(flightDate + 'T00:00:00+03:00')
+    const ts = Math.floor(damMidnight.getTime() / 1000)
+    const url = `https://api.flightradar24.com/common/v1/airport.json?code=DAM&plugin=&plugin-setting[schedule][mode]=&plugin-setting[schedule][timestamp]=${ts}&page=1&limit=100&fleet=&token=`
+    fetch(url)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return
+        const sched = data?.result?.response?.airport?.pluginData?.schedule ?? {}
+        const REG_TO_FLIGHT: Record<string, string> = { 'YK-BAA': 'FYC728' }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const normFlight = (f: any) => {
+          const fl = f?.flight
+          if (!fl) return null
+          const reg = fl.aircraft?.registration ?? null
+          const num = fl.identification?.number?.default ?? fl.identification?.callsign ?? (reg ? REG_TO_FLIGHT[reg] : null) ?? reg ?? null
+          const schedDep = fl.time?.scheduled?.departure ?? null
+          const schedArr = fl.time?.scheduled?.arrival   ?? null
+          if (!schedDep || !schedArr) return null
+          return { num, airline: fl.airline?.name ?? null, airline_iata: fl.airline?.code?.iata ?? null, dep_iata: fl.airport?.origin?.code?.iata ?? null, arr_iata: fl.airport?.destination?.code?.iata ?? null, sched_dep: schedDep, sched_arr: schedArr, duration_min: Math.round((schedArr - schedDep) / 60), status: fl.status?.text ?? null }
+        }
+        const byDate: Record<string, { arrivals: object[]; departures: object[] }> = {}
+        const bucket = (d: string) => { if (!byDate[d]) byDate[d] = { arrivals: [], departures: [] }; return byDate[d] }
+        for (const f of (sched.departures?.data ?? [])) {
+          const flight = normFlight(f); if (!flight) continue
+          bucket(new Date(flight.sched_dep * 1000).toLocaleDateString('en-CA', { timeZone: TZ })).departures.push(flight)
+        }
+        for (const f of (sched.arrivals?.data ?? [])) {
+          const flight = normFlight(f); if (!flight) continue
+          bucket(new Date(flight.sched_arr * 1000).toLocaleDateString('en-CA', { timeZone: TZ })).arrivals.push(flight)
+        }
+        Object.entries(byDate).forEach(([d, v]) => {
+          fetch('/api/fr24-cache', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ airport_iata: 'DAM', flight_date: d, ...v }) }).catch(() => {})
+        })
+      })
+      .catch(() => {})
+  }, []) // run once on mount
 
   const byViewAndAirport = (() => {
     // Cache is bucketed by Syria operating date (sched_dep for dep, sched_arr for arr),
@@ -570,7 +578,7 @@ export default function BoardPage() {
         {!loading && (
           <div className="flex flex-col gap-3">
             {sorted.map((f, i) => (
-              <Fragment key={`${f.callsign}-${f.dep_iata}-${f.arr_iata}-${f.dep_time}`}>
+              <Fragment key={`${f.iata_number}-${f.dep_iata}-${f.arr_iata}-${f.dep_time_utc}`}>
                 {i === nowIdx && (
                   <div className="flex items-center gap-2 py-1">
                     <div className="flex-1 h-px bg-blue-900" />

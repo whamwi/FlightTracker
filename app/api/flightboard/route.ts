@@ -6,11 +6,10 @@ const SB_URL = process.env.SUPABASE_URL!
 const SB_KEY = process.env.SUPABASE_ANON_KEY!
 const HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 
-// Callsign prefix → airline IATA for carriers FR24 widget doesn't carry an IATA for
 const PREFIX_TO_IATA: Record<string, string> = {
-  FYC: 'XH',  // Fly Cham
-  SYR: 'RB',  // Syrian Air
-  HST: 'RB',  // Syrian Air (operating_as code)
+  FYC: 'XH',
+  SYR: 'RB',
+  HST: 'RB',
 }
 
 function unixToUtcHHMM(unix: number | null): string {
@@ -19,31 +18,27 @@ function unixToUtcHHMM(unix: number | null): string {
   return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
 }
 
-// Extract HH:MM time embedded in an FR24 status string and convert to UTC ISO.
-// All times in the DAM widget are in Syria local time (UTC+3).
+// Extract HH:MM from FR24 status text and convert Syria local (UTC+3) → UTC ISO
 function extractStatusUtc(raw: string | null, operatingDate: string): string | null {
   if (!raw) return null
   const match = raw.match(/\b(\d{1,2}):(\d{2})\b/)
   if (!match) return null
-  const localHH = parseInt(match[1])
-  const localMM = parseInt(match[2])
   const baseMs = new Date(operatingDate + 'T00:00:00Z').getTime()
-  return new Date(baseMs + (localHH * 60 + localMM - 3 * 60) * 60_000).toISOString()
+  return new Date(baseMs + (parseInt(match[1]) * 60 + parseInt(match[2]) - 180) * 60_000).toISOString()
 }
 
-// Normalise the raw FR24 status text to a board status key
 function normaliseStatus(raw: string | null): string {
   if (!raw) return 'Scheduled'
   const t = raw.toLowerCase()
-  if (t === 'scheduled')                                    return 'Scheduled'
-  if (t.startsWith('estimated') || t.startsWith('expect')) return 'Expected'
-  if (t.includes('boarding'))                               return 'Boarding'
-  if (t.includes('gate close'))                             return 'GateClosed'
-  if (t.includes('departed') || t.includes('took off'))     return 'Departed'
-  if (t.includes('en route') || t.includes('in flight'))   return 'En Route'
-  if (t.includes('approach'))                               return 'Approaching'
-  if (t.includes('landed') || t.includes('arrived'))       return 'Arrived'
-  if (t.includes('cancel'))                                 return 'Cancelled'
+  if (t === 'scheduled' || t === 'scheduled*')                return 'Scheduled'
+  if (t.startsWith('estimated') || t.startsWith('expect'))    return 'Expected'
+  if (t.includes('boarding'))                                  return 'Boarding'
+  if (t.includes('gate close'))                               return 'GateClosed'
+  if (t.includes('departed') || t.includes('took off'))       return 'Departed'
+  if (t.includes('en route') || t.includes('in flight'))      return 'En Route'
+  if (t.includes('approach'))                                  return 'Approaching'
+  if (t.includes('landed') || t.includes('arrived'))          return 'Arrived'
+  if (t.includes('cancel'))                                    return 'Cancelled'
   return 'Scheduled'
 }
 
@@ -52,25 +47,9 @@ export async function GET(req: Request) {
   const date = searchParams.get('date')
   if (!date) return NextResponse.json({ ok: false, error: 'date required' }, { status: 400 })
 
-  // Fetch all three in parallel
-  const [cacheRes, airlinesRes, statusRes] = await Promise.all([
-    fetch(
-      `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${date}&select=airport_iata,arrivals,departures`,
-      { headers: HEADERS }
-    ),
-    fetch(
-      `${SB_URL}/rest/v1/airlines?select=iata,name_en,country_flag`,
-      { headers: HEADERS }
-    ),
-    fetch(
-      `${SB_URL}/rest/v1/flight_status` +
-      `?operating_date=eq.${date}` +
-      `&select=flight_number,callsign,status,actual_dep_utc,actual_arr_utc` +
-      `,revised_dep_utc,revised_arr_utc,dep_delay_min,arr_delay_min` +
-      `,dep_terminal,dep_gate,dep_check_in_desk,arr_terminal,arr_gate,arr_baggage_belt` +
-      `,aircraft_type,aircraft_reg`,
-      { headers: HEADERS }
-    ),
+  const [cacheRes, airlinesRes] = await Promise.all([
+    fetch(`${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${date}&select=airport_iata,arrivals,departures`, { headers: HEADERS }),
+    fetch(`${SB_URL}/rest/v1/airlines?select=iata,name_en,country_flag`, { headers: HEADERS }),
   ])
 
   if (!cacheRes.ok) {
@@ -78,29 +57,16 @@ export async function GET(req: Request) {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const cacheRows: any[]    = await cacheRes.json()
+  const cacheRows: any[]   = await cacheRes.json()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const airlineRows: any[]  = airlinesRes.ok ? await airlinesRes.json() : []
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const statusRows: any[]   = statusRes.ok  ? await statusRes.json()  : []
+  const airlineRows: any[] = airlinesRes.ok ? await airlinesRes.json() : []
 
-  // ── Lookups ──────────────────────────────────────────────────────────────────
   const airlineMap: Record<string, { name: string; flag: string }> = {}
   for (const a of airlineRows) {
     airlineMap[a.iata] = { name: a.name_en ?? a.iata, flag: a.country_flag ?? '' }
   }
 
-  // Index flight_status by flight_number — strip spaces so "FYC 741" matches "FYC741"
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const statusMap: Record<string, any> = {}
-  for (const s of statusRows) {
-    const key = (s.flight_number ?? s.callsign ?? '').replace(/\s+/g, '')
-    if (key) statusMap[key] = s
-  }
-
-  // ── Flatten JSONB arrays from all airports ────────────────────────────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const seen  = new Set<string>()
+  const seen    = new Set<string>()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const flights: any[] = []
 
@@ -112,51 +78,32 @@ export async function GET(req: Request) {
     const schedDep = f.sched_dep ?? null
     const schedArr = f.sched_arr ?? null
 
-    // Dedup: same flight number + route + dep time → one row.
-    // Include dep time so same-numbered flights at different hours (e.g. FYC501 at 09:00 and 18:30) both appear.
     const key = `${num}|${depIata}|${arrIata}|${schedDep ?? ''}`
     if (seen.has(key)) return
     seen.add(key)
 
-    // Derive airline IATA from callsign prefix when FR24 widget omits it
-    const airlineIata = f.airline_iata || PREFIX_TO_IATA[num.slice(0, 3)] || ''
-    const al  = airlineMap[airlineIata] ?? { name: f.airline ?? airlineIata, flag: '' }
-    const st  = statusMap[num] ?? null
-
+    const airlineIata  = f.airline_iata || PREFIX_TO_IATA[num.slice(0, 3)] || ''
+    const al           = airlineMap[airlineIata] ?? { name: f.airline ?? airlineIata, flag: '' }
     const dep_time_utc = unixToUtcHHMM(schedDep)
     const arr_time_utc = unixToUtcHHMM(schedArr)
 
     flights.push({
-      callsign:          num,                            // widget doesn't give callsign; flight num is close enough
-      iata_number:       num,
-      airline_name:      al.name,
-      airline_iata:      airlineIata,
-      country_flag:      al.flag,
-      dep_iata:          depIata,
-      arr_iata:          arrIata,
-      dep_time:          dep_time_utc,                   // used only as React key fallback
-      arr_time:          arr_time_utc,
+      iata_number:    num,
+      airline_name:   al.name,
+      airline_iata:   airlineIata,
+      country_flag:   al.flag,
+      dep_iata:       depIata,
+      arr_iata:       arrIata,
       dep_time_utc,
       arr_time_utc,
-      duration_min:      f.duration_min ?? 0,
-      codeshare_iata:    null,
-      // Status: flight_status overlay wins → FR24 widget status
-      // Actual/revised times: flight_status wins → parsed from FR24 widget status text
-      status:            st?.status             ?? normaliseStatus(f.status),
-      actual_dep_utc:    st?.actual_dep_utc     ?? f.fr24_actual_dep  ?? null,
-      actual_arr_utc:    st?.actual_arr_utc     ?? f.fr24_actual_arr  ?? null,
-      revised_dep_utc:   st?.revised_dep_utc    ?? f.fr24_revised_dep ?? null,
-      revised_arr_utc:   st?.revised_arr_utc    ?? f.fr24_revised_arr ?? null,
-      dep_delay_min:     st?.dep_delay_min      ?? null,
-      arr_delay_min:     st?.arr_delay_min      ?? null,
-      dep_terminal:      st?.dep_terminal       ?? null,
-      dep_gate:          st?.dep_gate           ?? null,
-      dep_check_in_desk: st?.dep_check_in_desk  ?? null,
-      arr_terminal:      st?.arr_terminal       ?? null,
-      arr_gate:          st?.arr_gate           ?? null,
-      arr_baggage_belt:  st?.arr_baggage_belt   ?? null,
-      aircraft_type:     st?.aircraft_type      ?? f.aircraft ?? null,
-      aircraft_reg:      st?.aircraft_reg       ?? f.reg      ?? null,
+      duration_min:   f.duration_min ?? 0,
+      status:         normaliseStatus(f.status),
+      actual_dep_utc: f.fr24_actual_dep  ?? null,
+      actual_arr_utc: f.fr24_actual_arr  ?? null,
+      revised_dep_utc: f.fr24_revised_dep ?? null,
+      revised_arr_utc: f.fr24_revised_arr ?? null,
+      aircraft_type:  f.aircraft ?? null,
+      aircraft_reg:   f.reg      ?? null,
     })
   }
 
@@ -164,24 +111,20 @@ export async function GET(req: Request) {
     const ap = row.airport_iata as string
     for (const f of (row.departures ?? [])) {
       const t = (f.status ?? '').toLowerCase()
-      const isActualDep = t.includes('departed') || t.includes('took off')
-      const isRevised   = t.startsWith('estimated') || t.startsWith('expect')
       addFlight({
         ...f,
-        dep_iata: f.dep_iata || ap,
-        fr24_actual_dep:  isActualDep ? extractStatusUtc(f.status, date) : null,
-        fr24_revised_dep: isRevised   ? extractStatusUtc(f.status, date) : null,
+        dep_iata:        f.dep_iata || ap,
+        fr24_actual_dep:  t.includes('departed') || t.includes('took off') ? extractStatusUtc(f.status, date) : null,
+        fr24_revised_dep: t.startsWith('estimated') || t.startsWith('expect') ? extractStatusUtc(f.status, date) : null,
       })
     }
     for (const f of (row.arrivals ?? [])) {
       const t = (f.status ?? '').toLowerCase()
-      const isActualArr = t.includes('landed') || t.includes('arrived')
-      const isRevised   = t.startsWith('estimated') || t.startsWith('expect')
       addFlight({
         ...f,
-        arr_iata: f.arr_iata || ap,
-        fr24_actual_arr:  isActualArr ? extractStatusUtc(f.status, date) : null,
-        fr24_revised_arr: isRevised   ? extractStatusUtc(f.status, date) : null,
+        arr_iata:        f.arr_iata || ap,
+        fr24_actual_arr:  t.includes('landed') || t.includes('arrived') ? extractStatusUtc(f.status, date) : null,
+        fr24_revised_arr: t.startsWith('estimated') || t.startsWith('expect') ? extractStatusUtc(f.status, date) : null,
       })
     }
   }
