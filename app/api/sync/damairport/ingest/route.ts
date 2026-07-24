@@ -120,9 +120,10 @@ async function processDate(airport: string, date: string, rawRows: RawRow[]) {
   const existingSchedule: {
     id: number; flight_id: number; dep_iata: string; arr_iata: string
     dep_time: string | null; arr_time: string | null; days_of_week: string[]
+    source: string
   }[] = flightIds.length
-    ? await sb(`/route_master?flight_id=in.(${flightIds.join(',')})&source=eq.damairport` +
-               `&select=id,flight_id,dep_iata,arr_iata,dep_time,arr_time,days_of_week`)
+    ? await sb(`/route_master?flight_id=in.(${flightIds.join(',')})` +
+               `&select=id,flight_id,dep_iata,arr_iata,dep_time,arr_time,days_of_week,source`)
     : []
 
   // Key uses the Syria-side time only (arr for arrivals, dep for departures) — stable after fill adds the other side
@@ -176,13 +177,13 @@ async function processDate(airport: string, date: string, rawRows: RawRow[]) {
 
       if (driftMatch) {
         const newDow = [...new Set([...(driftMatch.days_of_week ?? []), dow])].sort()
-        toUpdate.push({
-          id:           driftMatch.id,
-          days_of_week: newDow,
-          ...(SY_AIRPORTS.has(raw.iata_to)
-            ? { arr_time: arrTime!, arr_time_utc: toUtc(arrTime!) + ':00' }
-            : { dep_time: depTime!, dep_time_utc: toUtc(depTime!) + ':00' }),
-        })
+        // Only overwrite dep/arr times for damairport-sourced rows; manual/syrlines_api times take precedence
+        const timeUpdate = driftMatch.source === 'damairport'
+          ? (SY_AIRPORTS.has(raw.iata_to)
+              ? { arr_time: arrTime!, arr_time_utc: toUtc(arrTime!) + ':00' }
+              : { dep_time: depTime!, dep_time_utc: toUtc(depTime!) + ':00' })
+          : {}
+        toUpdate.push({ id: driftMatch.id, days_of_week: newDow, ...timeUpdate })
         schedMap.delete(schedKey(driftMatch))
         schedMap.set(key, driftMatch)
       } else {
@@ -204,11 +205,37 @@ async function processDate(airport: string, date: string, rawRows: RawRow[]) {
   }
 
   if (toInsert.length) {
-    await sb('/route_master', {
+    const rmRes = await fetch(`${SB_URL}/rest/v1/route_master`, {
       method:  'POST',
-      headers: { Prefer: 'return=minimal,resolution=ignore-duplicates' },
-      body:    JSON.stringify(toInsert),
+      headers: {
+        apikey:         SB_KEY,
+        Authorization:  `Bearer ${SB_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer:         'return=minimal,resolution=ignore-duplicates',
+      },
+      body: JSON.stringify(toInsert),
     })
+    if (!rmRes.ok) {
+      if (rmRes.status === 409) {
+        // Batch conflicted (partial unique index not covered by ON CONFLICT DO NOTHING).
+        // Fall back to individual inserts so genuinely new rows still land.
+        for (const row of toInsert) {
+          const r = await fetch(`${SB_URL}/rest/v1/route_master`, {
+            method:  'POST',
+            headers: {
+              apikey:         SB_KEY,
+              Authorization:  `Bearer ${SB_KEY}`,
+              'Content-Type': 'application/json',
+              Prefer:         'return=minimal,resolution=ignore-duplicates',
+            },
+            body: JSON.stringify([row]),
+          })
+          if (!r.ok && r.status !== 409) throw new Error(`Supabase /route_master: ${r.status} ${await r.text()}`)
+        }
+      } else {
+        throw new Error(`Supabase /route_master: ${rmRes.status} ${await rmRes.text()}`)
+      }
+    }
   }
 
   if (toUpdate.length) {
