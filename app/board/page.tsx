@@ -321,10 +321,10 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
               <p className={`font-mono text-xs ${actualColor(!!f.actual_dep_utc, depDelay)}`}>
                 {depActual}
               </p>
-              {!isArr && <DelayBadge min={depDelay} />}
+              <DelayBadge min={depDelay} />
             </div>
           ) : (
-            !isArr && <DelayBadge min={depDelay} />
+            <DelayBadge min={depDelay} />
           )}
         </div>
 
