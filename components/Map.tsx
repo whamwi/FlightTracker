@@ -23,6 +23,8 @@ interface Aircraft {
   duration_min:   number | null
   iata_number:    string | null
   actual_dep_utc: string | null
+  dep_delay_min:  number | null
+  airline_iata:   string | null
   seen_at?: string
   stale?:   boolean
 }
@@ -71,7 +73,7 @@ interface FlightStatus {
 const ICAO_TO_IATA: Record<string, string> = {
   FDB: 'FZ', ABY: 'G9', THY: 'TK', RJA: 'RJ',
   QTR: 'QR', ETD: 'EY', PGT: 'PC', SYR: 'RB',
-  JZR: 'J9', ADY: 'TK',
+  JZR: 'J9', ADY: 'TK', FYC: 'XH',
 }
 
 // Airport IATA → city name for popup route line
@@ -95,7 +97,7 @@ function airlineIataFor(callsign: string, fs?: FlightStatus | null): string | nu
   // flight_number is IATA format like "FZ1847" — first 2 alpha chars = IATA
   const fn = fs?.flight_number ?? ''
   const fnLetters = fn.replace(/[^A-Za-z]/g, '')
-  if (fnLetters.length >= 2) return fnLetters.slice(0, 2).toUpperCase()
+  if (fnLetters.length === 2) return fnLetters.toUpperCase()
   // Fall back: first 3 alpha chars of callsign = ICAO prefix
   const icao = callsign.replace(/\d/g, '').toUpperCase()
   return ICAO_TO_IATA[icao] ?? null
@@ -640,14 +642,14 @@ export default function Map() {
                   scheduled_arr_utc: existing?.scheduled_arr_utc ?? null,
                   revised_dep_utc:   existing?.revised_dep_utc   ?? null,
                   revised_arr_utc:   existing?.revised_arr_utc   ?? null,
-                  dep_delay_min:     existing?.dep_delay_min      ?? null,
+                  dep_delay_min:     a.dep_delay_min ?? existing?.dep_delay_min ?? null,
                   arr_delay_min:     existing?.arr_delay_min      ?? null,
                   aircraft_reg:      a.r ?? existing?.aircraft_reg   ?? null,
                   aircraft_type:     a.t ?? existing?.aircraft_type  ?? null,
                   flight_number:     a.iata_number ?? existing?.flight_number ?? null,
                   dep_iata:          a.dep_iata ?? existing?.dep_iata ?? null,
                   arr_iata:          a.arr_iata ?? existing?.arr_iata ?? null,
-                  airline_iata:      existing?.airline_iata ?? null,
+                  airline_iata:      a.airline_iata ?? existing?.airline_iata ?? null,
                 }
               }
             }
@@ -658,8 +660,9 @@ export default function Map() {
             for (const bd of (data.boardDeparted ?? []) as {
               callsign: string; dep_iata: string; arr_iata: string
               duration_min: number; actual_dep_utc: string; iata_number: string
+              dep_delay_min: number | null; airline_iata: string | null
             }[]) {
-              const { callsign: cs, dep_iata, arr_iata, duration_min, actual_dep_utc, iata_number } = bd
+              const { callsign: cs, dep_iata, arr_iata, duration_min, actual_dep_utc, iata_number, dep_delay_min, airline_iata } = bd
               if (!cs || !dep_iata || !arr_iata) continue
 
               // Seed flightStatusRef so the schedule overlay uses actual dep time
@@ -673,14 +676,14 @@ export default function Map() {
                   scheduled_arr_utc: null,
                   revised_dep_utc:   null,
                   revised_arr_utc:   null,
-                  dep_delay_min:     null,
+                  dep_delay_min,
                   arr_delay_min:     null,
                   aircraft_reg:      null,
                   aircraft_type:     null,
                   flight_number:     iata_number,
                   dep_iata,
                   arr_iata,
-                  airline_iata:      null,
+                  airline_iata,
                 }
               }
 

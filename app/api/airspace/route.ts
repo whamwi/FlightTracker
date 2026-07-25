@@ -87,6 +87,8 @@ interface BoardFlight {
   duration_min:   number | null
   status:         string        // raw FR24 status, lowercased
   actual_dep_utc: string | null // extracted from "Departed HH:MM" in status
+  dep_delay_min:  number | null // actual_dep_utc − sched_dep
+  airline_iata:   string | null // IATA code for airline logo
 }
 
 let boardCache: { flights: BoardFlight[]; date: string; ts: number } | null = null
@@ -104,6 +106,10 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<Bo
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows: any[] = await res.json()
 
+  // Reverse map: ICAO prefix → IATA (e.g. FYC→XH, THY→TK, FDB→FZ)
+  const icaoToIata: Record<string, string> = {}
+  for (const [iata, icao] of Object.entries(iataToIcao)) icaoToIata[icao] = iata
+
   const seen    = new Set<string>()
   const flights: BoardFlight[] = []
 
@@ -116,19 +122,29 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<Bo
         const key = `${num}|${f.sched_dep ?? ''}`
         if (seen.has(key)) continue
         seen.add(key)
-        const status = (f.status ?? '').toLowerCase()
+        const status       = (f.status ?? '').toLowerCase()
+        const actual_dep_utc = extractActualDepUtc(status, date)
+        const schedDepMs   = f.sched_dep ? f.sched_dep * 1000 : null
+        const actualDepMs  = actual_dep_utc ? new Date(actual_dep_utc).getTime() : null
+        const dep_delay_min = (schedDepMs && actualDepMs)
+          ? Math.round((actualDepMs - schedDepMs) / 60_000)
+          : null
+        const callsignCs   = toCallsign(num, iataToIcao)
+        const icaoPrefix   = callsignCs.replace(/\d/g, '')
         // FR24 cache omits the implicit airport — fill dep_iata for departures
         // and arr_iata for arrivals from the row's airport_iata.
         flights.push({
           num,
-          callsign:       toCallsign(num, iataToIcao),
+          callsign:       callsignCs,
           dep_iata:       f.dep_iata || (section === 'departures' ? ap : null) || null,
           arr_iata:       f.arr_iata || (section === 'arrivals'   ? ap : null) || null,
           sched_dep:      f.sched_dep    ?? null,
           sched_arr:      f.sched_arr    ?? null,
           duration_min:   f.duration_min ?? null,
           status,
-          actual_dep_utc: extractActualDepUtc(status, date),
+          actual_dep_utc,
+          dep_delay_min,
+          airline_iata:   icaoToIata[icaoPrefix] ?? null,
         })
       }
     }
@@ -318,6 +334,8 @@ export async function GET() {
         duration_min:   info?.duration_min  ?? null,
         iata_number:    info?.num           ?? null,
         actual_dep_utc: info?.actual_dep_utc ?? null,
+        dep_delay_min:  info?.dep_delay_min  ?? null,
+        airline_iata:   info?.airline_iata   ?? null,
       })
     }
 
@@ -337,6 +355,8 @@ export async function GET() {
         duration_min:   info?.duration_min  ?? null,
         iata_number:    info?.num           ?? null,
         actual_dep_utc: info?.actual_dep_utc ?? null,
+        dep_delay_min:  info?.dep_delay_min  ?? null,
+        airline_iata:   info?.airline_iata   ?? null,
       })
     }
     if (trackedExtra.length) upsertPositions(trackedExtra).catch(() => {})
@@ -363,6 +383,8 @@ export async function GET() {
         duration_min:   f.duration_min,
         actual_dep_utc: f.actual_dep_utc,
         iata_number:    f.num,
+        dep_delay_min:  f.dep_delay_min,
+        airline_iata:   f.airline_iata,
       }))
 
     return NextResponse.json({
