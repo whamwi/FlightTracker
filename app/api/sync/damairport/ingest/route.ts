@@ -304,14 +304,13 @@ export async function POST(req: Request) {
   // Aggregate totals across all dates
   const totals = dateResults.reduce(
     (acc, r) => ({
-      airlines_added:     acc.airlines_added     + r.airlines_added,
-      lookup_added:       acc.lookup_added       + r.lookup_added,
-      routes_inserted:    acc.routes_inserted    + r.routes_inserted,
-      routes_updated:     acc.routes_updated     + r.routes_updated,
-      routes_drift:       acc.routes_drift       + r.routes_drift,
-      instances_upserted: acc.instances_upserted + r.instances_upserted,
+      airlines_added:  acc.airlines_added  + r.airlines_added,
+      lookup_added:    acc.lookup_added    + r.lookup_added,
+      routes_inserted: acc.routes_inserted + r.routes_inserted,
+      routes_updated:  acc.routes_updated  + r.routes_updated,
+      routes_drift:    acc.routes_drift    + r.routes_drift,
     }),
-    { airlines_added: 0, lookup_added: 0, routes_inserted: 0, routes_updated: 0, routes_drift: 0, instances_upserted: 0 }
+    { airlines_added: 0, lookup_added: 0, routes_inserted: 0, routes_updated: 0, routes_drift: 0 }
   )
 
   return NextResponse.json({ ok: true, airport, dates: dateResults, ...totals })
