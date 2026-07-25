@@ -69,24 +69,52 @@ function normalizeForCache(data: any): Record<string, { arrivals: object[]; depa
     return flight
   }
 
+  const statusPriority = (s: string | null): number => {
+    const t = (s ?? '').toLowerCase()
+    if (t.includes('landed') || t.includes('arrived')) return 8
+    if (t.includes('approach'))                         return 7
+    if (t.includes('en route') || t.includes('in flight')) return 6
+    if (t.includes('departed') || t.includes('took off')) return 5
+    if (t.startsWith('delayed'))                        return 4
+    if (t.startsWith('estimated') || t.startsWith('expect')) return 3
+    if (t === 'scheduled' || t === 'scheduled*')        return 1
+    return 0
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const byDate: Record<string, { arrivals: object[]; departures: object[] }> = {}
+  const byDate: Record<string, { arrivals: any[]; departures: any[] }> = {}
   const bucket = (date: string) => {
     if (!byDate[date]) byDate[date] = { arrivals: [], departures: [] }
     return byDate[date]
+  }
+
+  // Upsert a flight into a list by (num|dep_iata|arr_iata) key.
+  // When FR24 shows two entries for the same flight (e.g. "Scheduled*" + "Landed HH:MM"),
+  // keep only the one with the higher-priority status so the cache stays deduplicated.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const upsert = (list: any[], flight: any, keyFields: [string, string, string]) => {
+    const key = keyFields.map(k => flight[k] ?? '').join('|')
+    const idx = list.findIndex(e => keyFields.map(k => e[k] ?? '').join('|') === key)
+    if (idx >= 0) {
+      if (statusPriority(flight.status) > statusPriority(list[idx].status)) {
+        list[idx] = flight
+      }
+    } else {
+      list.push(flight)
+    }
   }
 
   for (const f of (sched.departures?.data ?? [])) {
     const flight = normFlight(f, 'departures')
     if (!flight) continue
     const date = new Date(flight.sched_dep! * 1000).toLocaleDateString('en-CA', { timeZone: TZ })
-    bucket(date).departures.push(flight)
+    upsert(bucket(date).departures, flight, ['num', 'dep_iata', 'arr_iata'])
   }
   for (const f of (sched.arrivals?.data ?? [])) {
     const flight = normFlight(f, 'arrivals')
     if (!flight) continue
     const date = new Date(flight.sched_arr! * 1000).toLocaleDateString('en-CA', { timeZone: TZ })
-    bucket(date).arrivals.push(flight)
+    upsert(bucket(date).arrivals, flight, ['num', 'dep_iata', 'arr_iata'])
   }
 
   return byDate
