@@ -532,7 +532,7 @@ export default function Map() {
         iconUrl:       'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
         shadowUrl:     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
       })
-      const map = L.map(mapRef.current!, { center: [33.0, 42.0], zoom: 6 })
+      const map = L.map(mapRef.current!, { center: [33.0, 40.0], zoom: 6 })
       L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
         attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/">CARTO</a>',
         maxZoom: 19,
@@ -906,35 +906,41 @@ export default function Map() {
         let dispLat = a.lat, dispLon = a.lon, dispTrack = bestHeading(a)
         let projected = false, arrSnapped = false
 
-        // Expire markers past scheduled arrival window.
-        // Live-then-lost (not on ground): 15 min (let ESTIMATED take over quickly).
-        // Stale DB aircraft or on-ground non-stale: 90 min (full ARRIVED window).
-        if (isSyria && a.arr_time_utc) {
-          const d = new Date(now)
-          const nowSec = d.getUTCHours() * 3600 + d.getUTCMinutes() * 60 + d.getUTCSeconds()
-          const [ah, am] = a.arr_time_utc.split(':').map(Number)
-          const sinceArr = (nowSec - (ah * 3600 + am * 60) + 86400) % 86400
-          const maxSinceArr = (a.stale || isOnGround) ? 90 * 60 : 15 * 60
-          if (sinceArr > maxSinceArr && sinceArr < 22 * 3600) {
-            // Guard against midnight-crossing routes (e.g. dep 21:15, arr 00:51):
-            // sinceArr wraps to ~21h which looks "past arrival" but the flight is
-            // still airborne. isFlightActiveNow handles overnight correctly — skip
-            // removal if the flight is still in progress (fraction 0–1).
-            const cs_ = (a.flight ?? '').trim()
-            const se_ = cs_ ? scheduleRef.current.find(e => e.callsign === cs_) : null
-            const activeFrac = se_
-              ? isFlightActiveNow(se_.dep_time_utc, se_.arr_time_utc, se_.days_of_week, now)
-              : null
-            if (activeFrac !== null && activeFrac <= 1.0) {
-              // Flight still active — don't expire
-            } else {
-              markersRef.current[hex]?.remove()
-              delete markersRef.current[hex]
-              linesRef.current[hex]?.forEach((l: any) => l.remove())
-              delete linesRef.current[hex]
-              delete lastKnownRef.current[hex]
-              continue
+        // Expire markers past arrival window.
+        // When actual_dep_utc + duration_min are known, base expiry on real wheels-off
+        // so delayed flights don't get removed at their scheduled arrival time.
+        // Fallback: scheduled arr_time_utc with midnight-crossing guard.
+        // Live-then-lost (not on ground): 15-min buffer past expected arrival.
+        // Stale DB aircraft or on-ground: 90-min buffer.
+        if (isSyria) {
+          const bufMs = (a.stale || isOnGround) ? 90 * 60_000 : 15 * 60_000
+          let expired = false
+          if (a.actual_dep_utc && a.duration_min) {
+            const expectedArrMs = new Date(a.actual_dep_utc).getTime() + a.duration_min * 60_000
+            expired = now - expectedArrMs > bufMs
+          } else if (a.arr_time_utc) {
+            const d = new Date(now)
+            const nowSec = d.getUTCHours() * 3600 + d.getUTCMinutes() * 60 + d.getUTCSeconds()
+            const [ah, am] = a.arr_time_utc.split(':').map(Number)
+            const sinceArr = (nowSec - (ah * 3600 + am * 60) + 86400) % 86400
+            if (sinceArr > bufMs / 1000 && sinceArr < 22 * 3600) {
+              // Guard against midnight-crossing routes: isFlightActiveNow handles
+              // overnight windows — skip removal if flight is still in progress.
+              const cs_ = (a.flight ?? '').trim()
+              const se_ = cs_ ? scheduleRef.current.find(e => e.callsign === cs_) : null
+              const activeFrac = se_
+                ? isFlightActiveNow(se_.dep_time_utc, se_.arr_time_utc, se_.days_of_week, now)
+                : null
+              expired = !(activeFrac !== null && activeFrac <= 1.0)
             }
+          }
+          if (expired) {
+            markersRef.current[hex]?.remove()
+            delete markersRef.current[hex]
+            linesRef.current[hex]?.forEach((l: any) => l.remove())
+            delete linesRef.current[hex]
+            delete lastKnownRef.current[hex]
+            continue
           }
         }
 
