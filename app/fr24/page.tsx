@@ -66,7 +66,9 @@ function normalizeForCache(data: any): Record<string, { arrivals: object[]; depa
     }
     // Drop FR24 widget artifacts: corrupted entries have an inflated block time
     // (> 5 hours for any Syrian-region route is always a bad sched_arr timestamp).
-    if (durationMin > 300) return null
+    // Skip this check for landed flights — schedDep may carry a wrong previous-leg
+    // timestamp, but real_arr confirms the flight is genuine.
+    if (durationMin > 300 && !flight.real_arr) return null
     return flight
   }
 
