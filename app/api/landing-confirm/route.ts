@@ -27,7 +27,7 @@ export async function GET() {
   const minAgeSec = nowSec - 30 * 60   // at least 30 min past ETA
   const maxAgeSec = nowSec - 4 * 3600  // give up after 4 h
 
-  type Pending = { airport: string; date: string; num: string; eta: number }
+  type Pending = { airport: string; date: string; num: string; eta: number; fr24_id: string | null }
   const pending: Pending[] = []
 
   for (const date of [syriaDate(-1), syriaDate(0)]) {
@@ -45,47 +45,23 @@ export async function GET() {
         if (!f.num)     continue
         const eta = (f.est_arr ?? f.sched_arr) as number | null
         if (!eta || eta > minAgeSec || eta < maxAgeSec) continue
-        pending.push({ airport: row.airport_iata as string, date, num: String(f.num), eta })
+        pending.push({ airport: row.airport_iata as string, date, num: String(f.num), eta, fr24_id: f.fr24_id ?? null })
       }
     }
   }
 
   if (!pending.length) return NextResponse.json({ ok: true, checked: 0, confirmed: 0 })
 
-  // Look up stable FR24 route IDs from flight_lookup.
-  // Cache stores num in broadcast_callsign format (e.g. "FYC728") while
-  // iata_number may differ (e.g. "XH728") — query both columns and map either.
-  const uniqueNums = [...new Set(pending.map(p => p.num))]
-  const numsParam = uniqueNums.join(',')
-  const lookupRes = await fetch(
-    `${SB_URL}/rest/v1/flight_lookup?or=(iata_number.in.(${numsParam}),broadcast_callsign.in.(${numsParam}))&select=iata_number,broadcast_callsign,fr24_id`,
-    { headers: HEADERS }
-  )
-  if (!lookupRes.ok) {
-    return NextResponse.json({ ok: false, error: `flight_lookup fetch failed: ${lookupRes.status}` }, { status: 502 })
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const lookupRows: any[] = await lookupRes.json()
-  const numToFr24Id = new Map<string, string>()
-  for (const row of lookupRows) {
-    if (!row.fr24_id) continue
-    // Map both columns so whichever format the cache used resolves correctly
-    if (row.iata_number)       numToFr24Id.set(row.iata_number as string, row.fr24_id as string)
-    if (row.broadcast_callsign) numToFr24Id.set(row.broadcast_callsign as string, row.fr24_id as string)
-  }
-
-  // Group pending entries by fr24_id (one fr24_id may cover multiple airport/date combos)
+  // Group pending entries by fr24_id captured live from the widget API
   const byFr24Id = new Map<string, Pending[]>()
   for (const p of pending) {
-    const id = numToFr24Id.get(p.num)
-    if (!id) continue
-    if (!byFr24Id.has(id)) byFr24Id.set(id, [])
-    byFr24Id.get(id)!.push(p)
+    if (!p.fr24_id) continue
+    if (!byFr24Id.has(p.fr24_id)) byFr24Id.set(p.fr24_id, [])
+    byFr24Id.get(p.fr24_id)!.push(p)
   }
 
   if (!byFr24Id.size) {
-    return NextResponse.json({ ok: true, checked: 0, confirmed: 0, note: 'no fr24_id found for pending flights' })
+    return NextResponse.json({ ok: true, checked: 0, confirmed: 0, note: 'no fr24_id in cache yet — board page visit required' })
   }
 
   const ids = [...byFr24Id.keys()]
