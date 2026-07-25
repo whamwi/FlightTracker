@@ -66,6 +66,13 @@ export async function GET(req: Request) {
     airlineMap[a.iata] = { name: a.name_en ?? a.iata, flag: a.country_flag ?? '' }
   }
 
+  // Damascus-day bounds — flights arriving at Syrian airports must land within this window.
+  // Origin-airport caches are bucketed by DEPARTURE date, so an overnight flight departing
+  // MJI July 25 → arriving DAM July 26 would otherwise bleed onto the July 25 board.
+  const dayStartMs = new Date(date + 'T00:00:00+03:00').getTime()
+  const dayEndMs   = dayStartMs + 24 * 60 * 60 * 1000
+  const SYRIAN_AIRPORTS = new Set(['DAM', 'ALP', 'LTK'])
+
   // Status priority: higher rank wins when the same flight appears in multiple airport caches.
   // Landed/Arrived (8) beats Departed (5) beats Scheduled (1) — so origin airports supply
   // the "Departed" signal for in-flight arrivals, while destination airports supply "Arrived"
@@ -86,6 +93,12 @@ export async function GET(req: Request) {
     const arrIata  = f.arr_iata  ?? ''
     const schedDep = f.sched_dep ?? null
     const schedArr = f.sched_arr ?? null
+
+    // Drop overnight arrivals that land on a different Damascus calendar day
+    if (arrIata && SYRIAN_AIRPORTS.has(arrIata) && schedArr) {
+      const arrMs = schedArr * 1000
+      if (arrMs < dayStartMs || arrMs >= dayEndMs) return
+    }
 
     const key    = `${num}|${depIata}|${arrIata}|${schedDep ?? ''}`
     const status = normaliseStatus(f.status)
