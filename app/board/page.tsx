@@ -380,20 +380,6 @@ export default function BoardPage() {
     }
   }, [])
 
-  useEffect(() => { load(tab) }, [tab, load])
-  useEffect(() => {
-    if (tab !== 0) return
-    const loadTimer = setInterval(() => load(0, true), 60_000)
-    // Re-warm FR24 cache every 5 minutes so statuses stay live on idle open tabs.
-    // warmFR24Cache writes fresh data; 8s delay lets the DB write settle before reloading.
-    const warmTimer = setInterval(() => {
-      warmFR24Cache('DAM')
-      warmFR24Cache('ALP')
-      setTimeout(() => load(0, true), 8_000)
-    }, 5 * 60_000)
-    return () => { clearInterval(loadTimer); clearInterval(warmTimer) }
-  }, [tab, load, warmFR24Cache])
-
   // Warm the FR24 cache for a given airport: fetch the live widget data from FR24
   // and write it through to fr24_daily_cache so the board picks up intraday status updates.
   // depth=0 (default): also warms origin airports of arrivals so their "Departed" status
@@ -448,6 +434,19 @@ export default function BoardPage() {
       })
       .catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { load(tab) }, [tab, load])
+  useEffect(() => {
+    if (tab !== 0) return
+    const loadTimer = setInterval(() => load(0, true), 60_000)
+    // Re-warm FR24 cache every 5 minutes so statuses stay live on idle open tabs.
+    const warmTimer = setInterval(() => {
+      warmFR24Cache('DAM')
+      warmFR24Cache('ALP')
+      setTimeout(() => load(0, true), 8_000)
+    }, 5 * 60_000)
+    return () => { clearInterval(loadTimer); clearInterval(warmTimer) }
+  }, [tab, load, warmFR24Cache])
 
   // On mount: warm both airports so intraday statuses are live from the first load.
   useEffect(() => {
