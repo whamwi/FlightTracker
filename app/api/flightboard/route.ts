@@ -128,6 +128,7 @@ export async function GET(req: Request) {
       dep_time_utc:    unixToUtcHHMM(schedDep),
       arr_time_utc:    unixToUtcHHMM(schedArr),
       duration_min:    f.duration_min ?? 0,
+      sched_dep_unix:  schedDep,
       status,
       actual_dep_utc:  f.fr24_actual_dep  ?? null,
       actual_arr_utc:  f.fr24_actual_arr  ?? null,
