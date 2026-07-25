@@ -31,6 +31,7 @@ function normaliseStatus(raw: string | null): string {
   if (!raw) return 'Scheduled'
   const t = raw.toLowerCase()
   if (t === 'scheduled' || t === 'scheduled*')                return 'Scheduled'
+  if (t.startsWith('delayed'))                                return 'Delayed'
   if (t.startsWith('estimated') || t.startsWith('expect'))    return 'Expected'
   if (t.includes('boarding'))                                  return 'Boarding'
   if (t.includes('gate close'))                               return 'GateClosed'
