@@ -389,7 +389,10 @@ export default function BoardPage() {
 
   // Warm the FR24 cache for a given airport: fetch the live widget data from FR24
   // and write it through to fr24_daily_cache so the board picks up intraday status updates.
-  const warmFR24Cache = useCallback((airportCode: string) => {
+  // depth=0 (default): also warms origin airports of arrivals so their "Departed" status
+  // wins in the flightboard dedup over the destination's stale "Scheduled" arrival entry.
+  // depth=1: leaf call — only writes the airport's own data, no further recursion.
+  const warmFR24Cache = useCallback((airportCode: string, depth = 0) => {
     const TZ = 'Asia/Damascus'
     const flightDate = new Date().toLocaleDateString('en-CA', { timeZone: TZ })
     const ts = Math.floor(new Date(flightDate + 'T00:00:00+03:00').getTime() / 1000)
@@ -424,9 +427,20 @@ export default function BoardPage() {
         Object.entries(byDate).forEach(([d, v]) => {
           fetch('/api/fr24-cache', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ airport_iata: airportCode, flight_date: d, ...v }) }).catch(() => {})
         })
+        // Warm origin airports of arrivals so the flightboard can show "Departed" status
+        // for in-flight arrivals (the origin knows departure status; destination only knows landing).
+        if (depth === 0) {
+          const origins = new Set<string>()
+          for (const f of (sched.arrivals?.data ?? [])) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const dep = (f as any)?.flight?.airport?.origin?.code?.iata
+            if (dep && dep !== airportCode) origins.add(dep as string)
+          }
+          origins.forEach(origin => warmFR24Cache(origin, 1))
+        }
       })
       .catch(() => {})
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // On mount: warm both airports so intraday statuses are live from the first load.
   useEffect(() => {

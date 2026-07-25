@@ -107,22 +107,30 @@ export async function GET(req: Request) {
     })
   }
 
+  // Pass 1 — departures: origin airports know "Departed" as soon as the plane leaves.
+  // Processing departures first means the "Departed" status wins the dedup over the
+  // destination airport's stale "Scheduled" arrival entry for the same flight.
   for (const row of cacheRows) {
     const ap = row.airport_iata as string
     for (const f of (row.departures ?? [])) {
       const t = (f.status ?? '').toLowerCase()
       addFlight({
         ...f,
-        dep_iata:        f.dep_iata || ap,
+        dep_iata:         f.dep_iata || ap,
         fr24_actual_dep:  t.includes('departed') || t.includes('took off') ? extractStatusUtc(f.status, date) : null,
         fr24_revised_dep: t.startsWith('estimated') || t.startsWith('expect') ? extractStatusUtc(f.status, date) : null,
       })
     }
+  }
+  // Pass 2 — arrivals: destination airports know "Landed" once the plane touches down.
+  // Flights already seen in pass 1 are deduplicated — their departure status is preserved.
+  for (const row of cacheRows) {
+    const ap = row.airport_iata as string
     for (const f of (row.arrivals ?? [])) {
       const t = (f.status ?? '').toLowerCase()
       addFlight({
         ...f,
-        arr_iata:        f.arr_iata || ap,
+        arr_iata:         f.arr_iata || ap,
         fr24_actual_arr:  t.includes('landed') || t.includes('arrived') ? extractStatusUtc(f.status, date) : null,
         fr24_revised_arr: t.startsWith('estimated') || t.startsWith('expect') ? extractStatusUtc(f.status, date) : null,
       })
