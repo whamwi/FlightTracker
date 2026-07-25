@@ -41,8 +41,6 @@ function normalizeForCache(data: any): Record<string, { arrivals: object[]; depa
     const num      = fl.identification?.number?.default ?? fl.identification?.callsign ?? (reg ? REG_TO_FLIGHT[reg] : null) ?? reg ?? null
     const schedDep = fl.time?.scheduled?.departure ?? null
     const schedArr = fl.time?.scheduled?.arrival   ?? null
-    // Drop entries with no meaningful status — Unknown adds no information.
-    if ((fl.status?.text ?? '').toLowerCase() === 'unknown') return null
     // For completed/landed flights FR24 may omit the origin-side scheduled time.
     // Only require the time relevant to the direction we're processing.
     if (dir === 'arrivals'   && !schedArr) return null
