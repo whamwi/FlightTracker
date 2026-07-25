@@ -66,9 +66,18 @@ export async function GET(req: Request) {
     airlineMap[a.iata] = { name: a.name_en ?? a.iata, flag: a.country_flag ?? '' }
   }
 
-  const seen    = new Set<string>()
+  // Status priority: higher rank wins when the same flight appears in multiple airport caches.
+  // Landed/Arrived (8) beats Departed (5) beats Scheduled (1) — so origin airports supply
+  // the "Departed" signal for in-flight arrivals, while destination airports supply "Arrived"
+  // once the plane actually lands (overriding the origin's stale "Departed").
+  const STATUS_RANK: Record<string, number> = {
+    Arrived: 8, Landed: 8, Approaching: 7, 'En Route': 6,
+    Departed: 5, Delayed: 4, GateClosed: 3, Boarding: 3,
+    Expected: 2, Scheduled: 1, Cancelled: 0, Unknown: 0,
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const flights: any[] = []
+  const flightMap: Record<string, any> = {}
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function addFlight(f: any) {
@@ -78,38 +87,43 @@ export async function GET(req: Request) {
     const schedDep = f.sched_dep ?? null
     const schedArr = f.sched_arr ?? null
 
-    const key = `${num}|${depIata}|${arrIata}|${schedDep ?? ''}`
-    if (seen.has(key)) return
-    seen.add(key)
+    const key    = `${num}|${depIata}|${arrIata}|${schedDep ?? ''}`
+    const status = normaliseStatus(f.status)
+
+    if (flightMap[key]) {
+      // Keep the best status; merge actual/revised times if not already set
+      const existRank = STATUS_RANK[flightMap[key].status] ?? 0
+      if ((STATUS_RANK[status] ?? 0) > existRank) flightMap[key].status = status
+      if (f.fr24_actual_dep  && !flightMap[key].actual_dep_utc)  flightMap[key].actual_dep_utc  = f.fr24_actual_dep
+      if (f.fr24_actual_arr  && !flightMap[key].actual_arr_utc)  flightMap[key].actual_arr_utc  = f.fr24_actual_arr
+      if (f.fr24_revised_dep && !flightMap[key].revised_dep_utc) flightMap[key].revised_dep_utc = f.fr24_revised_dep
+      if (f.fr24_revised_arr && !flightMap[key].revised_arr_utc) flightMap[key].revised_arr_utc = f.fr24_revised_arr
+      return
+    }
 
     const airlineIata  = f.airline_iata || PREFIX_TO_IATA[num.slice(0, 3)] || ''
     const al           = airlineMap[airlineIata] ?? { name: f.airline ?? airlineIata, flag: '' }
-    const dep_time_utc = unixToUtcHHMM(schedDep)
-    const arr_time_utc = unixToUtcHHMM(schedArr)
 
-    flights.push({
-      iata_number:    num,
-      airline_name:   al.name,
-      airline_iata:   airlineIata,
-      country_flag:   al.flag,
-      dep_iata:       depIata,
-      arr_iata:       arrIata,
-      dep_time_utc,
-      arr_time_utc,
-      duration_min:   f.duration_min ?? 0,
-      status:         normaliseStatus(f.status),
-      actual_dep_utc: f.fr24_actual_dep  ?? null,
-      actual_arr_utc: f.fr24_actual_arr  ?? null,
+    flightMap[key] = {
+      iata_number:     num,
+      airline_name:    al.name,
+      airline_iata:    airlineIata,
+      country_flag:    al.flag,
+      dep_iata:        depIata,
+      arr_iata:        arrIata,
+      dep_time_utc:    unixToUtcHHMM(schedDep),
+      arr_time_utc:    unixToUtcHHMM(schedArr),
+      duration_min:    f.duration_min ?? 0,
+      status,
+      actual_dep_utc:  f.fr24_actual_dep  ?? null,
+      actual_arr_utc:  f.fr24_actual_arr  ?? null,
       revised_dep_utc: f.fr24_revised_dep ?? null,
       revised_arr_utc: f.fr24_revised_arr ?? null,
-      aircraft_type:  f.aircraft ?? null,
-      aircraft_reg:   f.reg      ?? null,
-    })
+      aircraft_type:   f.aircraft ?? null,
+      aircraft_reg:    f.reg      ?? null,
+    }
   }
 
-  // Pass 1 — departures: origin airports know "Departed" as soon as the plane leaves.
-  // Processing departures first means the "Departed" status wins the dedup over the
-  // destination airport's stale "Scheduled" arrival entry for the same flight.
   for (const row of cacheRows) {
     const ap = row.airport_iata as string
     for (const f of (row.departures ?? [])) {
@@ -121,11 +135,6 @@ export async function GET(req: Request) {
         fr24_revised_dep: t.startsWith('estimated') || t.startsWith('expect') ? extractStatusUtc(f.status, date) : null,
       })
     }
-  }
-  // Pass 2 — arrivals: destination airports know "Landed" once the plane touches down.
-  // Flights already seen in pass 1 are deduplicated — their departure status is preserved.
-  for (const row of cacheRows) {
-    const ap = row.airport_iata as string
     for (const f of (row.arrivals ?? [])) {
       const t = (f.status ?? '').toLowerCase()
       addFlight({
@@ -137,5 +146,5 @@ export async function GET(req: Request) {
     }
   }
 
-  return NextResponse.json({ ok: true, date, flights })
+  return NextResponse.json({ ok: true, date, flights: Object.values(flightMap) })
 }
