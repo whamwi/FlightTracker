@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import Link from 'next/link'
+import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 
 // ── Airport city names ───────────────────────────────────────────────────────
 const CITY: Record<string, string> = {
@@ -14,7 +15,7 @@ const CITY: Record<string, string> = {
   GYD: 'Baku',       TBS: 'Tbilisi',      BGW: 'Baghdad',
   EBL: 'Erbil',      NJF: 'Najaf',        ESB: 'Ankara',
   SKD: 'Samarkand',  TAS: 'Tashkent',     AMS: 'Amsterdam',
-  MJI: 'Tripoli',
+  MJI: 'Tripoli',    MED: 'Medina',
 }
 const cityName = (iata: string) => CITY[iata] ?? iata
 
@@ -28,7 +29,7 @@ const AIRPORT_FLAG: Record<string, string> = {
   OTP: '🇷🇴', BUH: '🇷🇴', EVN: '🇦🇲', GYD: '🇦🇿', TBS: '🇬🇪',
   BGW: '🇮🇶', EBL: '🇮🇶', NJF: '🇮🇶',
   SKD: '🇺🇿', TAS: '🇺🇿',
-  AMS: '🇳🇱', MJI: '🇱🇾',
+  AMS: '🇳🇱', MJI: '🇱🇾', MED: '🇸🇦',
 }
 
 // ── Day display: Sun-first order matching airport FIDS convention ─────────────
@@ -77,12 +78,13 @@ interface Destination {
   iata: string
   allDays: string[]
   airlines: AirlineEntry[]
-  flights: ScheduleRow[]
+  flights: ScheduleRow[]         // dep=home → arr=dest
+  reverseFlights: ScheduleRow[]  // dep=dest → arr=home
   minDuration: number
 }
 
 // ── Day bubbles ───────────────────────────────────────────────────────────────
-function DayBubbles({ days, size = 'md' }: { days: string[]; size?: 'sm' | 'md' }) {
+function DayBubbles({ days, size = 'md', color = '#2563eb' }: { days: string[]; size?: 'sm' | 'md'; color?: string }) {
   const cls = size === 'md'
     ? 'w-7 h-7 text-[11px]'
     : 'w-6 h-6 text-[10px]'
@@ -92,8 +94,10 @@ function DayBubbles({ days, size = 'md' }: { days: string[]; size?: 'sm' | 'md' 
         <span
           key={d}
           title={DOW_FULL[d]}
-          className={`${cls} rounded-full font-bold flex items-center justify-center leading-none select-none
-            ${days.includes(d) ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-600'}`}
+          className={`${cls} rounded-full font-bold flex items-center justify-center leading-none select-none`}
+          style={days.includes(d)
+            ? { backgroundColor: color, color: '#fff' }
+            : { backgroundColor: '#1f2937', color: '#4b5563' }}
         >
           {DOW_LABEL[d]}
         </span>
@@ -103,11 +107,7 @@ function DayBubbles({ days, size = 'md' }: { days: string[]; size?: 'sm' | 'md' 
 }
 
 // ── Airline logo — local override → FlightsFrom CDN → emoji flag ─────────────
-const LOCAL_LOGOS: Record<string, string> = {
-  XH: '/airlines/XH.jpg',
-  EY: '/airlines/EY.png',
-  '3L': 'https://images.flightsfrom.com/airlines/100/G9_100px.png',
-}
+const LOCAL_LOGOS = AIRLINE_LOGOS
 
 function AirlineLogo({ prefix, flag, name, size = 28 }: { prefix: string; flag: string; name: string; size?: number }) {
   const [src, setSrc] = useState(LOCAL_LOGOS[prefix] ?? `https://images.flightsfrom.com/airlines/100/${prefix}_100px.png`)
@@ -131,7 +131,7 @@ function AirlineLogo({ prefix, flag, name, size = 28 }: { prefix: string; flag: 
       title={name}
       width={size}
       height={size}
-      className="rounded-lg object-cover"
+      className={`rounded-lg object-cover${LOGO_WHITE_BG.has(prefix) ? ' bg-white p-0.5' : ''}`}
       onError={handleError}
     />
   )
@@ -154,7 +154,7 @@ function AirlineLogos({ airlines }: { airlines: AirlineEntry[] }) {
 }
 
 // ── Destination card ──────────────────────────────────────────────────────────
-function DestCard({ dest, onClick }: { dest: Destination; onClick: () => void }) {
+function DestCard({ dest, onClick, color }: { dest: Destination; onClick: () => void; color: string }) {
   return (
     <button
       onClick={onClick}
@@ -176,7 +176,7 @@ function DestCard({ dest, onClick }: { dest: Destination; onClick: () => void })
 
       {/* Row 2: day bubbles + duration */}
       <div className="flex items-center justify-between gap-3">
-        <DayBubbles days={dest.allDays} size="md" />
+        <DayBubbles days={dest.allDays} size="md" color={color} />
         {dest.minDuration > 0 && (
           <span className="text-gray-400 text-sm font-medium shrink-0">{fmtDur(dest.minDuration)}</span>
         )}
@@ -186,7 +186,7 @@ function DestCard({ dest, onClick }: { dest: Destination; onClick: () => void })
 }
 
 // ── Flight row (inside bottom sheet) ─────────────────────────────────────────
-function FlightRow({ f }: { f: ScheduleRow }) {
+function FlightRow({ f, color }: { f: ScheduleRow; color: string }) {
   return (
     <div className="px-4 py-3.5 border-b border-gray-800/60">
       {/* Airline + flight number */}
@@ -211,22 +211,31 @@ function FlightRow({ f }: { f: ScheduleRow }) {
         <span className="font-mono text-white font-semibold text-lg">{f.arr_time}</span>
       </div>
       {/* Days */}
-      <DayBubbles days={f.days_of_week} size="sm" />
+      <DayBubbles days={f.days_of_week} size="sm" color={color} />
     </div>
   )
 }
 
 // ── Bottom sheet ──────────────────────────────────────────────────────────────
-function BottomSheet({ dest, onClose }: {
+function BottomSheet({ dest, airport, onClose }: {
   dest: Destination | null
+  airport: string
   onClose: () => void
 }) {
-  // Prevent body scroll when open
+  const [dir, setDir] = useState<'to' | 'from'>('to')
+  const airportColor = airport === 'ALP' ? '#f97316' : '#16a34a'
+
+  // Reset direction when a new destination opens
+  useEffect(() => { setDir('to') }, [dest?.iata])
+
   useEffect(() => {
     if (dest) document.body.style.overflow = 'hidden'
     else document.body.style.overflow = ''
     return () => { document.body.style.overflow = '' }
   }, [dest])
+
+  const flights = dir === 'to' ? (dest?.flights ?? []) : (dest?.reverseFlights ?? [])
+  const hasReverse = (dest?.reverseFlights.length ?? 0) > 0
 
   return (
     <>
@@ -253,14 +262,14 @@ function BottomSheet({ dest, onClose }: {
           <>
             {/* Sheet header */}
             <div className="px-4 pt-2 pb-3 border-b border-gray-800 shrink-0">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between mb-3">
                 <div>
                   <p className="text-white font-bold text-lg leading-tight">
                     {cityName(dest.iata)}
                     <span className="text-gray-500 font-mono font-normal text-base ml-2">{dest.iata}</span>
                   </p>
                   <p className="text-gray-500 text-xs mt-0.5">
-                    {dest.flights.length} {dest.flights.length === 1 ? 'flight' : 'flights'}
+                    {flights.length} {flights.length === 1 ? 'flight' : 'flights'}
                     {dest.minDuration > 0 && ` · ${fmtDur(dest.minDuration)}`}
                   </p>
                 </div>
@@ -271,11 +280,34 @@ function BottomSheet({ dest, onClose }: {
                   ×
                 </button>
               </div>
+
+              {/* To / From toggle — only shown when return flights exist */}
+              {hasReverse && (
+                <div className="flex bg-gray-800 rounded-xl p-1 gap-1">
+                  <button
+                    onClick={() => setDir('to')}
+                    className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors
+                      ${dir === 'to' ? 'bg-white text-gray-900' : 'text-gray-400 hover:text-white'}`}
+                  >
+                    To {cityName(dest.iata)}
+                  </button>
+                  <button
+                    onClick={() => setDir('from')}
+                    className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors
+                      ${dir === 'from' ? 'bg-white text-gray-900' : 'text-gray-400 hover:text-white'}`}
+                  >
+                    From {cityName(dest.iata)}
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Flight list */}
             <div className="overflow-y-auto flex-1">
-              {dest.flights.map(f => <FlightRow key={f.id} f={f} />)}
+              {flights.map(f => <FlightRow key={f.id} f={f} color={airportColor} />)}
+              {flights.length === 0 && (
+                <p className="text-center text-gray-600 text-sm py-12">No scheduled flights</p>
+              )}
               <div className="h-8" />
             </div>
           </>
@@ -327,6 +359,13 @@ export default function DestinationsPage() {
       if (!grouped.has(key)) grouped.set(key, [])
       grouped.get(key)!.push(r)
     }
+    // Build reverse map: flights FROM each destination BACK to the home airport
+    const reverseGrouped = new Map<string, ScheduleRow[]>()
+    for (const r of rows.filter(r => r.arr_iata === airport)) {
+      const key = r.dep_iata
+      if (!reverseGrouped.has(key)) reverseGrouped.set(key, [])
+      reverseGrouped.get(key)!.push(r)
+    }
     return Array.from(grouped.entries())
       .map(([iata, flights]) => {
         const allDays = sortDays([...new Set(flights.flatMap(f => f.days_of_week))])
@@ -342,7 +381,8 @@ export default function DestinationsPage() {
         const durations = flights.map(f => f.duration_min).filter(Boolean)
         const minDuration = durations.length ? Math.min(...durations) : 0
         const sorted = [...flights].sort((a, b) => a.dep_time.localeCompare(b.dep_time))
-        return { iata, allDays, airlines, flights: sorted, minDuration }
+        const reverseFlights = [...(reverseGrouped.get(iata) ?? [])].sort((a, b) => a.dep_time.localeCompare(b.dep_time))
+        return { iata, allDays, airlines, flights: sorted, reverseFlights, minDuration }
       })
       .sort((a, b) => cityName(a.iata).localeCompare(cityName(b.iata)))
   }, [rows, airport])
@@ -402,7 +442,7 @@ export default function DestinationsPage() {
 
         {/* Destination list */}
         {!loading && destinations.map(d => (
-          <DestCard key={d.iata} dest={d} onClick={() => setSelected(d)} />
+          <DestCard key={d.iata} dest={d} onClick={() => setSelected(d)} color={airport === 'ALP' ? '#f97316' : '#16a34a'} />
         ))}
 
         {/* Empty */}
@@ -418,7 +458,7 @@ export default function DestinationsPage() {
       </div>
 
       {/* ── Bottom sheet ── */}
-      <BottomSheet dest={selected} onClose={handleClose} />
+      <BottomSheet dest={selected} airport={airport} onClose={handleClose} />
     </div>
   )
 }
