@@ -93,7 +93,7 @@ function normalizeForCache(data: any): Record<string, { arrivals: object[]; depa
   // When FR24 shows two entries for the same flight (e.g. "Scheduled*" + "Landed HH:MM"),
   // keep only the one with the higher-priority status so the cache stays deduplicated.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const upsert = (list: any[], flight: any, keyFields: [string, string, string]) => {
+  const upsert = (list: any[], flight: any, keyFields: string[]) => {
     const key = keyFields.map(k => flight[k] ?? '').join('|')
     const idx = list.findIndex(e => keyFields.map(k => e[k] ?? '').join('|') === key)
     if (idx >= 0) {
