@@ -117,12 +117,19 @@ export async function GET(req: Request) {
       if (arrMs < dayStartMs || arrMs >= dayEndMs) return
     }
 
-    const key    = `${num}|${depIata}|${arrIata}|${schedDep ?? ''}`
+    const key    = `${num}|${depIata}|${arrIata}`
     const status = normaliseStatus(f.status)
 
     if (flightMap[key]) {
       const existRank = STATUS_RANK[flightMap[key].status] ?? 0
-      if ((STATUS_RANK[status] ?? 0) > existRank) flightMap[key].status = status
+      const newRank   = STATUS_RANK[status] ?? 0
+      if (newRank > existRank) flightMap[key].status = status
+      // Prefer the entry with more reliable timing data (longer duration = more complete)
+      if ((f.duration_min ?? 0) > (flightMap[key].duration_min ?? 0)) {
+        if (schedDep) flightMap[key].dep_time_utc = unixToUtcHHMM(schedDep)
+        if (schedArr) flightMap[key].arr_time_utc = unixToUtcHHMM(schedArr)
+        flightMap[key].duration_min = f.duration_min ?? flightMap[key].duration_min
+      }
       if (f.fr24_actual_dep  && !flightMap[key].actual_dep_utc)  flightMap[key].actual_dep_utc  = f.fr24_actual_dep
       if (f.fr24_actual_arr  && !flightMap[key].actual_arr_utc)  flightMap[key].actual_arr_utc  = f.fr24_actual_arr
       if (f.fr24_revised_dep && !flightMap[key].revised_dep_utc) flightMap[key].revised_dep_utc = f.fr24_revised_dep
