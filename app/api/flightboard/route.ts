@@ -6,65 +6,32 @@ const SB_URL = process.env.SUPABASE_URL!
 const SB_KEY = process.env.SUPABASE_ANON_KEY!
 const HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 
-// ── Damascus Airport live-data Supabase sources ────────────────────────────────
-const DAM_SOURCES: Record<string, { url: string; key: string }> = {
-  DAM: {
-    url: 'https://ognrupehzbbckimkaikb.supabase.co',
-    key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9nbnJ1cGVoemJiY2tpbWthaWtiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ2ODc3NTIsImV4cCI6MjA4MDI2Mzc1Mn0.cBh06V2W7ocx8etUixo2lcdl1XH5RR4pTjXNOG59Xsg',
-  },
-  ALP: {
-    url: 'https://ttqpvffxbouowufwbfze.supabase.co',
-    key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR0cXB2ZmZ4Ym91b3d1ZndiZnplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY3ODU3NDMsImV4cCI6MjA4MjM2MTc0M30.A3j9iny8RusFtUt8J5mAyaj33cKEQJW9EPJw8iLtVWc',
-  },
-}
-
-interface DacFlight {
-  type:              'arrival' | 'departure'
-  flightNumber:      string
-  scheduledTime:     string
-  estimatedTime?:    string
-  actualTime?:       string
-  status:            string
-  flightDate:        string
-}
-
-async function fetchDamSource(airport: string, date: string): Promise<DacFlight[]> {
-  const src = DAM_SOURCES[airport]
-  if (!src) return []
-  try {
-    const res = await fetch(`${src.url}/rest/v1/flight_cache?id=eq.main&select=payload`, {
-      headers: { apikey: src.key, Authorization: `Bearer ${src.key}` },
-      signal: AbortSignal.timeout(8_000),
-    })
-    if (!res.ok) return []
-    const data = await res.json()
-    return ((data[0]?.payload ?? []) as DacFlight[]).filter(f => f.flightDate === date)
-  } catch { return [] }
-}
-
-function normDamStatus(raw: string): string {
-  switch (raw.toLowerCase()) {
-    case 'arrived':   return 'Arrived'
-    case 'departed':  return 'Departed'
-    case 'in_flight': return 'En Route'
-    case 'estimated': return 'Expected'
-    case 'delayed':   return 'Delayed'
-    case 'cancelled': return 'Cancelled'
-    default:          return 'Scheduled'
-  }
-}
-
-// Syria local HH:MM → UTC ISO string
-function damTimeToUtcIso(localHHMM: string, date: string): string {
-  const [hh, mm] = localHHMM.split(':').map(Number)
-  return new Date(new Date(date + 'T00:00:00Z').getTime() + (hh * 60 + mm - 180) * 60_000).toISOString()
-}
-
-// ── FR24 helpers ───────────────────────────────────────────────────────────────
 const PREFIX_TO_IATA: Record<string, string> = {
   FYC: 'XH',
   SYR: 'RB',
   HST: 'RB',
+}
+
+// Hardcoded airline data — eliminates a Supabase round trip on every board load.
+// Update here when a new carrier starts serving Syrian airports.
+const AIRLINE_MAP: Record<string, { name: string; flag: string }> = {
+  '3L': { name: 'Air Arabia Abu Dhabi', flag: '🇦🇪' },
+  DN:   { name: 'Dan Air',              flag: '🇱🇹' },
+  EK:   { name: 'Emirates',             flag: '🇦🇪' },
+  EY:   { name: 'Etihad Airways',       flag: '🇦🇪' },
+  F3:   { name: 'Flyadeal',             flag: '🇸🇦' },
+  FZ:   { name: 'Flydubai',             flag: '🇦🇪' },
+  G9:   { name: 'Air Arabia',           flag: '🇦🇪' },
+  J9:   { name: 'Jazeera Airways',      flag: '🇰🇼' },
+  KU:   { name: 'Kuwait Airways',       flag: '🇰🇼' },
+  PC:   { name: 'Pegasus Airlines',     flag: '🇹🇷' },
+  QR:   { name: 'Qatar Airways',        flag: '🇶🇦' },
+  RB:   { name: 'Syrian Arab Airlines', flag: '🇸🇾' },
+  RJ:   { name: 'Royal Jordanian',      flag: '🇯🇴' },
+  TK:   { name: 'Turkish Airlines',     flag: '🇹🇷' },
+  VF:   { name: 'Anadolujet',           flag: '🇹🇷' },
+  XH:   { name: 'Fly Cham',             flag: '🇸🇾' },
+  XY:   { name: 'Flynas',               flag: '🇸🇦' },
 }
 
 function unixToUtcHHMM(unix: number | null): string {
@@ -80,6 +47,24 @@ function extractStatusUtc(raw: string | null, operatingDate: string): string | n
   if (!match) return null
   const baseMs = new Date(operatingDate + 'T00:00:00Z').getTime()
   return new Date(baseMs + (parseInt(match[1]) * 60 + parseInt(match[2]) - 180) * 60_000).toISOString()
+}
+
+// Syria local HH:MM → UTC ISO string
+function damTimeToUtcIso(localHHMM: string, date: string): string {
+  const [hh, mm] = localHHMM.split(':').map(Number)
+  return new Date(new Date(date + 'T00:00:00Z').getTime() + (hh * 60 + mm - 180) * 60_000).toISOString()
+}
+
+function normDamStatus(raw: string): string {
+  switch (raw.toLowerCase()) {
+    case 'arrived':   return 'Arrived'
+    case 'departed':  return 'Departed'
+    case 'in_flight': return 'En Route'
+    case 'estimated': return 'Expected'
+    case 'delayed':   return 'Delayed'
+    case 'cancelled': return 'Cancelled'
+    default:          return 'Scheduled'
+  }
 }
 
 function normaliseStatus(raw: string | null): string {
@@ -103,26 +88,20 @@ export async function GET(req: Request) {
   const date = searchParams.get('date')
   if (!date) return NextResponse.json({ ok: false, error: 'date required' }, { status: 400 })
 
-  const [cacheRes, airlinesRes, damFlights, alpFlights] = await Promise.all([
-    fetch(`${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${date}&select=airport_iata,arrivals,departures`, { headers: HEADERS }),
-    fetch(`${SB_URL}/rest/v1/airlines?select=iata,name_en,country_flag`, { headers: HEADERS }),
-    fetchDamSource('DAM', date),
-    fetchDamSource('ALP', date),
-  ])
+  // Only fetch Syrian airport rows + their _LIVE overlays — origin-airport caches (IST, DXB…)
+  // are excluded; their En Route contribution is now covered by damascusairport.com _LIVE data.
+  const syriaCodes = ['DAM', 'ALP', 'LTK', 'DAM_LIVE', 'ALP_LIVE', 'LTK_LIVE'].join(',')
+  const cacheRes = await fetch(
+    `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${date}&airport_iata=in.(${syriaCodes})&select=airport_iata,arrivals,departures`,
+    { headers: HEADERS }
+  )
 
   if (!cacheRes.ok) {
     return NextResponse.json({ ok: false, error: `cache fetch failed: ${cacheRes.status}` }, { status: 502 })
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const cacheRows: any[]   = await cacheRes.json()
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const airlineRows: any[] = airlinesRes.ok ? await airlinesRes.json() : []
-
-  const airlineMap: Record<string, { name: string; flag: string }> = {}
-  for (const a of airlineRows) {
-    airlineMap[a.iata] = { name: a.name_en ?? a.iata, flag: a.country_flag ?? '' }
-  }
+  const cacheRows: any[] = await cacheRes.json()
 
   // Damascus-day bounds — flights arriving at Syrian airports must land within this window.
   const dayStartMs = new Date(date + 'T00:00:00+03:00').getTime()
@@ -139,6 +118,9 @@ export async function GET(req: Request) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const flightMap: Record<string, any> = {}
 
+  // DAM/ALP live overlay: "${flightNumber}|${airport}|${type}" → { status, actualUtc?, estimatedUtc? }
+  const damLookup: Record<string, { status: string; actualUtc?: string; estimatedUtc?: string }> = {}
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function addFlight(f: any) {
     const num      = f.num       ?? ''
@@ -146,6 +128,10 @@ export async function GET(req: Request) {
     const arrIata  = f.arr_iata  ?? ''
     const schedDep = f.sched_dep ?? null
     const schedArr = f.sched_arr ?? null
+
+    // Only keep flights that touch a Syrian airport — origin-airport caches contain
+    // every flight at that airport; we only care about the Syria-bound ones.
+    if (!SYRIAN_AIRPORTS.has(depIata) && !SYRIAN_AIRPORTS.has(arrIata)) return
 
     // Drop overnight arrivals that land on a different Damascus calendar day
     if (arrIata && SYRIAN_AIRPORTS.has(arrIata) && schedArr) {
@@ -167,7 +153,7 @@ export async function GET(req: Request) {
     }
 
     const airlineIata  = f.airline_iata || PREFIX_TO_IATA[num.slice(0, 3)] || ''
-    const al           = airlineMap[airlineIata] ?? { name: f.airline ?? airlineIata, flag: '' }
+    const al           = AIRLINE_MAP[airlineIata] ?? { name: f.airline ?? airlineIata, flag: '' }
 
     flightMap[key] = {
       iata_number:     num,
@@ -192,6 +178,21 @@ export async function GET(req: Request) {
 
   for (const row of cacheRows) {
     const ap = row.airport_iata as string
+
+    // _LIVE rows contain cached damascusairport.com data — build overlay lookup, skip addFlight
+    if (ap.endsWith('_LIVE')) {
+      const baseAp = ap.slice(0, -5)
+      for (const f of [...(row.arrivals ?? []), ...(row.departures ?? [])]) {
+        const key = `${f.flightNumber}|${baseAp}|${f.type}`
+        damLookup[key] = {
+          status:       normDamStatus(f.status),
+          actualUtc:    f.actualTime    ? damTimeToUtcIso(f.actualTime,    date) : undefined,
+          estimatedUtc: f.estimatedTime ? damTimeToUtcIso(f.estimatedTime, date) : undefined,
+        }
+      }
+      continue
+    }
+
     for (const f of (row.departures ?? [])) {
       const t = (f.status ?? '').toLowerCase()
       addFlight({
@@ -212,22 +213,7 @@ export async function GET(req: Request) {
     }
   }
 
-  // ── Overlay damascusairport.com live statuses ──────────────────────────────
-  // Build lookup: "${normFlightNum}|${syrianAirport}|${type}" → { status, actualUtc?, estimatedUtc? }
-  const damLookup: Record<string, { status: string; actualUtc?: string; estimatedUtc?: string }> = {}
-
-  for (const [airport, flights] of [['DAM', damFlights], ['ALP', alpFlights]] as [string, DacFlight[]][]) {
-    for (const f of flights) {
-      const key = `${f.flightNumber}|${airport}|${f.type}`
-      damLookup[key] = {
-        status:       normDamStatus(f.status),
-        actualUtc:    f.actualTime    ? damTimeToUtcIso(f.actualTime,    date) : undefined,
-        estimatedUtc: f.estimatedTime ? damTimeToUtcIso(f.estimatedTime, date) : undefined,
-      }
-    }
-  }
-
-  // Apply DAM/ALP data to each flightMap entry
+  // Apply DAM/ALP live status overlay to flightMap entries
   for (const entry of Object.values(flightMap)) {
     const num = entry.iata_number as string
 
@@ -250,5 +236,8 @@ export async function GET(req: Request) {
     }
   }
 
-  return NextResponse.json({ ok: true, date, flights: Object.values(flightMap) })
+  return NextResponse.json(
+    { ok: true, date, flights: Object.values(flightMap) },
+    { headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' } }
+  )
 }
