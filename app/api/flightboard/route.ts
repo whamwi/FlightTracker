@@ -101,7 +101,7 @@ export async function GET(req: Request) {
   const flightMap: Record<string, any> = {}
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function addFlight(f: any) {
+  function addFlight(f: any, keyOverride?: string) {
     const num      = f.num       ?? ''
     const depIata  = f.dep_iata  ?? ''
     const arrIata  = f.arr_iata  ?? ''
@@ -123,7 +123,7 @@ export async function GET(req: Request) {
       if (f.est_arr > schedArr && f.est_arr * 1000 >= dayEndMs) return
     }
 
-    const key    = `${num}|${depIata}|${arrIata}`
+    const key    = keyOverride ?? `${num}|${depIata}|${arrIata}`
     const status = normaliseStatus(f.status)
 
     if (flightMap[key]) {
@@ -246,15 +246,17 @@ export async function GET(req: Request) {
           if (estMs < dayStartMs || estMs >= dayEndMs) continue
           const arrIata = f.arr_iata || ap
           const key = `${f.num ?? ''}|${f.dep_iata ?? ''}|${arrIata}`
-          // First-entry-wins: don't override today's scheduled service if same key exists
-          if (flightMap[key]) continue
+          // If today already has a regular service on this route, the overflow is a
+          // different departure — use |prev suffix so both appear on the board.
+          const useKey = flightMap[key] ? `${key}|prev` : undefined
+          if (flightMap[useKey ?? key]) continue  // already added
           addFlight({
             ...f,
             sched_arr: f.est_arr,  // shift day-assignment to the estimated landing time
             arr_iata: arrIata,
             fr24_revised_arr: new Date(f.est_arr * 1000).toISOString(),
             fr24_actual_arr:  f.real_arr ? new Date(f.real_arr * 1000).toISOString() : null,
-          })
+          }, useKey)
         }
       }
     }
