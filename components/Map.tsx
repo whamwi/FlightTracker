@@ -1301,6 +1301,22 @@ export default function Map() {
           }
         }
 
+        // GPS floor: when a recent last-known position exists for this callsign,
+        // prevent ESTIMATED from jumping backward behind where the plane was seen.
+        // Fixes the live→ESTIMATED handoff jump when block time > actual air time.
+        if (fraction !== null && fraction < 1.0) {
+          const gpsWps = routePathsRef.current[`${dep_iata}|${arr_iata}`]
+          if (gpsWps?.length) {
+            for (const lkEntry of Object.values(lastKnownRef.current)) {
+              if ((lkEntry.a.flight ?? '').trim() !== callsign) continue
+              if (now - lkEntry.lostAt > 10 * 60_000) break
+              const lkFrac = nearestPathFraction(gpsWps, lkEntry.a.lat, lkEntry.a.lon)
+              if (lkFrac > fraction) fraction = lkFrac
+              break
+            }
+          }
+        }
+
         // Confirmed early landing: ADB actual_arr_utc received while schedule window was
         // still open. Guard: actual_arr_utc must belong to THIS leg (not a prior completed
         // leg), so only fire when priorLegDone is false.
