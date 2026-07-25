@@ -119,16 +119,17 @@ function effectiveStatus(f: Flight): string {
   // actual_arr_utc is ground truth — if the plane landed, override Cancelled/Unknown
   if (f.actual_arr_utc) return 'Arrived'
   if (s === 'Arrived' || s === 'Landed' || s === 'Cancelled' || s === 'Diverted') return s
-  // Departure happened — check if delayed vs schedule
+  // Departure happened — check if delayed vs schedule, or already landed
   if (f.actual_dep_utc) {
+    const actMs = new Date(f.actual_dep_utc).getTime()
+    // If dep + block time is > 15 min in the past, the flight has landed
+    if (f.duration_min && actMs + f.duration_min * 60_000 < Date.now() - 15 * 60_000) return 'Arrived'
     const schedMs = new Date(`1970-01-01T${f.dep_time_utc}:00Z`).getTime()
-    const actMs   = new Date(f.actual_dep_utc).getTime()
-    // Extract HH:MM from actual UTC, compare to scheduled HH:MM
     const actHHMM = f.actual_dep_utc.slice(11, 16)
     const actMin  = parseInt(actHHMM.slice(0, 2)) * 60 + parseInt(actHHMM.slice(3))
     const schMin  = schedMs / 60_000
     const diff    = ((actMin - (schMin % 1440)) + 1440) % 1440
-    const delayMin = diff > 720 ? diff - 1440 : diff // unwrap day boundary
+    const delayMin = diff > 720 ? diff - 1440 : diff
     if (delayMin > 15) return 'Delayed'
     return s !== 'Unknown' ? s : 'Departed'
   }
