@@ -448,11 +448,13 @@ export default function BoardPage() {
     return () => { clearInterval(loadTimer); clearInterval(warmTimer) }
   }, [tab, load, warmFR24Cache])
 
-  // On mount: warm both airports so intraday statuses are live from the first load.
+  // On mount: warm both airports, then reload 8s later to pick up the fresh cache write.
   useEffect(() => {
     warmFR24Cache('DAM')
     warmFR24Cache('ALP')
-  }, [warmFR24Cache])
+    const t = setTimeout(() => load(0, true), 8_000)
+    return () => clearTimeout(t)
+  }, [warmFR24Cache, load])
 
   // When the user switches airport tabs: warm the selected airport, then silently
   // reload the board ~4 s later so the freshly-written cache data is visible immediately.
