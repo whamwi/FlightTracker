@@ -29,6 +29,7 @@ function statusRank(s: string | null | undefined): number {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mergeList(existing: any[], incoming: any[], keyFn: (e: any) => string): any[] {
   const merged = new Map<string, any>()
+  const nowSec = Math.floor(Date.now() / 1000)
 
   // Seed with incoming (fresh FR24 data is the baseline)
   for (const e of incoming) merged.set(keyFn(e), e)
@@ -38,8 +39,11 @@ function mergeList(existing: any[], incoming: any[], keyFn: (e: any) => string):
     const key = keyFn(e)
     const inc = merged.get(key)
     if (!inc) {
-      // Flight aged out of feed — preserve if it has confirmed landing
-      if (e.real_arr) merged.set(key, e)
+      // Flight aged out of FR24 feed — preserve if:
+      //   • confirmed landing (real_arr set), OR
+      //   • has FR24 ID for historic lookup and ETA was within the last 4 h (awaiting confirmation)
+      const pendingConfirm = e.fr24_id && e.est_arr && (nowSec - (e.est_arr as number)) < 4 * 3600
+      if (e.real_arr || pendingConfirm) merged.set(key, e)
     } else if (e.real_arr && !inc.real_arr) {
       // Existing proved the flight landed; incoming lost that data
       merged.set(key, e)
