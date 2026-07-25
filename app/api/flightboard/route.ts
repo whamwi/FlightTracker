@@ -117,6 +117,12 @@ export async function GET(req: Request) {
       if (arrMs < dayStartMs || arrMs >= dayEndMs) return
     }
 
+    // If FR24's estimated arrival has slipped past Syria midnight, exclude from today's board.
+    // The prev-day overflow pass will add it to tomorrow's board instead.
+    if (arrIata && SYRIAN_AIRPORTS.has(arrIata) && f.est_arr && schedArr) {
+      if (f.est_arr > schedArr && f.est_arr * 1000 >= dayEndMs) return
+    }
+
     const key    = `${num}|${depIata}|${arrIata}`
     const status = normaliseStatus(f.status)
 
@@ -214,6 +220,42 @@ export async function GET(req: Request) {
       for (const row of originRows) {
         const ap = row.airport_iata as string
         for (const f of (row.departures ?? [])) processDeparture(f, ap, date)
+      }
+    }
+  }
+
+  // Third pass: previous Syria day's arrivals whose est_arr falls within today's window.
+  // Catches flights delayed past Syria midnight that should appear on today's board.
+  {
+    const prev = new Date(date + 'T12:00:00Z')
+    prev.setUTCDate(prev.getUTCDate() - 1)
+    const prevDate = prev.toISOString().slice(0, 10)
+    const prevRes = await fetch(
+      `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${prevDate}&airport_iata=in.(${syriaCodes})&select=airport_iata,arrivals`,
+      { headers: HEADERS }
+    )
+    if (prevRes.ok) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const prevRows: any[] = await prevRes.json()
+      for (const row of prevRows) {
+        const ap = row.airport_iata as string
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        for (const f of (row.arrivals ?? [])) {
+          if (!f.est_arr || !f.sched_arr || f.est_arr <= f.sched_arr) continue
+          const estMs = (f.est_arr as number) * 1000
+          if (estMs < dayStartMs || estMs >= dayEndMs) continue
+          const arrIata = f.arr_iata || ap
+          const key = `${f.num ?? ''}|${f.dep_iata ?? ''}|${arrIata}`
+          // First-entry-wins: don't override today's scheduled service if same key exists
+          if (flightMap[key]) continue
+          addFlight({
+            ...f,
+            sched_arr: f.est_arr,  // shift day-assignment to the estimated landing time
+            arr_iata: arrIata,
+            fr24_revised_arr: new Date(f.est_arr * 1000).toISOString(),
+            fr24_actual_arr:  f.real_arr ? new Date(f.real_arr * 1000).toISOString() : null,
+          })
+        }
       }
     }
   }
