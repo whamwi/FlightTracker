@@ -135,14 +135,6 @@ function effectiveStatus(f: Flight): string {
     return s !== 'Unknown' ? s : 'Departed'
   }
   if (s !== 'Unknown' && s !== 'Scheduled') return s
-  // FR24 widget never updated the status — infer from scheduled times
-  if (f.sched_dep_unix && f.duration_min) {
-    const schedDepMs = f.sched_dep_unix * 1000
-    const schedArrMs = schedDepMs + f.duration_min * 60_000
-    const now = Date.now()
-    if (schedArrMs < now - 15 * 60_000) return 'Arrived'
-    if (schedDepMs + 30 * 60_000 < now)  return 'En Route'
-  }
   return s
 }
 
