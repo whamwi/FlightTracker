@@ -62,7 +62,7 @@ function normaliseStatus(raw: string | null): string {
   if (t.includes('approach'))                                  return 'Approaching'
   if (t.includes('landed') || t.includes('arrived'))          return 'Arrived'
   if (t.includes('cancel'))                                    return 'Cancelled'
-  return 'Scheduled'
+  return 'Unknown'
 }
 
 export async function GET(req: Request) {
