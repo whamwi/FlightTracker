@@ -146,7 +146,7 @@ export async function GET(req: Request) {
         ...f,
         dep_iata:         f.dep_iata || ap,
         fr24_actual_dep:  t.includes('departed') || t.includes('took off') ? extractStatusUtc(f.status, date) : null,
-        fr24_revised_dep: t.startsWith('estimated') || t.startsWith('expect') ? extractStatusUtc(f.status, date) : null,
+        fr24_revised_dep: t.startsWith('estimated') || t.startsWith('expect') || t.startsWith('delayed') ? extractStatusUtc(f.status, date) : null,
       })
     }
     for (const f of (row.arrivals ?? [])) {
@@ -155,7 +155,7 @@ export async function GET(req: Request) {
         ...f,
         arr_iata:         f.arr_iata || ap,
         fr24_actual_arr:  t.includes('landed') || t.includes('arrived') ? extractStatusUtc(f.status, date) : null,
-        fr24_revised_arr: t.startsWith('estimated') || t.startsWith('expect') ? extractStatusUtc(f.status, date) : null,
+        fr24_revised_arr: t.startsWith('estimated') || t.startsWith('expect') || t.startsWith('delayed') ? extractStatusUtc(f.status, date) : null,
       })
     }
   }
