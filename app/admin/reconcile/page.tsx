@@ -49,7 +49,7 @@ function diffBadge(min: number | null) {
 }
 
 const s: Record<string, React.CSSProperties> = {
-  page:    { fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif', maxWidth: 1100, margin: '0 auto', padding: '24px 20px', color: '#111', background: '#ffffff', minHeight: '100vh' },
+  page:    { fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif', maxWidth: 1100, margin: '0 auto', padding: '24px 20px', color: '#111' },
   h1:      { fontSize: 22, fontWeight: 700, marginBottom: 4 },
   sub:     { color: '#666', fontSize: 14, marginBottom: 24 },
   stats:   { display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' as const },
@@ -182,8 +182,8 @@ export default function ReconcilePage() {
             {displayed.map(r => (
               <tr key={r.id} style={{ opacity: r.reviewed ? 0.45 : 1 }}>
                 <td style={s.tdDim}>{r.flight_date}</td>
-                <td style={{ ...s.td, fontFamily: 'monospace', fontWeight: 600 }}>{r.iata_number}</td>
-                <td style={s.td}>{r.dep_iata} → {r.arr_iata}</td>
+                <td style={{ ...s.td, fontFamily: 'monospace', fontWeight: 600, color: '#fff' }}>{r.iata_number}</td>
+                <td style={{ ...s.td, color: '#fff' }}>{r.dep_iata} → {r.arr_iata}</td>
                 <td style={s.tdDim}>{DOW[r.day_of_week ?? ''] ?? r.day_of_week}</td>
                 <td style={{ ...s.td, color: '#2563eb', fontWeight: 600 }}>
                   {localTime(r.sched_dep_utc)}
@@ -224,8 +224,8 @@ export default function ReconcilePage() {
             {displayed.map(r => (
               <tr key={r.id} style={{ opacity: r.reviewed ? 0.45 : 1 }}>
                 <td style={s.tdDim}>{r.flight_date}</td>
-                <td style={{ ...s.td, fontFamily: 'monospace', fontWeight: 600 }}>{r.iata_number}</td>
-                <td style={s.td}>{r.dep_iata} → {r.arr_iata}</td>
+                <td style={{ ...s.td, fontFamily: 'monospace', fontWeight: 600, color: '#fff' }}>{r.iata_number}</td>
+                <td style={{ ...s.td, color: '#fff' }}>{r.dep_iata} → {r.arr_iata}</td>
                 <td style={s.tdDim}>{DOW[r.day_of_week ?? ''] ?? r.day_of_week}</td>
                 <td style={{ ...s.td, color: '#2563eb', fontWeight: 600 }}>{localTime(r.sched_dep_utc)}</td>
                 <td style={{ ...s.td, color: '#2563eb', fontWeight: 600 }}>{localTime(r.sched_arr_utc)}</td>
