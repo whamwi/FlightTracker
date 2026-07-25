@@ -143,7 +143,6 @@ export async function GET(req: Request) {
       dep_time_utc:    unixToUtcHHMM(schedDep),
       arr_time_utc:    unixToUtcHHMM(schedArr),
       duration_min:    f.duration_min ?? 0,
-      sched_dep_unix:  schedDep,
       status,
       actual_dep_utc:  f.fr24_actual_dep  ?? null,
       actual_arr_utc:  f.fr24_actual_arr  ?? null,
@@ -154,25 +153,62 @@ export async function GET(req: Request) {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function processDeparture(f: any, ap: string, d: string) {
+    const t = (f.status ?? '').toLowerCase()
+    addFlight({
+      ...f,
+      dep_iata:         f.dep_iata || ap,
+      fr24_actual_dep:  t.includes('departed') || t.includes('took off')
+        ? extractStatusUtc(f.status, d)
+        : (f.real_dep ? new Date(f.real_dep * 1000).toISOString() : null),
+      fr24_revised_dep: t.startsWith('estimated') || t.startsWith('expect') || t.startsWith('delayed')
+        ? extractStatusUtc(f.status, d)
+        : (f.est_dep ? new Date(f.est_dep * 1000).toISOString() : null),
+    })
+  }
+
+  // Collect non-Syrian origin airports from Syrian arrival rows so we can query
+  // their departure caches in a second pass — gives us "Departed" / "En Route"
+  // status for flights still in the air when the destination cache says "Scheduled".
+  const originSet = new Set<string>()
+
   for (const row of cacheRows) {
     const ap = row.airport_iata as string
-    for (const f of (row.departures ?? [])) {
-      const t = (f.status ?? '').toLowerCase()
-      addFlight({
-        ...f,
-        dep_iata:         f.dep_iata || ap,
-        fr24_actual_dep:  t.includes('departed') || t.includes('took off') ? extractStatusUtc(f.status, date) : null,
-        fr24_revised_dep: t.startsWith('estimated') || t.startsWith('expect') || t.startsWith('delayed') ? extractStatusUtc(f.status, date) : null,
-      })
-    }
+    for (const f of (row.departures ?? [])) processDeparture(f, ap, date)
     for (const f of (row.arrivals ?? [])) {
       const t = (f.status ?? '').toLowerCase()
       addFlight({
         ...f,
         arr_iata:         f.arr_iata || ap,
-        fr24_actual_arr:  t.includes('landed') || t.includes('arrived') ? extractStatusUtc(f.status, date) : null,
-        fr24_revised_arr: t.startsWith('estimated') || t.startsWith('expect') || t.startsWith('delayed') ? extractStatusUtc(f.status, date) : null,
+        fr24_actual_arr:  t.includes('landed') || t.includes('arrived')
+          ? extractStatusUtc(f.status, date)
+          : (f.real_arr ? new Date(f.real_arr * 1000).toISOString() : null),
+        fr24_revised_arr: t.startsWith('estimated') || t.startsWith('expect') || t.startsWith('delayed')
+          ? extractStatusUtc(f.status, date)
+          : (f.est_arr ? new Date(f.est_arr * 1000).toISOString() : null),
       })
+      // Collect origin for second pass
+      const dep = (f.dep_iata || '') as string
+      if (dep && !SYRIAN_AIRPORTS.has(dep)) originSet.add(dep)
+    }
+  }
+
+  // Second pass: read departure caches from origin airports.
+  // Only departures are needed (we want their outbound status toward Syria).
+  if (originSet.size > 0) {
+    const originCodes = [...originSet].join(',')
+    const originRes = await fetch(
+      `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${date}&airport_iata=in.(${originCodes})&select=airport_iata,departures`,
+      { headers: HEADERS }
+    )
+    if (originRes.ok) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const originRows: any[] = await originRes.json()
+      for (const row of originRows) {
+        const ap = row.airport_iata as string
+        for (const f of (row.departures ?? [])) processDeparture(f, ap, date)
+      }
     }
   }
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react'
 import Link from 'next/link'
+import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 
 // ── Airport display names ────────────────────────────────────────────────────
 const CITY: Record<string, string> = {
@@ -16,7 +17,7 @@ const CITY: Record<string, string> = {
   DEL: 'Delhi',          BOM: 'Mumbai',           BGW: 'Baghdad',
   ESB: 'Ankara',         SKD: 'Samarkand',        NJF: 'Najaf',
   OTP: 'Bucharest',      EBL: 'Erbil',            MJI: 'Tripoli',
-  AMS: 'Amsterdam',
+  AMS: 'Amsterdam',   MED: 'Medina',
 }
 const city = (iata: string) => CITY[iata] ?? iata
 
@@ -43,13 +44,7 @@ const STATUS_ALIAS: Record<string, string> = {
   Land:   'Arrived',
 }
 
-// ── Local airline logo overrides ─────────────────────────────────────────────
-const LOCAL_LOGOS: Record<string, string> = {
-  XH: '/airlines/XH.jpg',
-  TK: '/airlines/TK.jpg',
-  EY: '/airlines/EY.png',
-  '3L': 'https://images.flightsfrom.com/airlines/100/G9_100px.png',
-}
+const LOCAL_LOGOS = AIRLINE_LOGOS
 
 // ── Types ────────────────────────────────────────────────────────────────────
 type Flight = {
@@ -62,7 +57,6 @@ type Flight = {
   dep_time_utc: string
   arr_time_utc: string
   duration_min: number
-  sched_dep_unix: number | null
   status: string
   actual_dep_utc: string | null
   actual_arr_utc: string | null
@@ -129,12 +123,9 @@ function effectiveStatus(f: Flight): string {
     const actHHMM = f.actual_dep_utc.slice(11, 16)
     const actMin  = parseInt(actHHMM.slice(0, 2)) * 60 + parseInt(actHHMM.slice(3))
     const schMin  = schedMs / 60_000
-    const diff    = ((actMin - (schMin % 1440)) + 1440) % 1440
-    const delayMin = diff > 720 ? diff - 1440 : diff
-    if (delayMin > 15) return 'Delayed'
     return s !== 'Unknown' ? s : 'Departed'
   }
-  if (s !== 'Unknown' && s !== 'Scheduled') return s
+  if (f.revised_arr_utc && (s === 'Scheduled' || s === 'Unknown')) return 'Expected'
   return s
 }
 
@@ -150,6 +141,25 @@ function calcDelay(schedHHMM: string, actualISO: string | null): number | null {
   if (!actualISO || !schedHHMM) return null
   const opDate = actualISO.slice(0, 10)
   return Math.round((new Date(actualISO).getTime() - new Date(`${opDate}T${schedHHMM}:00Z`).getTime()) / 60_000)
+}
+
+// Sort key: actual → revised → scheduled, in Syria local minutes (UTC+3).
+// Midnight-crossing flights (arr 00:16 local) must sort to the start of the day,
+// not the end — raw UTC minutes would place them at minute 1276 instead of 16.
+function effectiveLocalMin(f: Flight, v: View): number {
+  const iso = v === 'arr'
+    ? (f.actual_arr_utc ?? f.revised_arr_utc)
+    : (f.actual_dep_utc ?? f.revised_dep_utc)
+  if (iso) {
+    const localMs = new Date(iso).getTime() + 3 * 3_600_000
+    const d = new Date(localMs)
+    return d.getUTCHours() * 60 + d.getUTCMinutes()
+  }
+  // arr_time_utc / dep_time_utc are UTC HH:MM — shift to Syria local
+  const hhmm = v === 'arr' ? f.arr_time_utc : f.dep_time_utc
+  if (!hhmm) return 0
+  const [h, m] = hhmm.split(':').map(Number)
+  return (h * 60 + m + 3 * 60) % 1440
 }
 
 // ── Airline logo with CDN + local fallback ───────────────────────────────────
@@ -177,7 +187,7 @@ function AirlineLogo({ iata, flag, name }: { iata: string; flag: string; name: s
       title={name}
       width={32}
       height={32}
-      className="rounded-lg object-cover shrink-0"
+      className={`rounded-lg object-cover shrink-0${LOGO_WHITE_BG.has(iata) ? ' bg-white p-0.5' : ''}`}
       onError={handleError}
     />
   )
@@ -412,7 +422,9 @@ export default function BoardPage() {
           const schedDep = fl.time?.scheduled?.departure ?? null
           const schedArr = fl.time?.scheduled?.arrival   ?? null
           if (!schedDep || !schedArr) return null
-          return { num, airline: fl.airline?.name ?? null, airline_iata: fl.airline?.code?.iata ?? null, dep_iata: fl.airport?.origin?.code?.iata ?? null, arr_iata: fl.airport?.destination?.code?.iata ?? null, sched_dep: schedDep, sched_arr: schedArr, duration_min: Math.round((schedArr - schedDep) / 60), status: fl.status?.text ?? null }
+          const flight = { num, airline: fl.airline?.name ?? null, airline_iata: fl.airline?.code?.iata ?? null, dep_iata: fl.airport?.origin?.code?.iata ?? null, arr_iata: fl.airport?.destination?.code?.iata ?? null, sched_dep: schedDep, sched_arr: schedArr, duration_min: Math.round((schedArr - schedDep) / 60), status: fl.status?.text ?? null, est_dep: fl.time?.estimated?.departure ?? null, est_arr: fl.time?.estimated?.arrival ?? null, real_dep: fl.time?.real?.departure ?? null, real_arr: fl.time?.real?.arrival ?? null }
+          if (flight.duration_min > 300) return null
+          return flight
         }
         const byDate: Record<string, { arrivals: object[]; departures: object[] }> = {}
         const bucket = (d: string) => { if (!byDate[d]) byDate[d] = { arrivals: [], departures: [] }; return byDate[d] }
@@ -481,12 +493,8 @@ export default function BoardPage() {
     return flights.filter(f => f.arr_iata === airport)
   })()
 
-  // Sort by the primary time in Syria local (arr for arrivals, dep for departures)
-  const sorted = [...byViewAndAirport].sort((a, b) => {
-    const ta = view === 'arr' ? utcHHMMtoLocal(a.arr_time_utc, 3) : utcHHMMtoLocal(a.dep_time_utc, 3)
-    const tb = view === 'arr' ? utcHHMMtoLocal(b.arr_time_utc, 3) : utcHHMMtoLocal(b.dep_time_utc, 3)
-    return ta.localeCompare(tb)
-  })
+  // Sort by effective time: actual → revised → scheduled (Syria local minutes)
+  const sorted = [...byViewAndAirport].sort((a, b) => effectiveLocalMin(a, view) - effectiveLocalMin(b, view))
 
   const total     = sorted.length
   const landed    = sorted.filter(f => ['Arrived', 'Landed'].includes(effectiveStatus(f))).length
@@ -504,11 +512,10 @@ export default function BoardPage() {
     return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
   })()
 
+  const nowSyriaMin = Math.floor((Date.now() + 3 * 3_600_000) / 60_000) % 1440
+
   const nowIdx = tab === 0
-    ? sorted.findIndex(f => {
-        const t = view === 'arr' ? utcHHMMtoLocal(f.arr_time_utc, 3) : utcHHMMtoLocal(f.dep_time_utc, 3)
-        return t >= nowSyriaHHMM
-      })
+    ? sorted.findIndex(f => effectiveLocalMin(f, view) >= nowSyriaMin)
     : -1
 
   return (

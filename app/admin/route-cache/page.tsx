@@ -269,14 +269,6 @@ export default function AdminRouteCache() {
     }
   }
 
-  async function triggerFill() {
-    setMsg('Running fill…')
-    const res = await fetch('/api/sync/damairport/fill')
-    const json = await res.json()
-    setMsg(`Fill done — adb_filled:${json.adb_filled} skipped:${json.skipped}`)
-    await load()
-  }
-
   if (!data) return <div style={s.page}><p style={{ color: '#444' }}>Loading…</p></div>
 
   const { unfilled, filled } = data
@@ -289,10 +281,7 @@ export default function AdminRouteCache() {
             <h1 style={s.title}>Route Master</h1>
             <p style={s.sub}>Manually fill or correct dep/arr times in route_master</p>
           </div>
-          <div style={{ display: 'flex', gap: 10 }}>
-            <a href="/admin/reconcile" style={s.reconcileBtn}>Reconcile Monitor →</a>
-            <button onClick={triggerFill} style={s.fillBtn}>▶ Run Fill Now</button>
-          </div>
+          <a href="/admin/reconcile" style={s.reconcileBtn}>Reconcile Monitor →</a>
         </div>
 
         {msg && <div style={s.msg}>{msg}</div>}
@@ -655,7 +644,6 @@ const s: Record<string, React.CSSProperties> = {
   fr24:         { fontWeight: 700, color: '#0070f3', textDecoration: 'none', fontFamily: 'monospace', fontSize: 13 },
   editBtn:      { padding: '4px 12px', fontSize: 13, border: '1px solid #0070f3', background: '#fff', color: '#0070f3', borderRadius: 5, cursor: 'pointer', fontWeight: 600 },
   rotBtn:       { padding: '4px 10px', fontSize: 12, border: '1px solid #16a34a', background: '#f0fdf4', color: '#16a34a', borderRadius: 5, cursor: 'pointer', fontWeight: 600 },
-  fillBtn:      { padding: '8px 18px', background: '#0070f3', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: 14 },
   reconcileBtn: { padding: '8px 18px', background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: 14, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' },
   overlay:      { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '20px' },
   modal:        { background: '#ffffff', borderRadius: 12, padding: 28, width: '100%', maxWidth: 440, boxShadow: '0 20px 60px rgba(0,0,0,0.3)', color: '#1a1a1a', boxSizing: 'border-box' },
