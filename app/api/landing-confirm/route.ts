@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 60
 
 const SB_URL  = process.env.SUPABASE_URL!
 const SB_KEY  = process.env.SUPABASE_ANON_KEY!
-const FR24_TOKEN = process.env.FR24_API_TOKEN
+const FR24_TOKEN = process.env.FR24_API_KEY
 const HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 const SYRIAN_AIRPORTS = ['DAM', 'ALP', 'LTK']
 
@@ -20,7 +19,7 @@ function syriaDate(offsetDays = 0): string {
 // Intended to run every 15 min via Vercel cron.
 export async function GET() {
   if (!FR24_TOKEN) {
-    return NextResponse.json({ ok: false, error: 'FR24_API_TOKEN not configured' }, { status: 500 })
+    return NextResponse.json({ ok: false, error: 'FR24_API_KEY not configured' }, { status: 500 })
   }
 
   const nowSec    = Math.floor(Date.now() / 1000)
