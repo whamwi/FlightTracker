@@ -49,7 +49,7 @@ function diffBadge(min: number | null) {
 }
 
 const s: Record<string, React.CSSProperties> = {
-  page:    { fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif', maxWidth: 1100, margin: '0 auto', padding: '24px 20px', color: '#111' },
+  page:    { fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif', maxWidth: 1100, margin: '0 auto', padding: '24px 20px', color: '#111', background: '#ffffff', minHeight: '100vh' },
   h1:      { fontSize: 22, fontWeight: 700, marginBottom: 4 },
   sub:     { color: '#666', fontSize: 14, marginBottom: 24 },
   stats:   { display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' as const },
