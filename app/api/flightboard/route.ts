@@ -246,10 +246,16 @@ export async function GET(req: Request) {
           if (estMs < dayStartMs || estMs >= dayEndMs) continue
           const arrIata = f.arr_iata || ap
           const key = `${f.num ?? ''}|${f.dep_iata ?? ''}|${arrIata}`
-          // If today already has a regular service on this route, the overflow is a
-          // different departure — use |prev suffix so both appear on the board.
-          const useKey = flightMap[key] ? `${key}|prev` : undefined
-          if (flightMap[useKey ?? key]) continue  // already added
+          const overflowArrUtc = unixToUtcHHMM(f.est_arr as number)
+          let useKey: string | undefined
+          if (flightMap[key]) {
+            // If the existing entry already has the same arrival time, FR24 re-indexed
+            // the overnight landing into today's cache — overflow is a duplicate, skip it.
+            if (flightMap[key].arr_time_utc === overflowArrUtc) continue
+            // A genuinely different service runs today on the same route — show both.
+            useKey = `${key}|prev`
+            if (flightMap[useKey]) continue  // |prev slot already filled
+          }
           addFlight({
             ...f,
             sched_arr: f.est_arr,  // shift day-assignment to the estimated landing time
