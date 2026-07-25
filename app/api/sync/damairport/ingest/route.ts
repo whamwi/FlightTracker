@@ -251,81 +251,17 @@ async function processDate(airport: string, date: string, rawRows: RawRow[]) {
     )
   }
 
-  // ── 5. Create flight_instance rows for this date ─────────────────────────
-  // Re-read route_master for final dep/arr UTC times (just-inserted rows now visible)
-  const finalRoutes: {
-    id: number; flight_id: number; dep_iata: string; arr_iata: string
-    dep_time_utc: string | null; arr_time_utc: string | null
-  }[] = flightIds.length
-    ? await sb(`/route_master?flight_id=in.(${flightIds.join(',')})&select=id,flight_id,dep_iata,arr_iata,dep_time_utc,arr_time_utc`)
-    : []
-
-  const routeByKey = new Map(finalRoutes.map(r => [`${r.flight_id}|${r.dep_iata}|${r.arr_iata}`, r]))
-
-  const instanceRows: object[] = []
-  for (const raw of rawRows) {
-    const iataNum = `${raw.carrier}${raw.flightnumber}`
-    const lookup  = lookupByIata.get(iataNum)
-    if (!lookup) continue
-
-    const route = routeByKey.get(`${lookup.id}|${raw.iata_from}|${raw.iata_to}`)
-    if (!route?.dep_time_utc) continue  // skip if departure time not yet known; fill will complete it
-
-    const std = toTimestamp(date, route.dep_time_utc)
-    const sta = toTimestamp(date, route.arr_time_utc, std)
-
-    instanceRows.push({
-      flight_id:   lookup.id,
-      route_id:    route.id,
-      flight_date: date,
-      dep_iata:    raw.iata_from,
-      arr_iata:    raw.iata_to,
-      std,
-      sta,
-    })
-  }
-
-  // Deduplicate by (flight_id, flight_date, dep_iata) — PostgreSQL rejects ON CONFLICT DO UPDATE
-  // when two rows in the same batch target the same unique key ("cannot affect row a second time").
-  const seenInstanceKeys = new Set<string>()
-  const dedupedRows = instanceRows.filter(row => {
-    const r = row as { flight_id: number; flight_date: string; dep_iata: string }
-    const k = `${r.flight_id}|${r.flight_date}|${r.dep_iata}`
-    if (seenInstanceKeys.has(k)) return false
-    seenInstanceKeys.add(k)
-    return true
-  })
-
-  let instancesUpserted = 0
-  if (dedupedRows.length) {
-    // Use ?on_conflict= to target the secondary unique index (flight_id, flight_date, dep_iata).
-    // PostgREST merge-duplicates without on_conflict targets only the PK, which 409s on this index.
-    const fiRes = await fetch(`${SB_URL}/rest/v1/flight_instance?on_conflict=flight_id,flight_date,dep_iata`, {
-      method:  'POST',
-      headers: {
-        apikey:         SB_KEY,
-        Authorization:  `Bearer ${SB_KEY}`,
-        'Content-Type': 'application/json',
-        Prefer:         'return=minimal,resolution=merge-duplicates',
-      },
-      body: JSON.stringify(dedupedRows),
-    })
-    if (!fiRes.ok) throw new Error(`Supabase /flight_instance: ${fiRes.status} ${await fiRes.text()}`)
-    instancesUpserted = dedupedRows.length
-  }
-
   const driftCount = toUpdate.filter(u => u.dep_time || u.arr_time).length
 
   return {
     date,
     dow,
-    raw_rows:           rawRows.length,
-    airlines_added:     airlinesAdded,
-    lookup_added:       lookupAdded,
-    routes_inserted:    toInsert.length,
-    routes_updated:     toUpdate.length - driftCount,
-    routes_drift:       driftCount,
-    instances_upserted: instancesUpserted,
+    raw_rows:        rawRows.length,
+    airlines_added:  airlinesAdded,
+    lookup_added:    lookupAdded,
+    routes_inserted: toInsert.length,
+    routes_updated:  toUpdate.length - driftCount,
+    routes_drift:    driftCount,
   }
 }
 
