@@ -386,6 +386,11 @@ export default function BoardPage() {
   // depth=0 (default): also warms origin airports of arrivals so their "Departed" status
   // wins in the flightboard dedup over the destination's stale "Scheduled" arrival entry.
   // depth=1: leaf call — only writes the airport's own data, no further recursion.
+  // Always holds the latest load function so warmFR24Cache can call it without
+  // being in its dependency array (warmFR24Cache has [] deps to avoid re-creation).
+  const loadRef = useRef(load)
+  useEffect(() => { loadRef.current = load }, [load])
+
   const warmFR24Cache = useCallback((airportCode: string, depth = 0) => {
     const TZ = 'Asia/Damascus'
     const flightDate = new Date().toLocaleDateString('en-CA', { timeZone: TZ })
@@ -418,9 +423,14 @@ export default function BoardPage() {
           const flight = normFlight(f); if (!flight) continue
           bucket(new Date(flight.sched_arr * 1000).toLocaleDateString('en-CA', { timeZone: TZ })).arrivals.push(flight)
         }
-        Object.entries(byDate).forEach(([d, v]) => {
+        // Wait for ALL cache writes to finish, then reload the board (depth=0 only —
+        // origin-airport warms at depth=1 don't need to trigger a reload themselves).
+        const writes = Object.entries(byDate).map(([d, v]) =>
           fetch('/api/fr24-cache', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ airport_iata: airportCode, flight_date: d, ...v }) }).catch(() => {})
-        })
+        )
+        if (depth === 0) {
+          Promise.all(writes).then(() => loadRef.current(0, true)).catch(() => {})
+        }
         // Warm origin airports of arrivals so the flightboard can show "Departed" status
         // for in-flight arrivals (the origin knows departure status; destination only knows landing).
         if (depth === 0) {
@@ -440,22 +450,20 @@ export default function BoardPage() {
   useEffect(() => {
     if (tab !== 0) return
     const loadTimer = setInterval(() => load(0, true), 60_000)
-    // Re-warm FR24 cache every 5 minutes so statuses stay live on idle open tabs.
+    // Re-warm FR24 cache every 5 minutes; reload is triggered by warmFR24Cache itself
+    // after the writes complete, so no fixed-delay timer needed here.
     const warmTimer = setInterval(() => {
       warmFR24Cache('DAM')
       warmFR24Cache('ALP')
-      setTimeout(() => load(0, true), 8_000)
     }, 5 * 60_000)
     return () => { clearInterval(loadTimer); clearInterval(warmTimer) }
   }, [tab, load, warmFR24Cache])
 
-  // On mount: warm both airports, then reload 8s later to pick up the fresh cache write.
+  // On mount: warm both airports. Reload is triggered inside warmFR24Cache once writes land.
   useEffect(() => {
     warmFR24Cache('DAM')
     warmFR24Cache('ALP')
-    const t = setTimeout(() => load(0, true), 8_000)
-    return () => clearTimeout(t)
-  }, [warmFR24Cache, load])
+  }, [warmFR24Cache])
 
   // When the user switches airport tabs: warm the selected airport, then silently
   // reload the board ~4 s later so the freshly-written cache data is visible immediately.
