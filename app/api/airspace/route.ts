@@ -348,7 +348,7 @@ export async function GET() {
       const info = boardMap.get(cs)
       trackedExtra.push({
         ...a,
-        board_match:    true,
+        board_match:    !!info,
         dep_iata:       info?.dep_iata      ?? null,
         arr_iata:       info?.arr_iata      ?? null,
         arr_time_utc:   info?.sched_arr     != null ? unixToHHMM(info.sched_arr) : null,
