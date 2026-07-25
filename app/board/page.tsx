@@ -619,7 +619,7 @@ export default function BoardPage() {
         {!loading && (
           <div className="flex flex-col gap-3">
             {sorted.map((f, i) => (
-              <Fragment key={`${f.iata_number}-${f.dep_iata}-${f.arr_iata}-${f.dep_time_utc}`}>
+              <Fragment key={`${f.iata_number}-${f.dep_iata}-${f.arr_iata}-${f.dep_time_utc}-${f.arr_time_utc}`}>
                 {i === nowIdx && (
                   <div className="flex items-center gap-2 py-1">
                     <div className="flex-1 h-px bg-blue-900" />
