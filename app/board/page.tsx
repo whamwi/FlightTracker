@@ -387,15 +387,13 @@ export default function BoardPage() {
     return () => clearInterval(t)
   }, [tab, load])
 
-  // Silently warm the FR24 cache for DAM on every board visit.
-  // Any visitor triggers a fresh widget fetch → write-through to fr24_daily_cache.
-  // The 60s auto-refresh then picks up the updated data without any user action.
-  useEffect(() => {
+  // Warm the FR24 cache for a given airport: fetch the live widget data from FR24
+  // and write it through to fr24_daily_cache so the board picks up intraday status updates.
+  const warmFR24Cache = useCallback((airportCode: string) => {
     const TZ = 'Asia/Damascus'
     const flightDate = new Date().toLocaleDateString('en-CA', { timeZone: TZ })
-    const damMidnight = new Date(flightDate + 'T00:00:00+03:00')
-    const ts = Math.floor(damMidnight.getTime() / 1000)
-    const url = `https://api.flightradar24.com/common/v1/airport.json?code=DAM&plugin=&plugin-setting[schedule][mode]=&plugin-setting[schedule][timestamp]=${ts}&page=1&limit=100&fleet=&token=`
+    const ts = Math.floor(new Date(flightDate + 'T00:00:00+03:00').getTime() / 1000)
+    const url = `https://api.flightradar24.com/common/v1/airport.json?code=${airportCode}&plugin=&plugin-setting[schedule][mode]=&plugin-setting[schedule][timestamp]=${ts}&page=1&limit=100&fleet=&token=`
     fetch(url)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
@@ -424,11 +422,27 @@ export default function BoardPage() {
           bucket(new Date(flight.sched_arr * 1000).toLocaleDateString('en-CA', { timeZone: TZ })).arrivals.push(flight)
         }
         Object.entries(byDate).forEach(([d, v]) => {
-          fetch('/api/fr24-cache', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ airport_iata: 'DAM', flight_date: d, ...v }) }).catch(() => {})
+          fetch('/api/fr24-cache', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ airport_iata: airportCode, flight_date: d, ...v }) }).catch(() => {})
         })
       })
       .catch(() => {})
-  }, []) // run once on mount
+  }, [])
+
+  // On mount: warm both airports so intraday statuses are live from the first load.
+  useEffect(() => {
+    warmFR24Cache('DAM')
+    warmFR24Cache('ALP')
+  }, [warmFR24Cache])
+
+  // When the user switches airport tabs: warm the selected airport, then silently
+  // reload the board ~4 s later so the freshly-written cache data is visible immediately.
+  const mountedRef = useRef(false)
+  useEffect(() => {
+    if (!mountedRef.current) { mountedRef.current = true; return }
+    warmFR24Cache(airport)
+    const timer = setTimeout(() => load(tab, true), 4000)
+    return () => clearTimeout(timer)
+  }, [airport]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const byViewAndAirport = (() => {
     // Cache is bucketed by Syria operating date (sched_dep for dep, sched_arr for arr),
