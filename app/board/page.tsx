@@ -455,22 +455,6 @@ export default function BoardPage() {
       .catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Warm the damascusairport.com live cache: POSTs to /api/dam-cache which fetches the
-  // external source and writes to fr24_daily_cache under airport_LIVE. The flightboard
-  // reads _LIVE rows from the same fast Supabase query — no external calls on board load.
-  const warmDamCache = useCallback((airportCode: string) => {
-    const TZ = 'Asia/Damascus'
-    const flightDate = new Date().toLocaleDateString('en-CA', { timeZone: TZ })
-    fetch('/api/dam-cache', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ airport: airportCode, date: flightDate }),
-    })
-      .then(r => r.ok ? r.json() : null)
-      .then(ok => { if (ok?.ok) loadRef.current(0, true) })
-      .catch(() => {})
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
   useEffect(() => { load(tab) }, [tab, load])
   useEffect(() => {
     if (tab !== 0) return
@@ -478,19 +462,15 @@ export default function BoardPage() {
     const warmTimer = setInterval(() => {
       warmFR24Cache('DAM')
       warmFR24Cache('ALP')
-      warmDamCache('DAM')
-      warmDamCache('ALP')
     }, 5 * 60_000)
     return () => { clearInterval(loadTimer); clearInterval(warmTimer) }
-  }, [tab, load, warmFR24Cache, warmDamCache])
+  }, [tab, load, warmFR24Cache])
 
   // On mount: warm both airports. Reload is triggered inside warmFR24Cache once writes land.
   useEffect(() => {
     warmFR24Cache('DAM')
     warmFR24Cache('ALP')
-    warmDamCache('DAM')
-    warmDamCache('ALP')
-  }, [warmFR24Cache, warmDamCache])
+  }, [warmFR24Cache])
 
   // When the user switches airport tabs: warm the selected airport, then silently
   // reload the board ~4 s later so the freshly-written cache data is visible immediately.

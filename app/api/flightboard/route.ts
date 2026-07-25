@@ -49,24 +49,6 @@ function extractStatusUtc(raw: string | null, operatingDate: string): string | n
   return new Date(baseMs + (parseInt(match[1]) * 60 + parseInt(match[2]) - 180) * 60_000).toISOString()
 }
 
-// Syria local HH:MM → UTC ISO string
-function damTimeToUtcIso(localHHMM: string, date: string): string {
-  const [hh, mm] = localHHMM.split(':').map(Number)
-  return new Date(new Date(date + 'T00:00:00Z').getTime() + (hh * 60 + mm - 180) * 60_000).toISOString()
-}
-
-function normDamStatus(raw: string): string {
-  switch (raw.toLowerCase()) {
-    case 'arrived':   return 'Arrived'
-    case 'departed':  return 'Departed'
-    case 'in_flight': return 'En Route'
-    case 'estimated': return 'Expected'
-    case 'delayed':   return 'Delayed'
-    case 'cancelled': return 'Cancelled'
-    default:          return 'Scheduled'
-  }
-}
-
 function normaliseStatus(raw: string | null): string {
   if (!raw) return 'Scheduled'
   const t = raw.toLowerCase()
@@ -88,9 +70,9 @@ export async function GET(req: Request) {
   const date = searchParams.get('date')
   if (!date) return NextResponse.json({ ok: false, error: 'date required' }, { status: 400 })
 
-  // Only fetch Syrian airport rows + their _LIVE overlays — origin-airport caches (IST, DXB…)
-  // are excluded; their En Route contribution is now covered by damascusairport.com _LIVE data.
-  const syriaCodes = ['DAM', 'ALP', 'LTK', 'DAM_LIVE', 'ALP_LIVE', 'LTK_LIVE'].join(',')
+  // Only fetch Syrian airport rows — origin-airport caches (IST, DXB…) are excluded;
+  // they bloated the response to 2950 flights and added no unique data for the board.
+  const syriaCodes = ['DAM', 'ALP', 'LTK'].join(',')
   const cacheRes = await fetch(
     `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${date}&airport_iata=in.(${syriaCodes})&select=airport_iata,arrivals,departures`,
     { headers: HEADERS }
@@ -108,7 +90,7 @@ export async function GET(req: Request) {
   const dayEndMs   = dayStartMs + 24 * 60 * 60 * 1000
   const SYRIAN_AIRPORTS = new Set(['DAM', 'ALP', 'LTK'])
 
-  // Status priority: higher rank wins when the same flight appears in multiple sources.
+  // Status priority: higher rank wins when the same flight appears in multiple airport caches.
   const STATUS_RANK: Record<string, number> = {
     Arrived: 8, Landed: 8, Approaching: 7, 'En Route': 6,
     Departed: 5, Delayed: 4, GateClosed: 3, Boarding: 3,
@@ -118,9 +100,6 @@ export async function GET(req: Request) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const flightMap: Record<string, any> = {}
 
-  // DAM/ALP live overlay: "${flightNumber}|${airport}|${type}" → { status, actualUtc?, estimatedUtc? }
-  const damLookup: Record<string, { status: string; actualUtc?: string; estimatedUtc?: string }> = {}
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function addFlight(f: any) {
     const num      = f.num       ?? ''
@@ -129,8 +108,7 @@ export async function GET(req: Request) {
     const schedDep = f.sched_dep ?? null
     const schedArr = f.sched_arr ?? null
 
-    // Only keep flights that touch a Syrian airport — origin-airport caches contain
-    // every flight at that airport; we only care about the Syria-bound ones.
+    // Only keep flights that touch a Syrian airport
     if (!SYRIAN_AIRPORTS.has(depIata) && !SYRIAN_AIRPORTS.has(arrIata)) return
 
     // Drop overnight arrivals that land on a different Damascus calendar day
@@ -152,8 +130,8 @@ export async function GET(req: Request) {
       return
     }
 
-    const airlineIata  = f.airline_iata || PREFIX_TO_IATA[num.slice(0, 3)] || ''
-    const al           = AIRLINE_MAP[airlineIata] ?? { name: f.airline ?? airlineIata, flag: '' }
+    const airlineIata = f.airline_iata || PREFIX_TO_IATA[num.slice(0, 3)] || ''
+    const al          = AIRLINE_MAP[airlineIata] ?? { name: f.airline ?? airlineIata, flag: '' }
 
     flightMap[key] = {
       iata_number:     num,
@@ -178,21 +156,6 @@ export async function GET(req: Request) {
 
   for (const row of cacheRows) {
     const ap = row.airport_iata as string
-
-    // _LIVE rows contain cached damascusairport.com data — build overlay lookup, skip addFlight
-    if (ap.endsWith('_LIVE')) {
-      const baseAp = ap.slice(0, -5)
-      for (const f of [...(row.arrivals ?? []), ...(row.departures ?? [])]) {
-        const key = `${f.flightNumber}|${baseAp}|${f.type}`
-        damLookup[key] = {
-          status:       normDamStatus(f.status),
-          actualUtc:    f.actualTime    ? damTimeToUtcIso(f.actualTime,    date) : undefined,
-          estimatedUtc: f.estimatedTime ? damTimeToUtcIso(f.estimatedTime, date) : undefined,
-        }
-      }
-      continue
-    }
-
     for (const f of (row.departures ?? [])) {
       const t = (f.status ?? '').toLowerCase()
       addFlight({
@@ -210,29 +173,6 @@ export async function GET(req: Request) {
         fr24_actual_arr:  t.includes('landed') || t.includes('arrived') ? extractStatusUtc(f.status, date) : null,
         fr24_revised_arr: t.startsWith('estimated') || t.startsWith('expect') || t.startsWith('delayed') ? extractStatusUtc(f.status, date) : null,
       })
-    }
-  }
-
-  // Apply DAM/ALP live status overlay to flightMap entries
-  for (const entry of Object.values(flightMap)) {
-    const num = entry.iata_number as string
-
-    if (SYRIAN_AIRPORTS.has(entry.dep_iata)) {
-      const dam = damLookup[`${num}|${entry.dep_iata}|departure`]
-      if (dam) {
-        if ((STATUS_RANK[dam.status] ?? 0) > (STATUS_RANK[entry.status] ?? 0)) entry.status = dam.status
-        if (dam.actualUtc    && !entry.actual_dep_utc)  entry.actual_dep_utc  = dam.actualUtc
-        if (dam.estimatedUtc && !entry.revised_dep_utc) entry.revised_dep_utc = dam.estimatedUtc
-      }
-    }
-
-    if (SYRIAN_AIRPORTS.has(entry.arr_iata)) {
-      const dam = damLookup[`${num}|${entry.arr_iata}|arrival`]
-      if (dam) {
-        if ((STATUS_RANK[dam.status] ?? 0) > (STATUS_RANK[entry.status] ?? 0)) entry.status = dam.status
-        if (dam.actualUtc    && !entry.actual_arr_utc)  entry.actual_arr_utc  = dam.actualUtc
-        if (dam.estimatedUtc && !entry.revised_arr_utc) entry.revised_arr_utc = dam.estimatedUtc
-      }
     }
   }
 
