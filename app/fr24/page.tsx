@@ -34,14 +34,20 @@ function normalizeForCache(data: any): Record<string, { arrivals: object[]; depa
   const sched = data?.result?.response?.airport?.pluginData?.schedule ?? {}
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const normFlight = (f: any) => {
+  const normFlight = (f: any, dir: 'arrivals' | 'departures') => {
     const fl = f?.flight
     if (!fl) return null
     const reg      = fl.aircraft?.registration ?? null
     const num      = fl.identification?.number?.default ?? fl.identification?.callsign ?? (reg ? REG_TO_FLIGHT[reg] : null) ?? reg ?? null
     const schedDep = fl.time?.scheduled?.departure ?? null
     const schedArr = fl.time?.scheduled?.arrival   ?? null
-    if (!schedDep || !schedArr) return null
+    // For completed/landed flights FR24 may omit the origin-side scheduled time.
+    // Only require the time relevant to the direction we're processing.
+    if (dir === 'arrivals'   && !schedArr) return null
+    if (dir === 'departures' && !schedDep) return null
+    const durationMin = (schedDep && schedArr)
+      ? Math.round((schedArr - schedDep) / 60)
+      : (fl.flight_time ?? 0)
     const flight = {
       num,
       airline:      fl.airline?.name ?? null,
@@ -50,7 +56,7 @@ function normalizeForCache(data: any): Record<string, { arrivals: object[]; depa
       arr_iata:     fl.airport?.destination?.code?.iata ?? null,
       sched_dep:    schedDep,
       sched_arr:    schedArr,
-      duration_min: Math.round((schedArr - schedDep) / 60),
+      duration_min: durationMin,
       status:       fl.status?.text ?? null,
       est_dep:      fl.time?.estimated?.departure ?? null,
       est_arr:      fl.time?.estimated?.arrival   ?? null,
@@ -59,7 +65,7 @@ function normalizeForCache(data: any): Record<string, { arrivals: object[]; depa
     }
     // Drop FR24 widget artifacts: corrupted entries have an inflated block time
     // (> 5 hours for any Syrian-region route is always a bad sched_arr timestamp).
-    if (flight.duration_min > 300) return null
+    if (durationMin > 300) return null
     return flight
   }
 
@@ -71,15 +77,15 @@ function normalizeForCache(data: any): Record<string, { arrivals: object[]; depa
   }
 
   for (const f of (sched.departures?.data ?? [])) {
-    const flight = normFlight(f)
+    const flight = normFlight(f, 'departures')
     if (!flight) continue
-    const date = new Date(flight.sched_dep * 1000).toLocaleDateString('en-CA', { timeZone: TZ })
+    const date = new Date(flight.sched_dep! * 1000).toLocaleDateString('en-CA', { timeZone: TZ })
     bucket(date).departures.push(flight)
   }
   for (const f of (sched.arrivals?.data ?? [])) {
-    const flight = normFlight(f)
+    const flight = normFlight(f, 'arrivals')
     if (!flight) continue
-    const date = new Date(flight.sched_arr * 1000).toLocaleDateString('en-CA', { timeZone: TZ })
+    const date = new Date(flight.sched_arr! * 1000).toLocaleDateString('en-CA', { timeZone: TZ })
     bucket(date).arrivals.push(flight)
   }
 
