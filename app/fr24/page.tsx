@@ -45,9 +45,10 @@ function normalizeForCache(data: any): Record<string, { arrivals: object[]; depa
     // Only require the time relevant to the direction we're processing.
     if (dir === 'arrivals'   && !schedArr) return null
     if (dir === 'departures' && !schedDep) return null
+    // fl.flight_time is in seconds; convert to minutes for the fallback case
     const durationMin = (schedDep && schedArr)
       ? Math.round((schedArr - schedDep) / 60)
-      : (fl.flight_time ?? 0)
+      : Math.round((fl.flight_time ?? 0) / 60)
     const flight = {
       num,
       airline:      fl.airline?.name ?? null,
@@ -108,13 +109,16 @@ function normalizeForCache(data: any): Record<string, { arrivals: object[]; depa
     const flight = normFlight(f, 'departures')
     if (!flight) continue
     const date = new Date(flight.sched_dep! * 1000).toLocaleDateString('en-CA', { timeZone: TZ })
+    // For departures: key by destination (origin is always this airport).
     upsert(bucket(date).departures, flight, ['num', 'dep_iata', 'arr_iata'])
   }
   for (const f of (sched.arrivals?.data ?? [])) {
     const flight = normFlight(f, 'arrivals')
     if (!flight) continue
     const date = new Date(flight.sched_arr! * 1000).toLocaleDateString('en-CA', { timeZone: TZ })
-    upsert(bucket(date).arrivals, flight, ['num', 'dep_iata', 'arr_iata'])
+    // For arrivals: key by origin only — FR24 clears arr_iata on landed entries
+    // so Scheduled* (arr_iata="DAM") and Landed (arr_iata=null) share the same key.
+    upsert(bucket(date).arrivals, flight, ['num', 'dep_iata'])
   }
 
   return byDate
