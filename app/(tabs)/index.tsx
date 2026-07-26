@@ -15,7 +15,7 @@ import { syriaDate } from '../../lib/constants'
 import type { Flight, Airport, View as ViewType } from '../../lib/types'
 
 type DateTab = 'yesterday' | 'today' | 'tomorrow'
-type NowDivider = { _now: true; timeStr: string }
+type NowDivider = { _now: true; timeStr: string; inAir: number; done: number; doneLabel: string }
 type ListItem = Flight | NowDivider
 
 const DATE_LABELS: Record<DateTab, string> = {
@@ -51,15 +51,27 @@ function flightSyriaMin(f: Flight, v: ViewType): number {
   return ((h + 3) * 60 + m) % 1440
 }
 
-function NowLine({ time }: { time: string }) {
+function NowLine({ time, inAir, done, doneLabel }: { time: string; inAir: number; done: number; doneLabel: string }) {
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 10, gap: 10 }}>
-      <View style={{ flex: 1, height: 1, backgroundColor: '#9ca3af' }} />
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-        <Ionicons name="time-outline" size={14} color="#9ca3af" />
-        <Text style={{ color: '#9ca3af', fontSize: 13, fontWeight: '600' }}>{time} · Now</Text>
+    <View style={{ marginVertical: 10 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <View style={{ flex: 1, height: 1, backgroundColor: '#9ca3af' }} />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+          <Ionicons name="time-outline" size={14} color="#9ca3af" />
+          <Text style={{ color: '#9ca3af', fontSize: 13, fontWeight: '600' }}>{time} · Now</Text>
+        </View>
+        <View style={{ flex: 1, height: 1, backgroundColor: '#9ca3af' }} />
       </View>
-      <View style={{ flex: 1, height: 1, backgroundColor: '#9ca3af' }} />
+      {(inAir > 0 || done > 0) && (
+        <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 12, marginTop: 5 }}>
+          {inAir > 0 && (
+            <Text style={{ color: '#38bdf8', fontSize: 11, fontWeight: '600' }}>{inAir} in air</Text>
+          )}
+          {done > 0 && (
+            <Text style={{ color: '#4ade80', fontSize: 11, fontWeight: '600' }}>{done} {doneLabel}</Text>
+          )}
+        </View>
+      )}
     </View>
   )
 }
@@ -124,16 +136,20 @@ export default function BoardScreen() {
     const localH = (n.getUTCHours() + 3) % 24
     const localM = n.getUTCMinutes()
     const nowLocal = `${String(localH).padStart(2, '0')}:${String(localM).padStart(2, '0')}`
+    const inAir = sorted.filter(f => ['En Route', 'Departed', 'Approaching'].includes(f.status)).length
+    const done  = sorted.filter(f => ['Arrived', 'Landed'].includes(f.status)).length
+    const doneLabel = view === 'arr' ? 'arrived' : 'departed'
+    const divider: NowDivider = { _now: true, timeStr: nowLocal, inAir, done, doneLabel }
     const items: ListItem[] = []
     let inserted = false
     for (const f of sorted) {
       if (!inserted && flightSyriaMin(f, view) > nowSyriaMin) {
-        items.push({ _now: true, timeStr: nowLocal })
+        items.push(divider)
         inserted = true
       }
       items.push(f)
     }
-    if (!inserted) items.push({ _now: true, timeStr: nowLocal })
+    if (!inserted) items.push(divider)
     return items
   }, [sorted, dateTab, view])
 
@@ -283,7 +299,7 @@ export default function BoardScreen() {
           }
           renderItem={({ item }) =>
             '_now' in item
-              ? <NowLine time={(item as NowDivider).timeStr} />
+              ? <NowLine time={(item as NowDivider).timeStr} inAir={(item as NowDivider).inAir} done={(item as NowDivider).done} doneLabel={(item as NowDivider).doneLabel} />
               : <FlightCard f={item as Flight} view={view} />
           }
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }}
