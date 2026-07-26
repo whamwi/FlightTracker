@@ -1168,8 +1168,10 @@ export default function Map() {
             } else {
               fraction = elapsed / (duration_min * 60_000)
             }
-            // Only expire when 8h+ past expected arrival — clearly stale.
-            if (fraction > 1.0 && elapsed - duration_min * 60_000 > 8 * 3_600_000) {
+            // Expire dynamically: grace = max(2h, 1× flight duration) past expected arrival.
+            // Short flights (EBL ~90min) expire ~3.5h after dep; long flights scale with duration.
+            const graceMs = Math.max(2 * 3_600_000, duration_min * 60_000)
+            if (fraction > 1.0 && elapsed - duration_min * 60_000 > graceMs) {
               fraction = null
             }
           }
@@ -1183,7 +1185,8 @@ export default function Map() {
               const elapsed = now - impliedDepMs
               if (elapsed > 0) {
                 fraction = elapsed / (duration_min * 60_000)
-                if (fraction > 1.0 && elapsed - duration_min * 60_000 > 8 * 3_600_000) {
+                const graceMs = Math.max(2 * 3_600_000, duration_min * 60_000)
+                if (fraction > 1.0 && elapsed - duration_min * 60_000 > graceMs) {
                   fraction = null
                 }
               }
