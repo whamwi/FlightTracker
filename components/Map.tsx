@@ -1161,6 +1161,13 @@ export default function Map() {
         }
 
         const fs = flightStatusRef.current[callsign]
+        // A callsign may have multiple schedule entries (different days / airports).
+        // Once the board confirms which route is actually operating (dep_iata + arr_iata
+        // are set from the boardDeparted or board-matched ADS-B injection), skip every
+        // other schedule entry so they don't race to overwrite the ghost marker and
+        // produce the wrong label / colour (e.g. ALP→JED on a DAM→JED Sunday flight).
+        if (fs?.actual_dep_utc && fs.dep_iata && fs.arr_iata &&
+            (fs.dep_iata !== dep_iata || fs.arr_iata !== arr_iata)) continue
         const AIRBORNE_STATUSES  = new Set(['En Route', 'Departed', 'Approaching'])
 
         let fraction: number | null = null
