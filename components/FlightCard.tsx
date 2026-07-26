@@ -49,7 +49,7 @@ export function FlightCard({ f, view }: { f: Flight; view: ViewType }) {
   return (
     <View
       style={{
-        backgroundColor: '#253548',
+        backgroundColor: '#344B61',
         borderRadius: 12,
         borderWidth: 1,
         borderColor: '#3f5870',
