@@ -1213,9 +1213,21 @@ export default function Map() {
 
         const fPos = arrived ? 1.0 : Math.min(fraction, 0.97)
         const wps  = routePathsRef.current[`${dep_iata}|${arr_iata}`]
-        const [lat, lon] = wps?.length
-          ? interpolatePath(wps, fPos)
-          : slerpGreatCircle(depC[0], depC[1], arrC[0], arrC[1], fPos)
+
+        // On final approach with a recent ADS-B fix, pin the ghost to the last
+        // known position instead of interpolating along the stored route path.
+        // Route paths follow stored airways; actual flights may use different
+        // airways (e.g. DAM→SHJ stored via Saudi Arabia; actual via Iraq/Kuwait),
+        // causing the ghost to snap to the wrong side of the destination airport.
+        const lastPos = lastADSBPosRef.current[callsign]
+        const pinToLastPos = !arrived && fPos >= 0.85
+          && !!lastPos && now - lastPos.lostAt < 15 * 60_000
+
+        const [lat, lon] = pinToLastPos
+          ? [lastPos.lat, lastPos.lon]
+          : wps?.length
+            ? interpolatePath(wps, fPos)
+            : slerpGreatCircle(depC[0], depC[1], arrC[0], arrC[1], fPos)
         const track = wps?.length
           ? bearingFromPath(wps, fPos)
           : bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], fPos)
