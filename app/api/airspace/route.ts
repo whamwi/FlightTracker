@@ -92,8 +92,8 @@ interface BoardFlight {
   sched_arr:      number | null // unix
   duration_min:   number | null
   status:         string        // raw FR24 status, lowercased
-  actual_dep_utc: string | null // from real_dep or "Departed HH:MM" status
-  actual_arr_utc: string | null // from real_arr or "Landed HH:MM" status
+  actual_dep_utc: string | null // from "Departed HH:MM" status
+  actual_arr_utc: string | null // from real_arr (landing-confirm cron) or "Landed HH:MM" status
   dep_delay_min:  number | null // actual_dep_utc − sched_dep
   airline_iata:   string | null // IATA code for airline logo
 }
@@ -129,11 +129,8 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<Bo
         const key = `${num}|${f.sched_dep ?? ''}`
         if (seen.has(key)) continue
         seen.add(key)
-        const status       = (f.status ?? '').toLowerCase()
-        // Prefer real_dep/real_arr (set by landing-confirm cron) over status parsing
-        const actual_dep_utc = f.real_dep
-          ? new Date(f.real_dep * 1000).toISOString()
-          : extractActualDepUtc(status, date)
+        const status         = (f.status ?? '').toLowerCase()
+        const actual_dep_utc = extractActualDepUtc(status, date)
         const actual_arr_utc = f.real_arr
           ? new Date(f.real_arr * 1000).toISOString()
           : extractActualArrUtc(status, date)
