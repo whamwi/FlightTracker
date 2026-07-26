@@ -21,6 +21,30 @@ const CITY: Record<string, string> = {
 }
 const city = (iata: string) => CITY[iata] ?? iata
 
+const AIRPORT_FLAG: Record<string, string> = {
+  DAM: '🇸🇾', ALP: '🇸🇾',
+  SHJ: '🇦🇪', DXB: '🇦🇪', AUH: '🇦🇪',
+  MCT: '🇴🇲',
+  IST: '🇹🇷', SAW: '🇹🇷', ESB: '🇹🇷',
+  AMM: '🇯🇴',
+  BEY: '🇱🇧',
+  CAI: '🇪🇬',
+  DOH: '🇶🇦',
+  KWI: '🇰🇼',
+  RUH: '🇸🇦', JED: '🇸🇦', DMM: '🇸🇦', MED: '🇸🇦',
+  BGW: '🇮🇶', NJF: '🇮🇶', EBL: '🇮🇶',
+  BUH: '🇷🇴', OTP: '🇷🇴',
+  GYD: '🇦🇿',
+  LED: '🇷🇺', SVO: '🇷🇺', KJA: '🇷🇺', IKT: '🇷🇺',
+  TAS: '🇺🇿', SKD: '🇺🇿',
+  ALA: '🇰🇿',
+  DEL: '🇮🇳', BOM: '🇮🇳',
+  MJI: '🇱🇾',
+  AMS: '🇳🇱',
+  EVN: '🇦🇲',
+}
+const airportFlag = (iata: string) => AIRPORT_FLAG[iata] ?? ''
+
 // ── Status badge config ──────────────────────────────────────────────────────
 const STATUS: Record<string, { label: string; cls: string; color: string }> = {
   Scheduled:   { label: 'Scheduled',   cls: 'bg-gray-800 text-gray-400',     color: '#374151' },
@@ -296,9 +320,9 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
 
       {/* Row 2: Route */}
       <div className="flex items-center gap-2">
-        <div className="text-center min-w-[3.5rem]">
-          <p className="text-white font-bold text-lg leading-tight">{f.dep_iata}</p>
-          <p className="text-gray-400 text-xs truncate">{city(f.dep_iata)}</p>
+        <div className="text-left min-w-[5rem]">
+          <p className="text-white font-bold text-sm leading-tight truncate">{city(f.dep_iata)} {airportFlag(f.dep_iata)}</p>
+          <p className="text-gray-500 text-xs font-mono">{f.dep_iata}</p>
         </div>
         <div className="flex-1 flex flex-col items-center gap-0.5">
           <div className="flex items-center gap-1 w-full">
@@ -310,9 +334,9 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
             <p className="text-gray-600 text-xs">{durationLabel(f.duration_min)}</p>
           )}
         </div>
-        <div className="text-center min-w-[3.5rem]">
-          <p className="text-white font-bold text-lg leading-tight">{f.arr_iata}</p>
-          <p className="text-gray-400 text-xs truncate">{city(f.arr_iata)}</p>
+        <div className="text-right min-w-[5rem]">
+          <p className="text-white font-bold text-sm leading-tight truncate">{airportFlag(f.arr_iata)} {city(f.arr_iata)}</p>
+          <p className="text-gray-500 text-xs font-mono">{f.arr_iata}</p>
         </div>
       </div>
 
