@@ -56,6 +56,7 @@ type Flight = {
   arr_iata: string
   dep_time_utc: string
   arr_time_utc: string
+  sched_dep_unix: number | null
   duration_min: number
   status: string
   actual_dep_utc: string | null
@@ -262,8 +263,10 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
 
   const statusCfg = STATUS[status] ?? STATUS.Unknown
   const borderColor = isCancelled ? '#7f1d1d' : statusCfg.color
+  const depForProgress = f.actual_dep_utc ?? f.revised_dep_utc
+    ?? (f.sched_dep_unix ? new Date(f.sched_dep_unix * 1000).toISOString() : null)
   const showProgress = (status === 'Departed' || status === 'En Route' || status === 'Approaching')
-    && !!f.actual_dep_utc && f.duration_min > 0 && !f.actual_arr_utc
+    && !!depForProgress && f.duration_min > 0 && !f.actual_arr_utc
 
   return (
     <div
@@ -349,7 +352,7 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
 
       </div>
       {showProgress && (
-        <FlightProgress depUtc={f.actual_dep_utc!} durationMin={f.duration_min} />
+        <FlightProgress depUtc={depForProgress!} durationMin={f.duration_min} />
       )}
     </div>
   )

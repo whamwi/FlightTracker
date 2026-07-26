@@ -132,7 +132,7 @@ export async function GET(req: Request) {
       // Always take the best status seen across all entries
       if (newRank > existRank) flightMap[key].status = status
       // Always overwrite timing with the latest entry (later in array = more recent FR24 data)
-      if (schedDep) flightMap[key].dep_time_utc = unixToUtcHHMM(schedDep)
+      if (schedDep) { flightMap[key].dep_time_utc = unixToUtcHHMM(schedDep); flightMap[key].sched_dep_unix = schedDep }
       if (schedArr) flightMap[key].arr_time_utc = unixToUtcHHMM(schedArr)
       if (f.duration_min) flightMap[key].duration_min = f.duration_min
       if (f.fr24_actual_dep)  flightMap[key].actual_dep_utc  = f.fr24_actual_dep
@@ -154,6 +154,7 @@ export async function GET(req: Request) {
       arr_iata:        arrIata,
       dep_time_utc:    unixToUtcHHMM(schedDep),
       arr_time_utc:    unixToUtcHHMM(schedArr),
+      sched_dep_unix:  schedDep,
       duration_min:    f.duration_min ?? 0,
       status,
       actual_dep_utc:  f.fr24_actual_dep  ?? null,
