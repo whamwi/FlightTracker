@@ -110,7 +110,7 @@ const ALL_AIRPORT_COORDS: Record<string, [number, number]> = {
   DAM: [33.4114, 36.5156],
   ALP: [36.1807, 37.2244],
   SAW: [40.8986, 29.3092],
-  IST: [40.9769, 28.8146],
+  IST: [41.2608, 28.7418],
   AYT: [36.8987, 30.7995],
   AMM: [31.7226, 35.9930],
   BEY: [33.8208, 35.4883],
@@ -505,7 +505,8 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-type TrackedEntry = { a: Aircraft; lostAt: number; isFr24: boolean }
+type TrackedEntry    = { a: Aircraft; lostAt: number; isFr24: boolean }
+type KinematicState  = { lat: number; lon: number; gs_kts: number; track_deg: number; captured_at_ms: number }
 
 export default function Map() {
   const mapRef          = useRef<HTMLDivElement>(null)
@@ -531,6 +532,8 @@ export default function Map() {
   // Last confirmed ADS-B lat/lon per callsign — kept alive through stale hand-off
   // so the schedule overlay GPS floor still works after trackedRef is cleared.
   const lastADSBPosRef    = useRef<Record<string, { lat: number; lon: number; lostAt: number }>>({})
+  // Last kinematic state per callsign — never cleared, used for dead reckoning after signal loss.
+  const kinematicStateRef = useRef<Record<string, KinematicState>>({})
 
   const [error, setError] = useState<string | null>(null)
 
@@ -571,7 +574,7 @@ export default function Map() {
         [25.2528, 55.3644], // DXB
         [36.2376, 43.9631], // EBL
         [40.1281, 32.9951], // ESB
-        [40.9769, 28.8146], // IST
+        [41.2608, 28.7418], // IST
         [21.6796, 39.1565], // JED
         [15.5895, 32.5532], // KRT
         [29.2267, 47.9689], // KWI
@@ -799,6 +802,23 @@ export default function Map() {
             headers: { 'Content-Type': 'application/json' },
             body:    JSON.stringify(batch),
           }).catch(() => {})
+        }
+
+        // Capture kinematic state for dead reckoning after signal loss.
+        // Only from fresh live ADS-B (not FR24 cache, not stale DB rows).
+        for (const cs of freshCallsigns) {
+          const entry = trackedRef.current[cs]
+          if (!entry || entry.lostAt !== 0 || entry.isFr24) continue
+          const a = entry.a
+          if (typeof a.gs !== 'number' || a.gs <= 50) continue
+          if (!a.dep_iata || !a.arr_iata) continue
+          kinematicStateRef.current[cs] = {
+            lat:           a.lat,
+            lon:           a.lon,
+            gs_kts:        a.gs,
+            track_deg:     typeof a.track === 'number' ? a.track : 0,
+            captured_at_ms: now,
+          }
         }
       }
 
@@ -1130,9 +1150,19 @@ export default function Map() {
         if (fs?.actual_dep_utc && !priorLegDone && duration_min > 0) {
           const elapsed = now - new Date(fs.actual_dep_utc).getTime()
           if (elapsed > 0) {
-            fraction = elapsed / (duration_min * 60_000)
+            // Use kinematic dead reckoning when we have last known position + speed.
+            // projectPosition → nearestPathFraction gives a geometry-anchored fraction
+            // that advances with actual speed rather than the scheduled block time.
+            const ks  = kinematicStateRef.current[callsign]
+            const wpsK = routePathsRef.current[`${dep_iata}|${arr_iata}`]
+            if (ks && wpsK?.length) {
+              const sinceCapMs = now - ks.captured_at_ms
+              const [drLat, drLon] = projectPosition(ks.lat, ks.lon, ks.track_deg, ks.gs_kts, sinceCapMs)
+              fraction = nearestPathFraction(wpsK, drLat, drLon)
+            } else {
+              fraction = elapsed / (duration_min * 60_000)
+            }
             // Only expire when 8h+ past expected arrival — clearly stale.
-            // Let fraction exceed 1.0 naturally; the display layer caps fPos at 0.97.
             if (fraction > 1.0 && elapsed - duration_min * 60_000 > 8 * 3_600_000) {
               fraction = null
             }

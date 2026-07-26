@@ -66,6 +66,9 @@ function extractActualDepUtc(status: string, date: string): string | null {
 function extractActualArrUtc(status: string, date: string): string | null {
   return extractStatusUtc(status, ['landed', 'arrived'], date)
 }
+function extractRevisedArrUtc(status: string, date: string): string | null {
+  return extractStatusUtc(status, ['estimated', 'expect', 'delayed'], date)
+}
 
 // Convert FR24 flight number → ADS-B broadcast callsign.
 // FR24 uses IATA format (TK849, G9434, FZ1234) or already-ICAO (FYC490, SYR123).
@@ -136,6 +139,18 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<Bo
         const actual_arr_utc = f.real_arr
           ? new Date(f.real_arr * 1000).toISOString()
           : extractActualArrUtc(status, date)
+        const revised_arr_utc = extractRevisedArrUtc(status, date)
+          ?? (f.est_arr ? new Date(f.est_arr * 1000).toISOString() : null)
+        // Prefer computed duration (actual_dep → revised_arr) over stale scheduled block time.
+        const effectiveDurationMin = (() => {
+          if (actual_dep_utc && revised_arr_utc) {
+            const c = Math.round(
+              (new Date(revised_arr_utc).getTime() - new Date(actual_dep_utc).getTime()) / 60_000
+            )
+            if (c > 30) return c
+          }
+          return f.duration_min ?? null
+        })()
         const schedDepMs   = f.sched_dep ? f.sched_dep * 1000 : null
         const actualDepMs  = actual_dep_utc ? new Date(actual_dep_utc).getTime() : null
         const dep_delay_min = (schedDepMs && actualDepMs)
@@ -152,7 +167,7 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<Bo
           arr_iata:       f.arr_iata || (section === 'arrivals'   ? ap : null) || null,
           sched_dep:      f.sched_dep    ?? null,
           sched_arr:      f.sched_arr    ?? null,
-          duration_min:   f.duration_min ?? null,
+          duration_min:   effectiveDurationMin,
           status,
           actual_dep_utc,
           actual_arr_utc,

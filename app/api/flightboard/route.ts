@@ -129,6 +129,18 @@ export async function GET(req: Request) {
     const effectiveStatus = f.fr24_actual_arr ? 'Arrived'
       : (f.fr24_actual_dep && (STATUS_RANK[status] ?? 0) < STATUS_RANK['Departed'] ? 'Departed' : status)
 
+    // Compute effective duration from confirmed departure + estimated arrival when available.
+    // FR24's stored duration_min is the scheduled block time and is often stale/padded.
+    const effectiveDuration = (() => {
+      if (f.fr24_actual_dep && f.fr24_revised_arr) {
+        const computed = Math.round(
+          (new Date(f.fr24_revised_arr).getTime() - new Date(f.fr24_actual_dep).getTime()) / 60_000
+        )
+        if (computed > 30) return computed
+      }
+      return f.duration_min ?? 0
+    })()
+
     if (flightMap[key]) {
       const existRank = STATUS_RANK[flightMap[key].status] ?? 0
       // Always take the best status seen across all entries
@@ -136,7 +148,12 @@ export async function GET(req: Request) {
       // Always overwrite timing with the latest entry (later in array = more recent FR24 data)
       if (schedDep) { flightMap[key].dep_time_utc = unixToUtcHHMM(schedDep); flightMap[key].sched_dep_unix = schedDep }
       if (schedArr) flightMap[key].arr_time_utc = unixToUtcHHMM(schedArr)
-      if (f.duration_min) flightMap[key].duration_min = f.duration_min
+      // Prefer computed effective duration; only fall back to raw if no better value exists
+      if (f.fr24_actual_dep && f.fr24_revised_arr) {
+        flightMap[key].duration_min = effectiveDuration
+      } else if (f.duration_min && !flightMap[key].duration_min) {
+        flightMap[key].duration_min = f.duration_min
+      }
       if (f.fr24_actual_dep)  flightMap[key].actual_dep_utc  = f.fr24_actual_dep
       if (f.fr24_actual_arr)  flightMap[key].actual_arr_utc  = f.fr24_actual_arr
       if (f.fr24_revised_dep) flightMap[key].revised_dep_utc = f.fr24_revised_dep
@@ -162,7 +179,7 @@ export async function GET(req: Request) {
       dep_time_utc:    unixToUtcHHMM(schedDep),
       arr_time_utc:    unixToUtcHHMM(schedArr),
       sched_dep_unix:  schedDep,
-      duration_min:    f.duration_min ?? 0,
+      duration_min:    effectiveDuration,
       status:          effectiveStatus,
       actual_dep_utc:  f.fr24_actual_dep  ?? null,
       actual_arr_utc:  f.fr24_actual_arr  ?? null,
@@ -191,6 +208,7 @@ export async function GET(req: Request) {
         ? extractStatusUtc(f.status, d)
         : (f.est_dep ? new Date(f.est_dep * 1000).toISOString() : null),
       fr24_actual_arr: f.real_arr ? new Date(f.real_arr * 1000).toISOString() : null,
+      fr24_revised_arr: f.est_arr ? new Date(f.est_arr * 1000).toISOString() : null,
     })
   }
 
