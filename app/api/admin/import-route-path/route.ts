@@ -19,8 +19,8 @@ function haversineNm(lat1: number, lon1: number, lat2: number, lon2: number): nu
 }
 
 async function fetchTrail(fr24_id: string): Promise<object[]> {
-  const url = `https://fr24api.flightradar24.com/api/historic/flight-positions/full`
-            + `?flights=${encodeURIComponent(fr24_id)}&limit=500`
+  const url = `https://fr24api.flightradar24.com/api/flight-tracks`
+            + `?flight_id=${encodeURIComponent(fr24_id)}`
 
   const res = await fetch(url, {
     headers: {
@@ -37,7 +37,10 @@ async function fetchTrail(fr24_id: string): Promise<object[]> {
   }
 
   const body = await res.json()
-  // Response may be paginated; gather first page (500 pts covers any single flight)
+  // SDK format: [{ fr24_id, tracks: [...] }]
+  if (Array.isArray(body) && body[0]?.tracks) return body[0].tracks
+  // Flat array fallback
+  if (Array.isArray(body)) return body
   return body.data ?? []
 }
 
