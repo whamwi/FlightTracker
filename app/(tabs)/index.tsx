@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   SafeAreaView,
 } from 'react-native'
+import { Ionicons } from '@expo/vector-icons'
 import { FlightCard } from '../../components/FlightCard'
 import { fetchFlights } from '../../lib/api'
 import { syriaDate } from '../../lib/constants'
@@ -54,7 +55,10 @@ function NowLine({ time }: { time: string }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 10, gap: 10 }}>
       <View style={{ flex: 1, height: 1, backgroundColor: '#1d4ed8' }} />
-      <Text style={{ color: '#60a5fa', fontSize: 13, fontWeight: '600' }}>🕐 {time} · Now</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+        <Ionicons name="time-outline" size={14} color="#60a5fa" />
+        <Text style={{ color: '#60a5fa', fontSize: 13, fontWeight: '600' }}>{time} · Now</Text>
+      </View>
       <View style={{ flex: 1, height: 1, backgroundColor: '#1d4ed8' }} />
     </View>
   )
