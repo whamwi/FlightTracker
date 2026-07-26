@@ -15,7 +15,7 @@ function DelayBadge({ min }: { min: number | null }) {
   if (!min || Math.abs(min) < 1) return null
   const color = min > 0 ? '#ef4444' : '#22c55e'
   return (
-    <View style={{ backgroundColor: '#3f5870', borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1, marginTop: 2, alignSelf: 'flex-start' }}>
+    <View style={{ backgroundColor: '#1f2937', borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1, marginTop: 2, alignSelf: 'flex-start' }}>
       <Text style={{ color, fontSize: 12, fontWeight: '600' }}>{min > 0 ? `+${min}m` : `${min}m`}</Text>
     </View>
   )
@@ -49,10 +49,10 @@ export function FlightCard({ f, view }: { f: Flight; view: ViewType }) {
   return (
     <View
       style={{
-        backgroundColor: '#344B61',
+        backgroundColor: '#111827',
         borderRadius: 12,
         borderWidth: 1,
-        borderColor: '#3f5870',
+        borderColor: '#1f2937',
         borderLeftWidth: 3,
         borderLeftColor: cfg.border,
         marginBottom: 10,
@@ -66,7 +66,7 @@ export function FlightCard({ f, view }: { f: Flight; view: ViewType }) {
           <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8, gap: 10 }}>
             <View style={{
               width: 36, height: 36, borderRadius: 12, overflow: 'hidden',
-              backgroundColor: LOGO_WHITE_BG.has(f.airline_iata) ? '#ffffff' : '#3f5870',
+              backgroundColor: LOGO_WHITE_BG.has(f.airline_iata) ? '#ffffff' : '#1f2937',
               justifyContent: 'center', alignItems: 'center',
             }}>
               <Image
@@ -103,9 +103,9 @@ export function FlightCard({ f, view }: { f: Flight; view: ViewType }) {
               <Text style={{ color: '#4b5563', fontSize: 12 }}>{durationLabel(f.duration_min)}</Text>
             )}
             <View style={{ flexDirection: 'row', alignItems: 'center', width: '100%' }}>
-              <View style={{ flex: 1, height: 1, backgroundColor: '#405870' }} />
+              <View style={{ flex: 1, height: 1, backgroundColor: '#374151' }} />
               <Text style={{ color: '#4b5563', fontSize: 12, marginHorizontal: 4 }}>✈</Text>
-              <View style={{ flex: 1, height: 1, backgroundColor: '#405870' }} />
+              <View style={{ flex: 1, height: 1, backgroundColor: '#374151' }} />
             </View>
           </View>
 

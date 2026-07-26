@@ -139,7 +139,7 @@ export default function BoardScreen() {
   }, [loading, listItems, dateTab])
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#253548' }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#030712' }}>
       {/* Header */}
       <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8, gap: 10 }}>
 
@@ -154,12 +154,12 @@ export default function BoardScreen() {
                 alignItems: 'center',
                 paddingVertical: 8,
                 borderRadius: 10,
-                backgroundColor: dateTab === dt ? '#ffffff' : '#344B61',
+                backgroundColor: dateTab === dt ? '#ffffff' : '#111827',
                 borderWidth: 1,
-                borderColor: dateTab === dt ? '#ffffff' : '#3f5870',
+                borderColor: dateTab === dt ? '#ffffff' : '#1f2937',
               }}
             >
-              <Text style={{ color: dateTab === dt ? '#253548' : '#9ca3af', fontSize: 13, fontWeight: '600' }}>
+              <Text style={{ color: dateTab === dt ? '#030712' : '#9ca3af', fontSize: 13, fontWeight: '600' }}>
                 {DATE_LABELS[dt]}
               </Text>
               <Text style={{ color: dateTab === dt ? '#374151' : '#4b5563', fontSize: 11, marginTop: 1 }}>
@@ -171,7 +171,7 @@ export default function BoardScreen() {
 
         {/* Arr/Dep + Airport on same row */}
         <View style={{ flexDirection: 'row', gap: 8 }}>
-          <View style={{ flex: 1, flexDirection: 'row', backgroundColor: '#344B61', borderRadius: 8, padding: 3 }}>
+          <View style={{ flex: 1, flexDirection: 'row', backgroundColor: '#111827', borderRadius: 8, padding: 3 }}>
             {([['arr', 'Arrivals'], ['dep', 'Departures']] as [ViewType, string][]).map(([v, label]) => (
               <TouchableOpacity
                 key={v}
@@ -184,14 +184,14 @@ export default function BoardScreen() {
                   backgroundColor: view === v ? '#ffffff' : 'transparent',
                 }}
               >
-                <Text style={{ color: view === v ? '#253548' : '#6b7280', fontWeight: '600', fontSize: 13 }}>
+                <Text style={{ color: view === v ? '#030712' : '#6b7280', fontWeight: '600', fontSize: 13 }}>
                   {label}
                 </Text>
               </TouchableOpacity>
             ))}
           </View>
 
-          <View style={{ flexDirection: 'row', backgroundColor: '#344B61', borderRadius: 8, padding: 3 }}>
+          <View style={{ flexDirection: 'row', backgroundColor: '#111827', borderRadius: 8, padding: 3 }}>
             {(['DAM', 'ALP'] as Airport[]).map(ap => (
               <TouchableOpacity
                 key={ap}
@@ -203,7 +203,7 @@ export default function BoardScreen() {
                   backgroundColor: airport === ap ? '#ffffff' : 'transparent',
                 }}
               >
-                <Text style={{ color: airport === ap ? '#253548' : '#6b7280', fontWeight: '700', fontSize: 13 }}>
+                <Text style={{ color: airport === ap ? '#030712' : '#6b7280', fontWeight: '700', fontSize: 13 }}>
                   {ap}
                 </Text>
               </TouchableOpacity>
