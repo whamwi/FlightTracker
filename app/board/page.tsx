@@ -224,25 +224,45 @@ function AirlineLogo({ iata, flag, name }: { iata: string; flag: string; name: s
 }
 
 // ── Flight progress bar (en-route only) ─────────────────────────────────────
-function FlightProgress({ depUtc, durationMin }: { depUtc: string; durationMin: number }) {
-  const [pct, setPct] = useState(0)
+function ProgressRoute({ depUtc, durationMin }: { depUtc: string; durationMin: number }) {
+  const calc = () => {
+    const dep = new Date(depUtc).getTime()
+    return Math.min(100, Math.max(0, ((Date.now() - dep) / (durationMin * 60_000)) * 100))
+  }
+  const [pct, setPct] = useState(calc)
   useEffect(() => {
-    const update = () => {
-      const dep = new Date(depUtc).getTime()
-      const p = Math.min(100, Math.max(0, ((Date.now() - dep) / (durationMin * 60_000)) * 100))
-      setPct(p)
-    }
-    update()
-    const t = setInterval(update, 30_000)
+    const t = setInterval(() => setPct(calc()), 30_000)
     return () => clearInterval(t)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [depUtc, durationMin])
 
+  const leftPct = Math.max(2, Math.min(98, pct))
+  // Grows from 0.7rem at departure to 1.3rem approaching
+  const size = 0.7 + (pct / 100) * 0.6
+
   return (
-    <div className="h-0.5 bg-gray-800 rounded-full overflow-hidden">
+    <div className="flex-1 relative" style={{ height: '1.75rem' }}>
+      {/* Track */}
+      <div className="absolute inset-x-0" style={{ top: '50%', transform: 'translateY(-50%)' }}>
+        <div className="w-full h-px bg-gray-800" />
+        <div
+          className="absolute top-0 left-0 h-px bg-sky-700 transition-all duration-1000"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      {/* Moving plane */}
       <div
-        className="h-full rounded-full transition-all duration-1000"
-        style={{ width: `${pct.toFixed(1)}%`, background: 'linear-gradient(90deg, #0284c7, #06b6d4)' }}
-      />
+        className="absolute text-sky-400 transition-all duration-1000"
+        style={{
+          left: `${leftPct}%`,
+          top: '50%',
+          transform: 'translate(-50%, -50%)',
+          fontSize: `${size.toFixed(2)}rem`,
+          lineHeight: 1,
+        }}
+      >
+        ✈
+      </div>
     </div>
   )
 }
@@ -324,16 +344,20 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
           <p className="text-white font-bold text-sm leading-tight truncate">{airportFlag(f.dep_iata)} {city(f.dep_iata)}</p>
           <p className="text-gray-500 text-xs font-mono text-center">{f.dep_iata}</p>
         </div>
-        <div className="flex-1 flex flex-col items-center gap-0.5">
-          <div className="flex items-center gap-1 w-full">
-            <div className="flex-1 h-px bg-gray-700" />
-            <span className="text-gray-600 text-xs">✈</span>
-            <div className="flex-1 h-px bg-gray-700" />
+        {showProgress && depForProgress ? (
+          <ProgressRoute depUtc={depForProgress} durationMin={f.duration_min} />
+        ) : (
+          <div className="flex-1 flex flex-col items-center gap-0.5">
+            <div className="flex items-center gap-1 w-full">
+              <div className="flex-1 h-px bg-gray-700" />
+              <span className="text-gray-600 text-xs">✈</span>
+              <div className="flex-1 h-px bg-gray-700" />
+            </div>
+            {f.duration_min > 0 && (
+              <p className="text-gray-600 text-xs">{durationLabel(f.duration_min)}</p>
+            )}
           </div>
-          {f.duration_min > 0 && (
-            <p className="text-gray-600 text-xs">{durationLabel(f.duration_min)}</p>
-          )}
-        </div>
+        )}
         <div className="text-right min-w-[5rem]">
           <p className="text-white font-bold text-sm leading-tight truncate">{airportFlag(f.arr_iata)} {city(f.arr_iata)}</p>
           <p className="text-gray-500 text-xs font-mono text-center">{f.arr_iata}</p>
@@ -389,9 +413,6 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
       </div>
 
       </div>
-      {showProgress && (
-        <FlightProgress depUtc={depForProgress!} durationMin={f.duration_min} />
-      )}
     </div>
   )
 }
