@@ -130,7 +130,9 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<Bo
         if (seen.has(key)) continue
         seen.add(key)
         const status         = (f.status ?? '').toLowerCase()
-        const actual_dep_utc = extractActualDepUtc(status, date)
+        const actual_dep_utc = f.real_dep
+          ? new Date(f.real_dep * 1000).toISOString()
+          : extractActualDepUtc(status, date)
         const actual_arr_utc = f.real_arr
           ? new Date(f.real_arr * 1000).toISOString()
           : extractActualArrUtc(status, date)
@@ -386,6 +388,9 @@ export async function GET() {
     // Include any board flight with a confirmed departure (or arrival) that is
     // not covered by a live ADS-B signal.  Flights with actual_arr_utc within
     // the last 4 h are included so the Map can show the ARRIVED state briefly.
+    // For inbound flights without a departure confirmation (FR24 only updates the
+    // arrival-airport row, which stays "Estimated" until landing), we synthesize
+    // actual_dep_utc from sched_dep so the ESTIMATED ghost marker still appears.
     const NOW_MS = Date.now()
     const boardDeparted = resolvedBoard
       .filter(f => {
@@ -394,19 +399,31 @@ export async function GET() {
         if (f.actual_dep_utc) return true
         // Already landed without a departure record — still show ARRIVED for 4 h
         if (f.actual_arr_utc && NOW_MS - new Date(f.actual_arr_utc).getTime() < 4 * 3_600_000) return true
+        // Scheduled window says flight should be airborne right now — include for ESTIMATED marker
+        if (f.sched_dep && f.sched_arr) {
+          const depMs = f.sched_dep * 1000
+          const arrMs = f.sched_arr * 1000
+          if (NOW_MS >= depMs && NOW_MS <= arrMs + 30 * 60_000) return true
+        }
         return false
       })
-      .map(f => ({
-        callsign:       f.callsign,
-        dep_iata:       f.dep_iata,
-        arr_iata:       f.arr_iata,
-        duration_min:   f.duration_min,
-        actual_dep_utc: f.actual_dep_utc,
-        actual_arr_utc: f.actual_arr_utc,
-        iata_number:    f.num,
-        dep_delay_min:  f.dep_delay_min,
-        airline_iata:   f.airline_iata,
-      }))
+      .map(f => {
+        // Synthesize actual_dep_utc from sched_dep when the board hasn't confirmed
+        // departure yet (inbound flights: DAM arrivals row stays "Estimated" en route).
+        const actual_dep_utc = f.actual_dep_utc
+          ?? (f.sched_dep && !f.actual_arr_utc ? new Date(f.sched_dep * 1000).toISOString() : null)
+        return {
+          callsign:       f.callsign,
+          dep_iata:       f.dep_iata,
+          arr_iata:       f.arr_iata,
+          duration_min:   f.duration_min,
+          actual_dep_utc,
+          actual_arr_utc: f.actual_arr_utc,
+          iata_number:    f.num,
+          dep_delay_min:  f.dep_delay_min,
+          airline_iata:   f.airline_iata,
+        }
+      })
 
     return NextResponse.json({
       ok:           true,
