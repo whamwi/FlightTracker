@@ -1050,7 +1050,8 @@ export default function Map() {
         // On-ground: pin to arrival airport
         if (isOnGround && !arrSnapped) {
           const se_ = scheduleRef.current.find(e => e.callsign === cs)
-          const arrC_ = se_ ? ALL_AIRPORT_COORDS[se_.arr_iata] : null
+          const arrIata_ = se_?.arr_iata ?? a.arr_iata ?? null
+          const arrC_ = arrIata_ ? ALL_AIRPORT_COORDS[arrIata_] : null
           if (arrC_) { dispLat = arrC_[0]; dispLon = arrC_[1]; arrSnapped = true; projected = true }
         }
 
@@ -1059,7 +1060,9 @@ export default function Map() {
           const fsFix = flightStatusRef.current[cs]
           if (fsFix?.actual_arr_utc && now - new Date(fsFix.actual_arr_utc).getTime() < 4 * 3_600_000) {
             const seFix = scheduleRef.current.find(e => e.callsign === cs)
-            const arrFix = seFix ? ALL_AIRPORT_COORDS[seFix.arr_iata] : null
+            const arrFix = (seFix ? ALL_AIRPORT_COORDS[seFix.arr_iata] : null)
+                        ?? (fsFix.arr_iata ? ALL_AIRPORT_COORDS[fsFix.arr_iata] : null)
+                        ?? (a.arr_iata    ? ALL_AIRPORT_COORDS[a.arr_iata]    : null)
             if (arrFix) { dispLat = arrFix[0]; dispLon = arrFix[1]; arrSnapped = true }
           }
         }
