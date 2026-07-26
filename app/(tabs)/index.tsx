@@ -54,12 +54,12 @@ function flightSyriaMin(f: Flight, v: ViewType): number {
 function NowLine({ time }: { time: string }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 10, gap: 10 }}>
-      <View style={{ flex: 1, height: 1, backgroundColor: '#ffffff' }} />
+      <View style={{ flex: 1, height: 1, backgroundColor: '#9ca3af' }} />
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-        <Ionicons name="time-outline" size={14} color="#ffffff" />
-        <Text style={{ color: '#ffffff', fontSize: 13, fontWeight: '600' }}>{time} · Now</Text>
+        <Ionicons name="time-outline" size={14} color="#9ca3af" />
+        <Text style={{ color: '#9ca3af', fontSize: 13, fontWeight: '600' }}>{time} · Now</Text>
       </View>
-      <View style={{ flex: 1, height: 1, backgroundColor: '#ffffff' }} />
+      <View style={{ flex: 1, height: 1, backgroundColor: '#9ca3af' }} />
     </View>
   )
 }
