@@ -910,6 +910,13 @@ export default function Map() {
           delete lastKnownRef.current[hex]
           continue
         }
+        if (!isSyria) {
+          markersRef.current[hex]?.remove()
+          delete markersRef.current[hex]
+          linesRef.current[hex]?.forEach((l: any) => l.remove())
+          delete linesRef.current[hex]
+          continue
+        }
         const elapsed = now - entry.lostAt
         // True when the aircraft is on the ground — landed early before the schedule
         // fraction reaches 1.0.  Used to show ARRIVED and extend the expiry window.
