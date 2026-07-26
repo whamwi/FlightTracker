@@ -91,15 +91,15 @@ export default function BoardScreen() {
                 alignItems: 'center',
                 paddingVertical: 8,
                 borderRadius: 10,
-                backgroundColor: dateTab === dt ? '#1d4ed8' : '#111827',
+                backgroundColor: dateTab === dt ? '#ffffff' : '#111827',
                 borderWidth: 1,
-                borderColor: dateTab === dt ? '#1d4ed8' : '#1f2937',
+                borderColor: dateTab === dt ? '#ffffff' : '#1f2937',
               }}
             >
-              <Text style={{ color: dateTab === dt ? '#ffffff' : '#9ca3af', fontSize: 13, fontWeight: '600' }}>
+              <Text style={{ color: dateTab === dt ? '#030712' : '#9ca3af', fontSize: 13, fontWeight: '600' }}>
                 {DATE_LABELS[dt]}
               </Text>
-              <Text style={{ color: dateTab === dt ? '#bfdbfe' : '#4b5563', fontSize: 11, marginTop: 1 }}>
+              <Text style={{ color: dateTab === dt ? '#374151' : '#4b5563', fontSize: 11, marginTop: 1 }}>
                 {shortDate(dt)}
               </Text>
             </TouchableOpacity>
@@ -119,10 +119,10 @@ export default function BoardScreen() {
                   alignItems: 'center',
                   paddingVertical: 6,
                   borderRadius: 6,
-                  backgroundColor: view === v ? '#1d4ed8' : 'transparent',
+                  backgroundColor: view === v ? '#ffffff' : 'transparent',
                 }}
               >
-                <Text style={{ color: view === v ? '#ffffff' : '#6b7280', fontWeight: '600', fontSize: 13 }}>
+                <Text style={{ color: view === v ? '#030712' : '#6b7280', fontWeight: '600', fontSize: 13 }}>
                   {label}
                 </Text>
               </TouchableOpacity>
@@ -139,10 +139,10 @@ export default function BoardScreen() {
                   paddingHorizontal: 14,
                   paddingVertical: 6,
                   borderRadius: 6,
-                  backgroundColor: airport === ap ? '#1d4ed8' : 'transparent',
+                  backgroundColor: airport === ap ? '#ffffff' : 'transparent',
                 }}
               >
-                <Text style={{ color: airport === ap ? '#ffffff' : '#6b7280', fontWeight: '700', fontSize: 13 }}>
+                <Text style={{ color: airport === ap ? '#030712' : '#6b7280', fontWeight: '700', fontSize: 13 }}>
                   {ap}
                 </Text>
               </TouchableOpacity>
