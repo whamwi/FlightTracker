@@ -241,27 +241,32 @@ function ProgressRoute({ depUtc, durationMin }: { depUtc: string; durationMin: n
   const size = 0.7 + (pct / 100) * 0.6
 
   return (
-    <div className="flex-1 relative" style={{ height: '1.75rem' }}>
-      {/* Track */}
-      <div className="absolute inset-x-0" style={{ top: '50%', transform: 'translateY(-50%)' }}>
-        <div className="w-full h-px bg-gray-800" />
+    <div className="flex-1 flex flex-col items-center gap-0.5">
+      {durationMin > 0 && (
+        <p className="text-gray-600 text-xs">{durationLabel(durationMin)}</p>
+      )}
+      <div className="relative w-full" style={{ height: '1.25rem' }}>
+        {/* Track */}
+        <div className="absolute inset-x-0" style={{ top: '50%', transform: 'translateY(-50%)' }}>
+          <div className="w-full h-px bg-gray-800" />
+          <div
+            className="absolute top-0 left-0 h-px bg-sky-700 transition-all duration-1000"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        {/* Moving plane */}
         <div
-          className="absolute top-0 left-0 h-px bg-sky-700 transition-all duration-1000"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      {/* Moving plane */}
-      <div
-        className="absolute text-sky-400 transition-all duration-1000"
-        style={{
-          left: `${leftPct}%`,
-          top: '50%',
-          transform: 'translate(-50%, -50%)',
-          fontSize: `${size.toFixed(2)}rem`,
-          lineHeight: 1,
-        }}
-      >
-        ✈
+          className="absolute text-sky-400 transition-all duration-1000"
+          style={{
+            left: `${leftPct}%`,
+            top: '50%',
+            transform: 'translate(-50%, -50%)',
+            fontSize: `${size.toFixed(2)}rem`,
+            lineHeight: 1,
+          }}
+        >
+          ✈
+        </div>
       </div>
     </div>
   )
@@ -348,14 +353,14 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
           <ProgressRoute depUtc={depForProgress} durationMin={f.duration_min} />
         ) : (
           <div className="flex-1 flex flex-col items-center gap-0.5">
+            {f.duration_min > 0 && (
+              <p className="text-gray-600 text-xs">{durationLabel(f.duration_min)}</p>
+            )}
             <div className="flex items-center gap-1 w-full">
               <div className="flex-1 h-px bg-gray-700" />
               <span className="text-gray-600 text-xs">✈</span>
               <div className="flex-1 h-px bg-gray-700" />
             </div>
-            {f.duration_min > 0 && (
-              <p className="text-gray-600 text-xs">{durationLabel(f.duration_min)}</p>
-            )}
           </div>
         )}
         <div className="text-right min-w-[5rem]">
