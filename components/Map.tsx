@@ -528,6 +528,9 @@ export default function Map() {
   const flightStatusRef   = useRef<Record<string, FlightStatus>>({})
   const photoCacheRef     = useRef<Record<string, string | null>>({})
   const photoRequestedRef = useRef<Set<string>>(new Set())
+  // Last confirmed ADS-B lat/lon per callsign — kept alive through stale hand-off
+  // so the schedule overlay GPS floor still works after trackedRef is cleared.
+  const lastADSBPosRef    = useRef<Record<string, { lat: number; lon: number; lostAt: number }>>({})
 
   const [error, setError] = useState<string | null>(null)
 
@@ -550,6 +553,47 @@ export default function Map() {
         maxZoom: 19,
       }).addTo(map)
       mapInstanceRef.current = map
+
+      // ── Syrian airport circles ─────────────────────────────────────────────
+      const SERVICED: [number, number][] = [
+        // Syrian airports
+        [33.4114, 36.5156], // DAM
+        [36.1807, 37.2244], // ALP
+        [35.4011, 35.9488], // LTK
+        [35.2854, 40.1760], // DEZ
+        // Active destinations (last 7 days)
+        [31.7226, 35.9930], // AMM
+        [52.3086,  4.7639], // AMS
+        [24.4330, 54.6511], // AUH
+        [33.2626, 44.2346], // BGW
+        [26.4712, 49.7979], // DMM
+        [25.2731, 51.6081], // DOH
+        [25.2528, 55.3644], // DXB
+        [36.2376, 43.9631], // EBL
+        [40.1281, 32.9951], // ESB
+        [40.9769, 28.8146], // IST
+        [21.6796, 39.1565], // JED
+        [15.5895, 32.5532], // KRT
+        [29.2267, 47.9689], // KWI
+        [23.5933, 58.2844], // MCT
+        [32.8942, 13.2759], // MJI
+        [44.5711, 26.0850], // OTP
+        [24.9578, 46.6989], // RUH
+        [40.8986, 29.3092], // SAW
+        [25.3285, 55.5172], // SHJ
+      ]
+      for (const coords of SERVICED) {
+        L.circle(coords, {
+          radius:      8000,
+          color:       '#e53e3e',
+          fillColor:   '#e53e3e',
+          fillOpacity: 0.08,
+          weight:      2,
+          dashArray:   '4 4',
+          opacity:     0.75,
+          interactive: false,
+        }).addTo(map)
+      }
     })
     return () => { mapInstanceRef.current?.remove(); mapInstanceRef.current = null }
   }, [])
@@ -781,6 +825,10 @@ export default function Map() {
           delete trackedRef.current[cs]
           continue
         }
+
+        // Record last ADS-B lat/lon before any hand-off clears trackedRef,
+        // so the schedule overlay GPS floor still works after hand-off.
+        if (!isFr24) lastADSBPosRef.current[cs] = { lat: a.lat, lon: a.lon, lostAt }
 
         // ADS-B stale hand-off: if schedule can now drive position, let it
         if (!isFr24 && lostAt > 0 && now - lostAt > STALE_HAND_OFF_MS) {
@@ -1073,7 +1121,6 @@ export default function Map() {
         }
 
         const fs = flightStatusRef.current[callsign]
-        const POST_ARR_BUFFER_MS = 60 * 60_000
         const AIRBORNE_STATUSES  = new Set(['En Route', 'Departed', 'Approaching'])
 
         let fraction: number | null = null
@@ -1082,8 +1129,13 @@ export default function Map() {
 
         if (fs?.actual_dep_utc && !priorLegDone && duration_min > 0) {
           const elapsed = now - new Date(fs.actual_dep_utc).getTime()
-          if (elapsed > 0 && elapsed < duration_min * 60_000 + POST_ARR_BUFFER_MS) {
+          if (elapsed > 0) {
             fraction = elapsed / (duration_min * 60_000)
+            // Only expire when 8h+ past expected arrival — clearly stale.
+            // Let fraction exceed 1.0 naturally; the display layer caps fPos at 0.97.
+            if (fraction > 1.0 && elapsed - duration_min * 60_000 > 8 * 3_600_000) {
+              fraction = null
+            }
           }
         } else {
           const schedFrac = isFlightActiveNow(dep_time_utc, arr_time_utc, days_of_week, now)
@@ -1093,8 +1145,11 @@ export default function Map() {
               : null
             if (impliedDepMs) {
               const elapsed = now - impliedDepMs
-              if (elapsed > 0 && elapsed < duration_min * 60_000 + POST_ARR_BUFFER_MS) {
+              if (elapsed > 0) {
                 fraction = elapsed / (duration_min * 60_000)
+                if (fraction > 1.0 && elapsed - duration_min * 60_000 > 8 * 3_600_000) {
+                  fraction = null
+                }
               }
             } else if (fs && AIRBORNE_STATUSES.has(fs.status)) {
               fraction = schedFrac
@@ -1110,13 +1165,18 @@ export default function Map() {
           }
         }
 
-        // GPS floor: prevent ESTIMATED from jumping backward
+        // GPS floor: prevent ESTIMATED from jumping backward.
+        // Falls back to lastADSBPosRef so the floor works after stale hand-off
+        // clears trackedRef (e.g. signal lost on final approach).
         if (fraction !== null && fraction < 1.0) {
           const gpsWps = routePathsRef.current[`${dep_iata}|${arr_iata}`]
           if (gpsWps?.length) {
             const lkEntry = trackedRef.current[callsign]
-            if (lkEntry && now - lkEntry.lostAt < 10 * 60_000) {
-              const lkFrac = nearestPathFraction(gpsWps, lkEntry.a.lat, lkEntry.a.lon)
+            const lkPos   = lkEntry
+              ? { lat: lkEntry.a.lat, lon: lkEntry.a.lon, lostAt: lkEntry.lostAt }
+              : lastADSBPosRef.current[callsign] ?? null
+            if (lkPos && now - lkPos.lostAt < 30 * 60_000) {
+              const lkFrac = nearestPathFraction(gpsWps, lkPos.lat, lkPos.lon)
               if (lkFrac > fraction) fraction = lkFrac
             }
           }
