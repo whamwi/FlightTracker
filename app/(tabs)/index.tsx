@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   View,
   Text,
@@ -35,12 +35,19 @@ function shortDate(tab: DateTab): string {
   return `${parseInt(d)} ${months[parseInt(m) - 1]}`
 }
 
-function flightUtc(f: Flight, v: ViewType): string {
+// Returns UTC HH:MM string for sorting/comparing
+function flightUtcHHMM(f: Flight, v: ViewType): string {
   const raw = v === 'arr'
     ? (f.actual_arr_utc ?? f.revised_arr_utc ?? f.arr_time_utc)
     : (f.actual_dep_utc ?? f.revised_dep_utc ?? f.dep_time_utc)
   if (!raw) return '00:00'
   return raw.includes('T') ? raw.slice(11, 16) : raw
+}
+
+// Minutes from midnight in Syria local time (UTC+3)
+function flightSyriaMin(f: Flight, v: ViewType): number {
+  const [h, m] = flightUtcHHMM(f, v).split(':').map(Number)
+  return ((h + 3) * 60 + m) % 1440
 }
 
 function NowLine({ time }: { time: string }) {
@@ -61,6 +68,7 @@ export default function BoardScreen() {
   const [loading, setLoading]   = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError]       = useState<string | null>(null)
+  const flatListRef = useRef<FlatList>(null)
 
   const load = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true)
@@ -79,27 +87,28 @@ export default function BoardScreen() {
 
   useEffect(() => { load() }, [load])
 
+  // Sort in Syria local time so midnight wrap is handled correctly
   const sorted = useMemo(() => {
     const filtered = flights.filter(f =>
       view === 'arr' ? f.arr_iata === airport : f.dep_iata === airport
     )
     return [...filtered].sort((a, b) =>
-      flightUtc(a, view).localeCompare(flightUtc(b, view))
+      flightSyriaMin(a, view) - flightSyriaMin(b, view)
     )
   }, [flights, airport, view])
 
+  // Inject Now divider at the correct position (today only)
   const listItems = useMemo((): ListItem[] => {
     if (dateTab !== 'today' || sorted.length === 0) return sorted
     const n = new Date()
-    const utcHH = String(n.getUTCHours()).padStart(2, '0')
-    const utcMM = String(n.getUTCMinutes()).padStart(2, '0')
-    const nowUtc = `${utcHH}:${utcMM}`
+    const nowSyriaMin = ((n.getUTCHours() + 3) * 60 + n.getUTCMinutes()) % 1440
     const localH = (n.getUTCHours() + 3) % 24
-    const nowLocal = `${String(localH).padStart(2, '0')}:${utcMM}`
+    const localM = n.getUTCMinutes()
+    const nowLocal = `${String(localH).padStart(2, '0')}:${String(localM).padStart(2, '0')}`
     const items: ListItem[] = []
     let inserted = false
     for (const f of sorted) {
-      if (!inserted && flightUtc(f, view) > nowUtc) {
+      if (!inserted && flightSyriaMin(f, view) > nowSyriaMin) {
         items.push({ _now: true, timeStr: nowLocal })
         inserted = true
       }
@@ -108,6 +117,22 @@ export default function BoardScreen() {
     if (!inserted) items.push({ _now: true, timeStr: nowLocal })
     return items
   }, [sorted, dateTab, view])
+
+  // Scroll to show one flight above the Now line on initial load
+  useEffect(() => {
+    if (dateTab !== 'today' || loading || listItems.length === 0) return
+    const nowIdx = listItems.findIndex(item => '_now' in item)
+    if (nowIdx <= 0) return
+    const scrollIdx = Math.max(0, nowIdx - 1)
+    const timer = setTimeout(() => {
+      flatListRef.current?.scrollToIndex({
+        index: scrollIdx,
+        animated: true,
+        viewPosition: 0,
+      })
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [loading, listItems, dateTab])
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#030712' }}>
@@ -201,9 +226,12 @@ export default function BoardScreen() {
         </View>
       ) : (
         <FlatList
+          ref={flatListRef}
           data={listItems}
           keyExtractor={(item, i) =>
-            '_now' in item ? 'now-divider' : `${(item as Flight).iata_number}-${(item as Flight).dep_time_utc}-${i}`
+            '_now' in item
+              ? 'now-divider'
+              : `${(item as Flight).iata_number}-${(item as Flight).dep_time_utc}-${i}`
           }
           renderItem={({ item }) =>
             '_now' in item
@@ -214,6 +242,12 @@ export default function BoardScreen() {
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor="#38bdf8" />
           }
+          onScrollToIndexFailed={({ index }) => {
+            // Retry after list has rendered
+            setTimeout(() => {
+              flatListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0 })
+            }, 300)
+          }}
           ItemSeparatorComponent={() => <View style={{ height: 2 }} />}
         />
       )}
