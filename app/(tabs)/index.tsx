@@ -1,0 +1,178 @@
+import { useState, useEffect, useCallback } from 'react'
+import {
+  View,
+  Text,
+  FlatList,
+  TouchableOpacity,
+  RefreshControl,
+  ActivityIndicator,
+  SafeAreaView,
+  ScrollView,
+} from 'react-native'
+import { FlightCard } from '../../components/FlightCard'
+import { fetchFlights } from '../../lib/api'
+import { syriaDate } from '../../lib/constants'
+import type { Flight, Airport, View as ViewType } from '../../lib/types'
+
+type DateTab = 'yesterday' | 'today' | 'tomorrow'
+
+const DATE_LABELS: Record<DateTab, string> = {
+  yesterday: 'Yesterday',
+  today:     'Today',
+  tomorrow:  'Tomorrow',
+}
+
+function dateForTab(tab: DateTab): string {
+  const offset = tab === 'yesterday' ? -1 : tab === 'tomorrow' ? 1 : 0
+  return syriaDate(offset)
+}
+
+export default function BoardScreen() {
+  const [airport, setAirport]   = useState<Airport>('DAM')
+  const [view, setView]         = useState<ViewType>('arr')
+  const [dateTab, setDateTab]   = useState<DateTab>('today')
+  const [flights, setFlights]   = useState<Flight[]>([])
+  const [loading, setLoading]   = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [error, setError]       = useState<string | null>(null)
+
+  const load = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true)
+    else setLoading(true)
+    setError(null)
+    try {
+      const date = dateForTab(dateTab)
+      const all = await fetchFlights(date)
+      setFlights(all)
+    } catch (e) {
+      setError('Failed to load flights. Pull to retry.')
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
+    }
+  }, [dateTab])
+
+  useEffect(() => { load() }, [load])
+
+  const filtered = flights.filter(f => {
+    const matchAirport = view === 'arr' ? f.arr_iata === airport : f.dep_iata === airport
+    return matchAirport
+  })
+
+  const sorted = [...filtered].sort((a, b) => {
+    const ta = view === 'arr'
+      ? (a.actual_arr_utc ?? a.revised_arr_utc ?? a.arr_time_utc)
+      : (a.actual_dep_utc ?? a.revised_dep_utc ?? a.dep_time_utc)
+    const tb = view === 'arr'
+      ? (b.actual_arr_utc ?? b.revised_arr_utc ?? b.arr_time_utc)
+      : (b.actual_dep_utc ?? b.revised_dep_utc ?? b.dep_time_utc)
+    return ta.localeCompare(tb)
+  })
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#030712' }}>
+      {/* Header */}
+      <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8, gap: 10 }}>
+        <Text style={{ color: '#ffffff', fontSize: 20, fontWeight: '700' }}>Syria Flights</Text>
+
+        {/* Airport selector */}
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          {(['DAM', 'ALP'] as Airport[]).map(ap => (
+            <TouchableOpacity
+              key={ap}
+              onPress={() => setAirport(ap)}
+              style={{
+                paddingHorizontal: 16,
+                paddingVertical: 6,
+                borderRadius: 8,
+                backgroundColor: airport === ap ? '#0284c7' : '#111827',
+                borderWidth: 1,
+                borderColor: airport === ap ? '#0284c7' : '#1f2937',
+              }}
+            >
+              <Text style={{ color: airport === ap ? '#ffffff' : '#6b7280', fontWeight: '600', fontSize: 13 }}>
+                {ap}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* Arr / Dep toggle */}
+        <View style={{ flexDirection: 'row', backgroundColor: '#111827', borderRadius: 8, padding: 3, alignSelf: 'flex-start' }}>
+          {([['arr', 'Arrivals'], ['dep', 'Departures']] as [ViewType, string][]).map(([v, label]) => (
+            <TouchableOpacity
+              key={v}
+              onPress={() => setView(v)}
+              style={{
+                paddingHorizontal: 14,
+                paddingVertical: 5,
+                borderRadius: 6,
+                backgroundColor: view === v ? '#1d4ed8' : 'transparent',
+              }}
+            >
+              <Text style={{ color: view === v ? '#ffffff' : '#6b7280', fontWeight: '600', fontSize: 13 }}>
+                {label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* Date tabs */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {(['yesterday', 'today', 'tomorrow'] as DateTab[]).map(dt => (
+              <TouchableOpacity
+                key={dt}
+                onPress={() => setDateTab(dt)}
+                style={{
+                  paddingHorizontal: 14,
+                  paddingVertical: 5,
+                  borderRadius: 8,
+                  backgroundColor: dateTab === dt ? '#374151' : 'transparent',
+                  borderWidth: 1,
+                  borderColor: dateTab === dt ? '#4b5563' : '#1f2937',
+                }}
+              >
+                <Text style={{ color: dateTab === dt ? '#ffffff' : '#6b7280', fontSize: 13, fontWeight: '500' }}>
+                  {DATE_LABELS[dt]}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </ScrollView>
+      </View>
+
+      {/* Content */}
+      {loading ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color="#38bdf8" />
+        </View>
+      ) : error ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 }}>
+          <Text style={{ color: '#ef4444', textAlign: 'center', fontSize: 14 }}>{error}</Text>
+        </View>
+      ) : sorted.length === 0 ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 }}>
+          <Text style={{ color: '#4b5563', textAlign: 'center', fontSize: 14 }}>
+            No {view === 'arr' ? 'arrivals' : 'departures'} for {airport} on {DATE_LABELS[dateTab].toLowerCase()}
+          </Text>
+        </View>
+      ) : (
+        <FlatList
+          data={sorted}
+          keyExtractor={f => f.iata_number + f.dep_time_utc}
+          renderItem={({ item }) => <FlightCard f={item} view={view} />}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => load(true)}
+              tintColor="#38bdf8"
+            />
+          }
+          ItemSeparatorComponent={() => <View style={{ height: 2 }} />}
+        />
+      )}
+    </SafeAreaView>
+  )
+}
