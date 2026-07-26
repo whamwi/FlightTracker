@@ -125,12 +125,13 @@ export async function GET(req: Request) {
 
     const key    = keyOverride ?? `${num}|${depIata}|${arrIata}`
     const status = normaliseStatus(f.status)
+    // If we have a confirmed arrival timestamp, promote to Arrived regardless of status text.
+    const effectiveStatus = f.fr24_actual_arr ? 'Arrived' : status
 
     if (flightMap[key]) {
       const existRank = STATUS_RANK[flightMap[key].status] ?? 0
-      const newRank   = STATUS_RANK[status] ?? 0
       // Always take the best status seen across all entries
-      if (newRank > existRank) flightMap[key].status = status
+      if ((STATUS_RANK[effectiveStatus] ?? 0) > existRank) flightMap[key].status = effectiveStatus
       // Always overwrite timing with the latest entry (later in array = more recent FR24 data)
       if (schedDep) { flightMap[key].dep_time_utc = unixToUtcHHMM(schedDep); flightMap[key].sched_dep_unix = schedDep }
       if (schedArr) flightMap[key].arr_time_utc = unixToUtcHHMM(schedArr)
@@ -161,7 +162,7 @@ export async function GET(req: Request) {
       arr_time_utc:    unixToUtcHHMM(schedArr),
       sched_dep_unix:  schedDep,
       duration_min:    f.duration_min ?? 0,
-      status,
+      status:          effectiveStatus,
       actual_dep_utc:  f.fr24_actual_dep  ?? null,
       actual_arr_utc:  f.fr24_actual_arr  ?? null,
       revised_dep_utc: f.fr24_revised_dep ?? null,
@@ -188,6 +189,7 @@ export async function GET(req: Request) {
       fr24_revised_dep: t.startsWith('estimated') || t.startsWith('expect') || t.startsWith('delayed')
         ? extractStatusUtc(f.status, d)
         : (f.est_dep ? new Date(f.est_dep * 1000).toISOString() : null),
+      fr24_actual_arr: f.real_arr ? new Date(f.real_arr * 1000).toISOString() : null,
     })
   }
 
