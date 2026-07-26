@@ -201,6 +201,7 @@ export async function GET(req: Request) {
           ? extractStatusUtc(f.status, date)
           : (f.est_arr ? new Date(f.est_arr * 1000).toISOString() : null),
         fr24_actual_dep:  f.real_dep ? new Date(f.real_dep * 1000).toISOString() : null,
+        fr24_revised_dep: f.est_dep  ? new Date(f.est_dep  * 1000).toISOString() : null,
       })
       // Collect origin for second pass
       const dep = (f.dep_iata || '') as string
