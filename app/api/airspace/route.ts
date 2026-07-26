@@ -99,7 +99,7 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<Bo
     return boardCache.flights
 
   const res = await fetch(
-    `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${date}&select=airport_iata,departures,arrivals`,
+    `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${date}&airport_iata=in.(DAM,ALP,LTK)&select=airport_iata,departures,arrivals`,
     { headers: SB_HEADERS },
   )
   if (!res.ok) return boardCache?.flights ?? []
