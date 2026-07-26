@@ -1,4 +1,5 @@
 import { Tabs } from 'expo-router'
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons'
 
 export default function TabsLayout() {
   return (
@@ -19,21 +20,20 @@ export default function TabsLayout() {
         name="index"
         options={{
           title: 'Board',
-          tabBarIcon: ({ color }) => <TabIcon emoji="✈️" color={color} />,
+          tabBarIcon: ({ color, size }) => (
+            <Feather name="list" size={size} color={color} />
+          ),
         }}
       />
       <Tabs.Screen
         name="airlines"
         options={{
           title: 'Airlines',
-          tabBarIcon: ({ color }) => <TabIcon emoji="🛫" color={color} />,
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="airplane" size={size} color={color} />
+          ),
         }}
       />
     </Tabs>
   )
-}
-
-function TabIcon({ emoji, color }: { emoji: string; color: string }) {
-  const { Text } = require('react-native')
-  return <Text style={{ fontSize: 18, opacity: color === '#38bdf8' ? 1 : 0.5 }}>{emoji}</Text>
 }
