@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   View,
   Text,
@@ -14,6 +14,8 @@ import { syriaDate } from '../../lib/constants'
 import type { Flight, Airport, View as ViewType } from '../../lib/types'
 
 type DateTab = 'yesterday' | 'today' | 'tomorrow'
+type NowDivider = { _now: true; timeStr: string }
+type ListItem = Flight | NowDivider
 
 const DATE_LABELS: Record<DateTab, string> = {
   yesterday: 'Yesterday',
@@ -33,6 +35,24 @@ function shortDate(tab: DateTab): string {
   return `${parseInt(d)} ${months[parseInt(m) - 1]}`
 }
 
+function flightUtc(f: Flight, v: ViewType): string {
+  const raw = v === 'arr'
+    ? (f.actual_arr_utc ?? f.revised_arr_utc ?? f.arr_time_utc)
+    : (f.actual_dep_utc ?? f.revised_dep_utc ?? f.dep_time_utc)
+  if (!raw) return '00:00'
+  return raw.includes('T') ? raw.slice(11, 16) : raw
+}
+
+function NowLine({ time }: { time: string }) {
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 10, gap: 10 }}>
+      <View style={{ flex: 1, height: 1, backgroundColor: '#1d4ed8' }} />
+      <Text style={{ color: '#60a5fa', fontSize: 13, fontWeight: '600' }}>{time} · Now</Text>
+      <View style={{ flex: 1, height: 1, backgroundColor: '#1d4ed8' }} />
+    </View>
+  )
+}
+
 export default function BoardScreen() {
   const [airport, setAirport]   = useState<Airport>('DAM')
   const [view, setView]         = useState<ViewType>('arr')
@@ -47,10 +67,9 @@ export default function BoardScreen() {
     else setLoading(true)
     setError(null)
     try {
-      const date = dateForTab(dateTab)
-      const all = await fetchFlights(date)
+      const all = await fetchFlights(dateForTab(dateTab))
       setFlights(all)
-    } catch (e) {
+    } catch {
       setError('Failed to load flights. Pull to retry.')
     } finally {
       setLoading(false)
@@ -60,20 +79,35 @@ export default function BoardScreen() {
 
   useEffect(() => { load() }, [load])
 
-  const filtered = flights.filter(f => {
-    const matchAirport = view === 'arr' ? f.arr_iata === airport : f.dep_iata === airport
-    return matchAirport
-  })
+  const sorted = useMemo(() => {
+    const filtered = flights.filter(f =>
+      view === 'arr' ? f.arr_iata === airport : f.dep_iata === airport
+    )
+    return [...filtered].sort((a, b) =>
+      flightUtc(a, view).localeCompare(flightUtc(b, view))
+    )
+  }, [flights, airport, view])
 
-  const sorted = [...filtered].sort((a, b) => {
-    const ta = view === 'arr'
-      ? (a.actual_arr_utc ?? a.revised_arr_utc ?? a.arr_time_utc)
-      : (a.actual_dep_utc ?? a.revised_dep_utc ?? a.dep_time_utc)
-    const tb = view === 'arr'
-      ? (b.actual_arr_utc ?? b.revised_arr_utc ?? b.arr_time_utc)
-      : (b.actual_dep_utc ?? b.revised_dep_utc ?? b.dep_time_utc)
-    return ta.localeCompare(tb)
-  })
+  const listItems = useMemo((): ListItem[] => {
+    if (dateTab !== 'today' || sorted.length === 0) return sorted
+    const n = new Date()
+    const utcHH = String(n.getUTCHours()).padStart(2, '0')
+    const utcMM = String(n.getUTCMinutes()).padStart(2, '0')
+    const nowUtc = `${utcHH}:${utcMM}`
+    const localH = (n.getUTCHours() + 3) % 24
+    const nowLocal = `${String(localH).padStart(2, '0')}:${utcMM}`
+    const items: ListItem[] = []
+    let inserted = false
+    for (const f of sorted) {
+      if (!inserted && flightUtc(f, view) > nowUtc) {
+        items.push({ _now: true, timeStr: nowLocal })
+        inserted = true
+      }
+      items.push(f)
+    }
+    if (!inserted) items.push({ _now: true, timeStr: nowLocal })
+    return items
+  }, [sorted, dateTab, view])
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#030712' }}>
@@ -108,7 +142,6 @@ export default function BoardScreen() {
 
         {/* Arr/Dep + Airport on same row */}
         <View style={{ flexDirection: 'row', gap: 8 }}>
-          {/* Arrivals / Departures pill */}
           <View style={{ flex: 1, flexDirection: 'row', backgroundColor: '#111827', borderRadius: 8, padding: 3 }}>
             {([['arr', 'Arrivals'], ['dep', 'Departures']] as [ViewType, string][]).map(([v, label]) => (
               <TouchableOpacity
@@ -129,7 +162,6 @@ export default function BoardScreen() {
             ))}
           </View>
 
-          {/* DAM / ALP pill */}
           <View style={{ flexDirection: 'row', backgroundColor: '#111827', borderRadius: 8, padding: 3 }}>
             {(['DAM', 'ALP'] as Airport[]).map(ap => (
               <TouchableOpacity
@@ -169,16 +201,18 @@ export default function BoardScreen() {
         </View>
       ) : (
         <FlatList
-          data={sorted}
-          keyExtractor={(f, i) => `${f.iata_number}-${f.dep_time_utc}-${i}`}
-          renderItem={({ item }) => <FlightCard f={item} view={view} />}
+          data={listItems}
+          keyExtractor={(item, i) =>
+            '_now' in item ? 'now-divider' : `${(item as Flight).iata_number}-${(item as Flight).dep_time_utc}-${i}`
+          }
+          renderItem={({ item }) =>
+            '_now' in item
+              ? <NowLine time={(item as NowDivider).timeStr} />
+              : <FlightCard f={item as Flight} view={view} />
+          }
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }}
           refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => load(true)}
-              tintColor="#38bdf8"
-            />
+            <RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor="#38bdf8" />
           }
           ItemSeparatorComponent={() => <View style={{ height: 2 }} />}
         />
