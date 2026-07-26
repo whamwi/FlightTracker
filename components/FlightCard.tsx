@@ -1,6 +1,6 @@
-import { View, Text } from 'react-native'
+import { View, Text, Image } from 'react-native'
 import type { Flight, View as ViewType } from '../lib/types'
-import { city, airportFlag, statusConfig, durationLabel, fmtLocal, tzOffset } from '../lib/constants'
+import { city, airportFlag, statusConfig, durationLabel, fmtLocal, tzOffset, airlineLogo, LOGO_WHITE_BG } from '../lib/constants'
 
 function StatusBadge({ status }: { status: string }) {
   const cfg = statusConfig(status)
@@ -61,15 +61,28 @@ export function FlightCard({ f, view }: { f: Flight; view: ViewType }) {
     >
       <View style={{ padding: 14, gap: 10 }}>
 
-        {/* Row 1: airline + status */}
+        {/* Row 1: airline logo + name + status */}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <View style={{ flex: 1, marginRight: 8 }}>
-            <Text style={{ color: '#ffffff', fontWeight: '600', fontSize: 14 }} numberOfLines={1}>
-              {f.country_flag} {f.airline_name}
-            </Text>
-            <Text style={{ color: '#9ca3af', fontSize: 12, fontFamily: 'monospace', marginTop: 1 }}>
-              {f.iata_number}
-            </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8, gap: 10 }}>
+            <View style={{
+              width: 36, height: 36, borderRadius: 8, overflow: 'hidden',
+              backgroundColor: LOGO_WHITE_BG.has(f.airline_iata) ? '#ffffff' : '#1f2937',
+              justifyContent: 'center', alignItems: 'center',
+            }}>
+              <Image
+                source={{ uri: airlineLogo(f.airline_iata) }}
+                style={{ width: 32, height: 32 }}
+                resizeMode="contain"
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: '#ffffff', fontWeight: '600', fontSize: 14 }} numberOfLines={1}>
+                {f.airline_name}
+              </Text>
+              <Text style={{ color: '#9ca3af', fontSize: 12, fontFamily: 'monospace', marginTop: 1 }}>
+                {f.iata_number}
+              </Text>
+            </View>
           </View>
           <StatusBadge status={f.status} />
         </View>

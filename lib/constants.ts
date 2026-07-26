@@ -1,5 +1,21 @@
 export const API_BASE = 'https://flighttracker-sy.vercel.app'
 
+const LOCAL_LOGOS: Record<string, string> = {
+  XH:  'airlines/XH.jpg',
+  TK:  'airlines/TK.jpg',
+  EY:  'airlines/EY.png',
+  J9:  'airlines/J9.png',
+  FZ:  'airlines/FZ.jpg',
+  G9:  'airlines/G9.png',
+  '3L':'airlines/G9.png',
+}
+export const LOGO_WHITE_BG = new Set(['J9', 'G9', '3L'])
+
+export function airlineLogo(iata: string): string {
+  if (LOCAL_LOGOS[iata]) return `${API_BASE}/${LOCAL_LOGOS[iata]}`
+  return `https://images.flightsfrom.com/airlines/100/${iata}_100px.png`
+}
+
 export const CITY: Record<string, string> = {
   DAM: 'Damascus',  ALP: 'Aleppo',    SHJ: 'Sharjah',
   DXB: 'Dubai',     AUH: 'Abu Dhabi', MCT: 'Muscat',
