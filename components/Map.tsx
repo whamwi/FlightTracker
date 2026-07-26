@@ -724,6 +724,40 @@ export default function Map() {
         }
       }
 
+      // ── 2b. Log live ADS-B positions for board-matched flights ───────────────
+      // Fire-and-forget — never block the render loop
+      if (freshCallsigns.size > 0) {
+        const syriaDt = new Date(now + 3 * 3_600_000).toISOString().slice(0, 10)
+        const batch = [...freshCallsigns].flatMap(cs => {
+          const entry = trackedRef.current[cs]
+          if (!entry || entry.lostAt > 0) return []
+          const a = entry.a
+          const alt = typeof a.alt_baro === 'number' ? a.alt_baro
+                    : a.alt_baro === 'ground'        ? 0
+                    : null
+          return [{
+            callsign:    cs,
+            flight_date: syriaDt,
+            lat:         a.lat,
+            lon:         a.lon,
+            alt_baro:    alt,
+            gs:          a.gs,
+            track:       a.track,
+            hex:         a.hex,
+            dep_iata:    a.dep_iata,
+            arr_iata:    a.arr_iata,
+            iata_number: a.iata_number,
+          }]
+        })
+        if (batch.length > 0) {
+          fetch('/api/signal-log', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify(batch),
+          }).catch(() => {})
+        }
+      }
+
       // ── 3. Render tracked entries (live + stale/DR) ────────────────────────
       const realCallsigns = new Set<string>()   // suppresses schedule markers
       const STALE_HAND_OFF_MS = 3 * 60_000
