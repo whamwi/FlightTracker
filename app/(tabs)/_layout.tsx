@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router'
-import { Feather, MaterialCommunityIcons } from '@expo/vector-icons'
+import { MaterialCommunityIcons } from '@expo/vector-icons'
 
 export default function TabsLayout() {
   return (
@@ -21,7 +21,7 @@ export default function TabsLayout() {
         options={{
           title: 'Board',
           tabBarIcon: ({ color, size }) => (
-            <Feather name="list" size={size} color={color} />
+            <MaterialCommunityIcons name="view-list-outline" size={size} color={color} />
           ),
         }}
       />
