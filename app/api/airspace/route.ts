@@ -399,19 +399,10 @@ export async function GET() {
         if (f.actual_dep_utc) return true
         // Already landed without a departure record — still show ARRIVED for 4 h
         if (f.actual_arr_utc && NOW_MS - new Date(f.actual_arr_utc).getTime() < 4 * 3_600_000) return true
-        // Scheduled window says flight should be airborne right now — include for ESTIMATED marker
-        if (f.sched_dep && f.sched_arr) {
-          const depMs = f.sched_dep * 1000
-          const arrMs = f.sched_arr * 1000
-          if (NOW_MS >= depMs && NOW_MS <= arrMs + 30 * 60_000) return true
-        }
         return false
       })
       .map(f => {
-        // Synthesize actual_dep_utc from sched_dep when the board hasn't confirmed
-        // departure yet (inbound flights: DAM arrivals row stays "Estimated" en route).
         const actual_dep_utc = f.actual_dep_utc
-          ?? (f.sched_dep && !f.actual_arr_utc ? new Date(f.sched_dep * 1000).toISOString() : null)
         return {
           callsign:       f.callsign,
           dep_iata:       f.dep_iata,
