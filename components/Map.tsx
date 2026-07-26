@@ -998,9 +998,23 @@ export default function Map() {
                 }
               }
             } else {
-              // ADS-B stale: use schedule-based fraction
-              dispLat = timeLat; dispLon = timeLon
-              dispTrack = bearingFromPath(wps, useF)
+              // ADS-B stale: DR from real last-known position to prevent snap-back when
+              // a plane briefly enters ADS-B range then exits (real position is ahead of
+              // the schedule fraction — using it prevents backward jumps on signal loss).
+              if (typeof a.gs === 'number' && a.gs > 50 && typeof a.track === 'number') {
+                const [drLat, drLon] = projectPosition(a.lat, a.lon, a.track, a.gs, elapsed)
+                const drF = nearestPathFraction(wps, drLat, drLon)
+                if (drF >= useF) {
+                  dispLat = drLat; dispLon = drLon
+                  dispTrack = a.track
+                } else {
+                  dispLat = timeLat; dispLon = timeLon
+                  dispTrack = bearingFromPath(wps, useF)
+                }
+              } else {
+                dispLat = timeLat; dispLon = timeLon
+                dispTrack = bearingFromPath(wps, useF)
+              }
             }
             projected = true
           } else if (schedEntry && fraction !== null && fraction > 1.0) {
