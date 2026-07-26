@@ -242,9 +242,10 @@ function ProgressRoute({ depUtc, durationMin }: { depUtc: string; durationMin: n
 
   return (
     <div className="flex-1 flex flex-col items-center gap-0.5">
-      {durationMin > 0 && (
-        <p className="text-gray-600 text-xs">{durationLabel(durationMin)}</p>
-      )}
+      {durationMin > 0 && (() => {
+        const remainingMin = Math.round((1 - pct / 100) * durationMin)
+        return <p className="text-gray-600 text-xs">{remainingMin > 0 ? durationLabel(remainingMin) : 'Arriving'}</p>
+      })()}
       <div className="relative w-full" style={{ height: '1.25rem' }}>
         {/* Track */}
         <div className="absolute inset-x-0" style={{ top: '50%', transform: 'translateY(-50%)' }}>
