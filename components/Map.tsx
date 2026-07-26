@@ -1125,7 +1125,7 @@ export default function Map() {
         // Confirmed arrival within 4h → always show ARRIVED regardless of priorLegDone
         // priorLegDone was blocking fraction computation once actual_arr_utc was set,
         // which caused the marker to disappear exactly when it should show ARRIVED.
-        if (actualArrMs !== null && now - actualArrMs < 4 * 3_600_000) {
+        if (actualArrMs !== null && now - actualArrMs < 30 * 60_000) {
           fraction = 1.1
         }
 
