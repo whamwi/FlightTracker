@@ -1122,9 +1122,10 @@ export default function Map() {
           }
         }
 
-        // Confirmed early landing
-        if (fraction !== null && fraction < 1.0 && fs?.actual_arr_utc && !priorLegDone
-            && now - new Date(fs.actual_arr_utc).getTime() < 4 * 3_600_000) {
+        // Confirmed arrival within 4h → always show ARRIVED regardless of priorLegDone
+        // priorLegDone was blocking fraction computation once actual_arr_utc was set,
+        // which caused the marker to disappear exactly when it should show ARRIVED.
+        if (actualArrMs !== null && now - actualArrMs < 4 * 3_600_000) {
           fraction = 1.1
         }
 
