@@ -529,8 +529,6 @@ export default function Map() {
   const photoCacheRef     = useRef<Record<string, string | null>>({})
   const photoRequestedRef = useRef<Set<string>>(new Set())
 
-  const [count, setCount]           = useState(0)
-  const [lastUpdate, setLastUpdate] = useState('')
   const [error, setError]           = useState<string | null>(null)
 
   // ── Map init ────────────────────────────────────────────────────────────────
@@ -1412,8 +1410,6 @@ export default function Map() {
         }
       }
 
-      setCount(liveAircraft.length)
-      setLastUpdate(new Date().toLocaleTimeString())
     }
 
     fetchAndUpdate()
@@ -1424,11 +1420,11 @@ export default function Map() {
   return (
     <div className="relative w-full h-full">
       <div ref={mapRef} className="w-full h-full" />
-      <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000] bg-gray-900/90 backdrop-blur px-4 py-2 rounded-full text-sm flex items-center gap-4 border border-gray-700">
-        <span className="text-blue-400 font-mono font-bold">{count} aircraft</span>
-        {lastUpdate && <span className="text-gray-400">Updated {lastUpdate}</span>}
-        {error && <span className="text-red-400">{error}</span>}
-      </div>
+      {error && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000] bg-gray-900/90 backdrop-blur px-4 py-2 rounded-full text-sm border border-gray-700">
+          <span className="text-red-400">{error}</span>
+        </div>
+      )}
     </div>
   )
 }
