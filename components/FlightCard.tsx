@@ -6,7 +6,7 @@ function StatusBadge({ status }: { status: string }) {
   const cfg = statusConfig(status)
   return (
     <View style={{ backgroundColor: cfg.bg, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 99 }}>
-      <Text style={{ color: cfg.text, fontSize: 11, fontWeight: '600' }}>{cfg.label}</Text>
+      <Text style={{ color: cfg.text, fontSize: 12, fontWeight: '600' }}>{cfg.label}</Text>
     </View>
   )
 }
@@ -16,7 +16,7 @@ function DelayBadge({ min }: { min: number | null }) {
   const color = min > 0 ? '#ef4444' : '#22c55e'
   return (
     <View style={{ backgroundColor: '#1f2937', borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1, marginTop: 2, alignSelf: 'flex-start' }}>
-      <Text style={{ color, fontSize: 10, fontWeight: '600' }}>{min > 0 ? `+${min}m` : `${min}m`}</Text>
+      <Text style={{ color, fontSize: 12, fontWeight: '600' }}>{min > 0 ? `+${min}m` : `${min}m`}</Text>
     </View>
   )
 }
@@ -89,20 +89,18 @@ export function FlightCard({ f, view }: { f: Flight; view: ViewType }) {
 
         {/* Row 2: route */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          {/* Departure airport */}
           <View style={{ minWidth: 72 }}>
-            <Text style={{ color: '#ffffff', fontWeight: '700', fontSize: 13 }} numberOfLines={1}>
+            <Text style={{ color: '#ffffff', fontWeight: '700', fontSize: 14 }} numberOfLines={1}>
               {airportFlag(f.dep_iata)} {city(f.dep_iata)}
             </Text>
-            <Text style={{ color: '#6b7280', fontSize: 11, fontFamily: 'monospace', textAlign: 'center', marginTop: 1 }}>
+            <Text style={{ color: '#6b7280', fontSize: 12, fontFamily: 'monospace', textAlign: 'center', marginTop: 1 }}>
               {f.dep_iata}
             </Text>
           </View>
 
-          {/* Line + duration */}
           <View style={{ flex: 1, alignItems: 'center', gap: 3 }}>
             {f.duration_min > 0 && (
-              <Text style={{ color: '#4b5563', fontSize: 11 }}>{durationLabel(f.duration_min)}</Text>
+              <Text style={{ color: '#4b5563', fontSize: 12 }}>{durationLabel(f.duration_min)}</Text>
             )}
             <View style={{ flexDirection: 'row', alignItems: 'center', width: '100%' }}>
               <View style={{ flex: 1, height: 1, backgroundColor: '#374151' }} />
@@ -111,12 +109,11 @@ export function FlightCard({ f, view }: { f: Flight; view: ViewType }) {
             </View>
           </View>
 
-          {/* Arrival airport */}
           <View style={{ minWidth: 72, alignItems: 'flex-end' }}>
-            <Text style={{ color: '#ffffff', fontWeight: '700', fontSize: 13, textAlign: 'right' }} numberOfLines={1}>
+            <Text style={{ color: '#ffffff', fontWeight: '700', fontSize: 14, textAlign: 'right' }} numberOfLines={1}>
               {airportFlag(f.arr_iata)} {city(f.arr_iata)}
             </Text>
-            <Text style={{ color: '#6b7280', fontSize: 11, fontFamily: 'monospace', textAlign: 'center', marginTop: 1 }}>
+            <Text style={{ color: '#6b7280', fontSize: 12, fontFamily: 'monospace', textAlign: 'center', marginTop: 1 }}>
               {f.arr_iata}
             </Text>
           </View>
@@ -125,22 +122,22 @@ export function FlightCard({ f, view }: { f: Flight; view: ViewType }) {
         {/* Row 3: times */}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
           <View>
-            <Text style={{ color: '#6b7280', fontSize: 11, marginBottom: 2 }}>Departure</Text>
+            <Text style={{ color: '#6b7280', fontSize: 12, marginBottom: 2 }}>Departure</Text>
             <Text style={{ color: depColor, fontWeight: '600', fontSize: 17, fontFamily: 'monospace' }}>{depTime}</Text>
             <DelayBadge min={depDelay} />
           </View>
 
           <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
             {f.aircraft_type ? (
-              <Text style={{ color: '#4b5563', fontSize: 11 }}>{f.aircraft_type}</Text>
+              <Text style={{ color: '#4b5563', fontSize: 12 }}>{f.aircraft_type}</Text>
             ) : null}
             {(isArr ? f.arr_gate : f.dep_gate) ? (
-              <Text style={{ color: '#6b7280', fontSize: 11 }}>Gate {isArr ? f.arr_gate : f.dep_gate}</Text>
+              <Text style={{ color: '#6b7280', fontSize: 12 }}>Gate {isArr ? f.arr_gate : f.dep_gate}</Text>
             ) : null}
           </View>
 
           <View style={{ alignItems: 'flex-end' }}>
-            <Text style={{ color: '#6b7280', fontSize: 11, marginBottom: 2 }}>Arrival</Text>
+            <Text style={{ color: '#6b7280', fontSize: 12, marginBottom: 2 }}>Arrival</Text>
             <Text style={{ color: arrColor, fontWeight: '600', fontSize: 17, fontFamily: 'monospace' }}>{arrTime}</Text>
             {isArr && <DelayBadge min={arrDelay} />}
           </View>
