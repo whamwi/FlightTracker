@@ -139,6 +139,11 @@ export async function GET(req: Request) {
       if (f.fr24_actual_arr)  flightMap[key].actual_arr_utc  = f.fr24_actual_arr
       if (f.fr24_revised_dep) flightMap[key].revised_dep_utc = f.fr24_revised_dep
       if (f.fr24_revised_arr) flightMap[key].revised_arr_utc = f.fr24_revised_arr
+      if (f.dep_terminal) flightMap[key].dep_terminal = f.dep_terminal
+      if (f.dep_gate)     flightMap[key].dep_gate     = f.dep_gate
+      if (f.arr_terminal) flightMap[key].arr_terminal = f.arr_terminal
+      if (f.arr_gate)     flightMap[key].arr_gate     = f.arr_gate
+      if (f.arr_baggage)  flightMap[key].arr_baggage  = f.arr_baggage
       return
     }
 
@@ -161,8 +166,13 @@ export async function GET(req: Request) {
       actual_arr_utc:  f.fr24_actual_arr  ?? null,
       revised_dep_utc: f.fr24_revised_dep ?? null,
       revised_arr_utc: f.fr24_revised_arr ?? null,
-      aircraft_type:   f.aircraft ?? null,
-      aircraft_reg:    f.reg      ?? null,
+      aircraft_type:   f.aircraft    ?? null,
+      aircraft_reg:    f.reg         ?? null,
+      dep_terminal:    f.dep_terminal ?? null,
+      dep_gate:        f.dep_gate     ?? null,
+      arr_terminal:    f.arr_terminal ?? null,
+      arr_gate:        f.arr_gate     ?? null,
+      arr_baggage:     f.arr_baggage  ?? null,
     }
   }
 

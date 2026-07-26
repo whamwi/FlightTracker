@@ -66,6 +66,11 @@ function normalizeForCache(data: any): Record<string, { arrivals: object[]; depa
       real_arr:     fl.time?.real?.arrival        ?? null,
       aircraft:     fl.aircraft?.model?.code      ?? null,
       reg:          fl.aircraft?.registration     ?? null,
+      dep_terminal: fl.airport?.origin?.info?.terminal      ?? null,
+      dep_gate:     fl.airport?.origin?.info?.gate          ?? null,
+      arr_terminal: fl.airport?.destination?.info?.terminal ?? null,
+      arr_gate:     fl.airport?.destination?.info?.gate     ?? null,
+      arr_baggage:  fl.airport?.destination?.info?.baggage  ?? null,
     }
     // Drop FR24 widget artifacts: corrupted entries have an inflated block time
     // (> 5 hours for any Syrian-region route is always a bad sched_arr timestamp).

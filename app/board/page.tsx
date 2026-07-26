@@ -65,6 +65,11 @@ type Flight = {
   revised_arr_utc: string | null
   aircraft_type: string | null
   aircraft_reg: string | null
+  dep_terminal: string | null
+  dep_gate: string | null
+  arr_terminal: string | null
+  arr_gate: string | null
+  arr_baggage: string | null
 }
 
 type Tab     = -1 | 0 | 1        // yesterday / today / tomorrow
@@ -329,6 +334,15 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
 
         <div className="flex-1 flex flex-col items-center justify-center gap-0.5">
           {f.aircraft_type && <p className="text-gray-600 text-xs">{f.aircraft_type}</p>}
+          {(isArr ? f.arr_terminal : f.dep_terminal) && (
+            <p className="text-gray-500 text-xs">T{isArr ? f.arr_terminal : f.dep_terminal}</p>
+          )}
+          {(isArr ? f.arr_gate : f.dep_gate) && (
+            <p className="text-gray-500 text-xs">Gate {isArr ? f.arr_gate : f.dep_gate}</p>
+          )}
+          {isArr && f.arr_baggage && (
+            <p className="text-sky-600 text-xs">Belt {f.arr_baggage}</p>
+          )}
         </div>
 
         <div className="min-w-[3.5rem] text-right">
