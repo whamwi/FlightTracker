@@ -321,7 +321,7 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
       {/* Row 2: Route */}
       <div className="flex items-center gap-2">
         <div className="text-left min-w-[5rem]">
-          <p className="text-white font-bold text-sm leading-tight truncate">{city(f.dep_iata)} {airportFlag(f.dep_iata)}</p>
+          <p className="text-white font-bold text-sm leading-tight truncate">{airportFlag(f.dep_iata)} {city(f.dep_iata)}</p>
           <p className="text-gray-500 text-xs font-mono">{f.dep_iata}</p>
         </div>
         <div className="flex-1 flex flex-col items-center gap-0.5">
