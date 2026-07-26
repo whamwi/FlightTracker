@@ -23,6 +23,7 @@ interface Aircraft {
   duration_min:   number | null
   iata_number:    string | null
   actual_dep_utc: string | null
+  actual_arr_utc: string | null
   dep_delay_min:  number | null
   airline_iata:   string | null
   seen_at?: string
@@ -646,51 +647,58 @@ export default function Map() {
             }
           }
 
-          // Seed flightStatusRef from board_match aircraft with actual_dep_utc
+          // Seed flightStatusRef from board_match aircraft with lifecycle timestamps
           for (const a of data.aircraft as Aircraft[]) {
-            if (!a.board_match || !a.actual_dep_utc) continue
+            if (!a.board_match || (!a.actual_dep_utc && !a.actual_arr_utc)) continue
             const cs = (a.flight ?? '').trim()
             if (!cs) continue
             const existing = flightStatusRef.current[cs]
-            if (!existing?.actual_dep_utc) {
-              flightStatusRef.current[cs] = {
-                callsign:          cs,
-                status:            'Departed',
-                actual_dep_utc:    a.actual_dep_utc,
-                actual_arr_utc:    existing?.actual_arr_utc    ?? null,
-                scheduled_dep_utc: existing?.scheduled_dep_utc ?? null,
-                scheduled_arr_utc: existing?.scheduled_arr_utc ?? null,
-                revised_dep_utc:   existing?.revised_dep_utc   ?? null,
-                revised_arr_utc:   existing?.revised_arr_utc   ?? null,
-                dep_delay_min:     a.dep_delay_min ?? existing?.dep_delay_min ?? null,
-                arr_delay_min:     existing?.arr_delay_min      ?? null,
-                aircraft_reg:      a.r ?? existing?.aircraft_reg   ?? null,
-                aircraft_type:     a.t ?? existing?.aircraft_type  ?? null,
-                flight_number:     a.iata_number ?? existing?.flight_number ?? null,
-                dep_iata:          a.dep_iata ?? existing?.dep_iata ?? null,
-                arr_iata:          a.arr_iata ?? existing?.arr_iata ?? null,
-                airline_iata:      a.airline_iata ?? existing?.airline_iata ?? null,
-              }
+            flightStatusRef.current[cs] = {
+              callsign:          cs,
+              status:            a.actual_arr_utc ? 'Arrived' : 'Departed',
+              actual_dep_utc:    a.actual_dep_utc    ?? existing?.actual_dep_utc    ?? null,
+              actual_arr_utc:    a.actual_arr_utc    ?? existing?.actual_arr_utc    ?? null,
+              scheduled_dep_utc: existing?.scheduled_dep_utc ?? null,
+              scheduled_arr_utc: existing?.scheduled_arr_utc ?? null,
+              revised_dep_utc:   existing?.revised_dep_utc   ?? null,
+              revised_arr_utc:   existing?.revised_arr_utc   ?? null,
+              dep_delay_min:     a.dep_delay_min ?? existing?.dep_delay_min ?? null,
+              arr_delay_min:     existing?.arr_delay_min      ?? null,
+              aircraft_reg:      a.r ?? existing?.aircraft_reg   ?? null,
+              aircraft_type:     a.t ?? existing?.aircraft_type  ?? null,
+              flight_number:     a.iata_number ?? existing?.flight_number ?? null,
+              dep_iata:          a.dep_iata ?? existing?.dep_iata ?? null,
+              arr_iata:          a.arr_iata ?? existing?.arr_iata ?? null,
+              airline_iata:      a.airline_iata ?? existing?.airline_iata ?? null,
             }
           }
 
           // Inject boardDeparted into scheduleRef + flightStatusRef
           for (const bd of (data.boardDeparted ?? []) as {
             callsign: string; dep_iata: string; arr_iata: string
-            duration_min: number; actual_dep_utc: string; iata_number: string
-            dep_delay_min: number | null; airline_iata: string | null
+            duration_min: number
+            actual_dep_utc: string | null; actual_arr_utc: string | null
+            iata_number: string; dep_delay_min: number | null; airline_iata: string | null
           }[]) {
-            const { callsign: cs, dep_iata, arr_iata, duration_min, actual_dep_utc, iata_number, dep_delay_min, airline_iata } = bd
+            const { callsign: cs, dep_iata, arr_iata, duration_min,
+                    actual_dep_utc, actual_arr_utc, iata_number, dep_delay_min, airline_iata } = bd
             if (!cs || !dep_iata || !arr_iata) continue
-            if (!flightStatusRef.current[cs]?.actual_dep_utc) {
-              flightStatusRef.current[cs] = {
-                callsign: cs, status: 'Departed', actual_dep_utc,
-                actual_arr_utc: null, scheduled_dep_utc: null, scheduled_arr_utc: null,
-                revised_dep_utc: null, revised_arr_utc: null,
-                dep_delay_min, arr_delay_min: null,
-                aircraft_reg: null, aircraft_type: null,
-                flight_number: iata_number, dep_iata, arr_iata, airline_iata,
-              }
+            const existing = flightStatusRef.current[cs]
+            flightStatusRef.current[cs] = {
+              callsign:          cs,
+              status:            actual_arr_utc ? 'Arrived' : 'Departed',
+              actual_dep_utc:    actual_dep_utc ?? existing?.actual_dep_utc ?? null,
+              actual_arr_utc:    actual_arr_utc ?? existing?.actual_arr_utc ?? null,
+              scheduled_dep_utc: existing?.scheduled_dep_utc ?? null,
+              scheduled_arr_utc: existing?.scheduled_arr_utc ?? null,
+              revised_dep_utc:   existing?.revised_dep_utc   ?? null,
+              revised_arr_utc:   existing?.revised_arr_utc   ?? null,
+              dep_delay_min:     dep_delay_min ?? existing?.dep_delay_min ?? null,
+              arr_delay_min:     existing?.arr_delay_min ?? null,
+              aircraft_reg:      existing?.aircraft_reg  ?? null,
+              aircraft_type:     existing?.aircraft_type ?? null,
+              flight_number:     iata_number,
+              dep_iata, arr_iata, airline_iata,
             }
             if (!scheduleRef.current.some(e => e.callsign === cs)) {
               scheduleRef.current.push({

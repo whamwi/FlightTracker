@@ -50,15 +50,21 @@ async function fetchIataToIcao(): Promise<Record<string, string>> {
   return map
 }
 
-// Extract actual departure UTC from FR24 status string ("Departed 01:55" → ISO).
-// Time in status is Syria local (UTC+3); date is the Syria operating date.
-function extractActualDepUtc(status: string, date: string): string | null {
+// Extract actual dep/arr UTC from FR24 status string ("Departed 01:55" → ISO).
+// Times in status are Syria local (UTC+3); date is the Syria operating date.
+function extractStatusUtc(status: string, keywords: string[], date: string): string | null {
   const t = status.toLowerCase()
-  if (!t.includes('departed') && !t.includes('took off')) return null
+  if (!keywords.some(kw => t.includes(kw))) return null
   const match = status.match(/\b(\d{1,2}):(\d{2})\b/)
   if (!match) return null
   const baseMs = new Date(date + 'T00:00:00Z').getTime()
   return new Date(baseMs + (parseInt(match[1]) * 60 + parseInt(match[2]) - 180) * 60_000).toISOString()
+}
+function extractActualDepUtc(status: string, date: string): string | null {
+  return extractStatusUtc(status, ['departed', 'took off'], date)
+}
+function extractActualArrUtc(status: string, date: string): string | null {
+  return extractStatusUtc(status, ['landed', 'arrived'], date)
 }
 
 // Convert FR24 flight number → ADS-B broadcast callsign.
@@ -86,7 +92,8 @@ interface BoardFlight {
   sched_arr:      number | null // unix
   duration_min:   number | null
   status:         string        // raw FR24 status, lowercased
-  actual_dep_utc: string | null // extracted from "Departed HH:MM" in status
+  actual_dep_utc: string | null // from real_dep or "Departed HH:MM" status
+  actual_arr_utc: string | null // from real_arr or "Landed HH:MM" status
   dep_delay_min:  number | null // actual_dep_utc − sched_dep
   airline_iata:   string | null // IATA code for airline logo
 }
@@ -123,7 +130,13 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<Bo
         if (seen.has(key)) continue
         seen.add(key)
         const status       = (f.status ?? '').toLowerCase()
-        const actual_dep_utc = extractActualDepUtc(status, date)
+        // Prefer real_dep/real_arr (set by landing-confirm cron) over status parsing
+        const actual_dep_utc = f.real_dep
+          ? new Date(f.real_dep * 1000).toISOString()
+          : extractActualDepUtc(status, date)
+        const actual_arr_utc = f.real_arr
+          ? new Date(f.real_arr * 1000).toISOString()
+          : extractActualArrUtc(status, date)
         const schedDepMs   = f.sched_dep ? f.sched_dep * 1000 : null
         const actualDepMs  = actual_dep_utc ? new Date(actual_dep_utc).getTime() : null
         const dep_delay_min = (schedDepMs && actualDepMs)
@@ -143,6 +156,7 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<Bo
           duration_min:   f.duration_min ?? null,
           status,
           actual_dep_utc,
+          actual_arr_utc,
           dep_delay_min,
           airline_iata:   icaoToIata[icaoPrefix] ?? null,
         })
@@ -328,12 +342,13 @@ export async function GET() {
       annotated.push({
         ...a,
         board_match:    !!info,
-        dep_iata:       info?.dep_iata      ?? null,
-        arr_iata:       info?.arr_iata      ?? null,
+        dep_iata:       info?.dep_iata       ?? null,
+        arr_iata:       info?.arr_iata       ?? null,
         arr_time_utc:   info?.sched_arr     != null ? unixToHHMM(info.sched_arr) : null,
-        duration_min:   info?.duration_min  ?? null,
-        iata_number:    info?.num           ?? null,
+        duration_min:   info?.duration_min   ?? null,
+        iata_number:    info?.num            ?? null,
         actual_dep_utc: info?.actual_dep_utc ?? null,
+        actual_arr_utc: info?.actual_arr_utc ?? null,
         dep_delay_min:  info?.dep_delay_min  ?? null,
         airline_iata:   info?.airline_iata   ?? null,
       })
@@ -349,12 +364,13 @@ export async function GET() {
       trackedExtra.push({
         ...a,
         board_match:    !!info,
-        dep_iata:       info?.dep_iata      ?? null,
-        arr_iata:       info?.arr_iata      ?? null,
+        dep_iata:       info?.dep_iata       ?? null,
+        arr_iata:       info?.arr_iata       ?? null,
         arr_time_utc:   info?.sched_arr     != null ? unixToHHMM(info.sched_arr) : null,
-        duration_min:   info?.duration_min  ?? null,
-        iata_number:    info?.num           ?? null,
+        duration_min:   info?.duration_min   ?? null,
+        iata_number:    info?.num            ?? null,
         actual_dep_utc: info?.actual_dep_utc ?? null,
+        actual_arr_utc: info?.actual_arr_utc ?? null,
         dep_delay_min:  info?.dep_delay_min  ?? null,
         airline_iata:   info?.airline_iata   ?? null,
       })
@@ -370,18 +386,26 @@ export async function GET() {
       ...annotated.map((a: any) => (a.flight ?? '').trim().toUpperCase()),
       ...trackedExtra.map((a: any) => (a.flight ?? '').trim().toUpperCase()),
     ])
+    // Include any board flight with a confirmed departure (or arrival) that is
+    // not covered by a live ADS-B signal.  Flights with actual_arr_utc within
+    // the last 4 h are included so the Map can show the ARRIVED state briefly.
+    const NOW_MS = Date.now()
     const boardDeparted = resolvedBoard
-      .filter(f =>
-        f.actual_dep_utc &&
-        f.dep_iata && f.arr_iata && f.duration_min &&
-        !seenCallsigns.has(f.callsign)
-      )
+      .filter(f => {
+        if (!f.dep_iata || !f.arr_iata || !f.duration_min) return false
+        if (seenCallsigns.has(f.callsign)) return false
+        if (f.actual_dep_utc) return true
+        // Already landed without a departure record — still show ARRIVED for 4 h
+        if (f.actual_arr_utc && NOW_MS - new Date(f.actual_arr_utc).getTime() < 4 * 3_600_000) return true
+        return false
+      })
       .map(f => ({
         callsign:       f.callsign,
         dep_iata:       f.dep_iata,
         arr_iata:       f.arr_iata,
         duration_min:   f.duration_min,
         actual_dep_utc: f.actual_dep_utc,
+        actual_arr_utc: f.actual_arr_utc,
         iata_number:    f.num,
         dep_delay_min:  f.dep_delay_min,
         airline_iata:   f.airline_iata,
