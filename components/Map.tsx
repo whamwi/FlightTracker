@@ -874,7 +874,13 @@ export default function Map() {
         {
           const bufMs = (a.stale || isOnGround) ? 90 * 60_000 : 15 * 60_000
           let expired = false
-          if (a.actual_dep_utc && a.duration_min) {
+          // Board confirmed arrival — expire after 30 min regardless of ADS-B state.
+          // flightStatusRef is updated from boardDeparted which reflects FR24 status;
+          // a.actual_arr_utc (last live snapshot) may still be null when the plane just landed.
+          const fsArrUtc = flightStatusRef.current[cs]?.actual_arr_utc
+          if (fsArrUtc && now - new Date(fsArrUtc).getTime() > 30 * 60_000) {
+            expired = true
+          } else if (a.actual_dep_utc && a.duration_min) {
             const expectedArrMs = new Date(a.actual_dep_utc).getTime() + a.duration_min * 60_000
             expired = now - expectedArrMs > bufMs
           } else if (a.arr_time_utc) {
