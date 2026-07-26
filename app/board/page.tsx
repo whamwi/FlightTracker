@@ -8,7 +8,7 @@ import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 const CITY: Record<string, string> = {
   DAM: 'Damascus',       ALP: 'Aleppo',          SHJ: 'Sharjah',
   DXB: 'Dubai',          AUH: 'Abu Dhabi',        MCT: 'Muscat',
-  IST: 'Istanbul',       SAW: 'Istanbul (SAW)',   AMM: 'Amman',
+  IST: 'Istanbul',       SAW: 'Istanbul',          AMM: 'Amman',
   BEY: 'Beirut',         CAI: 'Cairo',            DOH: 'Doha',
   KWI: 'Kuwait City',    RUH: 'Riyadh',           JED: 'Jeddah',
   DMM: 'Dammam',         BUH: 'Bucharest',        GYD: 'Baku',
