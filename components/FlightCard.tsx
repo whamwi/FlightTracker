@@ -59,7 +59,7 @@ export function FlightCard({ f, view }: { f: Flight; view: ViewType }) {
         overflow: 'hidden',
       }}
     >
-      <View style={{ padding: 14, gap: 10 }}>
+      <View style={{ padding: 16, gap: 14 }}>
 
         {/* Row 1: airline logo + name + status */}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
