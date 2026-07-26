@@ -79,8 +79,16 @@ export function tzOffset(iata: string): number {
 
 export function fmtLocal(utcStr: string | null | undefined, offsetH: number): string {
   if (!utcStr) return '--:--'
-  const d = new Date(utcStr)
-  const totalMin = d.getUTCHours() * 60 + d.getUTCMinutes() + Math.round(offsetH * 60)
+  let utcH: number, utcM: number
+  if (/^\d{1,2}:\d{2}$/.test(utcStr)) {
+    ;[utcH, utcM] = utcStr.split(':').map(Number)
+  } else {
+    const d = new Date(utcStr)
+    if (isNaN(d.getTime())) return '--:--'
+    utcH = d.getUTCHours()
+    utcM = d.getUTCMinutes()
+  }
+  const totalMin = utcH * 60 + utcM + Math.round(offsetH * 60)
   const norm = ((totalMin % 1440) + 1440) % 1440
   const hh = String(Math.floor(norm / 60)).padStart(2, '0')
   const mm = String(norm % 60).padStart(2, '0')
