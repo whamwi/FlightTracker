@@ -1,7 +1,6 @@
 {
   "services": {},
   "crons": [
-    { "path": "/api/cron/fr24-sync",        "schedule": "0 2 * * *" },
     { "path": "/api/cron/route-reconcile",  "schedule": "0 3 * * *" },
     { "path": "/api/landing-confirm",       "schedule": "*/15 * * * *" }
   ]

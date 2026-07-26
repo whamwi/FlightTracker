@@ -6,8 +6,8 @@ const SB_URL      = process.env.SUPABASE_URL!
 const SB_KEY      = process.env.SUPABASE_ANON_KEY!
 const FR24_TOKEN  = process.env.FR24_API_KEY
 const HEADERS     = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
-const SYRIAN_AIRPORTS = ['DAM', 'ALP', 'LTK']
-const IATA_TO_ICAO: Record<string, string> = { DAM: 'OSDI', ALP: 'OSAP', LTK: 'OSLK' }
+const SYRIAN_AIRPORTS = ['DAM', 'ALP']
+const IATA_TO_ICAO: Record<string, string> = { DAM: 'OSDI', ALP: 'OSAP' }
 
 function syriaDate(offsetDays = 0): string {
   const ms = Date.now() + 3 * 3_600_000 + offsetDays * 86_400_000

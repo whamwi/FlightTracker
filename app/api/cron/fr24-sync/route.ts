@@ -7,7 +7,7 @@ const SB_URL = process.env.SUPABASE_URL!
 const SB_KEY = process.env.SUPABASE_ANON_KEY!
 const FR24_KEY = process.env.FR24_API_KEY!
 
-const AIRPORTS = ['DAM', 'ALP', 'LTK']
+const AIRPORTS = ['DAM', 'ALP']
 const TZ       = 'Asia/Damascus'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
