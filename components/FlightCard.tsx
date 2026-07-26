@@ -65,13 +65,13 @@ export function FlightCard({ f, view }: { f: Flight; view: ViewType }) {
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8, gap: 10 }}>
             <View style={{
-              width: 36, height: 36, borderRadius: 8, overflow: 'hidden',
+              width: 36, height: 36, borderRadius: 12, overflow: 'hidden',
               backgroundColor: LOGO_WHITE_BG.has(f.airline_iata) ? '#ffffff' : '#1f2937',
               justifyContent: 'center', alignItems: 'center',
             }}>
               <Image
                 source={{ uri: airlineLogo(f.airline_iata) }}
-                style={{ width: 32, height: 32 }}
+                style={{ width: 36, height: 36, borderRadius: 12 }}
                 resizeMode="contain"
               />
             </View>
