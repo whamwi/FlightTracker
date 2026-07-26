@@ -53,25 +53,23 @@ function flightSyriaMin(f: Flight, v: ViewType): number {
 
 function NowLine({ time, inAir, done, doneLabel }: { time: string; inAir: number; done: number; doneLabel: string }) {
   return (
-    <View style={{ marginVertical: 10 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-        <View style={{ flex: 1, height: 1, backgroundColor: '#9ca3af' }} />
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-          <Ionicons name="time-outline" size={14} color="#9ca3af" />
-          <Text style={{ color: '#9ca3af', fontSize: 13, fontWeight: '600' }}>{time} · Now</Text>
-        </View>
-        <View style={{ flex: 1, height: 1, backgroundColor: '#9ca3af' }} />
-      </View>
-      {(inAir > 0 || done > 0) && (
-        <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 12, marginTop: 5 }}>
-          {inAir > 0 && (
-            <Text style={{ color: '#38bdf8', fontSize: 11, fontWeight: '600' }}>{inAir} in air</Text>
-          )}
-          {done > 0 && (
-            <Text style={{ color: '#4ade80', fontSize: 11, fontWeight: '600' }}>{done} {doneLabel}</Text>
-          )}
+    <View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 10, gap: 6 }}>
+      <View style={{ flex: 1, height: 1, backgroundColor: '#9ca3af' }} />
+      {inAir > 0 && (
+        <View style={{ backgroundColor: '#0c4a6e', borderRadius: 99, paddingHorizontal: 7, paddingVertical: 2 }}>
+          <Text style={{ color: '#38bdf8', fontSize: 11, fontWeight: '700' }}>{inAir} in air</Text>
         </View>
       )}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+        <Ionicons name="time-outline" size={14} color="#9ca3af" />
+        <Text style={{ color: '#9ca3af', fontSize: 13, fontWeight: '600' }}>{time} · Now</Text>
+      </View>
+      {done > 0 && (
+        <View style={{ backgroundColor: '#052e16', borderRadius: 99, paddingHorizontal: 7, paddingVertical: 2 }}>
+          <Text style={{ color: '#4ade80', fontSize: 11, fontWeight: '700' }}>{done} {doneLabel}</Text>
+        </View>
+      )}
+      <View style={{ flex: 1, height: 1, backgroundColor: '#9ca3af' }} />
     </View>
   )
 }
