@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "expo-router/entry",
   "dependencies": {
+    "babel-plugin-syntax-hermes-parser": "^0.29.1",
     "expo": "~54.0.0",
     "expo-constants": "~17.0.7",
     "expo-linking": "~7.0.5",
