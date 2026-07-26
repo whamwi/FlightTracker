@@ -125,8 +125,9 @@ export async function GET(req: Request) {
 
     const key    = keyOverride ?? `${num}|${depIata}|${arrIata}`
     const status = normaliseStatus(f.status)
-    // If we have a confirmed arrival timestamp, promote to Arrived regardless of status text.
-    const effectiveStatus = f.fr24_actual_arr ? 'Arrived' : status
+    // Promote status based on confirmed timestamps, regardless of status text.
+    const effectiveStatus = f.fr24_actual_arr ? 'Arrived'
+      : (f.fr24_actual_dep && (STATUS_RANK[status] ?? 0) < STATUS_RANK['Departed'] ? 'Departed' : status)
 
     if (flightMap[key]) {
       const existRank = STATUS_RANK[flightMap[key].status] ?? 0
