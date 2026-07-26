@@ -93,7 +93,7 @@ export function FlightCard({ f, view }: { f: Flight; view: ViewType }) {
             <Text style={{ color: '#ffffff', fontWeight: '700', fontSize: 14 }} numberOfLines={1}>
               {airportFlag(f.dep_iata)} {city(f.dep_iata)}
             </Text>
-            <Text style={{ color: '#6b7280', fontSize: 12, fontFamily: 'monospace', textAlign: 'center', marginTop: 1 }}>
+            <Text style={{ color: '#6b7280', fontSize: 12, fontFamily: 'monospace', textAlign: 'center', marginTop: 1, alignSelf: 'stretch' }}>
               {f.dep_iata}
             </Text>
           </View>
@@ -113,7 +113,7 @@ export function FlightCard({ f, view }: { f: Flight; view: ViewType }) {
             <Text style={{ color: '#ffffff', fontWeight: '700', fontSize: 14, textAlign: 'right' }} numberOfLines={1}>
               {airportFlag(f.arr_iata)} {city(f.arr_iata)}
             </Text>
-            <Text style={{ color: '#6b7280', fontSize: 12, fontFamily: 'monospace', textAlign: 'center', marginTop: 1 }}>
+            <Text style={{ color: '#6b7280', fontSize: 12, fontFamily: 'monospace', textAlign: 'center', marginTop: 1, alignSelf: 'stretch' }}>
               {f.arr_iata}
             </Text>
           </View>
