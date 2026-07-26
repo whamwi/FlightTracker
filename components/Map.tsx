@@ -29,11 +29,6 @@ interface Aircraft {
   stale?:   boolean
 }
 
-interface LastKnown {
-  a: Aircraft
-  lostAt: number
-}
-
 interface Waypoint {
   f: number
   lat: number
@@ -509,27 +504,31 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
+type TrackedEntry = { a: Aircraft; lostAt: number; isFr24: boolean }
+
 export default function Map() {
   const mapRef          = useRef<HTMLDivElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapInstanceRef  = useRef<any>(null)
+  // Markers keyed by CALLSIGN (not hex) — one entry per flight
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const markersRef      = useRef<Record<string, any>>({})
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const linesRef        = useRef<Record<string, any[]>>({})
-  const lastKnownRef    = useRef<Record<string, LastKnown>>({})
   // Schedule-based projected markers (key = callsign)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const schedMarkersRef = useRef<Record<string, any>>({})
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const schedLinesRef   = useRef<Record<string, any[]>>({})
-  const scheduleRef     = useRef<ScheduleEntry[]>([])
-  const routePathsRef   = useRef<Record<string, Waypoint[]>>({})
+  // Last-known state keyed by callsign — replaces hex-keyed lastKnownRef
+  const trackedRef        = useRef<Record<string, TrackedEntry>>({})
+  const scheduleRef       = useRef<ScheduleEntry[]>([])
+  const routePathsRef     = useRef<Record<string, Waypoint[]>>({})
   const flightStatusRef   = useRef<Record<string, FlightStatus>>({})
   const photoCacheRef     = useRef<Record<string, string | null>>({})
   const photoRequestedRef = useRef<Set<string>>(new Set())
 
-  const [error, setError]           = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   // ── Map init ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -598,341 +597,171 @@ export default function Map() {
 
       const now = Date.now()
 
-      // ── Fetch live feed ───────────────────────────────────────────────────
-      let liveAircraft: Aircraft[] = []
-      let fr24CallsignsList: string[] = []
+      // ── 1. Fetch feed + update trackedRef (keyed by callsign) ─────────────
+      const freshCallsigns = new Set<string>()  // callsigns in THIS cycle's live feed
       try {
         const res  = await fetch('/api/airspace')
         const data = await res.json()
-        if (data.ok) {
-          if (data.from_db) {
-            for (const a of data.aircraft as Aircraft[]) {
-              if (!lastKnownRef.current[a.hex]) {
-                const lostAt = a.seen_at ? new Date(a.seen_at).getTime() : now - 5 * 60_000
-                lastKnownRef.current[a.hex] = { a, lostAt }
-              }
-            }
-            setError('Live feed down — showing last known positions')
-          } else {
-            // fr24Ts is when FR24 data was fetched; FR24 aircraft use this as lostAt
-            // so dead-reckoning advances their position between 5-min cache refreshes.
-            const fr24Ts: number = data.fr24Ts ?? 0
-            fr24CallsignsList = (data.fr24Callsigns ?? []) as string[]
-            for (const a of data.aircraft as Aircraft[]) {
-              const isFr24 = (a as any).fr24 === true
-              if (a.stale) {
-                if (!lastKnownRef.current[a.hex]) {
-                  const lostAt = a.seen_at ? new Date(a.seen_at).getTime() : now - 60_000
-                  lastKnownRef.current[a.hex] = { a, lostAt }
-                }
-              } else if (isFr24) {
-                // Route FR24 aircraft through last-known DR so position advances
-                // between cache refreshes, and always refresh their lostAt to fr24Ts.
-                lastKnownRef.current[a.hex] = { a, lostAt: fr24Ts || now - 30_000 }
-              } else {
-                liveAircraft.push(a)
-              }
-            }
-            // Seed flightStatusRef from board data so the schedule overlay can
-            // position delayed flights that are in route_master.
-            // The FR24 daily cache is frozen after the 02:00 UTC cron, so actual_dep_utc
-            // (extracted from "Departed HH:MM") is the only intraday timing signal we have.
-            for (const a of data.aircraft as Aircraft[]) {
-              if (!a.board_match || !a.actual_dep_utc) continue
-              const cs = (a.flight ?? '').trim()
-              if (!cs) continue
-              const existing = flightStatusRef.current[cs]
-              if (!existing?.actual_dep_utc) {
-                flightStatusRef.current[cs] = {
-                  callsign:          cs,
-                  status:            'Departed',
-                  actual_dep_utc:    a.actual_dep_utc,
-                  actual_arr_utc:    existing?.actual_arr_utc    ?? null,
-                  scheduled_dep_utc: existing?.scheduled_dep_utc ?? null,
-                  scheduled_arr_utc: existing?.scheduled_arr_utc ?? null,
-                  revised_dep_utc:   existing?.revised_dep_utc   ?? null,
-                  revised_arr_utc:   existing?.revised_arr_utc   ?? null,
-                  dep_delay_min:     a.dep_delay_min ?? existing?.dep_delay_min ?? null,
-                  arr_delay_min:     existing?.arr_delay_min      ?? null,
-                  aircraft_reg:      a.r ?? existing?.aircraft_reg   ?? null,
-                  aircraft_type:     a.t ?? existing?.aircraft_type  ?? null,
-                  flight_number:     a.iata_number ?? existing?.flight_number ?? null,
-                  dep_iata:          a.dep_iata ?? existing?.dep_iata ?? null,
-                  arr_iata:          a.arr_iata ?? existing?.arr_iata ?? null,
-                  airline_iata:      a.airline_iata ?? existing?.airline_iata ?? null,
-                }
-              }
-            }
-            // Board flights confirmed departed but not found by any ADS-B feed
-            // (no coverage over central Saudi Arabia, Iraqi desert, etc.).
-            // Inject into scheduleRef + flightStatusRef so the schedule overlay
-            // renders an ESTIMATED ghost marker at the correct enroute position.
-            for (const bd of (data.boardDeparted ?? []) as {
-              callsign: string; dep_iata: string; arr_iata: string
-              duration_min: number; actual_dep_utc: string; iata_number: string
-              dep_delay_min: number | null; airline_iata: string | null
-            }[]) {
-              const { callsign: cs, dep_iata, arr_iata, duration_min, actual_dep_utc, iata_number, dep_delay_min, airline_iata } = bd
-              if (!cs || !dep_iata || !arr_iata) continue
+        if (!data.ok) { setError(data.warn ?? 'feed error'); return }
 
-              // Seed flightStatusRef so the schedule overlay uses actual dep time
-              if (!flightStatusRef.current[cs]?.actual_dep_utc) {
-                flightStatusRef.current[cs] = {
-                  callsign:          cs,
-                  status:            'Departed',
-                  actual_dep_utc,
-                  actual_arr_utc:    null,
-                  scheduled_dep_utc: null,
-                  scheduled_arr_utc: null,
-                  revised_dep_utc:   null,
-                  revised_arr_utc:   null,
-                  dep_delay_min,
-                  arr_delay_min:     null,
-                  aircraft_reg:      null,
-                  aircraft_type:     null,
-                  flight_number:     iata_number,
-                  dep_iata,
-                  arr_iata,
-                  airline_iata,
-                }
-              }
-
-              // Inject into scheduleRef if missing — stub dep/arr times are fine
-              // because the schedule overlay uses actual_dep_utc from flightStatusRef
-              if (!scheduleRef.current.some(e => e.callsign === cs)) {
-                scheduleRef.current.push({
-                  callsign:     cs,
-                  dep_iata,
-                  arr_iata,
-                  dep_time_utc: '00:00',
-                  arr_time_utc: '00:00',
-                  duration_min,
-                  days_of_week: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],
-                })
-              }
+        if (data.from_db) {
+          // DB fallback: seed trackedRef without overwriting existing entries
+          for (const a of data.aircraft as Aircraft[]) {
+            const cs = (a.flight ?? '').trim()
+            if (!cs || !a.board_match) continue
+            if (!trackedRef.current[cs]) {
+              const lostAt = a.seen_at ? new Date(a.seen_at).getTime() : now - 5 * 60_000
+              trackedRef.current[cs] = { a, lostAt, isFr24: false }
             }
-            setError(data.warn ? 'Feed degraded' : null)
           }
+          setError('Live feed down — showing last known positions')
         } else {
-          setError(data.warn ?? 'feed error')
+          const fr24Ts: number = data.fr24Ts ?? 0
+
+          // Process each aircraft into trackedRef — board_match=true only
+          for (const a of data.aircraft as Aircraft[]) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const isFr24  = (a as any).fr24 === true
+            const isStale = a.stale === true
+            const cs = (a.flight ?? '').trim()
+            if (!cs || !a.board_match) continue
+
+            if (isStale) {
+              // DB stale row: preserve existing lostAt; never overwrite an FR24 entry
+              const prev = trackedRef.current[cs]
+              if (!prev?.isFr24) {
+                const lostAt = prev?.lostAt || (a.seen_at ? new Date(a.seen_at).getTime() : now - 5 * 60_000)
+                trackedRef.current[cs] = { a, lostAt, isFr24: false }
+              }
+            } else if (isFr24) {
+              // FR24 cache: lostAt = fr24Ts so DR advances between 5-min refreshes
+              trackedRef.current[cs] = { a, lostAt: fr24Ts || now - 30_000, isFr24: true }
+            } else {
+              // Live ADS-B: prefer non-stale, then highest gs (freshest fix)
+              const prev = trackedRef.current[cs]
+              if (!prev || prev.lostAt > 0 || (a.gs ?? 0) >= (prev.a.gs ?? 0)) {
+                trackedRef.current[cs] = { a, lostAt: 0, isFr24: false }
+              }
+              freshCallsigns.add(cs)  // record as seen in this live cycle
+            }
+          }
+
+          // Seed flightStatusRef from board_match aircraft with actual_dep_utc
+          for (const a of data.aircraft as Aircraft[]) {
+            if (!a.board_match || !a.actual_dep_utc) continue
+            const cs = (a.flight ?? '').trim()
+            if (!cs) continue
+            const existing = flightStatusRef.current[cs]
+            if (!existing?.actual_dep_utc) {
+              flightStatusRef.current[cs] = {
+                callsign:          cs,
+                status:            'Departed',
+                actual_dep_utc:    a.actual_dep_utc,
+                actual_arr_utc:    existing?.actual_arr_utc    ?? null,
+                scheduled_dep_utc: existing?.scheduled_dep_utc ?? null,
+                scheduled_arr_utc: existing?.scheduled_arr_utc ?? null,
+                revised_dep_utc:   existing?.revised_dep_utc   ?? null,
+                revised_arr_utc:   existing?.revised_arr_utc   ?? null,
+                dep_delay_min:     a.dep_delay_min ?? existing?.dep_delay_min ?? null,
+                arr_delay_min:     existing?.arr_delay_min      ?? null,
+                aircraft_reg:      a.r ?? existing?.aircraft_reg   ?? null,
+                aircraft_type:     a.t ?? existing?.aircraft_type  ?? null,
+                flight_number:     a.iata_number ?? existing?.flight_number ?? null,
+                dep_iata:          a.dep_iata ?? existing?.dep_iata ?? null,
+                arr_iata:          a.arr_iata ?? existing?.arr_iata ?? null,
+                airline_iata:      a.airline_iata ?? existing?.airline_iata ?? null,
+              }
+            }
+          }
+
+          // Inject boardDeparted into scheduleRef + flightStatusRef
+          for (const bd of (data.boardDeparted ?? []) as {
+            callsign: string; dep_iata: string; arr_iata: string
+            duration_min: number; actual_dep_utc: string; iata_number: string
+            dep_delay_min: number | null; airline_iata: string | null
+          }[]) {
+            const { callsign: cs, dep_iata, arr_iata, duration_min, actual_dep_utc, iata_number, dep_delay_min, airline_iata } = bd
+            if (!cs || !dep_iata || !arr_iata) continue
+            if (!flightStatusRef.current[cs]?.actual_dep_utc) {
+              flightStatusRef.current[cs] = {
+                callsign: cs, status: 'Departed', actual_dep_utc,
+                actual_arr_utc: null, scheduled_dep_utc: null, scheduled_arr_utc: null,
+                revised_dep_utc: null, revised_arr_utc: null,
+                dep_delay_min, arr_delay_min: null,
+                aircraft_reg: null, aircraft_type: null,
+                flight_number: iata_number, dep_iata, arr_iata, airline_iata,
+              }
+            }
+            if (!scheduleRef.current.some(e => e.callsign === cs)) {
+              scheduleRef.current.push({
+                callsign: cs, dep_iata, arr_iata,
+                dep_time_utc: '00:00', arr_time_utc: '00:00',
+                duration_min, days_of_week: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],
+              })
+            }
+          }
+
+          setError(data.warn ? 'Feed degraded' : null)
         }
       } catch (e) {
         setError(String(e))
       }
 
-      // Stale aircraft (from DB last-seen cache) are routed through the last-known
-      // loop so they get full DR + canonical path rejoin, not a frozen marker.
-      const seen = new Set(liveAircraft.filter(a => !a.stale).map(a => a.hex))
-
-      // Collect callsigns already covered by real data (live or last-known).
-      // Stale and pre-departure last-known entries are excluded so ESTIMATED can show.
-      // FR24 callsigns are seeded explicitly — this is the authoritative signal that
-      // overrides ESTIMATED regardless of Vercel instance cache state.
-      const realCallsigns = new Set<string>(
-        liveAircraft.filter(a => !a.stale).map(a => (a.flight ?? '').trim()).filter(Boolean)
-      )
-      for (const cs of fr24CallsignsList) {
-        if (cs) realCallsigns.add(cs)
+      // ── 2. Mark callsigns that dropped from the live feed ─────────────────
+      // Any non-FR24 entry with lostAt=0 that wasn't in freshCallsigns this cycle
+      // gets lostAt=now — signal was lost.
+      for (const [cs, entry] of Object.entries(trackedRef.current)) {
+        if (!entry.isFr24 && entry.lostAt === 0 && !freshCallsigns.has(cs)) {
+          trackedRef.current[cs] = { ...entry, lostAt: now }
+        }
       }
-      // After this many ms without a new signal, drop the stale entry from
-      // realCallsigns so the schedule-projected ESTIMATED marker can take over.
-      // 3 min ≈ 3 poll cycles — long enough to absorb brief coverage gaps,
-      // short enough that a genuinely lost signal shows ESTIMATED quickly.
+
+      // ── 3. Render tracked entries (live + stale/DR) ────────────────────────
+      const realCallsigns = new Set<string>()   // suppresses schedule markers
       const STALE_HAND_OFF_MS = 3 * 60_000
+      const FR24_HAND_OFF_MS  = 30 * 60_000
 
-      for (const entry of Object.values(lastKnownRef.current)) {
-        const cs = (entry.a.flight ?? '').trim()
-        if (!cs) continue
-        // FR24 aircraft suppress ESTIMATED while actively tracked. Once FR24 stops
-        // refreshing lostAt (plane left our airspace feed range), hand off to ESTIMATED
-        // after 30 min so flights to DXB/KWI/etc. don't vanish mid-route.
-        const FR24_HAND_OFF_MS = 30 * 60_000
-        if ((entry.a as any).fr24 && now - entry.lostAt < FR24_HAND_OFF_MS) {
-          realCallsigns.add(cs)
+      for (const [cs, entry] of Object.entries(trackedRef.current)) {
+        const { a, lostAt, isFr24 } = entry
+
+        // TTL expiry — Syria flights: 6 h
+        if (!isFr24 && lostAt > 0 && now - lostAt > STALE_TTL_SYRIA_MS) {
+          markersRef.current[cs]?.remove(); delete markersRef.current[cs]
+          linesRef.current[cs]?.forEach((l: any) => l.remove()); delete linesRef.current[cs]  // eslint-disable-line
+          delete trackedRef.current[cs]
           continue
         }
-        const sched = scheduleRef.current.find(e => e.callsign === cs)
-        if (sched && isFlightActiveNow(sched.dep_time_utc, sched.arr_time_utc, sched.days_of_week, now) === null) {
-          // Pre-departure or post-arrival+freeze: let ESTIMATED take over
+
+        // FR24 hand-off: after 30 min let the schedule overlay take over
+        if (isFr24 && now - lostAt > FR24_HAND_OFF_MS) {
+          markersRef.current[cs]?.remove(); delete markersRef.current[cs]
+          linesRef.current[cs]?.forEach((l: any) => l.remove()); delete linesRef.current[cs]  // eslint-disable-line
+          delete trackedRef.current[cs]
           continue
         }
-        // Hand off to ESTIMATED once the stale position is old enough.
-        if (now - entry.lostAt > STALE_HAND_OFF_MS) continue
-        realCallsigns.add(cs)
-      }
 
-      // ── Live markers ──────────────────────────────────────────────────────
-      for (const a of liveAircraft) {
-        if (a.stale) {
-          // Stale DB entries: preserve lostAt so elapsed grows, then hand off to
-          // the last-known loop below for DR + canonical path rejoin.
-          const prev = lastKnownRef.current[a.hex]
-          // Never overwrite an FR24 entry with a stale DB row — the DB row is often
-          // just a shadow of the FR24 upsert and must not strip the fr24 flag or
-          // reset the position anchor that keeps ESTIMATED suppressed.
-          if (!(prev && (prev.a as any).fr24)) {
-            // Use seen_at from DB as lostAt anchor so the 6h TTL doesn't reset on
-            // every poll cycle when no prior entry exists.
-            const staleLostAt = prev?.lostAt || (a.seen_at ? new Date(a.seen_at).getTime() : now - 5 * 60_000)
-            lastKnownRef.current[a.hex] = { a, lostAt: staleLostAt }
+        // ADS-B stale hand-off: if schedule can now drive position, let it
+        if (!isFr24 && lostAt > 0 && now - lostAt > STALE_HAND_OFF_MS) {
+          const sched = scheduleRef.current.find(e => e.callsign === cs)
+          if (sched && isFlightActiveNow(sched.dep_time_utc, sched.arr_time_utc, sched.days_of_week, now) !== null) {
+            markersRef.current[cs]?.remove(); delete markersRef.current[cs]
+            linesRef.current[cs]?.forEach((l: any) => l.remove()); delete linesRef.current[cs]  // eslint-disable-line
+            delete trackedRef.current[cs]
+            continue
           }
-          // Remove any old live marker so the last-known loop owns the rendering.
-          markersRef.current[a.hex]?.remove()
-          delete markersRef.current[a.hex]
-          linesRef.current[a.hex]?.forEach((l: any) => l.remove())
-          delete linesRef.current[a.hex]
-          continue
-        }
-        lastKnownRef.current[a.hex] = { a, lostAt: 0 }
-
-        const isSyria  = a.board_match
-        // Non-board-match aircraft are tracked in lastKnownRef for future geofence
-        // features but not rendered — only Syria board flights are shown on the map.
-        if (!isSyria) {
-          markersRef.current[a.hex]?.remove()
-          delete markersRef.current[a.hex]
-          linesRef.current[a.hex]?.forEach((l: any) => l.remove())
-          delete linesRef.current[a.hex]
-          continue
-        }
-        const callsign = (a.flight ?? '').trim()
-        const isAlp    = a.arr_iata === 'ALP' || a.dep_iata === 'ALP'
-        const icon     = planeIcon(L, bestHeading(a), isSyria, false, isSyria && callsign ? callsign : undefined, isAlp)
-        const fs_live  = flightStatusRef.current[callsign]
-        const reg_live = fs_live?.aircraft_reg ?? a.r ?? null
-        const photo_live = reg_live ? photoCacheRef.current[reg_live] ?? null : null
-        const popup    = buildPopup(a, undefined, false, fs_live, photo_live)
-
-        if (markersRef.current[a.hex]) {
-          markersRef.current[a.hex].setLatLng([a.lat, a.lon])
-          markersRef.current[a.hex].setIcon(icon)
-          markersRef.current[a.hex].setPopupContent(popup)
-        } else {
-          markersRef.current[a.hex] = L.marker([a.lat, a.lon], { icon }).addTo(map).bindPopup(popup, { className: 'fp-popup' })
         }
 
-        // Fetch aircraft photo from Planespotters once per registration
-        if (reg_live && !photoRequestedRef.current.has(reg_live)) {
-          photoRequestedRef.current.add(reg_live)
-          const capturedHex = a.hex
-          const capturedA   = a
-          const capturedCS  = callsign
-          fetch(`https://api.planespotters.net/pub/photos/reg/${encodeURIComponent(reg_live)}`)
-            .then(r => r.ok ? r.json() : null)
-            .then(data => {
-              const url: string | null = data?.photos?.[0]?.thumbnail?.src ?? null
-              photoCacheRef.current[reg_live] = url
-              if (url && markersRef.current[capturedHex]) {
-                const fsNow = flightStatusRef.current[capturedCS]
-                markersRef.current[capturedHex].setPopupContent(
-                  buildPopup(capturedA, undefined, false, fsNow, url)
-                )
-              }
-            })
-            .catch(() => { photoCacheRef.current[reg_live] = null })
-        }
-
-        linesRef.current[a.hex]?.forEach((l: any) => l.remove())
-        // Only draw the green line to Syria airport when the flight is ARRIVING at Syria.
-        // Departing flights (dep_syria=true, arr_syria=false) already left the airport —
-        // drawing a line back toward it would look like the plane is flying the wrong way.
-        linesRef.current[a.hex] = []
-      }
-
-      // ── Last-known / dead-reckoning markers ───────────────────────────────
-      // Deduplicate by callsign: when multiple hexes share a callsign (e.g. a stale
-      // DB entry AND a FR24 entry), keep only the best one — FR24 wins, then newest lostAt.
-      const bestHexForCallsign: Record<string, string> = {}
-      for (const hex of Object.keys(lastKnownRef.current)) {
-        if (seen.has(hex)) continue
-        const entry = lastKnownRef.current[hex]
-        if (!entry.a.board_match) continue
-        const cs = (entry.a.flight ?? '').trim()
-        if (!cs) continue
-        const existing = bestHexForCallsign[cs]
-        if (!existing) { bestHexForCallsign[cs] = hex; continue }
-        const existEntry = lastKnownRef.current[existing]
-        const isBetter = ((entry.a as any).fr24 && !(existEntry.a as any).fr24)
-          || (entry.lostAt > existEntry.lostAt && !((existEntry.a as any).fr24 && !(entry.a as any).fr24))
-        if (isBetter) {
-          markersRef.current[existing]?.remove(); delete markersRef.current[existing]
-          linesRef.current[existing]?.forEach((l: any) => l.remove()); delete linesRef.current[existing]
-          bestHexForCallsign[cs] = hex
-        } else {
-          markersRef.current[hex]?.remove(); delete markersRef.current[hex]
-          linesRef.current[hex]?.forEach((l: any) => l.remove()); delete linesRef.current[hex]
-        }
-      }
-
-      for (const hex of Object.keys(lastKnownRef.current)) {
-        if (seen.has(hex)) continue
-
-        const entry = lastKnownRef.current[hex]
-        if (entry.lostAt === 0) entry.lostAt = now
-
-        // Skip the loser hex for this callsign — dedup already cleaned it up
-        const cs0 = (entry.a.flight ?? '').trim()
-        if (cs0 && bestHexForCallsign[cs0] !== hex) continue
-
-        // If a LIVE ADS-B entry at a different hex covers this callsign, suppress the
-        // DR marker — avoids a duplicate "ESTIMATED" icon alongside the live plane.
-        // Do NOT suppress when only FR24 cache covers it: the plane may have just
-        // landed and dropped from the ADS-B feed; we still want to show ARRIVED.
-        if (cs0 && liveAircraft.some(la => !la.stale && (la.flight ?? '').trim() === cs0 && la.hex !== hex)) {
-          markersRef.current[hex]?.remove()
-          delete markersRef.current[hex]
-          linesRef.current[hex]?.forEach((l: any) => l.remove())
-          delete linesRef.current[hex]
-          continue
-        }
-
-        // If this callsign has been handed off to the ESTIMATED schedule marker
-        // (not in realCallsigns and has a schedule entry), remove the stale marker
-        // so both don't render simultaneously.
-        if (cs0 && !realCallsigns.has(cs0) && scheduleRef.current.some(e => e.callsign === cs0)) {
-          markersRef.current[hex]?.remove()
-          delete markersRef.current[hex]
-          linesRef.current[hex]?.forEach((l: any) => l.remove())
-          delete linesRef.current[hex]
-          continue
-        }
-
-        const { a }   = entry
-        const isSyria = a.board_match
-        const isAlp   = a.arr_iata === 'ALP' || a.dep_iata === 'ALP'
-
-        const ttl = isSyria ? STALE_TTL_SYRIA_MS : STALE_TTL_MS
-        if (now - entry.lostAt > ttl) {
-          markersRef.current[hex]?.remove()
-          delete markersRef.current[hex]
-          linesRef.current[hex]?.forEach((l: any) => l.remove())
-          delete linesRef.current[hex]
-          delete lastKnownRef.current[hex]
-          continue
-        }
-        if (!isSyria) {
-          markersRef.current[hex]?.remove()
-          delete markersRef.current[hex]
-          linesRef.current[hex]?.forEach((l: any) => l.remove())
-          delete linesRef.current[hex]
-          continue
-        }
-        const elapsed = now - entry.lostAt
-        // True when the aircraft is on the ground — landed early before the schedule
-        // fraction reaches 1.0.  Used to show ARRIVED and extend the expiry window.
+        const isLive     = lostAt === 0 && !isFr24
+        const elapsed    = lostAt > 0 ? now - lostAt : 0
+        const isAlp      = a.arr_iata === 'ALP' || a.dep_iata === 'ALP'
         const isOnGround = (a.alt_baro === 'ground' || (typeof a.alt_baro === 'number' && a.alt_baro < 500))
                         && (typeof a.gs === 'number' ? a.gs < 50 : false)
 
         let dispLat = a.lat, dispLon = a.lon, dispTrack = bestHeading(a)
         let projected = false, arrSnapped = false
 
-        // Expire markers past arrival window.
-        // When actual_dep_utc + duration_min are known, base expiry on real wheels-off
-        // so delayed flights don't get removed at their scheduled arrival time.
-        // Fallback: scheduled arr_time_utc with midnight-crossing guard.
-        // Live-then-lost (not on ground): 15-min buffer past expected arrival.
-        // Stale DB aircraft or on-ground: 90-min buffer.
-        if (isSyria) {
+        // ── Arrival-window expiry ─────────────────────────────────────────────
+        {
           const bufMs = (a.stale || isOnGround) ? 90 * 60_000 : 15 * 60_000
           let expired = false
           if (a.actual_dep_utc && a.duration_min) {
@@ -944,40 +773,27 @@ export default function Map() {
             const [ah, am] = a.arr_time_utc.split(':').map(Number)
             const sinceArr = (nowSec - (ah * 3600 + am * 60) + 86400) % 86400
             if (sinceArr > bufMs / 1000 && sinceArr < 22 * 3600) {
-              // Guard against midnight-crossing routes: isFlightActiveNow handles
-              // overnight windows — skip removal if flight is still in progress.
-              const cs_ = (a.flight ?? '').trim()
-              const se_ = cs_ ? scheduleRef.current.find(e => e.callsign === cs_) : null
-              const activeFrac = se_
-                ? isFlightActiveNow(se_.dep_time_utc, se_.arr_time_utc, se_.days_of_week, now)
-                : null
+              const se_ = scheduleRef.current.find(e => e.callsign === cs)
+              const activeFrac = se_ ? isFlightActiveNow(se_.dep_time_utc, se_.arr_time_utc, se_.days_of_week, now) : null
               expired = !(activeFrac !== null && activeFrac <= 1.0)
             }
           }
           if (expired) {
-            markersRef.current[hex]?.remove()
-            delete markersRef.current[hex]
-            linesRef.current[hex]?.forEach((l: any) => l.remove())
-            delete linesRef.current[hex]
-            delete lastKnownRef.current[hex]
+            markersRef.current[cs]?.remove(); delete markersRef.current[cs]
+            linesRef.current[cs]?.forEach((l: any) => l.remove()); delete linesRef.current[cs]  // eslint-disable-line
+            delete trackedRef.current[cs]
             continue
           }
         }
 
-        const isFR24Entry = (entry.a as any).fr24 === true
-        if (isSyria && (elapsed > 30_000 || isFR24Entry)) {
-          // ── Path-based rejoin ───────────────────────────────────────────────
-          const cs = (a.flight ?? '').trim()
+        // ── Path-based DR for non-live entries ────────────────────────────────
+        if (!isLive) {
           const schedEntry = scheduleRef.current.find(e => e.callsign === cs)
-          // Board flights carry dep_iata/arr_iata directly — use them as fallback
-          // so route_paths waypoints work even for callsigns absent from route_master.
           const pathKey = schedEntry
             ? `${schedEntry.dep_iata}|${schedEntry.arr_iata}`
             : (a.dep_iata && a.arr_iata ? `${a.dep_iata}|${a.arr_iata}` : '')
           const wps = pathKey ? routePathsRef.current[pathKey] : undefined
           const durationMin = schedEntry?.duration_min ?? a.duration_min ?? 0
-          // Use actual dep time from board when available (handles delayed flights).
-          // Falls back to schedule-based fraction when actual_dep_utc is absent.
           const fraction = (() => {
             if (a.actual_dep_utc && durationMin > 0) {
               const f = (now - new Date(a.actual_dep_utc).getTime()) / (durationMin * 60_000)
@@ -988,41 +804,19 @@ export default function Map() {
           })()
 
           if (wps?.length && fraction !== null) {
-            // Cap at 0.97 so the icon never overshoots destination via waypoints that
-            // extend slightly past the airport — same cap used in the ESTIMATED path.
             const clampedF = Math.min(0.97, fraction)
             const [timeLat, timeLon] = interpolatePath(wps, clampedF)
-            const distKm = greatCircleKm(a.lat, a.lon, timeLat, timeLon)
-            const SNAP_KM = 80  // ~43 NM — if within this, follow time-based fraction
 
-            // Pre-validate kinematic DR: if the projected position moves the plane
-            // further from its destination than the fix itself, the cached track is
-            // stale (e.g. captured mid-turn). In that case fall through to path-following.
-            let drLat = a.lat, drLon = a.lon, drValid = false
-            if (isFR24Entry && typeof a.gs === 'number' && a.gs > 50 && typeof a.track === 'number') {
-              ;[drLat, drLon] = projectPosition(a.lat, a.lon, a.track, a.gs, elapsed)
-              const arrC2  = schedEntry ? ALL_AIRPORT_COORDS[schedEntry.arr_iata] : null
-              const distFix = arrC2 ? greatCircleKm(a.lat,  a.lon,  arrC2[0], arrC2[1]) : 0
-              const distDR  = arrC2 ? greatCircleKm(drLat, drLon, arrC2[0], arrC2[1]) : 0
-              drValid = !arrC2 || distDR <= distFix + 20   // 20 km tolerance for minor overshoot
-            }
-
-            // Floor: if actual_dep_utc is confirmed, the ESTIMATED marker placed the
-            // plane here. Don't let a stale FR24 cache position snap the marker backward
-            // when FR24 takes over — use whichever fraction is further along the route.
-            const csKey = (a.flight ?? '').trim()
-            const fsDr  = csKey ? flightStatusRef.current[csKey] : null
+            const fsDr = flightStatusRef.current[cs]
             const depUtcDr = a.actual_dep_utc ?? fsDr?.actual_dep_utc ?? null
             const actualDepFrac = (depUtcDr && durationMin > 0)
               ? Math.max(0, Math.min(0.97, (now - new Date(depUtcDr).getTime()) / (durationMin * 60_000)))
               : null
 
             let useF = clampedF
+
             if (fraction > 1.0) {
-              // Post-arrival freeze: snap to arrival airport coords.
-              // Guard: if actual_dep_utc says the flight is still in progress (e.g. delayed
-              // departure or long-haul that outlasts the scheduled arrival), don't snap —
-              // use the actual-dep fraction to keep the plane at the correct enroute position.
+              // Post-arrival freeze
               if (actualDepFrac !== null && actualDepFrac < 1.0) {
                 useF = actualDepFrac
                 const [adfLat, adfLon] = interpolatePath(wps, useF)
@@ -1035,82 +829,76 @@ export default function Map() {
                 dispTrack = bearingFromPath(wps, Math.min(1, fraction))
                 arrSnapped = true
               }
-            } else if (isFR24Entry && drValid) {
-              // Kinematic DR — track consistent with destination direction.
-              // Guard: if actual dep time puts the plane further along the route than
-              // the kinematic DR position, snap forward to the path fraction instead
-              // so the marker doesn't jump backward when FR24 takes over from ESTIMATED.
-              const drPathF = nearestPathFraction(wps, drLat, drLon)
-              if (actualDepFrac !== null && drPathF < actualDepFrac) {
-                useF = actualDepFrac
-                const [pl, pln] = interpolatePath(wps, useF)
-                dispLat = pl; dispLon = pln
-                dispTrack = bearingFromPath(wps, useF)
-              } else {
-                dispLat = drLat; dispLon = drLon
-                dispTrack = a.track ?? 0
+            } else if (isFr24) {
+              // Kinematic DR for FR24 entries
+              let drLat = a.lat, drLon = a.lon, drValid = false
+              if (typeof a.gs === 'number' && a.gs > 50 && typeof a.track === 'number') {
+                ;[drLat, drLon] = projectPosition(a.lat, a.lon, a.track, a.gs, elapsed)
+                const arrC2  = schedEntry ? ALL_AIRPORT_COORDS[schedEntry.arr_iata] : null
+                const distFix = arrC2 ? greatCircleKm(a.lat,  a.lon,  arrC2[0], arrC2[1]) : 0
+                const distDR  = arrC2 ? greatCircleKm(drLat, drLon, arrC2[0], arrC2[1]) : 0
+                drValid = !arrC2 || distDR <= distFix + 20
               }
-            } else if (isFR24Entry) {
-              // Path-following fallback for FR24 stale entries: walk forward from the
-              // nearest route point + elapsed fraction. Not used for ADS-B stale entries
-              // whose last fix may be wrong (MLAT error, hex mismatch) — those fall
-              // through to the time-based schedule fraction below.
-              const liveF = nearestPathFraction(wps, a.lat, a.lon)
 
-              // Guard: if the FR24 track conflicts with the stored path direction by
-              // more than 90°, the schedule dep/arr is likely inverted for this leg
-              // (e.g. return flight operates under the same callsign). In that case,
-              // projecting onto the path gives a wrong position AND wrong bearing —
-              // use the raw FR24 fix + real track instead.
-              const pathBearingAtLive = bearingFromPath(wps, liveF)
-              const trackDiff = typeof a.track === 'number'
-                ? Math.abs(((a.track - pathBearingAtLive) + 180) % 360 - 180)
-                : 0
-              if (trackDiff >= 90) {
-                dispLat = a.lat; dispLon = a.lon
-                dispTrack = a.track ?? 0
-              } else {
-                let elapsedFrac = 0
-                if (durationMin > 0) {
-                  elapsedFrac = elapsed / (durationMin * 60_000)
+              if (drValid) {
+                const drPathF = nearestPathFraction(wps, drLat, drLon)
+                if (actualDepFrac !== null && drPathF < actualDepFrac) {
+                  useF = actualDepFrac
+                  const [pl, pln] = interpolatePath(wps, useF)
+                  dispLat = pl; dispLon = pln
+                  dispTrack = bearingFromPath(wps, useF)
                 } else {
-                  const depC2 = ALL_AIRPORT_COORDS[schedEntry?.dep_iata ?? a.dep_iata ?? ''] ?? null
-                  const arrC2 = ALL_AIRPORT_COORDS[schedEntry?.arr_iata ?? a.arr_iata ?? ''] ?? null
-                  if (depC2 && arrC2) {
-                    const routeKm = greatCircleKm(depC2[0], depC2[1], arrC2[0], arrC2[1])
-                    if (routeKm > 0) {
-                      const speedKts = (a.gs && a.gs > 50) ? a.gs : 450
-                      const distKm2  = speedKts * 1.852 * (elapsed / 3_600_000)
-                      elapsedFrac    = distKm2 / routeKm
+                  dispLat = drLat; dispLon = drLon
+                  dispTrack = a.track ?? 0
+                }
+              } else {
+                // Path-following fallback — walk forward from nearest route point
+                const liveF = nearestPathFraction(wps, a.lat, a.lon)
+                const pathBearingAtLive = bearingFromPath(wps, liveF)
+                const trackDiff = typeof a.track === 'number'
+                  ? Math.abs(((a.track - pathBearingAtLive) + 180) % 360 - 180)
+                  : 0
+                if (trackDiff >= 90) {
+                  dispLat = a.lat; dispLon = a.lon; dispTrack = a.track ?? 0
+                } else {
+                  let elapsedFrac = 0
+                  if (durationMin > 0) {
+                    elapsedFrac = elapsed / (durationMin * 60_000)
+                  } else {
+                    const depC2 = ALL_AIRPORT_COORDS[schedEntry?.dep_iata ?? a.dep_iata ?? ''] ?? null
+                    const arrC2 = ALL_AIRPORT_COORDS[schedEntry?.arr_iata ?? a.arr_iata ?? ''] ?? null
+                    if (depC2 && arrC2) {
+                      const routeKm = greatCircleKm(depC2[0], depC2[1], arrC2[0], arrC2[1])
+                      if (routeKm > 0) {
+                        const speedKts = (a.gs && a.gs > 50) ? a.gs : 450
+                        elapsedFrac    = speedKts * 1.852 * (elapsed / 3_600_000) / routeKm
+                      }
                     }
                   }
+                  useF = Math.min(0.97, Math.max(liveF + elapsedFrac, actualDepFrac ?? 0))
+                  const [pathLat, pathLon] = interpolatePath(wps, useF)
+                  dispLat = pathLat; dispLon = pathLon
+                  dispTrack = bearingFromPath(wps, useF)
                 }
-                useF = Math.min(0.97, Math.max(liveF + elapsedFrac, actualDepFrac ?? 0))
-                const [pathLat, pathLon] = interpolatePath(wps, useF)
-                dispLat = pathLat; dispLon = pathLon
-                dispTrack = bearingFromPath(wps, useF)
               }
             } else {
+              // ADS-B stale: use schedule-based fraction
               dispLat = timeLat; dispLon = timeLon
               dispTrack = bearingFromPath(wps, useF)
             }
             projected = true
           } else if (schedEntry && fraction !== null && fraction > 1.0) {
-            // No route path but flight arrived — snap to arrival airport coords
             const arrC = ALL_AIRPORT_COORDS[schedEntry.arr_iata]
             if (arrC) { dispLat = arrC[0]; dispLon = arrC[1]; arrSnapped = true; projected = true }
           } else if (a.gs && a.track &&
               (schedEntry == null || fraction !== null ||
                (typeof a.alt_baro === 'number' && a.alt_baro > 2_000))) {
-            // ── Fallback: kinematic dead-reckoning ──────────────────────────
-            // Allow DR when confirmed airborne at last signal (alt > 2000 ft),
-            // even if schedule days_of_week don't include today.
+            // Fallback: kinematic dead-reckoning
             const projDistKm = a.gs * 1.852 * (elapsed / 3_600_000)
             const destDists  = [a.dep_iata, a.arr_iata]
               .filter((ap): ap is string => !!ap && !!AIRPORT_COORDS[ap])
               .map(ap => greatCircleKm(a.lat, a.lon, AIRPORT_COORDS[ap][0], AIRPORT_COORDS[ap][1]))
             const minDestKm = destDists.length ? Math.min(...destDists) : Infinity
-
             if (projDistKm < minDestKm) {
               const [pLat, pLon] = projectPosition(a.lat, a.lon, a.track, a.gs, elapsed)
               dispLat = pLat; dispLon = pLon; projected = true
@@ -1123,44 +911,32 @@ export default function Map() {
                   apC[0] - a.lat
                 ) * 180 / Math.PI + 360) % 360
                 const headingDiff = Math.abs(((a.track - bearingToAp) + 180) % 360 - 180)
-                if (headingDiff < 90) {
-                  dispLat = apC[0]; dispLon = apC[1]; arrSnapped = true
-                }
+                if (headingDiff < 90) { dispLat = apC[0]; dispLon = apC[1]; arrSnapped = true }
               }
             }
           }
         }
 
-        // On-ground non-stale aircraft (landed early, before schedule fraction hits 1.0):
-        // pin to arrival airport and show ARRIVED badge.
-        if (isSyria && isOnGround && !arrSnapped) {
-          const cs_ = (a.flight ?? '').trim()
-          const se_ = scheduleRef.current.find(e => e.callsign === cs_)
+        // On-ground: pin to arrival airport
+        if (isOnGround && !arrSnapped) {
+          const se_ = scheduleRef.current.find(e => e.callsign === cs)
           const arrC_ = se_ ? ALL_AIRPORT_COORDS[se_.arr_iata] : null
           if (arrC_) { dispLat = arrC_[0]; dispLon = arrC_[1]; arrSnapped = true; projected = true }
         }
 
-        // Confirmed arrival from AeroDataBox or FR24: snap to arrival airport even
-        // when the flight landed early (fraction < 1.0 during path-following).
-        // 4 h recency guard prevents yesterday's row from triggering today's flight.
-        if (isSyria && !arrSnapped) {
-          const csFix = (a.flight ?? '').trim()
-          const fsFix = csFix ? flightStatusRef.current[csFix] : null
-          if (fsFix?.actual_arr_utc && (now - new Date(fsFix.actual_arr_utc).getTime() < 4 * 3_600_000)) {
-            const seFix  = scheduleRef.current.find(e => e.callsign === csFix)
+        // Confirmed arrival snap
+        if (!arrSnapped) {
+          const fsFix = flightStatusRef.current[cs]
+          if (fsFix?.actual_arr_utc && now - new Date(fsFix.actual_arr_utc).getTime() < 4 * 3_600_000) {
+            const seFix = scheduleRef.current.find(e => e.callsign === cs)
             const arrFix = seFix ? ALL_AIRPORT_COORDS[seFix.arr_iata] : null
             if (arrFix) { dispLat = arrFix[0]; dispLon = arrFix[1]; arrSnapped = true }
           }
         }
 
-        // Stale un-projected aircraft: determine whether pre-departure or post-arrival
-        // by comparing the raw clock, not just isFlightActiveNow (which returns null
-        // for both states). Pre-departure → park at dep airport. Post-arrival (within
-        // 90 min) → snap to arr airport with ARRIVED. Beyond 90 min the expiry check
-        // above already removes the marker, so no further action needed.
-        if (a.stale && !projected && isSyria) {
-          const scs = (a.flight ?? '').trim()
-          const se  = scheduleRef.current.find(e => e.callsign === scs)
+        // Stale un-projected: park pre-departure or post-arrival
+        if (a.stale && !projected) {
+          const se = scheduleRef.current.find(e => e.callsign === cs)
           if (se && isFlightActiveNow(se.dep_time_utc, se.arr_time_utc, se.days_of_week, now) === null) {
             const toSec2 = (s: string) => { const [h, m] = s.split(':').map(Number); return h * 3600 + m * 60 }
             const d2 = new Date(now)
@@ -1169,122 +945,101 @@ export default function Map() {
             const depSec2 = toSec2(se.dep_time_utc)
             const arrSec2 = toSec2(se.arr_time_utc)
             const sinceArr2 = (nowSec2 - arrSec2 + 86400) % 86400
-
             if (se.days_of_week.includes(todayDay2)) {
               if (nowSec2 < depSec2) {
-                // Genuinely pre-departure: park at departure airport
                 const depC = ALL_AIRPORT_COORDS[se.dep_iata]
                 if (depC) { dispLat = depC[0]; dispLon = depC[1] }
               } else if (sinceArr2 > 0 && sinceArr2 <= 90 * 60) {
-                // Post-arrival within 90 min: show at arrival airport as ARRIVED
                 const arrC = ALL_AIRPORT_COORDS[se.arr_iata]
                 if (arrC) { dispLat = arrC[0]; dispLon = arrC[1]; arrSnapped = true }
               }
-              // sinceArr > 90 min: expiry check at top of loop already removed marker
             }
           }
         }
 
-        const cs        = (a.flight ?? '').trim()
-        const staleLabel = isSyria && cs
-          ? (arrSnapped ? `${cs}\nARRIVED` : cs)
-          : undefined
-        const isEstimatedStale = projected && !arrSnapped
-        const icon       = planeIcon(L, dispTrack, isSyria, !isSyria || arrSnapped, staleLabel, isAlp, isEstimatedStale)
-        const fs_dr    = flightStatusRef.current[cs]
-        const reg_dr   = fs_dr?.aircraft_reg ?? a.r ?? null
-        const photo_dr = reg_dr ? photoCacheRef.current[reg_dr] ?? null : null
-        const popup    = buildPopup(a, entry.lostAt, projected, fs_dr, photo_dr)
+        const staleLabel    = arrSnapped ? `${cs}\nARRIVED` : cs
+        const isEstimated   = projected && !arrSnapped
+        const icon    = planeIcon(L, dispTrack, true, arrSnapped, staleLabel, isAlp, isEstimated)
+        const fsDr    = flightStatusRef.current[cs]
+        const regDr   = fsDr?.aircraft_reg ?? a.r ?? null
+        const photoDr = regDr ? photoCacheRef.current[regDr] ?? null : null
+        const popup   = buildPopup(a, lostAt > 0 ? lostAt : undefined, projected && !isLive, fsDr, photoDr)
 
-        // Smooth-blend toward the DR target so that when a fresh FR24 fix arrives
-        // at a position slightly different from what DR predicted, the marker
-        // transitions gradually instead of jumping (55% per 10s poll cycle).
-        if (isFR24Entry && !arrSnapped && markersRef.current[hex]) {
-          const p = markersRef.current[hex].getLatLng()
+        // Smooth position blend for FR24 entries to avoid marker jumps
+        if (isFr24 && !arrSnapped && markersRef.current[cs]) {
+          const p = markersRef.current[cs].getLatLng()
           const BLEND = 0.55
           dispLat = p.lat + BLEND * (dispLat - p.lat)
           dispLon = p.lng + BLEND * (dispLon - p.lng)
         }
 
-        if (markersRef.current[hex]) {
-          markersRef.current[hex].setLatLng([dispLat, dispLon])
-          markersRef.current[hex].setIcon(icon)
-          markersRef.current[hex].setPopupContent(popup)
+        if (markersRef.current[cs]) {
+          markersRef.current[cs].setLatLng([dispLat, dispLon])
+          markersRef.current[cs].setIcon(icon)
+          markersRef.current[cs].setPopupContent(popup)
         } else {
-          markersRef.current[hex] = L.marker([dispLat, dispLon], { icon }).addTo(map).bindPopup(popup, { className: 'fp-popup' })
+          markersRef.current[cs] = L.marker([dispLat, dispLon], { icon }).addTo(map).bindPopup(popup, { className: 'fp-popup' })
         }
 
-        // Fetch photo if we have a reg and haven't requested it yet
-        if (reg_dr && !photoRequestedRef.current.has(reg_dr)) {
-          photoRequestedRef.current.add(reg_dr)
-          const capturedHex = hex
-          const capturedA   = a
-          const capturedCS  = cs
-          fetch(`https://api.planespotters.net/pub/photos/reg/${encodeURIComponent(reg_dr)}`)
+        // Fetch aircraft photo once per registration
+        if (regDr && !photoRequestedRef.current.has(regDr)) {
+          photoRequestedRef.current.add(regDr)
+          const capturedCS = cs
+          const capturedA  = a
+          const capturedLostAt = lostAt
+          fetch(`https://api.planespotters.net/pub/photos/reg/${encodeURIComponent(regDr)}`)
             .then(r => r.ok ? r.json() : null)
-            .then(data => {
-              const url: string | null = data?.photos?.[0]?.thumbnail?.src ?? null
-              photoCacheRef.current[reg_dr] = url
-              if (url && markersRef.current[capturedHex]) {
+            .then(photoData => {
+              const url: string | null = photoData?.photos?.[0]?.thumbnail?.src ?? null
+              photoCacheRef.current[regDr] = url
+              if (url && markersRef.current[capturedCS]) {
                 const fsNow = flightStatusRef.current[capturedCS]
-                markersRef.current[capturedHex].setPopupContent(
-                  buildPopup(capturedA, entry.lostAt, projected, fsNow, url)
+                markersRef.current[capturedCS].setPopupContent(
+                  buildPopup(capturedA, capturedLostAt > 0 ? capturedLostAt : undefined, false, fsNow, url)
                 )
               }
             })
-            .catch(() => { photoCacheRef.current[reg_dr] = null })
+            .catch(() => { photoCacheRef.current[regDr] = null })
         }
 
-        linesRef.current[hex]?.forEach((l: any) => l.remove())
-        linesRef.current[hex] = []
+        linesRef.current[cs]?.forEach((l: any) => l.remove())  // eslint-disable-line
+        linesRef.current[cs] = []
+        realCallsigns.add(cs)
       }
 
-      // ── Schedule-based projection (no signal at all) ───────────────────────
+      // Remove markers for callsigns no longer in trackedRef
+      for (const cs of Object.keys(markersRef.current)) {
+        if (!trackedRef.current[cs]) {
+          markersRef.current[cs]?.remove(); delete markersRef.current[cs]
+          linesRef.current[cs]?.forEach((l: any) => l.remove()); delete linesRef.current[cs]  // eslint-disable-line
+        }
+      }
+
+      // ── 4. Schedule overlay (ESTIMATED / no signal) ───────────────────────
       const activeSchedKeys = new Set<string>()
 
       for (const entry of scheduleRef.current) {
         const { callsign, dep_iata, arr_iata, dep_time_utc, arr_time_utc, duration_min, days_of_week } = entry
 
-        // If we have real data for this callsign, clear any schedule marker and skip
+        // Real data covers this callsign — clear any ghost marker
         if (realCallsigns.has(callsign)) {
           if (schedMarkersRef.current[callsign]) {
-            schedMarkersRef.current[callsign].remove()
-            delete schedMarkersRef.current[callsign]
-            schedLinesRef.current[callsign]?.forEach((l: any) => l.remove())
-            delete schedLinesRef.current[callsign]
+            schedMarkersRef.current[callsign].remove(); delete schedMarkersRef.current[callsign]
+            schedLinesRef.current[callsign]?.forEach((l: any) => l.remove()); delete schedLinesRef.current[callsign]  // eslint-disable-line
           }
           continue
         }
 
         const fs = flightStatusRef.current[callsign]
-
-        // Route progress (0 = at origin, 1 = at destination).
-        //
-        // Priority 1 — actual_dep_utc: real wheels-off time drives position directly,
-        //   works for both early AND delayed departures, regardless of schedule window.
-        // Priority 2 — revised_arr_utc: back-calculate implied departure for a better
-        //   estimate when actual_dep_utc is not yet available.
-        // Priority 3 — schedule window: raw isFlightActiveNow fraction, accepted only
-        //   when at least one other airborne signal confirms the flight is up.
-        //
-        // POST_ARR_BUFFER: keep the marker this many ms past the expected arrival time
-        // (actual_dep_utc + block time). Handles delayed flights that outlast the
-        // scheduled window — a fixed buffer is correct; a multiplier of block time is not.
-        const POST_ARR_BUFFER_MS = 60 * 60_000   // 60 min past expected arrival
+        const POST_ARR_BUFFER_MS = 60 * 60_000
         const AIRBORNE_STATUSES  = new Set(['En Route', 'Departed', 'Approaching'])
 
         let fraction: number | null = null
-
-        // If actual_arr_utc is already in the past, the status row belongs to a
-        // completed leg (multi-leg aircraft reusing the same callsign today).
-        // Don't use that leg's actual_dep_utc to compute position for the current leg.
-        const actualArrMs = fs?.actual_arr_utc ? new Date(fs.actual_arr_utc).getTime() : null
+        const actualArrMs  = fs?.actual_arr_utc ? new Date(fs.actual_arr_utc).getTime() : null
         const priorLegDone = actualArrMs !== null && actualArrMs < now
 
         if (fs?.actual_dep_utc && !priorLegDone && duration_min > 0) {
           const elapsed = now - new Date(fs.actual_dep_utc).getTime()
-          // Keep marker while we haven't exceeded expected arrival + 60-min buffer.
-          // elapsed ≤ 0 → timestamp in the future (clock skew); suppress.
           if (elapsed > 0 && elapsed < duration_min * 60_000 + POST_ARR_BUFFER_MS) {
             fraction = elapsed / (duration_min * 60_000)
           }
@@ -1294,52 +1049,38 @@ export default function Map() {
             const impliedDepMs = fs?.revised_arr_utc
               ? new Date(fs.revised_arr_utc).getTime() - duration_min * 60_000
               : null
-
             if (impliedDepMs) {
-              // revised_arr_utc available: implied departure gives a better position estimate
               const elapsed = now - impliedDepMs
               if (elapsed > 0 && elapsed < duration_min * 60_000 + POST_ARR_BUFFER_MS) {
                 fraction = elapsed / (duration_min * 60_000)
               }
             } else if (fs && AIRBORNE_STATUSES.has(fs.status)) {
-              // Status confirms airborne but no timing data — schedule fraction is the best estimate
               fraction = schedFrac
             } else if (!priorLegDone) {
-              // No confirmed airborne status (DB record says Scheduled, or no record at all).
-              // ADS-B is a stronger signal than the DB — if the plane was recently seen at
-              // altitude, trust it regardless of what the status row says.
-              // Guard: priorLegDone means actual_arr_utc is in the past — the flight is done.
-              // Stale ADS-B altitude from a completed flight must NOT project a ghost position.
-              const adsbAirborne = Object.values(lastKnownRef.current).some(e =>
+              // ADS-B altitude as airborne confirmation (checks trackedRef instead of lastKnownRef)
+              const adsbAirborne = Object.values(trackedRef.current).some(e =>
                 (e.a.flight ?? '').trim() === callsign &&
                 typeof e.a.alt_baro === 'number' && e.a.alt_baro > 2_000 &&
                 (now - e.lostAt) < 60 * 60_000
               )
               if (adsbAirborne) fraction = schedFrac
-              // else: no confirmation at all → phantom → fraction stays null
             }
           }
         }
 
-        // GPS floor: when a recent last-known position exists for this callsign,
-        // prevent ESTIMATED from jumping backward behind where the plane was seen.
-        // Fixes the live→ESTIMATED handoff jump when block time > actual air time.
+        // GPS floor: prevent ESTIMATED from jumping backward
         if (fraction !== null && fraction < 1.0) {
           const gpsWps = routePathsRef.current[`${dep_iata}|${arr_iata}`]
           if (gpsWps?.length) {
-            for (const lkEntry of Object.values(lastKnownRef.current)) {
-              if ((lkEntry.a.flight ?? '').trim() !== callsign) continue
-              if (now - lkEntry.lostAt > 10 * 60_000) break
+            const lkEntry = trackedRef.current[callsign]
+            if (lkEntry && now - lkEntry.lostAt < 10 * 60_000) {
               const lkFrac = nearestPathFraction(gpsWps, lkEntry.a.lat, lkEntry.a.lon)
               if (lkFrac > fraction) fraction = lkFrac
-              break
             }
           }
         }
 
-        // Confirmed early landing: ADB actual_arr_utc received while schedule window was
-        // still open. Guard: actual_arr_utc must belong to THIS leg (not a prior completed
-        // leg), so only fire when priorLegDone is false.
+        // Confirmed early landing
         if (fraction !== null && fraction < 1.0 && fs?.actual_arr_utc && !priorLegDone
             && now - new Date(fs.actual_arr_utc).getTime() < 4 * 3_600_000) {
           fraction = 1.1
@@ -1347,10 +1088,8 @@ export default function Map() {
 
         if (fraction === null) {
           if (schedMarkersRef.current[callsign]) {
-            schedMarkersRef.current[callsign].remove()
-            delete schedMarkersRef.current[callsign]
-            schedLinesRef.current[callsign]?.forEach((l: any) => l.remove())
-            delete schedLinesRef.current[callsign]
+            schedMarkersRef.current[callsign].remove(); delete schedMarkersRef.current[callsign]
+            schedLinesRef.current[callsign]?.forEach((l: any) => l.remove()); delete schedLinesRef.current[callsign]  // eslint-disable-line
           }
           continue
         }
@@ -1359,37 +1098,27 @@ export default function Map() {
         const arrC = ALL_AIRPORT_COORDS[arr_iata]
         if (!depC || !arrC) continue
 
-        // fraction ≥ 1: the scheduled duration has elapsed.
-        // confirmed arrival (actual_arr_utc) → show as ARRIVED at destination.
-        // no confirmation + no departure record → pure schedule phantom → suppress.
-        // no confirmation + departure confirmed → late flight still airborne → show near dest.
         const confirmedArr = !!(fs?.actual_arr_utc)
         const arrived      = fraction >= 1.0 && confirmedArr
         if (fraction >= 1.0 && !confirmedArr && !fs?.actual_dep_utc) {
           if (schedMarkersRef.current[callsign]) {
-            schedMarkersRef.current[callsign].remove()
-            delete schedMarkersRef.current[callsign]
-            schedLinesRef.current[callsign]?.forEach((l: any) => l.remove())
-            delete schedLinesRef.current[callsign]
+            schedMarkersRef.current[callsign].remove(); delete schedMarkersRef.current[callsign]
+            schedLinesRef.current[callsign]?.forEach((l: any) => l.remove()); delete schedLinesRef.current[callsign]  // eslint-disable-line
           }
           continue
         }
-        // Display cap: icon stays just short of the airport marker until arrival is confirmed.
-        // This is a render-only adjustment — fraction is not modified.
-        const APPROACH_DISPLAY_CAP = 0.97
-        const fPos = arrived ? 1.0 : Math.min(fraction, APPROACH_DISPLAY_CAP)
 
-        const wps = routePathsRef.current[`${dep_iata}|${arr_iata}`]
+        const fPos = arrived ? 1.0 : Math.min(fraction, 0.97)
+        const wps  = routePathsRef.current[`${dep_iata}|${arr_iata}`]
         const [lat, lon] = wps?.length
           ? interpolatePath(wps, fPos)
           : slerpGreatCircle(depC[0], depC[1], arrC[0], arrC[1], fPos)
         const track = wps?.length
           ? bearingFromPath(wps, fPos)
           : bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], fPos)
-        const isSyria    = AIRPORT_COORDS[arr_iata] != null || AIRPORT_COORDS[dep_iata] != null
-        const label      = arrived ? `${callsign}\nARRIVED` : callsign
-
-        const icon  = planeIcon(L, track, isSyria, arrived, label, dep_iata === 'ALP' || arr_iata === 'ALP', !arrived)
+        const label = arrived ? `${callsign}\nARRIVED` : callsign
+        const isAlp = dep_iata === 'ALP' || arr_iata === 'ALP'
+        const icon  = planeIcon(L, track, true, arrived, label, isAlp, !arrived)
         const popup = buildSchedulePopup(entry, arrived, fs, fPos)
 
         activeSchedKeys.add(callsign)
@@ -1402,21 +1131,17 @@ export default function Map() {
           schedMarkersRef.current[callsign] = L.marker([lat, lon], { icon }).addTo(map).bindPopup(popup, { className: 'fp-popup' })
         }
 
-        // No route line for arrived flights; clear any existing line
-        schedLinesRef.current[callsign]?.forEach((l: any) => l.remove())
+        schedLinesRef.current[callsign]?.forEach((l: any) => l.remove())  // eslint-disable-line
         schedLinesRef.current[callsign] = []
       }
 
       // Remove schedule markers that are no longer active
       for (const cs of Object.keys(schedMarkersRef.current)) {
         if (!activeSchedKeys.has(cs)) {
-          schedMarkersRef.current[cs].remove()
-          delete schedMarkersRef.current[cs]
-          schedLinesRef.current[cs]?.forEach((l: any) => l.remove())
-          delete schedLinesRef.current[cs]
+          schedMarkersRef.current[cs].remove(); delete schedMarkersRef.current[cs]
+          schedLinesRef.current[cs]?.forEach((l: any) => l.remove()); delete schedLinesRef.current[cs]  // eslint-disable-line
         }
       }
-
     }
 
     fetchAndUpdate()
