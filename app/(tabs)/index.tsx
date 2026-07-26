@@ -91,6 +91,9 @@ export default function BoardScreen() {
 
   useEffect(() => { load() }, [load])
 
+  const arrCount = useMemo(() => flights.filter(f => f.arr_iata === airport).length, [flights, airport])
+  const depCount = useMemo(() => flights.filter(f => f.dep_iata === airport).length, [flights, airport])
+
   // Sort in Syria local time so midnight wrap is handled correctly
   const sorted = useMemo(() => {
     const filtered = flights.filter(f =>
@@ -172,13 +175,16 @@ export default function BoardScreen() {
         {/* Arr/Dep + Airport on same row */}
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <View style={{ flex: 1, flexDirection: 'row', backgroundColor: '#111827', borderRadius: 8, padding: 3 }}>
-            {([['arr', 'Arrivals'], ['dep', 'Departures']] as [ViewType, string][]).map(([v, label]) => (
+            {([['arr', 'Arrivals', arrCount], ['dep', 'Departures', depCount]] as [ViewType, string, number][]).map(([v, label, count]) => (
               <TouchableOpacity
                 key={v}
                 onPress={() => setView(v)}
                 style={{
                   flex: 1,
                   alignItems: 'center',
+                  flexDirection: 'row',
+                  justifyContent: 'center',
+                  gap: 5,
                   paddingVertical: 6,
                   borderRadius: 6,
                   backgroundColor: view === v ? '#ffffff' : 'transparent',
@@ -187,6 +193,18 @@ export default function BoardScreen() {
                 <Text style={{ color: view === v ? '#030712' : '#6b7280', fontWeight: '600', fontSize: 13 }}>
                   {label}
                 </Text>
+                {count > 0 && (
+                  <View style={{
+                    backgroundColor: view === v ? '#111827' : '#1f2937',
+                    borderRadius: 99,
+                    paddingHorizontal: 5,
+                    paddingVertical: 1,
+                  }}>
+                    <Text style={{ color: view === v ? '#ffffff' : '#9ca3af', fontSize: 10, fontWeight: '700' }}>
+                      {count}
+                    </Text>
+                  </View>
+                )}
               </TouchableOpacity>
             ))}
           </View>
