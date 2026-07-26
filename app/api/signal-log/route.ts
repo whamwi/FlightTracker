@@ -59,10 +59,10 @@ async function processReading(r: SignalReading, now: string) {
     (ex?.airborne_at || airborne_at) && gs < 30 && alt < 100 ? now : null
   )
 
-  // 3. Insert position row
+  // 3. Insert position row — plain insert, no upsert (captured_at ms precision guarantees uniqueness)
   await fetch(`${SB_URL}/rest/v1/flight_position_log`, {
     method:  'POST',
-    headers: { ...HEADERS, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' },
+    headers: { ...HEADERS, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
     body: JSON.stringify({
       callsign, flight_date, captured_at: now,
       lat: r.lat, lon: r.lon,
