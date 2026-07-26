@@ -420,7 +420,7 @@ function buildPopup(
   </div>`
 }
 
-function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus | null): string {
+function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus | null, fraction?: number): string {
   const isSyria = AIRPORT_COORDS[e.arr_iata] != null
   const acType  = fs?.aircraft_type ?? null
   const aiata   = airlineIataFor(e.callsign, fs)
@@ -482,6 +482,17 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
     }
   }
 
+  const pct = (fraction != null && fraction > 0 && fraction < 1 && !arrived)
+    ? Math.round(Math.min(fraction, 1) * 100)
+    : null
+  const progressHtml = pct != null
+    ? `<div style="margin-top:6px">
+        <div style="height:3px;background:#1f2937;border-radius:2px;overflow:hidden">
+          <div style="width:${pct}%;height:100%;background:linear-gradient(90deg,#0284c7,#06b6d4);border-radius:2px"></div>
+        </div>
+      </div>`
+    : ''
+
   return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:200px;padding:9px 13px 11px">
     <div style="display:flex;align-items:center;margin-bottom:3px">
       ${logoHtml}<b style="font-size:14px">${e.callsign}</b>
@@ -491,6 +502,7 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
     ${routeLine}
     ${syriaLine}
     ${depDelay}${arrDelay}
+    ${progressHtml}
     <div style="color:#9ca3af;font-size:10px;margin-top:3px">Schedule projection · no signal yet</div>
   </div>`
 }
@@ -1373,7 +1385,7 @@ export default function Map() {
         const label      = arrived ? `${callsign}\nARRIVED` : callsign
 
         const icon  = planeIcon(L, track, isSyria, arrived, label, dep_iata === 'ALP' || arr_iata === 'ALP', !arrived)
-        const popup = buildSchedulePopup(entry, arrived, fs)
+        const popup = buildSchedulePopup(entry, arrived, fs, fPos)
 
         activeSchedKeys.add(callsign)
 
