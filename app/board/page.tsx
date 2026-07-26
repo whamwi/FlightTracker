@@ -344,7 +344,7 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
       <div className="flex items-start justify-between gap-2">
 
         <div className="min-w-[3.5rem]">
-          <p className="text-gray-500 text-xs mb-0.5">Dep</p>
+          <p className="text-gray-500 text-xs mb-0.5">Departure</p>
           <p className={`font-mono font-semibold text-base ${
             isCancelled       ? 'line-through text-gray-600' :
             f.actual_dep_utc  ? 'text-green-400' :
@@ -370,7 +370,7 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
         </div>
 
         <div className="min-w-[3.5rem] text-right">
-          <p className="text-gray-500 text-xs mb-0.5">Arr</p>
+          <p className="text-gray-500 text-xs mb-0.5">Arrival</p>
           <p className={`font-mono font-semibold text-base ${
             isCancelled       ? 'line-through text-gray-600' :
             f.actual_arr_utc  ? 'text-green-400' :
