@@ -170,7 +170,7 @@ export default function BoardScreen() {
       ) : (
         <FlatList
           data={sorted}
-          keyExtractor={f => f.iata_number + f.dep_time_utc}
+          keyExtractor={(f, i) => `${f.iata_number}-${f.dep_time_utc}-${i}`}
           renderItem={({ item }) => <FlightCard f={item} view={view} />}
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }}
           refreshControl={
