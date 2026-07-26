@@ -51,6 +51,7 @@ function normalizeForCache(data: any): Record<string, { arrivals: object[]; depa
       : Math.round((fl.flight_time ?? 0) / 60)
     const flight = {
       num,
+      fr24_id:      fl.identification?.id ?? null,
       airline:      fl.airline?.name ?? null,
       airline_iata: fl.airline?.code?.iata ?? null,
       dep_iata:     fl.airport?.origin?.code?.iata ?? null,
@@ -63,6 +64,8 @@ function normalizeForCache(data: any): Record<string, { arrivals: object[]; depa
       est_arr:      fl.time?.estimated?.arrival   ?? null,
       real_dep:     fl.time?.real?.departure      ?? null,
       real_arr:     fl.time?.real?.arrival        ?? null,
+      aircraft:     fl.aircraft?.model?.code      ?? null,
+      reg:          fl.aircraft?.registration     ?? null,
     }
     // Drop FR24 widget artifacts: corrupted entries have an inflated block time
     // (> 5 hours for any Syrian-region route is always a bad sched_arr timestamp).
