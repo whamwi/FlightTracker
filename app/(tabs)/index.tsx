@@ -94,6 +94,18 @@ export default function BoardScreen() {
   const arrCount = useMemo(() => flights.filter(f => f.arr_iata === airport).length, [flights, airport])
   const depCount = useMemo(() => flights.filter(f => f.dep_iata === airport).length, [flights, airport])
 
+  const [tabCounts, setTabCounts] = useState<Record<DateTab, number>>({ yesterday: 0, today: 0, tomorrow: 0 })
+  useEffect(() => {
+    const tabs: DateTab[] = ['yesterday', 'today', 'tomorrow']
+    Promise.all(tabs.map(t => fetchFlights(dateForTab(t)))).then(results => {
+      const counts = { yesterday: 0, today: 0, tomorrow: 0 } as Record<DateTab, number>
+      tabs.forEach((t, i) => {
+        counts[t] = results[i].filter(f => f.arr_iata === airport || f.dep_iata === airport).length
+      })
+      setTabCounts(counts)
+    }).catch(() => {})
+  }, [airport])
+
   // Sort in Syria local time so midnight wrap is handled correctly
   const sorted = useMemo(() => {
     const filtered = flights.filter(f =>
@@ -168,6 +180,19 @@ export default function BoardScreen() {
               <Text style={{ color: dateTab === dt ? '#374151' : '#4b5563', fontSize: 11, marginTop: 1 }}>
                 {shortDate(dt)}
               </Text>
+              {tabCounts[dt] > 0 && (
+                <View style={{
+                  backgroundColor: dateTab === dt ? '#111827' : '#1f2937',
+                  borderRadius: 99,
+                  paddingHorizontal: 6,
+                  paddingVertical: 1,
+                  marginTop: 3,
+                }}>
+                  <Text style={{ color: dateTab === dt ? '#ffffff' : '#6b7280', fontSize: 10, fontWeight: '700' }}>
+                    {tabCounts[dt]}
+                  </Text>
+                </View>
+              )}
             </TouchableOpacity>
           ))}
         </View>
