@@ -54,7 +54,7 @@ function NowLine({ time }: { time: string }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 10, gap: 10 }}>
       <View style={{ flex: 1, height: 1, backgroundColor: '#1d4ed8' }} />
-      <Text style={{ color: '#60a5fa', fontSize: 13, fontWeight: '600' }}>{time} · Now</Text>
+      <Text style={{ color: '#60a5fa', fontSize: 13, fontWeight: '600' }}>🕐 {time} · Now</Text>
       <View style={{ flex: 1, height: 1, backgroundColor: '#1d4ed8' }} />
     </View>
   )
