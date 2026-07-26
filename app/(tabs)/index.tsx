@@ -7,7 +7,6 @@ import {
   RefreshControl,
   ActivityIndicator,
   SafeAreaView,
-  ScrollView,
 } from 'react-native'
 import { FlightCard } from '../../components/FlightCard'
 import { fetchFlights } from '../../lib/api'
@@ -25,6 +24,13 @@ const DATE_LABELS: Record<DateTab, string> = {
 function dateForTab(tab: DateTab): string {
   const offset = tab === 'yesterday' ? -1 : tab === 'tomorrow' ? 1 : 0
   return syriaDate(offset)
+}
+
+function shortDate(tab: DateTab): string {
+  const iso = dateForTab(tab)
+  const [, m, d] = iso.split('-')
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  return `${parseInt(d)} ${months[parseInt(m) - 1]}`
 }
 
 export default function BoardScreen() {
@@ -73,73 +79,77 @@ export default function BoardScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: '#030712' }}>
       {/* Header */}
       <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8, gap: 10 }}>
-        <Text style={{ color: '#ffffff', fontSize: 20, fontWeight: '700' }}>Syria Flights</Text>
-
-        {/* Airport selector */}
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          {(['DAM', 'ALP'] as Airport[]).map(ap => (
-            <TouchableOpacity
-              key={ap}
-              onPress={() => setAirport(ap)}
-              style={{
-                paddingHorizontal: 16,
-                paddingVertical: 6,
-                borderRadius: 8,
-                backgroundColor: airport === ap ? '#0284c7' : '#111827',
-                borderWidth: 1,
-                borderColor: airport === ap ? '#0284c7' : '#1f2937',
-              }}
-            >
-              <Text style={{ color: airport === ap ? '#ffffff' : '#6b7280', fontWeight: '600', fontSize: 13 }}>
-                {ap}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* Arr / Dep toggle */}
-        <View style={{ flexDirection: 'row', backgroundColor: '#111827', borderRadius: 8, padding: 3, alignSelf: 'flex-start' }}>
-          {([['arr', 'Arrivals'], ['dep', 'Departures']] as [ViewType, string][]).map(([v, label]) => (
-            <TouchableOpacity
-              key={v}
-              onPress={() => setView(v)}
-              style={{
-                paddingHorizontal: 14,
-                paddingVertical: 5,
-                borderRadius: 6,
-                backgroundColor: view === v ? '#1d4ed8' : 'transparent',
-              }}
-            >
-              <Text style={{ color: view === v ? '#ffffff' : '#6b7280', fontWeight: '600', fontSize: 13 }}>
-                {label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
 
         {/* Date tabs */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            {(['yesterday', 'today', 'tomorrow'] as DateTab[]).map(dt => (
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          {(['yesterday', 'today', 'tomorrow'] as DateTab[]).map(dt => (
+            <TouchableOpacity
+              key={dt}
+              onPress={() => setDateTab(dt)}
+              style={{
+                flex: 1,
+                alignItems: 'center',
+                paddingVertical: 8,
+                borderRadius: 10,
+                backgroundColor: dateTab === dt ? '#1d4ed8' : '#111827',
+                borderWidth: 1,
+                borderColor: dateTab === dt ? '#1d4ed8' : '#1f2937',
+              }}
+            >
+              <Text style={{ color: dateTab === dt ? '#ffffff' : '#9ca3af', fontSize: 13, fontWeight: '600' }}>
+                {DATE_LABELS[dt]}
+              </Text>
+              <Text style={{ color: dateTab === dt ? '#bfdbfe' : '#4b5563', fontSize: 11, marginTop: 1 }}>
+                {shortDate(dt)}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* Arr/Dep + Airport on same row */}
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          {/* Arrivals / Departures pill */}
+          <View style={{ flex: 1, flexDirection: 'row', backgroundColor: '#111827', borderRadius: 8, padding: 3 }}>
+            {([['arr', 'Arrivals'], ['dep', 'Departures']] as [ViewType, string][]).map(([v, label]) => (
               <TouchableOpacity
-                key={dt}
-                onPress={() => setDateTab(dt)}
+                key={v}
+                onPress={() => setView(v)}
                 style={{
-                  paddingHorizontal: 14,
-                  paddingVertical: 5,
-                  borderRadius: 8,
-                  backgroundColor: dateTab === dt ? '#374151' : 'transparent',
-                  borderWidth: 1,
-                  borderColor: dateTab === dt ? '#4b5563' : '#1f2937',
+                  flex: 1,
+                  alignItems: 'center',
+                  paddingVertical: 6,
+                  borderRadius: 6,
+                  backgroundColor: view === v ? '#1d4ed8' : 'transparent',
                 }}
               >
-                <Text style={{ color: dateTab === dt ? '#ffffff' : '#6b7280', fontSize: 13, fontWeight: '500' }}>
-                  {DATE_LABELS[dt]}
+                <Text style={{ color: view === v ? '#ffffff' : '#6b7280', fontWeight: '600', fontSize: 13 }}>
+                  {label}
                 </Text>
               </TouchableOpacity>
             ))}
           </View>
-        </ScrollView>
+
+          {/* DAM / ALP pill */}
+          <View style={{ flexDirection: 'row', backgroundColor: '#111827', borderRadius: 8, padding: 3 }}>
+            {(['DAM', 'ALP'] as Airport[]).map(ap => (
+              <TouchableOpacity
+                key={ap}
+                onPress={() => setAirport(ap)}
+                style={{
+                  paddingHorizontal: 14,
+                  paddingVertical: 6,
+                  borderRadius: 6,
+                  backgroundColor: airport === ap ? '#1d4ed8' : 'transparent',
+                }}
+              >
+                <Text style={{ color: airport === ap ? '#ffffff' : '#6b7280', fontWeight: '700', fontSize: 13 }}>
+                  {ap}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
       </View>
 
       {/* Content */}
