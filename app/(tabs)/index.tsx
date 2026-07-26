@@ -174,25 +174,26 @@ export default function BoardScreen() {
                 borderColor: dateTab === dt ? '#ffffff' : '#1f2937',
               }}
             >
-              <Text style={{ color: dateTab === dt ? '#030712' : '#9ca3af', fontSize: 13, fontWeight: '600' }}>
-                {DATE_LABELS[dt]}
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <Text style={{ color: dateTab === dt ? '#030712' : '#9ca3af', fontSize: 13, fontWeight: '600' }}>
+                  {DATE_LABELS[dt]}
+                </Text>
+                {tabCounts[dt] > 0 && (
+                  <View style={{
+                    backgroundColor: dateTab === dt ? '#111827' : '#1f2937',
+                    borderRadius: 99,
+                    paddingHorizontal: 5,
+                    paddingVertical: 1,
+                  }}>
+                    <Text style={{ color: dateTab === dt ? '#ffffff' : '#6b7280', fontSize: 10, fontWeight: '700' }}>
+                      {tabCounts[dt]}
+                    </Text>
+                  </View>
+                )}
+              </View>
               <Text style={{ color: dateTab === dt ? '#374151' : '#4b5563', fontSize: 11, marginTop: 1 }}>
                 {shortDate(dt)}
               </Text>
-              {tabCounts[dt] > 0 && (
-                <View style={{
-                  backgroundColor: dateTab === dt ? '#111827' : '#1f2937',
-                  borderRadius: 99,
-                  paddingHorizontal: 6,
-                  paddingVertical: 1,
-                  marginTop: 3,
-                }}>
-                  <Text style={{ color: dateTab === dt ? '#ffffff' : '#6b7280', fontSize: 10, fontWeight: '700' }}>
-                    {tabCounts[dt]}
-                  </Text>
-                </View>
-              )}
             </TouchableOpacity>
           ))}
         </View>
