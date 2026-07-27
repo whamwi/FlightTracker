@@ -101,6 +101,20 @@ export default function BoardScreen() {
 
   useEffect(() => { load() }, [load])
 
+  // Silent background refresh every 30 s on today's tab (no scroll jerk)
+  const silentRefresh = useCallback(async () => {
+    try {
+      const all = await fetchFlights(dateForTab(dateTab))
+      setFlights(all)
+    } catch { /* ignore — user can pull-to-refresh if needed */ }
+  }, [dateTab])
+
+  useEffect(() => {
+    if (dateTab !== 'today') return
+    const t = setInterval(silentRefresh, 30_000)
+    return () => clearInterval(t)
+  }, [dateTab, silentRefresh])
+
   const arrCount = useMemo(() => flights.filter(f => f.arr_iata === airport).length, [flights, airport])
   const depCount = useMemo(() => flights.filter(f => f.dep_iata === airport).length, [flights, airport])
 

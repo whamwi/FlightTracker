@@ -1,6 +1,39 @@
+import { useState, useEffect } from 'react'
 import { View, Text, Image } from 'react-native'
 import type { Flight, View as ViewType } from '../lib/types'
 import { city, airportFlag, statusConfig, durationLabel, fmtLocal, tzOffset, airlineLogo, LOGO_WHITE_BG } from '../lib/constants'
+
+const IN_FLIGHT = new Set(['En Route', 'Departed', 'Approaching'])
+
+function ProgressRoute({ depUtc, durationMin }: { depUtc: string; durationMin: number }) {
+  const calc = () => {
+    const dep = new Date(depUtc).getTime()
+    return Math.min(100, Math.max(0, ((Date.now() - dep) / (durationMin * 60_000)) * 100))
+  }
+  const [pct, setPct] = useState(calc)
+  useEffect(() => {
+    const t = setInterval(() => setPct(calc()), 30_000)
+    return () => clearInterval(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [depUtc, durationMin])
+
+  const remainingMin = Math.round((1 - pct / 100) * durationMin)
+  const fill  = Math.max(0.5, pct)
+  const empty = Math.max(0.5, 100 - pct)
+
+  return (
+    <View style={{ width: '100%', alignItems: 'center', gap: 3 }}>
+      <Text style={{ color: '#4b5563', fontSize: 12 }}>
+        {remainingMin > 0 ? durationLabel(remainingMin) : 'Arriving'}
+      </Text>
+      <View style={{ flexDirection: 'row', width: '100%', alignItems: 'center', height: 20 }}>
+        <View style={{ flex: fill,  height: 1, backgroundColor: '#0284c7' }} />
+        <Text style={{ color: '#38bdf8', fontSize: 13 }}>✈</Text>
+        <View style={{ flex: empty, height: 1, backgroundColor: '#374151' }} />
+      </View>
+    </View>
+  )
+}
 
 function StatusBadge({ status }: { status: string }) {
   const cfg = statusConfig(status)
@@ -21,14 +54,21 @@ function DelayBadge({ min }: { min: number | null }) {
   )
 }
 
-function calcDelay(sched: string | null | undefined, actual: string | null | undefined): number | null {
-  if (!sched || !actual) return null
-  return Math.round((new Date(actual).getTime() - new Date(sched).getTime()) / 60_000)
+function calcDelay(schedHHMM: string | null | undefined, actual: string | null | undefined): number | null {
+  if (!schedHHMM || !actual) return null
+  const opDate   = actual.slice(0, 10)
+  const actualMs = new Date(actual).getTime()
+  if (isNaN(actualMs)) return null
+  let schedMs = new Date(`${opDate}T${schedHHMM}:00Z`).getTime()
+  // Scheduled HH:MM >12 h after actual means it belongs to the previous calendar day
+  if (schedMs - actualMs > 12 * 3_600_000) schedMs -= 86_400_000
+  return Math.round((actualMs - schedMs) / 60_000)
 }
 
 export function FlightCard({ f, view }: { f: Flight; view: ViewType }) {
-  const isArr = view === 'arr'
-  const cfg   = statusConfig(f.status)
+  const isArr      = view === 'arr'
+  const cfg        = statusConfig(f.status)
+  const showProgress = IN_FLIGHT.has(f.status) && !!f.actual_dep_utc && f.duration_min > 0
 
   const depOff = isArr ? tzOffset(f.dep_iata) : 3
   const arrOff = isArr ? 3 : tzOffset(f.arr_iata)
@@ -99,14 +139,20 @@ export function FlightCard({ f, view }: { f: Flight; view: ViewType }) {
           </View>
 
           <View style={{ flex: 1, alignItems: 'center', gap: 3 }}>
-            {f.duration_min > 0 && (
-              <Text style={{ color: '#4b5563', fontSize: 12 }}>{durationLabel(f.duration_min)}</Text>
+            {showProgress ? (
+              <ProgressRoute depUtc={f.actual_dep_utc!} durationMin={f.duration_min} />
+            ) : (
+              <>
+                {f.duration_min > 0 && (
+                  <Text style={{ color: '#4b5563', fontSize: 12 }}>{durationLabel(f.duration_min)}</Text>
+                )}
+                <View style={{ flexDirection: 'row', alignItems: 'center', width: '100%' }}>
+                  <View style={{ flex: 1, height: 1, backgroundColor: '#374151' }} />
+                  <Text style={{ color: '#4b5563', fontSize: 12, marginHorizontal: 4 }}>✈</Text>
+                  <View style={{ flex: 1, height: 1, backgroundColor: '#374151' }} />
+                </View>
+              </>
             )}
-            <View style={{ flexDirection: 'row', alignItems: 'center', width: '100%' }}>
-              <View style={{ flex: 1, height: 1, backgroundColor: '#374151' }} />
-              <Text style={{ color: '#4b5563', fontSize: 12, marginHorizontal: 4 }}>✈</Text>
-              <View style={{ flex: 1, height: 1, backgroundColor: '#374151' }} />
-            </View>
           </View>
 
           <View style={{ minWidth: 72, alignItems: 'flex-end' }}>
