@@ -747,12 +747,20 @@ export default function Map() {
               flight_number:     iata_number,
               dep_iata, arr_iata, airline_iata,
             }
-            if (!scheduleRef.current.some(e => e.callsign === cs)) {
+            const existingSchedIdx = scheduleRef.current.findIndex(e => e.callsign === cs)
+            if (existingSchedIdx === -1) {
               scheduleRef.current.push({
                 callsign: cs, dep_iata, arr_iata,
                 dep_time_utc: '00:00', arr_time_utc: '00:00',
                 duration_min, days_of_week: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],
               })
+            } else {
+              // boardDeparted carries effectiveDurationMin (actual dep → revised arr when known),
+              // which is more accurate than the stored schedule block time — update it.
+              scheduleRef.current[existingSchedIdx] = {
+                ...scheduleRef.current[existingSchedIdx],
+                duration_min,
+              }
             }
           }
 
