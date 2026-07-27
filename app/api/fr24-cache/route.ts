@@ -32,8 +32,14 @@ function mergeList(existing: any[], incoming: any[], keyFn: (e: any) => string):
   const merged = new Map<string, any>()
   const nowSec = Math.floor(Date.now() / 1000)
 
-  // Seed with incoming (fresh FR24 data is the baseline)
-  for (const e of incoming) merged.set(keyFn(e), e)
+  // Seed with incoming (fresh FR24 data is the baseline).
+  // When FR24 returns two entries for the same flight (e.g. one "Unknown" placeholder
+  // and one "Departed" entry with a real fr24_id), keep the higher-ranked status.
+  for (const e of incoming) {
+    const key = keyFn(e)
+    const prev = merged.get(key)
+    if (!prev || statusRank(e.status) >= statusRank(prev.status)) merged.set(key, e)
+  }
 
   // Walk existing; override incoming where existing data is richer
   for (const e of existing) {
