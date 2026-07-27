@@ -125,12 +125,8 @@ export async function GET(req: Request) {
 
     const key    = keyOverride ?? `${num}|${depIata}|${arrIata}`
     const status = normaliseStatus(f.status)
-    // Promote status based on confirmed timestamps, regardless of status text.
-    const effectiveStatus = f.fr24_actual_arr ? 'Arrived'
-      : (f.fr24_actual_dep && (STATUS_RANK[status] ?? 0) < STATUS_RANK['Departed'] ? 'Departed' : status)
 
-    // Compute effective duration from confirmed departure + estimated arrival when available.
-    // FR24's stored duration_min is the scheduled block time and is often stale/padded.
+    // Effective duration: actual_dep→revised_arr is more accurate than the scheduled block time.
     const effectiveDuration = (() => {
       if (f.fr24_actual_dep && f.fr24_revised_arr) {
         const computed = Math.round(
@@ -140,6 +136,17 @@ export async function GET(req: Request) {
       }
       return f.duration_min ?? 0
     })()
+
+    // Infer 'Arrived' when ATD + effective block time is > 15 min in the past with no FR24 confirmation yet.
+    // Uses effectiveDuration (not raw duration_min) so the revised ETA drives the inference, not the padded schedule.
+    const inferredArrived = !f.fr24_actual_arr
+      && !!f.fr24_actual_dep
+      && effectiveDuration > 0
+      && new Date(f.fr24_actual_dep as string).getTime() + effectiveDuration * 60_000 < Date.now() - 15 * 60_000
+
+    const effectiveStatus = f.fr24_actual_arr ? 'Arrived'
+      : inferredArrived ? 'Arrived'
+      : (f.fr24_actual_dep && (STATUS_RANK[status] ?? 0) < STATUS_RANK['Departed'] ? 'Departed' : status)
 
     if (flightMap[key]) {
       const existRank = STATUS_RANK[flightMap[key].status] ?? 0

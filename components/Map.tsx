@@ -878,7 +878,7 @@ export default function Map() {
           // flightStatusRef is updated from boardDeparted which reflects FR24 status;
           // a.actual_arr_utc (last live snapshot) may still be null when the plane just landed.
           const fsArrUtc = flightStatusRef.current[cs]?.actual_arr_utc
-          if (fsArrUtc && now - new Date(fsArrUtc).getTime() > 30 * 60_000) {
+          if (fsArrUtc && now - new Date(fsArrUtc).getTime() > 90 * 60_000) {
             expired = true
           } else if (a.actual_dep_utc && a.duration_min) {
             const expectedArrMs = new Date(a.actual_dep_utc).getTime() + a.duration_min * 60_000
@@ -1248,7 +1248,7 @@ export default function Map() {
         // Confirmed arrival within 4h → always show ARRIVED regardless of priorLegDone
         // priorLegDone was blocking fraction computation once actual_arr_utc was set,
         // which caused the marker to disappear exactly when it should show ARRIVED.
-        if (actualArrMs !== null && now - actualArrMs < 30 * 60_000) {
+        if (actualArrMs !== null && now - actualArrMs < 90 * 60_000) {
           fraction = 1.1
         }
 

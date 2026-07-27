@@ -136,7 +136,7 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<Bo
         const actual_dep_utc = f.real_dep
           ? new Date(f.real_dep * 1000).toISOString()
           : extractActualDepUtc(status, date)
-        const actual_arr_utc = f.real_arr
+        const raw_actual_arr_utc = f.real_arr
           ? new Date(f.real_arr * 1000).toISOString()
           : extractActualArrUtc(status, date)
         const revised_arr_utc = extractRevisedArrUtc(status, date)
@@ -150,6 +150,12 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<Bo
             if (c > 30) return c
           }
           return f.duration_min ?? null
+        })()
+        // Infer actual arrival when dep is confirmed + expected arr time is in the past (>15 min ago)
+        const actual_arr_utc = raw_actual_arr_utc ?? (() => {
+          if (!actual_dep_utc || !effectiveDurationMin || effectiveDurationMin <= 0) return null
+          const expectedMs = new Date(actual_dep_utc).getTime() + effectiveDurationMin * 60_000
+          return expectedMs < Date.now() - 15 * 60_000 ? new Date(expectedMs).toISOString() : null
         })()
         const schedDepMs   = f.sched_dep ? f.sched_dep * 1000 : null
         const actualDepMs  = actual_dep_utc ? new Date(actual_dep_utc).getTime() : null

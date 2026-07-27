@@ -169,8 +169,12 @@ function computedETA(f: Flight): string | null {
 
 function calcDelay(schedHHMM: string, actualISO: string | null): number | null {
   if (!actualISO || !schedHHMM) return null
-  const opDate = actualISO.slice(0, 10)
-  return Math.round((new Date(actualISO).getTime() - new Date(`${opDate}T${schedHHMM}:00Z`).getTime()) / 60_000)
+  const opDate   = actualISO.slice(0, 10)
+  const actualMs = new Date(actualISO).getTime()
+  let   schedMs  = new Date(`${opDate}T${schedHHMM}:00Z`).getTime()
+  // If scheduled HH:MM is >12 h after actual it belongs to the previous calendar day (midnight-crossing)
+  if (schedMs - actualMs > 12 * 3_600_000) schedMs -= 86_400_000
+  return Math.round((actualMs - schedMs) / 60_000)
 }
 
 // Sort key: actual → revised → scheduled, in Syria local minutes (UTC+3).
