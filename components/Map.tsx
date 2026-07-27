@@ -525,6 +525,8 @@ export default function Map() {
   // Last-known state keyed by callsign — replaces hex-keyed lastKnownRef
   const trackedRef        = useRef<Record<string, TrackedEntry>>({})
   const scheduleRef       = useRef<ScheduleEntry[]>([])
+  // boardDeparted overrides: effectiveDurationMin is more accurate than stored schedule block time
+  const durationOverridesRef = useRef<Record<string, number>>({})
   const routePathsRef     = useRef<Record<string, Waypoint[]>>({})
   const flightStatusRef   = useRef<Record<string, FlightStatus>>({})
   const photoCacheRef     = useRef<Record<string, string | null>>({})
@@ -620,6 +622,11 @@ export default function Map() {
             days_of_week: r.days_of_week       as string[],
           }))
           .filter(e => e.callsign && e.dep_iata && e.arr_iata)
+        // Re-apply any boardDeparted overrides that may have arrived before the schedule loaded
+        for (const e of scheduleRef.current) {
+          const ov = durationOverridesRef.current[e.callsign]
+          if (ov) e.duration_min = ov
+        }
       })
       .catch(() => {})
 
@@ -747,6 +754,8 @@ export default function Map() {
               flight_number:     iata_number,
               dep_iata, arr_iata, airline_iata,
             }
+            // Cache the effective duration so schedule reloads can re-apply it
+            durationOverridesRef.current[cs] = duration_min
             const existingSchedIdx = scheduleRef.current.findIndex(e => e.callsign === cs)
             if (existingSchedIdx === -1) {
               scheduleRef.current.push({
