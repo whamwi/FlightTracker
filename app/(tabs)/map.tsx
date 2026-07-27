@@ -136,7 +136,7 @@ type Aircraft = {
   dep_iata: string | null; arr_iata: string | null
   iata_number: string | null; airline_iata: string | null
   actual_dep_utc: string | null; actual_arr_utc: string | null
-  arr_time_utc: string | null; duration_min: number | null
+  dep_time_utc: string | null; arr_time_utc: string | null; duration_min: number | null
   dep_delay_min: number | null
   alt_baro: number | 'ground' | null; gs: number | null
 }
@@ -162,7 +162,7 @@ type DisplayItem = {
   dep_iata: string | null; arr_iata: string | null
   actual_dep_utc: string | null; actual_arr_utc: string | null
   revised_arr_utc: string | null
-  arr_time_utc: string | null; duration_min: number | null
+  dep_time_utc: string | null; arr_time_utc: string | null; duration_min: number | null
   dep_delay_min: number | null
   fraction: number | null
   t: string | null; alt_baro: number | 'ground' | null; gs: number | null
@@ -190,7 +190,7 @@ function toFlight(item: DisplayItem): Flight {
     country_flag:   '',
     dep_iata:       item.dep_iata ?? '',
     arr_iata:       item.arr_iata ?? '',
-    dep_time_utc:   item.actual_dep_utc ?? item.arr_time_utc ?? '--:--',
+    dep_time_utc:   item.actual_dep_utc ?? item.dep_time_utc ?? '--:--',
     arr_time_utc:   item.arr_time_utc ?? expectedArrISO ?? item.actual_arr_utc ?? '--:--',
     sched_dep_unix: null,
     duration_min:   item.duration_min ?? 0,
@@ -266,7 +266,7 @@ export default function MapTab() {
         lat:a.lat, lon:a.lon, track:a.track??0,
         dep_iata:a.dep_iata, arr_iata:a.arr_iata,
         actual_dep_utc:a.actual_dep_utc, actual_arr_utc:a.actual_arr_utc, revised_arr_utc:null,
-        arr_time_utc:a.arr_time_utc, duration_min:a.duration_min??null,
+        dep_time_utc:a.dep_time_utc??null, arr_time_utc:a.arr_time_utc, duration_min:a.duration_min??null,
         dep_delay_min:a.dep_delay_min??null, fraction:null,
         t:a.t, alt_baro:a.alt_baro, gs:a.gs,
         airline_iata:a.airline_iata, iata_number:a.iata_number,
@@ -303,6 +303,7 @@ export default function MapTab() {
         key:`bd-${cs}`,callsign:cs,label:cs,
         lat,lon,track:trk,dep_iata,arr_iata,
         actual_dep_utc,actual_arr_utc,revised_arr_utc:revised_arr_utc??null,
+        dep_time_utc:null,
         arr_time_utc:actual_dep_utc&&duration_min>0?new Date(new Date(actual_dep_utc).getTime()+duration_min*60_000).toISOString():null,
         duration_min,dep_delay_min:dep_delay_min??null,fraction:bdFrac,
         t:null,alt_baro:null,gs:null,
@@ -328,7 +329,7 @@ export default function MapTab() {
         key:`sched-${cs}`,callsign:cs,label:cs,
         lat,lon,track:trk,dep_iata,arr_iata,
         actual_dep_utc:null,actual_arr_utc:null,revised_arr_utc:null,
-        arr_time_utc,duration_min,dep_delay_min:null,fraction:f,
+        dep_time_utc,arr_time_utc,duration_min,dep_delay_min:null,fraction:f,
         t:null,alt_baro:null,gs:null,
         airline_iata:null,iata_number:null,
         isEstimated:true,isArrived:false,
