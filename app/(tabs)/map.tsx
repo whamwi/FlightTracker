@@ -112,7 +112,7 @@ function bearingFromPath(wps: Waypoint[], f: number): number {
 type Aircraft = {
   hex: string; flight: string
   lat: number; lon: number
-  track: number | null; t: string | null
+  track: number | null; true_heading: number | null; t: string | null
   board_match: boolean
   dep_iata: string | null; arr_iata: string | null
   iata_number: string | null; airline_iata: string | null
@@ -215,9 +215,14 @@ export default function MapTab() {
       covered.add(cs)
       const isArrived = !!a.actual_arr_utc
       const isAlp = a.arr_iata === 'ALP' || a.dep_iata === 'ALP'
+      // track fallback: ADS-B track → true_heading → route bearing dep→arr
+      const depC = a.dep_iata ? AIRPORT[a.dep_iata] : null
+      const arrC = a.arr_iata ? AIRPORT[a.arr_iata] : null
+      const routeTrk = depC && arrC ? brng(depC[0], depC[1], arrC[0], arrC[1]) : 0
+      const liveTrk = a.track ?? a.true_heading ?? routeTrk
       result.push({
-        key:`live-${cs}`, callsign:cs, label:cs,
-        lat:a.lat, lon:a.lon, track:a.track??0,
+        key:cs, callsign:cs, label:cs,
+        lat:a.lat, lon:a.lon, track:liveTrk,
         dep_iata:a.dep_iata, arr_iata:a.arr_iata,
         actual_dep_utc:a.actual_dep_utc, actual_arr_utc:a.actual_arr_utc, revised_arr_utc:null,
         dep_time_utc:a.dep_time_utc??null, arr_time_utc:a.arr_time_utc, duration_min:a.duration_min??null,
@@ -243,8 +248,9 @@ export default function MapTab() {
       } else if (actual_dep_utc&&duration_min>0) {
         const elapsedMin=(now-new Date(actual_dep_utc).getTime())/60_000
         if (elapsedMin<0) continue
-        const f=Math.min(elapsedMin/duration_min,0.97)
-        if (f>1.5) continue
+        const rawF=elapsedMin/duration_min
+        if (rawF>1.5) continue
+        const f=Math.min(rawF,0.97)
         const wps=routePathsRef.current[`${dep_iata}|${arr_iata}`]
         if (wps?.length){[lat,lon]=interpolatePath(wps,f);trk=bearingFromPath(wps,f)}
         else{[lat,lon]=slerpGreatCircle(depC[0],depC[1],arrC[0],arrC[1],f);trk=brng(depC[0],depC[1],arrC[0],arrC[1])}
@@ -254,7 +260,7 @@ export default function MapTab() {
         ?Math.min((now-new Date(actual_dep_utc).getTime())/60_000/duration_min,0.97):null
       const isAlp=arr_iata==='ALP'||dep_iata==='ALP'
       result.push({
-        key:`bd-${cs}`,callsign:cs,label:cs,
+        key:cs,callsign:cs,label:cs,
         lat,lon,track:trk,dep_iata,arr_iata,
         actual_dep_utc,actual_arr_utc,revised_arr_utc:revised_arr_utc??null,
         dep_time_utc:null,
