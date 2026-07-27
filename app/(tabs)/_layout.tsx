@@ -23,10 +23,17 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="map"
+        options={{
+          title: 'Map',
+          tabBarIcon: ({ color }) => <TabIcon emoji="🗺️" color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="destinations"
         options={{
           title: 'Destinations',
-          tabBarIcon: ({ color }) => <TabIcon emoji="🗺️" color={color} />,
+          tabBarIcon: ({ color }) => <TabIcon emoji="🏙️" color={color} />,
         }}
       />
       <Tabs.Screen

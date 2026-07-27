@@ -9,7 +9,8 @@
     "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.hamwi.syriaflights"
+      "bundleIdentifier": "com.hamwi.syriaflights",
+      "appleTeamId": "94AKZA7R4S"
     },
     "android": {
       "adaptiveIcon": {
