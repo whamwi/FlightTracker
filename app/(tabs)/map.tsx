@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native'
+import { MaterialIcons } from '@expo/vector-icons'
 import MapView, { Marker, UrlTile, Circle, PROVIDER_DEFAULT } from 'react-native-maps'
 import { FlightCard } from '../../components/FlightCard'
 import type { Flight } from '../../lib/types'
@@ -339,12 +340,15 @@ export default function MapTab() {
               tracksViewChanges={false}
             >
               <View style={styles.markerWrap}>
-                <Text style={{
-                  fontSize: 22,
-                  color,
-                  opacity: item.isArrived ? 0.35 : item.isEstimated ? 0.65 : 1,
-                  transform: [{ rotate: `${item.track - 90}deg` }],
-                }}>✈</Text>
+                <MaterialIcons
+                  name="flight"
+                  size={22}
+                  color={color}
+                  style={{
+                    opacity: item.isArrived ? 0.35 : item.isEstimated ? 0.65 : 1,
+                    transform: [{ rotate: `${item.track}deg` }],
+                  }}
+                />
                 <View style={styles.labelWrap}>
                   <Text style={[styles.labelText, {
                     color: item.isAlp      ? '#f97316'
