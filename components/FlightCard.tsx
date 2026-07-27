@@ -26,9 +26,9 @@ function ProgressRoute({ depUtc, durationMin }: { depUtc: string; durationMin: n
       <Text style={{ color: '#4b5563', fontSize: 12 }}>
         {remainingMin > 0 ? durationLabel(remainingMin) : 'Arriving'}
       </Text>
-      <View style={{ flexDirection: 'row', width: '100%', alignItems: 'center', height: 20 }}>
+      <View style={{ flexDirection: 'row', width: '100%', alignItems: 'center', height: 24 }}>
         <View style={{ flex: fill,  height: 1, backgroundColor: '#0284c7' }} />
-        <Text style={{ color: '#38bdf8', fontSize: 13 }}>✈</Text>
+        <Text style={{ color: '#38bdf8', fontSize: 20 }}>✈</Text>
         <View style={{ flex: empty, height: 1, backgroundColor: '#374151' }} />
       </View>
     </View>
