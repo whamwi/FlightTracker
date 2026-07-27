@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native'
-import Svg, { Path } from 'react-native-svg'
+import MaterialIcons from '@expo/vector-icons/MaterialIcons'
 import MapView, { Marker, UrlTile, Circle, PROVIDER_DEFAULT } from 'react-native-maps'
 import { FlightCard } from '../../components/FlightCard'
 import type { Flight } from '../../lib/types'
@@ -109,6 +109,25 @@ function bearingFromPath(wps: Waypoint[], f: number): number {
   return brng(aLat,aLon,bLat,bLon)
 }
 
+function bearingAlongPath(lat1: number,lon1: number,lat2: number,lon2: number,t: number): number {
+  const dt=Math.min(0.005,(1-t)*0.5)
+  const [aLat,aLon]=slerpGreatCircle(lat1,lon1,lat2,lon2,t)
+  const [bLat,bLon]=slerpGreatCircle(lat1,lon1,lat2,lon2,Math.min(1,t+dt))
+  return brng(aLat,aLon,bLat,bLon)
+}
+
+function greatCircleKm(lat1: number,lon1: number,lat2: number,lon2: number): number {
+  const r=Math.PI/180,dLat=(lat2-lat1)*r,dLon=(lon2-lon1)*r
+  const a=Math.sin(dLat/2)**2+Math.cos(lat1*r)*Math.cos(lat2*r)*Math.sin(dLon/2)**2
+  return 6371*2*Math.asin(Math.sqrt(a))
+}
+
+function nearestPathFraction(wps: Waypoint[],lat: number,lon: number): number {
+  let bestF=wps[0]?.f??0,bestDist=Infinity
+  for (const wp of wps){const d=greatCircleKm(lat,lon,wp.lat,wp.lon);if(d<bestDist){bestDist=d;bestF=wp.f}}
+  return bestF
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Aircraft = {
   hex: string; flight: string
@@ -188,7 +207,9 @@ export default function MapTab() {
   const [selected, setSelected] = useState<DisplayItem | null>(null)
   const [loading, setLoading]   = useState(true)
 
-  const routePathsRef = useRef<Record<string, Waypoint[]>>({})
+  const routePathsRef  = useRef<Record<string, Waypoint[]>>({})
+  const lastKnownRef   = useRef<Record<string, { lat: number; lon: number }>>({})
+  const prevItemsRef   = useRef<Record<string, DisplayItem>>({})
 
   useEffect(() => {
     fetch(`${BASE}/api/routes`)
@@ -214,6 +235,7 @@ export default function MapTab() {
       const cs = (a.flight ?? '').trim()
       if (!cs) continue
       covered.add(cs)
+      lastKnownRef.current[cs] = { lat: a.lat, lon: a.lon }
       const isArrived = !!a.actual_arr_utc
       const isAlp = a.arr_iata === 'ALP' || a.dep_iata === 'ALP'
       // track fallback: ADS-B track → true_heading → route bearing dep→arr
@@ -251,10 +273,17 @@ export default function MapTab() {
         if (elapsedMin<0) continue
         const rawF=elapsedMin/duration_min
         if (rawF>1.5) continue
-        const f=Math.min(rawF,0.97)
+        const timeFrac=Math.min(rawF,0.97)
         const wps=routePathsRef.current[`${dep_iata}|${arr_iata}`]
-        if (wps?.length){[lat,lon]=interpolatePath(wps,f);trk=bearingFromPath(wps,f)}
-        else{[lat,lon]=slerpGreatCircle(depC[0],depC[1],arrC[0],arrC[1],f);trk=brng(depC[0],depC[1],arrC[0],arrC[1])}
+        if (wps?.length){
+          const lastKnown=lastKnownRef.current[cs]
+          const anchorF=lastKnown?nearestPathFraction(wps,lastKnown.lat,lastKnown.lon):0
+          const f=Math.min(Math.max(timeFrac,anchorF),0.97)
+          ;[lat,lon]=interpolatePath(wps,f);trk=bearingFromPath(wps,f)
+        } else {
+          const f=timeFrac
+          ;[lat,lon]=slerpGreatCircle(depC[0],depC[1],arrC[0],arrC[1],f);trk=bearingAlongPath(depC[0],depC[1],arrC[0],arrC[1],f)
+        }
       } else continue
       covered.add(cs)
       const bdFrac=(!isArrived&&actual_dep_utc&&duration_min>0)
@@ -273,6 +302,38 @@ export default function MapTab() {
       })
     }
 
+    // Gap-fill: flights that were visible last poll but aren't in this poll's
+    // aircraft or boardDeparted (happens during the 60s boardCache stale window
+    // right after a plane leaves the ADS-B radius). Keep them at their current
+    // estimated position so the marker never disappears mid-flight.
+    const resultKeys = new Set(result.map(i => i.key))
+    for (const [cs, prev] of Object.entries(prevItemsRef.current)) {
+      if (resultKeys.has(cs)) continue
+      if (prev.isArrived) continue
+      if (!prev.actual_dep_utc || !prev.duration_min) continue
+      const elapsedMin = (now - new Date(prev.actual_dep_utc).getTime()) / 60_000
+      if (elapsedMin < 0 || elapsedMin > prev.duration_min * 1.5) continue
+      const dep_iata = prev.dep_iata!, arr_iata = prev.arr_iata!
+      const depC = AIRPORT[dep_iata], arrC = AIRPORT[arr_iata]
+      if (!depC || !arrC) continue
+      const rawF = elapsedMin / prev.duration_min
+      const timeFrac = Math.min(rawF, 0.97)
+      const wps = routePathsRef.current[`${dep_iata}|${arr_iata}`]
+      let lat: number, lon: number, trk: number
+      if (wps?.length) {
+        const lastKnown = lastKnownRef.current[cs]
+        const anchorF = lastKnown ? nearestPathFraction(wps, lastKnown.lat, lastKnown.lon) : 0
+        const f = Math.min(Math.max(timeFrac, anchorF), 0.97)
+        ;[lat, lon] = interpolatePath(wps, f); trk = bearingFromPath(wps, f)
+      } else {
+        const f = timeFrac
+        ;[lat, lon] = slerpGreatCircle(depC[0], depC[1], arrC[0], arrC[1], f)
+        trk = bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], f)
+      }
+      result.push({ ...prev, lat, lon, track: trk, isEstimated: true })
+    }
+
+    prevItemsRef.current = Object.fromEntries(result.map(i => [i.key, i]))
     setItems(result)
   }, [])
 
@@ -287,7 +348,7 @@ export default function MapTab() {
 
   useEffect(() => {
     load()
-    const t = setInterval(load, 30_000)
+    const t = setInterval(load, 10_000)
     return () => clearInterval(t)
   }, [load])
 
@@ -337,20 +398,14 @@ export default function MapTab() {
               coordinate={{ latitude: item.lat, longitude: item.lon }}
               onPress={e => { e.stopPropagation(); setSelected(item) }}
               anchor={{ x: 0.5, y: 0.5 }}
-              tracksViewChanges={false}
             >
               <View style={styles.markerWrap}>
-                <Svg width={22} height={22} viewBox="0 0 24 24" style={{
+                <View style={{
                   opacity: item.isArrived ? 0.35 : item.isEstimated ? 0.65 : 1,
                   transform: [{ rotate: `${item.track}deg` }],
                 }}>
-                  <Path
-                    d="M21 16v-2l-8-5V3.5C13 2.67 12.33 2 11.5 2S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"
-                    fill={color}
-                    stroke="white"
-                    strokeWidth={0.4}
-                  />
-                </Svg>
+                  <MaterialIcons name="flight" size={22} color={color} />
+                </View>
                 <View style={styles.labelWrap}>
                   <Text style={[styles.labelText, {
                     color: item.isAlp      ? '#f97316'
