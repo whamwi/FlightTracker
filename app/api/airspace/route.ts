@@ -95,10 +95,11 @@ interface BoardFlight {
   sched_arr:      number | null // unix
   duration_min:   number | null
   status:         string        // raw FR24 status, lowercased
-  actual_dep_utc: string | null // from "Departed HH:MM" status
-  actual_arr_utc: string | null // from real_arr (landing-confirm cron) or "Landed HH:MM" status
-  dep_delay_min:  number | null // actual_dep_utc − sched_dep
-  airline_iata:   string | null // IATA code for airline logo
+  actual_dep_utc:  string | null // from "Departed HH:MM" status
+  actual_arr_utc:  string | null // from real_arr (landing-confirm cron) or "Landed HH:MM" status
+  revised_arr_utc: string | null // FR24 est_arr or "Estimated HH:MM" status
+  dep_delay_min:   number | null // actual_dep_utc − sched_dep
+  airline_iata:    string | null // IATA code for airline logo
 }
 
 let boardCache: { flights: BoardFlight[]; date: string; ts: number } | null = null
@@ -177,6 +178,7 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<Bo
           status,
           actual_dep_utc,
           actual_arr_utc,
+          revised_arr_utc,
           dep_delay_min,
           airline_iata:   icaoToIata[icaoPrefix] ?? null,
         })
@@ -471,15 +473,16 @@ export async function GET() {
       .map(f => {
         const actual_dep_utc = f.actual_dep_utc
         return {
-          callsign:       f.callsign,
-          dep_iata:       f.dep_iata,
-          arr_iata:       f.arr_iata,
-          duration_min:   f.duration_min,
+          callsign:        f.callsign,
+          dep_iata:        f.dep_iata,
+          arr_iata:        f.arr_iata,
+          duration_min:    f.duration_min,
           actual_dep_utc,
-          actual_arr_utc: f.actual_arr_utc,
-          iata_number:    f.num,
-          dep_delay_min:  f.dep_delay_min,
-          airline_iata:   f.airline_iata,
+          actual_arr_utc:  f.actual_arr_utc,
+          revised_arr_utc: f.revised_arr_utc,
+          iata_number:     f.num,
+          dep_delay_min:   f.dep_delay_min,
+          airline_iata:    f.airline_iata,
         }
       })
 
