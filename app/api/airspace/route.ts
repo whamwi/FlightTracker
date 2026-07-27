@@ -304,9 +304,12 @@ let feedCache: { aircraft: any[]; ts: number } | null = null
 let feedInflight: Promise<any[]> | null = null
 
 // ── Live ADS-B departure writeback ────────────────────────────────────────────
-// When the UAE/Gulf radius feed sees an inbound flight airborne before FR24 cron
-// has updated real_dep, we write real_dep back to the arrival-airport cache row
-// immediately.  One write per callsign per Vercel instance lifetime.
+// writeInboundDep: UAE/Gulf radius sees an inbound flight airborne → write real_dep
+//   to the arrival-airport (Syrian) cache row so future polls find it.
+// writeOutboundDep: Syria radius sees an outbound flight airborne → write real_dep
+//   to the departure-airport (Syrian) cache row so the ghost marker appears once
+//   the plane leaves the radius.
+// One write per callsign per Vercel instance lifetime (depSynced guard).
 const SYRIAN_AIRPORTS_SET = new Set(['DAM', 'ALP', 'LTK'])
 const depSynced = new Set<string>()
 
@@ -330,6 +333,29 @@ async function writeInboundDep(info: BoardFlight, depTs: number): Promise<void> 
     method:  'POST',
     headers: { ...SB_HEADERS, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' },
     body: JSON.stringify({ airport_iata: arrAp, flight_date: date, arrivals: list, departures: rows[0].departures ?? [] }),
+  })
+}
+
+async function writeOutboundDep(info: BoardFlight, depTs: number): Promise<void> {
+  const depAp = info.dep_iata
+  if (!depAp || !SYRIAN_AIRPORTS_SET.has(depAp)) return
+  const date = new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10)
+  const rowRes = await fetch(
+    `${SB_URL}/rest/v1/fr24_daily_cache?airport_iata=eq.${depAp}&flight_date=eq.${date}&select=arrivals,departures`,
+    { headers: SB_HEADERS },
+  )
+  if (!rowRes.ok) return
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows: any[] = await rowRes.json()
+  if (!rows.length) return
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const list = ((rows[0].departures ?? []) as any[]).map((f: any) =>
+    f.num === info.num ? { ...f, real_dep: depTs } : f,
+  )
+  await fetch(`${SB_URL}/rest/v1/fr24_daily_cache`, {
+    method:  'POST',
+    headers: { ...SB_HEADERS, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify({ airport_iata: depAp, flight_date: date, arrivals: rows[0].arrivals ?? [], departures: list }),
   })
 }
 
@@ -392,18 +418,31 @@ export async function GET() {
       const cs   = (a.flight ?? '').trim().toUpperCase()
       const info = boardMap.get(cs)
 
-      // Live departure confirmation: if ADS-B shows an inbound flight clearly
-      // airborne (alt > 500 ft, gs > 80 kts) before FR24 cron has set real_dep,
-      // synthesize actual_dep_utc from sched_dep and write real_dep to cache once.
+      // Live departure confirmation — two cases, both require alt > 500 ft and gs > 80 kts:
+      // 1. Inbound to Syrian airport: write real_dep to arrival-airport cache row.
+      // 2. Outbound from Syrian airport: write real_dep to departure-airport cache row
+      //    so the ghost marker appears once the plane leaves the Syria ADS-B radius.
       let actual_dep_utc = info?.actual_dep_utc ?? null
-      if (!actual_dep_utc && info?.arr_iata && SYRIAN_AIRPORTS_SET.has(info.arr_iata)
-          && !SYRIAN_AIRPORTS_SET.has(info.dep_iata ?? '')
-          && (a.alt_baro ?? 0) > 500 && (a.gs ?? 0) > 80) {
-        const depTs    = info.sched_dep ?? Math.floor(Date.now() / 1000)
-        actual_dep_utc = new Date(depTs * 1000).toISOString()
-        if (!depSynced.has(cs)) {
-          depSynced.add(cs)
-          writeInboundDep(info, depTs).catch(() => {})
+      const isAirborne = (a.alt_baro ?? 0) > 500 && (a.gs ?? 0) > 80
+      if (!actual_dep_utc && info && isAirborne) {
+        if (info.arr_iata && SYRIAN_AIRPORTS_SET.has(info.arr_iata)
+            && !SYRIAN_AIRPORTS_SET.has(info.dep_iata ?? '')) {
+          // Inbound
+          const depTs    = info.sched_dep ?? Math.floor(Date.now() / 1000)
+          actual_dep_utc = new Date(depTs * 1000).toISOString()
+          if (!depSynced.has(cs)) {
+            depSynced.add(cs)
+            writeInboundDep(info, depTs).catch(() => {})
+          }
+        } else if (info.dep_iata && SYRIAN_AIRPORTS_SET.has(info.dep_iata)
+            && !SYRIAN_AIRPORTS_SET.has(info.arr_iata ?? '')) {
+          // Outbound
+          const depTs    = info.sched_dep ?? Math.floor(Date.now() / 1000)
+          actual_dep_utc = new Date(depTs * 1000).toISOString()
+          if (!depSynced.has(cs)) {
+            depSynced.add(cs)
+            writeOutboundDep(info, depTs).catch(() => {})
+          }
         }
       }
 
