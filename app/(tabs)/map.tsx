@@ -108,25 +108,6 @@ function bearingFromPath(wps: Waypoint[], f: number): number {
   return brng(aLat,aLon,bLat,bLon)
 }
 
-function schedFraction(depUtc: string, arrUtc: string, days: string[], nowMs: number): number | null {
-  const toSec=(s: string)=>{const[h,m]=s.split(':').map(Number);return h*3600+m*60}
-  const depSec=toSec(depUtc),arrSec=toSec(arrUtc)
-  const durSec=arrSec>depSec?arrSec-depSec:86400-depSec+arrSec
-  if (durSec<=0) return null
-  const now=new Date(nowMs)
-  const DAYS=['sun','mon','tue','wed','thu','fri','sat']
-  const todayI=now.getUTCDay()
-  const nowSec=now.getUTCHours()*3600+now.getUTCMinutes()*60+now.getUTCSeconds()
-  if (arrSec>depSec){
-    if (days.includes(DAYS[todayI])&&nowSec>=depSec&&nowSec<=arrSec) return (nowSec-depSec)/durSec
-    return null
-  }
-  if (days.includes(DAYS[todayI])&&nowSec>=depSec) return (nowSec-depSec)/durSec
-  const yIdx=(todayI+6)%7
-  if (days.includes(DAYS[yIdx])&&nowSec<=arrSec) return (86400-depSec+nowSec)/durSec
-  return null
-}
-
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Aircraft = {
   hex: string; flight: string
@@ -148,12 +129,6 @@ type BoardDeparted = {
   revised_arr_utc: string | null
   iata_number: string; airline_iata: string | null
   dep_delay_min: number | null
-}
-
-type ScheduleRow = {
-  callsign: string; dep_iata: string; arr_iata: string
-  dep_time_utc: string; arr_time_utc: string
-  duration_min: number; days_of_week: string[]
 }
 
 type DisplayItem = {
@@ -212,30 +187,9 @@ export default function MapTab() {
   const [selected, setSelected] = useState<DisplayItem | null>(null)
   const [loading, setLoading]   = useState(true)
 
-  const scheduleRef   = useRef<ScheduleRow[]>([])
   const routePathsRef = useRef<Record<string, Waypoint[]>>({})
 
   useEffect(() => {
-    fetch(`${BASE}/api/schedule`)
-      .then(r => r.json())
-      .then(d => {
-        if (!d.ok) return
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        scheduleRef.current = (d.rows as any[])
-          .filter((r: any) => r.dep_time_utc !== '—' && r.arr_time_utc !== '—' && r.duration_min > 0)
-          .map((r: any) => ({
-            callsign:     r.broadcast_callsign as string,
-            dep_iata:     r.dep_iata as string,
-            arr_iata:     r.arr_iata as string,
-            dep_time_utc: (r.dep_time_utc as string).slice(0, 5),
-            arr_time_utc: (r.arr_time_utc as string).slice(0, 5),
-            duration_min: r.duration_min as number,
-            days_of_week: r.days_of_week as string[],
-          }))
-          .filter((e: ScheduleRow) => e.callsign && e.dep_iata && e.arr_iata)
-      })
-      .catch(() => {})
-
     fetch(`${BASE}/api/routes`)
       .then(r => r.json())
       .then(d => {
@@ -309,31 +263,6 @@ export default function MapTab() {
         t:null,alt_baro:null,gs:null,
         airline_iata,iata_number,
         isEstimated:true,isArrived,isAlp,
-      })
-    }
-
-    for (const entry of scheduleRef.current) {
-      const {callsign:cs,dep_iata,arr_iata,dep_time_utc,arr_time_utc,duration_min,days_of_week} = entry
-      if (!cs||covered.has(cs)) continue
-      const depC=AIRPORT[dep_iata],arrC=AIRPORT[arr_iata]
-      if (!depC||!arrC) continue
-      const frac=schedFraction(dep_time_utc,arr_time_utc,days_of_week,now)
-      if (frac===null) continue
-      const f=Math.min(frac,0.97)
-      const wps=routePathsRef.current[`${dep_iata}|${arr_iata}`]
-      let lat: number,lon: number,trk: number
-      if (wps?.length){[lat,lon]=interpolatePath(wps,f);trk=bearingFromPath(wps,f)}
-      else{[lat,lon]=slerpGreatCircle(depC[0],depC[1],arrC[0],arrC[1],f);trk=brng(depC[0],depC[1],arrC[0],arrC[1])}
-      covered.add(cs)
-      result.push({
-        key:`sched-${cs}`,callsign:cs,label:cs,
-        lat,lon,track:trk,dep_iata,arr_iata,
-        actual_dep_utc:null,actual_arr_utc:null,revised_arr_utc:null,
-        dep_time_utc,arr_time_utc,duration_min,dep_delay_min:null,fraction:f,
-        t:null,alt_baro:null,gs:null,
-        airline_iata:null,iata_number:null,
-        isEstimated:true,isArrived:false,
-        isAlp:arr_iata==='ALP'||dep_iata==='ALP',
       })
     }
 
