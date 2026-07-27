@@ -210,6 +210,7 @@ export default function MapTab() {
   const routePathsRef  = useRef<Record<string, Waypoint[]>>({})
   const lastKnownRef   = useRef<Record<string, { lat: number; lon: number }>>({})
   const prevItemsRef   = useRef<Record<string, DisplayItem>>({})
+  const gapStartRef    = useRef<Record<string, number>>({})
 
   useEffect(() => {
     fetch(`${BASE}/api/routes`)
@@ -302,35 +303,54 @@ export default function MapTab() {
       })
     }
 
-    // Gap-fill: flights that were visible last poll but aren't in this poll's
-    // aircraft or boardDeparted (happens during the 60s boardCache stale window
-    // right after a plane leaves the ADS-B radius). Keep them at their current
-    // estimated position so the marker never disappears mid-flight.
+    // Gap-fill: hold planes visible during the 60s boardCache stale window that
+    // follows leaving the ADS-B radius. Two modes:
+    //   A) Moving estimate  — when actual_dep_utc + duration_min + airports are all
+    //      available, advance the marker along the route path.
+    //   B) Hold position    — when departure metadata is missing (e.g. just took
+    //      off, boardCache not yet refreshed), freeze at the last known live lat/lon.
+    // Both modes expire after GAP_HOLD_MS so zombie planes can't accumulate.
+    const GAP_HOLD_MS = 90_000
     const resultKeys = new Set(result.map(i => i.key))
+
+    // Release gapStart tracking for flights that came back (live or boardDeparted)
+    for (const cs of resultKeys) delete gapStartRef.current[cs]
+
     for (const [cs, prev] of Object.entries(prevItemsRef.current)) {
       if (resultKeys.has(cs)) continue
       if (prev.isArrived) continue
-      if (!prev.actual_dep_utc || !prev.duration_min) continue
-      const elapsedMin = (now - new Date(prev.actual_dep_utc).getTime()) / 60_000
-      if (elapsedMin < 0 || elapsedMin > prev.duration_min * 1.5) continue
-      const dep_iata = prev.dep_iata!, arr_iata = prev.arr_iata!
+
+      // Record when this callsign first entered the gap
+      if (!gapStartRef.current[cs]) gapStartRef.current[cs] = now
+      if (now - gapStartRef.current[cs] > GAP_HOLD_MS) continue
+
+      const dep_iata = prev.dep_iata ?? ''
+      const arr_iata = prev.arr_iata ?? ''
       const depC = AIRPORT[dep_iata], arrC = AIRPORT[arr_iata]
-      if (!depC || !arrC) continue
-      const rawF = elapsedMin / prev.duration_min
-      const timeFrac = Math.min(rawF, 0.97)
-      const wps = routePathsRef.current[`${dep_iata}|${arr_iata}`]
-      let lat: number, lon: number, trk: number
-      if (wps?.length) {
-        const lastKnown = lastKnownRef.current[cs]
-        const anchorF = lastKnown ? nearestPathFraction(wps, lastKnown.lat, lastKnown.lon) : 0
-        const f = Math.min(Math.max(timeFrac, anchorF), 0.97)
-        ;[lat, lon] = interpolatePath(wps, f); trk = bearingFromPath(wps, f)
-      } else {
-        const f = timeFrac
-        ;[lat, lon] = slerpGreatCircle(depC[0], depC[1], arrC[0], arrC[1], f)
-        trk = bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], f)
+
+      // Mode A: moving estimate
+      if (prev.actual_dep_utc && prev.duration_min && depC && arrC) {
+        const elapsedMin = (now - new Date(prev.actual_dep_utc).getTime()) / 60_000
+        if (elapsedMin >= 0 && elapsedMin <= prev.duration_min * 1.5) {
+          const timeFrac = Math.min(elapsedMin / prev.duration_min, 0.97)
+          const wps = routePathsRef.current[`${dep_iata}|${arr_iata}`]
+          let lat: number, lon: number, trk: number
+          if (wps?.length) {
+            const lastKnown = lastKnownRef.current[cs]
+            const anchorF = lastKnown ? nearestPathFraction(wps, lastKnown.lat, lastKnown.lon) : 0
+            const f = Math.min(Math.max(timeFrac, anchorF), 0.97)
+            ;[lat, lon] = interpolatePath(wps, f); trk = bearingFromPath(wps, f)
+          } else {
+            ;[lat, lon] = slerpGreatCircle(depC[0], depC[1], arrC[0], arrC[1], timeFrac)
+            trk = bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], timeFrac)
+          }
+          result.push({ ...prev, lat, lon, track: trk, isEstimated: true })
+          continue
+        }
       }
-      result.push({ ...prev, lat, lon, track: trk, isEstimated: true })
+
+      // Mode B: hold at last known live lat/lon (covers null duration_min / null actual_dep_utc)
+      result.push({ ...prev, isEstimated: true })
     }
 
     prevItemsRef.current = Object.fromEntries(result.map(i => [i.key, i]))
