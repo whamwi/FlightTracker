@@ -469,6 +469,28 @@ export async function GET() {
       if (seenHex.has(a.hex)) continue
       seenHex.add(a.hex)
       const info = boardMap.get(cs)
+
+      // Same departure writeback as the visual radius loop — catches outbound ALP/DAM/LTK
+      // flights that only become visible to adsb.fi once they cross into Turkish airspace
+      // (outside the 700 km Syria radius but returned by the global callsign query).
+      let te_actual_dep_utc = info?.actual_dep_utc ?? null
+      const teAirborne = (a.alt_baro ?? 0) > 500 && (a.gs ?? 0) > 80
+      if (!te_actual_dep_utc && info && teAirborne) {
+        if (info.arr_iata && SYRIAN_AIRPORTS_SET.has(info.arr_iata)
+            && !SYRIAN_AIRPORTS_SET.has(info.dep_iata ?? '')) {
+          // Inbound to Syrian airport
+          const depTs = info.sched_dep ?? Math.floor(Date.now() / 1000)
+          te_actual_dep_utc = new Date(depTs * 1000).toISOString()
+          if (!depSynced.has(cs)) { depSynced.add(cs); writeInboundDep(info, depTs).catch(() => {}) }
+        } else if (info.dep_iata && SYRIAN_AIRPORTS_SET.has(info.dep_iata)
+            && !SYRIAN_AIRPORTS_SET.has(info.arr_iata ?? '')) {
+          // Outbound from Syrian airport
+          const depTs = info.sched_dep ?? Math.floor(Date.now() / 1000)
+          te_actual_dep_utc = new Date(depTs * 1000).toISOString()
+          if (!depSynced.has(cs)) { depSynced.add(cs); writeOutboundDep(info, depTs).catch(() => {}) }
+        }
+      }
+
       trackedExtra.push({
         ...a,
         board_match:    !!info,
@@ -478,7 +500,7 @@ export async function GET() {
         arr_time_utc:   info?.sched_arr      ? unixToHHMM(info.sched_arr) : null,
         duration_min:   info?.duration_min   ?? null,
         iata_number:    info?.num            ?? null,
-        actual_dep_utc: info?.actual_dep_utc ?? null,
+        actual_dep_utc: te_actual_dep_utc,
         actual_arr_utc: info?.actual_arr_utc ?? null,
         dep_delay_min:  info?.dep_delay_min  ?? null,
         airline_iata:   info?.airline_iata   ?? null,
