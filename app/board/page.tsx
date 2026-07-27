@@ -241,8 +241,8 @@ function ProgressRoute({ depUtc, durationMin }: { depUtc: string; durationMin: n
   }, [depUtc, durationMin])
 
   const leftPct = Math.max(2, Math.min(98, pct))
-  // Grows from 0.7rem at departure to 1.3rem approaching
-  const size = 0.7 + (pct / 100) * 0.6
+  // Grows from 1.1rem at departure to 1.7rem approaching
+  const size = 1.1 + (pct / 100) * 0.6
 
   return (
     <div className="flex-1 flex flex-col items-center gap-0.5">
@@ -250,7 +250,7 @@ function ProgressRoute({ depUtc, durationMin }: { depUtc: string; durationMin: n
         const remainingMin = Math.round((1 - pct / 100) * durationMin)
         return <p className="text-gray-600 text-xs">{remainingMin > 0 ? durationLabel(remainingMin) : 'Arriving'}</p>
       })()}
-      <div className="relative w-full" style={{ height: '1.25rem' }}>
+      <div className="relative w-full" style={{ height: '1.75rem' }}>
         {/* Track */}
         <div className="absolute inset-x-0" style={{ top: '50%', transform: 'translateY(-50%)' }}>
           <div className="w-full h-px bg-gray-800" />
