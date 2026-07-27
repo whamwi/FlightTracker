@@ -1168,6 +1168,38 @@ export default function Map() {
       // ── 4. Schedule overlay (ESTIMATED / no signal) ───────────────────────
       const activeSchedKeys = new Set<string>()
 
+      // When actual_dep_utc is known, a callsign may have multiple schedule entries
+      // (different dep times for different days). Pre-compute the best-matching
+      // dep_time_utc per callsign so we only render the right entry's popup/position.
+      const bestSchedDepTime: Record<string, string> = {}
+      for (const entry of scheduleRef.current) {
+        const fss = flightStatusRef.current[entry.callsign]
+        if (!fss?.actual_dep_utc) continue
+        // Infer scheduled departure = actual − delay so we can match to the right timetable row
+        const refMs = new Date(fss.actual_dep_utc).getTime() - (fss.dep_delay_min ?? 0) * 60_000
+        const refMin = new Date(refMs).getUTCHours() * 60 + new Date(refMs).getUTCMinutes()
+        const [eh, em] = entry.dep_time_utc.split(':').map(Number)
+        const entryMin = eh * 60 + em
+        const diff = Math.min(
+          Math.abs(entryMin - refMin),
+          Math.abs(entryMin - refMin + 1440),
+          Math.abs(entryMin - refMin - 1440),
+        )
+        const prior = bestSchedDepTime[entry.callsign]
+        if (!prior) {
+          bestSchedDepTime[entry.callsign] = entry.dep_time_utc
+        } else {
+          const [ph, pm] = prior.split(':').map(Number)
+          const priorMin = ph * 60 + pm
+          const priorDiff = Math.min(
+            Math.abs(priorMin - refMin),
+            Math.abs(priorMin - refMin + 1440),
+            Math.abs(priorMin - refMin - 1440),
+          )
+          if (diff < priorDiff) bestSchedDepTime[entry.callsign] = entry.dep_time_utc
+        }
+      }
+
       for (const entry of scheduleRef.current) {
         const { callsign, dep_iata, arr_iata, dep_time_utc, arr_time_utc, duration_min, days_of_week } = entry
 
@@ -1188,6 +1220,11 @@ export default function Map() {
         // produce the wrong label / colour (e.g. ALP→JED on a DAM→JED Sunday flight).
         if (fs?.actual_dep_utc && fs.dep_iata && fs.arr_iata &&
             (fs.dep_iata !== dep_iata || fs.arr_iata !== arr_iata)) continue
+        // When actual dep is known, skip all schedule entries except the one whose
+        // dep_time_utc most closely matches the inferred scheduled departure time.
+        // This prevents multiple timetable rows (same callsign, different days) from
+        // overwriting each other and showing the wrong arrival time in the popup.
+        if (fs?.actual_dep_utc && bestSchedDepTime[callsign] && dep_time_utc !== bestSchedDepTime[callsign]) continue
         const AIRBORNE_STATUSES  = new Set(['En Route', 'Departed', 'Approaching'])
 
         let fraction: number | null = null
