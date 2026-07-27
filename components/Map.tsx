@@ -603,33 +603,8 @@ export default function Map() {
     return () => { mapInstanceRef.current?.remove(); mapInstanceRef.current = null }
   }, [])
 
-  // ── Load schedule + route paths once on mount ───────────────────────────────
+  // ── Load route paths once on mount ─────────────────────────────────────────
   useEffect(() => {
-    fetch('/api/schedule')
-      .then(r => r.json())
-      .then(d => {
-        if (!d.ok) return
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        scheduleRef.current = (d.rows as any[])
-          .filter(r => r.dep_time_utc !== '—' && r.arr_time_utc !== '—' && r.duration_min > 0)
-          .map(r => ({
-            callsign:     r.broadcast_callsign as string,
-            dep_iata:     r.dep_iata           as string,
-            arr_iata:     r.arr_iata           as string,
-            dep_time_utc: (r.dep_time_utc as string).slice(0, 5),
-            arr_time_utc: (r.arr_time_utc as string).slice(0, 5),
-            duration_min: r.duration_min       as number,
-            days_of_week: r.days_of_week       as string[],
-          }))
-          .filter(e => e.callsign && e.dep_iata && e.arr_iata)
-        // Re-apply any boardDeparted overrides that may have arrived before the schedule loaded
-        for (const e of scheduleRef.current) {
-          const ov = durationOverridesRef.current[e.callsign]
-          if (ov) e.duration_min = ov
-        }
-      })
-      .catch(() => {})
-
     fetch('/api/routes')
       .then(r => r.json())
       .then(d => {
