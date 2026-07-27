@@ -93,8 +93,8 @@ export async function GET(req: Request) {
   // Status priority: higher rank wins when the same flight appears in multiple airport caches.
   const STATUS_RANK: Record<string, number> = {
     Arrived: 8, Landed: 8, Approaching: 7, 'En Route': 6,
-    Departed: 5, Delayed: 4, GateClosed: 3, Boarding: 3,
-    Expected: 2, Scheduled: 1, Cancelled: 0, Unknown: 0,
+    Departed: 5, Cancelled: 5, Delayed: 4, GateClosed: 3, Boarding: 3,
+    Expected: 2, Scheduled: 1, Unknown: 0,
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -312,7 +312,7 @@ export async function GET(req: Request) {
   }
 
   return NextResponse.json(
-    { ok: true, date, flights: Object.values(flightMap) },
+    { ok: true, date, flights: Object.values(flightMap).filter((f: any) => f.status !== 'Unknown') },
     { headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' } }
   )
 }

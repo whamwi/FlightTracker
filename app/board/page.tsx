@@ -566,7 +566,9 @@ export default function BoardPage() {
   })()
 
   // Sort by effective time: actual → revised → scheduled (Syria local minutes)
-  const sorted = [...byViewAndAirport].sort((a, b) => effectiveLocalMin(a, view) - effectiveLocalMin(b, view))
+  const sorted = [...byViewAndAirport]
+    .filter(f => effectiveStatus(f) !== 'Unknown')
+    .sort((a, b) => effectiveLocalMin(a, view) - effectiveLocalMin(b, view))
 
   const total     = sorted.length
   const landed    = sorted.filter(f => ['Arrived', 'Landed'].includes(effectiveStatus(f))).length

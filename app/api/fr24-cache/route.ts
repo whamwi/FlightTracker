@@ -9,6 +9,7 @@ const HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function statusRank(s: string | null | undefined): number {
   const t = (s ?? '').toLowerCase()
+  if (t.includes('cancel'))                           return 9  // definitive — never downgrade
   if (t.includes('landed') || t.includes('arrived')) return 8
   if (t.includes('approach'))                         return 7
   if (t.includes('en route') || t.includes('in flight')) return 6
