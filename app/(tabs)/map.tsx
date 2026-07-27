@@ -343,7 +343,7 @@ export default function MapTab() {
                   fontSize: 22,
                   color,
                   opacity: item.isArrived ? 0.35 : item.isEstimated ? 0.65 : 1,
-                  transform: [{ rotate: `${item.track - 135}deg` }],
+                  transform: [{ rotate: `${item.track - 90}deg` }],
                 }}>✈</Text>
                 <View style={styles.labelWrap}>
                   <Text style={[styles.labelText, {
