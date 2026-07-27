@@ -208,12 +208,14 @@ export async function GET(req: Request) {
     addFlight({
       ...f,
       dep_iata:         f.dep_iata || ap,
-      fr24_actual_dep:  t.includes('departed') || t.includes('took off')
-        ? extractStatusUtc(f.status, d)
-        : (f.real_dep ? new Date(f.real_dep * 1000).toISOString() : null),
-      fr24_revised_dep: t.startsWith('estimated') || t.startsWith('expect') || t.startsWith('delayed')
-        ? extractStatusUtc(f.status, d)
-        : (f.est_dep ? new Date(f.est_dep * 1000).toISOString() : null),
+      // Prefer unix timestamps — they're UTC and timezone-unambiguous.
+      // extractStatusUtc assumes Syria local time (UTC+3) so it's wrong for non-Syrian origin airports.
+      fr24_actual_dep:  f.real_dep
+        ? new Date(f.real_dep * 1000).toISOString()
+        : (t.includes('departed') || t.includes('took off') ? extractStatusUtc(f.status, d) : null),
+      fr24_revised_dep: f.est_dep
+        ? new Date(f.est_dep * 1000).toISOString()
+        : (t.startsWith('estimated') || t.startsWith('expect') || t.startsWith('delayed') ? extractStatusUtc(f.status, d) : null),
       fr24_actual_arr: f.real_arr ? new Date(f.real_arr * 1000).toISOString() : null,
       fr24_revised_arr: f.est_arr ? new Date(f.est_arr * 1000).toISOString() : null,
     })
