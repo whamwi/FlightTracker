@@ -49,8 +49,8 @@ function mergeList(existing: any[], incoming: any[], keyFn: (e: any) => string):
       // Existing proved the flight landed; incoming lost that data
       // Forward fr24_id from incoming so it isn't lost when existing wins
       merged.set(key, { ...e, fr24_id: e.fr24_id ?? inc.fr24_id ?? null })
-    } else if (!inc.real_arr && statusRank(e.status) > statusRank(inc.status)) {
-      // Existing has a higher-quality status and neither has a landing proof
+    } else if (!inc.real_arr && statusRank(e.status) > statusRank(inc.status) && (e.fr24_id || e.real_dep)) {
+      // Existing has a higher-quality status, has been ADS-B tracked, and neither has landing proof
       merged.set(key, { ...e, fr24_id: e.fr24_id ?? inc.fr24_id ?? null })
     }
   }
