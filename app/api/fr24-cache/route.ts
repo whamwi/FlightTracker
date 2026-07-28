@@ -83,22 +83,40 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: 'Missing fields' }, { status: 400 })
   }
 
+  // Load allowed airline IATA codes from the airlines table.
+  // Flights whose airline_iata is set but not in this table are FR24 artifacts (e.g. Taquan Air)
+  // and must not be persisted. Flights with airline_iata = null pass through unchecked
+  // (some legitimate carriers like Fly Cham have no IATA code in FR24's response).
+  const airlinesRes = await fetch(`${SB_URL}/rest/v1/airlines?select=iata`, { headers: HEADERS })
+  const allowedIatas = new Set<string>()
+  if (airlinesRes.ok) {
+    const rows: { iata: string }[] = await airlinesRes.json()
+    for (const r of rows) if (r.iata) allowedIatas.add(r.iata)
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const filterKnown = (list: any[]) =>
+    list.filter(f => !f.airline_iata || allowedIatas.has(f.airline_iata))
+
+  const filteredArrivals   = filterKnown(arrivals)
+  const filteredDepartures = filterKnown(departures)
+
   // Read existing row so we can merge rather than blindly replace
   const existRes = await fetch(
     `${SB_URL}/rest/v1/fr24_daily_cache?airport_iata=eq.${airport_iata}&flight_date=eq.${flight_date}&select=arrivals,departures`,
     { headers: HEADERS }
   )
 
-  let mergedArrivals:   typeof arrivals   = arrivals
-  let mergedDepartures: typeof departures = departures
+  let mergedArrivals:   typeof arrivals   = filteredArrivals
+  let mergedDepartures: typeof departures = filteredDepartures
 
   if (existRes.ok) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rows: any[] = await existRes.json()
     if (rows.length > 0) {
       const ex = rows[0]
-      mergedArrivals   = mergeList(ex.arrivals   ?? [], arrivals,   e => `${e.num ?? ''}|${e.dep_iata ?? ''}`)
-      mergedDepartures = mergeList(ex.departures  ?? [], departures, e => `${e.num ?? ''}|${e.arr_iata ?? ''}`)
+      mergedArrivals   = mergeList(ex.arrivals   ?? [], filteredArrivals,   e => `${e.num ?? ''}|${e.dep_iata ?? ''}`)
+      mergedDepartures = mergeList(ex.departures  ?? [], filteredDepartures, e => `${e.num ?? ''}|${e.arr_iata ?? ''}`)
     }
   }
 

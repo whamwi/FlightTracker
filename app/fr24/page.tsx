@@ -77,8 +77,6 @@ function normalizeForCache(data: any): Record<string, { arrivals: object[]; depa
     // Skip this check for landed flights — schedDep may carry a wrong previous-leg
     // timestamp, but real_arr confirms the flight is genuine.
     if (durationMin > 300 && !flight.real_arr) return null
-    // Drop known non-regional carriers that appear as FR24 data artifacts (e.g. Taquan Air K3).
-    if (flight.airline_iata === 'K3') return null
     return flight
   }
 
