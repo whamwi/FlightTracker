@@ -9,6 +9,7 @@ export const AIRLINE_NAMES: Record<string, string> = {
 
 const LOCAL_LOGOS: Record<string, string> = {
   XH:  'airlines/XH.jpg',
+  FYC: 'airlines/FYC.jpg',
   TK:  'airlines/TK.jpg',
   EY:  'airlines/EY.png',
   J9:  'airlines/J9.png',

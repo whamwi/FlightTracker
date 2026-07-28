@@ -8,8 +8,8 @@ import { AIRLINE_NAMES, city, airportFlag, airlineLogo, LOGO_WHITE_BG, fmtLocal,
 const EMBED_URL = 'https://flighttracker-sy.vercel.app/embed'
 const IN_FLIGHT = new Set(['En Route', 'Departed', 'Approaching'])
 
-// Only try CDN logo for these — others show branded monogram
-const KNOWN_LOGOS = new Set(['XH', 'TK', 'EY', 'J9', 'FZ', 'G9', '3L', 'QR', 'PC', 'ME', 'RJ'])
+// Only try logo image for these — others show branded monogram
+const KNOWN_LOGOS = new Set(['XH', 'FYC', 'TK', 'EY', 'J9', 'FZ', 'G9', '3L', 'QR', 'PC', 'ME', 'RJ'])
 
 const AIRLINE_BRAND: Record<string, string> = {
   RB: '#0F3D6B', FYC: '#8B1A1A', TK: '#C70F3E', QR: '#5C0632',
