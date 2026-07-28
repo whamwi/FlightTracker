@@ -386,6 +386,20 @@ export default function MapTab() {
         }
       } else continue
       covered.add(cs)
+      // Seed trackedRef + lastKnownRef so the DR step can hold this plane during
+      // boardCache refresh gaps (same protection live-ADS-B planes get).
+      lastKnownRef.current[cs] = { lat, lon }
+      trackedRef.current[cs] = {
+        a: {
+          hex: '', flight: cs, lat, lon, track: trk, true_heading: null, t: null,
+          board_match: true, dep_iata, arr_iata, iata_number, airline_iata,
+          actual_dep_utc, actual_arr_utc,
+          dep_time_utc: null, arr_time_utc: null, duration_min,
+          dep_delay_min: dep_delay_min ?? null, alt_baro: null, gs: null,
+        },
+        lostAt: 0,
+        durationMin: duration_min,
+      }
       const bdFrac = (!isArrived && actual_dep_utc && duration_min > 0)
         ? Math.min((now - new Date(actual_dep_utc).getTime()) / 60_000 / duration_min, 0.97) : null
       const isAlp = arr_iata === 'ALP' || dep_iata === 'ALP'
