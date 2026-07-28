@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   Modal,
   Animated,
+  ScrollView,
 } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
 import WebView, { WebViewMessageEvent } from 'react-native-webview'
@@ -14,6 +15,14 @@ import type { Flight } from '../../lib/types'
 import { AIRLINE_NAMES } from '../../lib/constants'
 
 const EMBED_URL = 'https://flighttracker-sy.vercel.app/embed'
+
+const C = {
+  surface: '#FFFFFF',
+  border:  '#D8D3BF',
+  ink:     '#161616',
+  sunken:  '#F7F5EC',
+  muted:   '#8A8578',
+}
 
 type EmbedMsg =
   | { type: 'SELECT';  flight: EmbedFlight }
@@ -38,6 +47,21 @@ interface EmbedFlight {
   dep_delay_min:   number | null
   arr_delay_min:   number | null
   photoUrl:        string | null
+}
+
+// Only pass real aircraft photos through — filter out placeholder/fallback URLs
+function realPhoto(url: string | null): string | null {
+  if (!url) return null
+  const lower = url.toLowerCase()
+  if (
+    lower.includes('placeholder') ||
+    lower.includes('no-photo') ||
+    lower.includes('no_photo') ||
+    lower.includes('noimg') ||
+    lower.includes('default') ||
+    lower.includes('blank')
+  ) return null
+  return url
 }
 
 function toFlight(ef: EmbedFlight): Flight {
@@ -69,14 +93,13 @@ function toFlight(ef: EmbedFlight): Flight {
 }
 
 export default function MapTab() {
-  const webViewRef                          = useRef<WebView>(null)
-  const [selected, setSelected]            = useState<Flight | null>(null)
-  const [photoUrl, setPhotoUrl]            = useState<string | null>(null)
-  const [depDelay, setDepDelay]            = useState<number | null | undefined>(undefined)
-  const [arrDelay, setArrDelay]            = useState<number | null | undefined>(undefined)
-  const [loading, setLoading]              = useState(true)
-
-  const slideAnim = useRef(new Animated.Value(0)).current
+  const webViewRef                    = useRef<WebView>(null)
+  const [selected, setSelected]       = useState<Flight | null>(null)
+  const [photoUrl, setPhotoUrl]       = useState<string | null>(null)
+  const [depDelay, setDepDelay]       = useState<number | null | undefined>(undefined)
+  const [arrDelay, setArrDelay]       = useState<number | null | undefined>(undefined)
+  const [loading, setLoading]         = useState(true)
+  const slideAnim                     = useRef(new Animated.Value(0)).current
 
   useEffect(() => {
     if (selected) {
@@ -85,7 +108,7 @@ export default function MapTab() {
     }
   }, [selected])
 
-  const translateY = slideAnim.interpolate({ inputRange: [0, 1], outputRange: [480, 0] })
+  const translateY = slideAnim.interpolate({ inputRange: [0, 1], outputRange: [520, 0] })
 
   const dismiss = useCallback(() => {
     setSelected(null)
@@ -104,7 +127,7 @@ export default function MapTab() {
       const msg: EmbedMsg = JSON.parse(e.nativeEvent.data)
       if (msg.type === 'SELECT') {
         setSelected(toFlight(msg.flight))
-        setPhotoUrl(msg.flight.photoUrl)
+        setPhotoUrl(realPhoto(msg.flight.photoUrl))
         setDepDelay(msg.flight.dep_delay_min)
         setArrDelay(msg.flight.arr_delay_min)
       }
@@ -133,7 +156,7 @@ export default function MapTab() {
         </View>
       )}
 
-      {/* Card renders as full-screen Modal so it covers the tab bar */}
+      {/* Bottom sheet — slides up over the tab bar via Modal */}
       <Modal
         transparent
         animationType="none"
@@ -142,24 +165,35 @@ export default function MapTab() {
         statusBarTranslucent
       >
         <View style={{ flex: 1 }} pointerEvents="box-none">
-          {/* Transparent tap-to-dismiss area above card */}
+          {/* Transparent area above sheet — tap to dismiss */}
           <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={dismiss} />
 
-          {/* Sliding card sheet */}
           <Animated.View style={[styles.sheet, { transform: [{ translateY }] }]}>
+            {/* Drag handle */}
+            <View style={{ alignItems: 'center', paddingTop: 10, paddingBottom: 8 }}>
+              <View style={{ width: 38, height: 4, borderRadius: 2, backgroundColor: C.border }} />
+            </View>
+
+            {/* Close button */}
             <TouchableOpacity style={styles.closeBtn} onPress={dismiss}>
               <Text style={styles.closeText}>✕</Text>
             </TouchableOpacity>
-            {selected && (
-              <FlightCard
-                f={selected}
-                view={cardView as 'arr' | 'dep'}
-                hideBadge
-                photoUrl={photoUrl}
-                depDelayMin={depDelay}
-                arrDelayMin={arrDelay}
-              />
-            )}
+
+            <ScrollView
+              scrollEnabled={false}
+              contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 36 }}
+            >
+              {selected && (
+                <FlightCard
+                  f={selected}
+                  view={cardView as 'arr' | 'dep'}
+                  hideBadge
+                  photoUrl={photoUrl}
+                  depDelayMin={depDelay}
+                  arrDelayMin={arrDelay}
+                />
+              )}
+            </ScrollView>
           </Animated.View>
         </View>
       </Modal>
@@ -168,31 +202,33 @@ export default function MapTab() {
 }
 
 const styles = StyleSheet.create({
-  container:    { flex: 1, backgroundColor: '#000' },
-  webview:      { flex: 1 },
+  container: { flex: 1, backgroundColor: '#000' },
+  webview:   { flex: 1 },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: '#111827',
-    justifyContent: 'center', alignItems: 'center',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  loadingText:  { color: '#6b7280', fontSize: 14 },
+  loadingText: { color: '#6b7280', fontSize: 14 },
   sheet: {
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 34,   // home indicator safe area
-    backgroundColor: 'transparent',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -8 },
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    elevation: 12,
+    backgroundColor: C.surface,
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    borderTopWidth: 1,
+    borderColor: C.border,
+    shadowColor: C.ink,
+    shadowOffset: { width: 0, height: -14 },
+    shadowOpacity: 0.2,
+    shadowRadius: 34,
+    elevation: 16,
   },
   closeBtn: {
-    position: 'absolute', top: 14, right: 20, zIndex: 10,
-    backgroundColor: '#F7F5EC',
-    borderRadius: 12, width: 26, height: 26,
+    position: 'absolute', top: 14, right: 18, zIndex: 10,
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: C.sunken,
+    borderWidth: 1, borderColor: C.border,
     justifyContent: 'center', alignItems: 'center',
-    borderWidth: 1, borderColor: '#D8D3BF',
   },
   closeText: { color: '#3D3A3B', fontSize: 14, lineHeight: 14 },
 })
