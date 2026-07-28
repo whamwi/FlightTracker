@@ -1,5 +1,12 @@
 export const API_BASE = 'https://flighttracker-sy.vercel.app'
 
+export const AIRLINE_NAMES: Record<string, string> = {
+  XH: 'Flynas', TK: 'Turkish Airlines', EY: 'Etihad Airways',
+  J9: 'Jazeera Airways', FZ: 'flydubai', G9: 'Air Arabia',
+  RJ: 'Royal Jordanian', RB: 'Syrian Air', QR: 'Qatar Airways',
+  PC: 'Pegasus Airlines', '3L': 'Air Arabia', ME: 'Middle East Airlines',
+}
+
 const LOCAL_LOGOS: Record<string, string> = {
   XH:  'airlines/XH.jpg',
   TK:  'airlines/TK.jpg',

@@ -1,685 +1,145 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native'
-import MaterialIcons from '@expo/vector-icons/MaterialIcons'
-import MapView, { Marker, UrlTile, PROVIDER_DEFAULT } from 'react-native-maps'
+import { useRef, useState, useCallback } from 'react'
+import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView } from 'react-native'
+import WebView, { WebViewMessageEvent } from 'react-native-webview'
 import { FlightCard } from '../../components/FlightCard'
 import type { Flight } from '../../lib/types'
-import { FlightPredictor } from '../../lib/flight-predictor'
-import type { Waypoint, LivePosition as PredictorLivePos } from '../../lib/flight-predictor'
+import { AIRLINE_NAMES } from '../../lib/constants'
 
-const BASE = 'https://flighttracker-sy.vercel.app'
+const EMBED_URL = 'https://flighttracker-sy.vercel.app/embed'
 
-// ── Airport coords ────────────────────────────────────────────────────────────
-const AIRPORT: Record<string, [number, number]> = {
-  DAM:[33.4114,36.5156], ALP:[36.1807,37.2244], LTK:[35.4011,35.9488],
-  DEZ:[35.2854,40.1760],
-  SAW:[40.8986,29.3092], IST:[41.2608,28.7418], AYT:[36.8987,30.7995],
-  AMM:[31.7226,35.9930], BEY:[33.8208,35.4883], CAI:[30.1219,31.4056],
-  HRG:[27.1783,33.7993], DXB:[25.2528,55.3644], SHJ:[25.3285,55.5172],
-  AUH:[24.4330,54.6511], KWI:[29.2267,47.9689], MCT:[23.5933,58.2844],
-  RUH:[24.9578,46.6989], JED:[21.6796,39.1565], BGW:[33.2626,44.2346],
-  BSR:[30.5491,47.6622], TBS:[41.6692,44.9547], GYD:[40.4675,50.0467],
-  DOH:[25.2731,51.6081], BAH:[26.2708,50.6336], ESB:[40.1281,32.9951],
-  NJF:[31.9890,44.4042], EBL:[36.2376,43.9631], VIE:[48.1103,16.5697],
-  AMS:[52.3086, 4.7639], THR:[35.6892,51.3130], MHD:[36.2352,59.6400],
-  DMM:[26.4712,49.7979], MED:[24.5534,39.7051], ADB:[38.2924,27.1570],
-  MJI:[32.8942,13.2759], ATH:[37.9364,23.9445], SVO:[55.9736,37.4125],
-  SKD:[39.7005,66.9838], TAS:[41.2579,69.2812], EVN:[40.1473,44.3959],
-  OTP:[44.5711,26.0850], VKO:[55.5965,37.2615], FCO:[41.8003,12.2389],
-  CDG:[49.0097, 2.5479], LHR:[51.4700,-0.4543], FRA:[50.0379, 8.5622],
-  LCA:[34.8751,33.6249], KHI:[24.9065,67.1608], NBO:[-1.3192,36.9275],
-  ADD:[ 8.9779,38.7993], KBP:[50.3450,30.8947], TIP:[32.6635,13.1515],
-  KRT:[15.5895,32.5532],
-}
+type EmbedMsg =
+  | { type: 'SELECT';  flight: EmbedFlight }
+  | { type: 'DESELECT' }
+  | { type: 'COUNT';   count: number }
 
-const SYRIA = new Set(['DAM', 'ALP', 'LTK', 'DEZ'])
-
-const SERVICED: { latitude: number; longitude: number; iata: string }[] = [
-  { latitude: 33.4114, longitude: 36.5156, iata: 'DAM' },
-  { latitude: 36.1807, longitude: 37.2244, iata: 'ALP' },
-  { latitude: 35.2854, longitude: 40.1760, iata: 'DEZ' },
-  { latitude: 31.7226, longitude: 35.9930, iata: 'AMM' },
-  { latitude: 52.3086, longitude:  4.7639, iata: 'AMS' },
-  { latitude: 24.4330, longitude: 54.6511, iata: 'AUH' },
-  { latitude: 33.2626, longitude: 44.2346, iata: 'BGW' },
-  { latitude: 26.4712, longitude: 49.7979, iata: 'DMM' },
-  { latitude: 25.2731, longitude: 51.6081, iata: 'DOH' },
-  { latitude: 25.2528, longitude: 55.3644, iata: 'DXB' },
-  { latitude: 36.2376, longitude: 43.9631, iata: 'EBL' },
-  { latitude: 40.1281, longitude: 32.9951, iata: 'ESB' },
-  { latitude: 41.2608, longitude: 28.7418, iata: 'IST' },
-  { latitude: 21.6796, longitude: 39.1565, iata: 'JED' },
-  { latitude: 29.2267, longitude: 47.9689, iata: 'KWI' },
-  { latitude: 23.5933, longitude: 58.2844, iata: 'MCT' },
-  { latitude: 32.8942, longitude: 13.2759, iata: 'MJI' },
-  { latitude: 44.5711, longitude: 26.0850, iata: 'OTP' },
-  { latitude: 24.9578, longitude: 46.6989, iata: 'RUH' },
-  { latitude: 40.8986, longitude: 29.3092, iata: 'SAW' },
-  { latitude: 25.3285, longitude: 55.5172, iata: 'SHJ' },
-]
-
-// ── Airline lookups ───────────────────────────────────────────────────────────
-const ICAO_TO_IATA: Record<string, string> = {
-  FDB:'FZ', ABY:'G9', THY:'TK', RJA:'RJ',
-  QTR:'QR', ETD:'EY', PGT:'PC', SYR:'RB',
-  JZR:'J9', FYC:'XH', UAE:'EK',
-}
-const AIRLINE_NAME: Record<string, string> = {
-  G9:'Air Arabia',      FZ:'flydubai',
-  TK:'Turkish Airlines',RB:'Syrianair',
-  XH:'Cham Wings',      J9:'Jazeera Airways',
-  EY:'Etihad Airways',  PC:'Pegasus Airlines',
-  QR:'Qatar Airways',   EK:'Emirates',
-  RJ:'Royal Jordanian', WY:'Oman Air',
-  GF:'Gulf Air',        J2:'Azerbaijan Airlines',
-}
-
-// ── Initial bearing (great circle) — all route geometry handled by FlightPredictor ──
-function brng(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const r = Math.PI / 180, dLon = (lon2 - lon1) * r
-  const y = Math.sin(dLon) * Math.cos(lat2 * r)
-  const x = Math.cos(lat1 * r) * Math.sin(lat2 * r) - Math.sin(lat1 * r) * Math.cos(lat2 * r) * Math.cos(dLon)
-  return (Math.atan2(y, x) / r + 360) % 360
-}
-
-// ── Types ─────────────────────────────────────────────────────────────────────
-type Aircraft = {
-  hex: string; flight: string
-  lat: number; lon: number
-  track: number | null; true_heading: number | null; t: string | null
-  board_match: boolean
-  dep_iata: string | null; arr_iata: string | null
-  iata_number: string | null; airline_iata: string | null
-  actual_dep_utc: string | null; actual_arr_utc: string | null
-  dep_time_utc: string | null; arr_time_utc: string | null; duration_min: number | null
-  dep_delay_min: number | null
-  alt_baro: number | 'ground' | null; gs: number | null
-}
-
-type BoardDeparted = {
-  callsign: string; dep_iata: string; arr_iata: string
-  duration_min: number
-  actual_dep_utc: string | null; actual_arr_utc: string | null
+interface EmbedFlight {
+  callsign:       string
+  iata_number:    string | null
+  airline_iata:   string | null
+  dep_iata:       string | null
+  arr_iata:       string | null
+  dep_time_utc:   string | null
+  arr_time_utc:   string | null
+  duration_min:   number | null
+  status:         string
+  actual_dep_utc:  string | null
+  actual_arr_utc:  string | null
+  revised_dep_utc: string | null
   revised_arr_utc: string | null
-  iata_number: string; airline_iata: string | null
-  dep_delay_min: number | null
+  aircraft_type:   string | null
 }
 
-type DisplayItem = {
-  key: string; callsign: string; label: string | null
-  lat: number; lon: number; track: number
-  dep_iata: string | null; arr_iata: string | null
-  actual_dep_utc: string | null; actual_arr_utc: string | null
-  revised_arr_utc: string | null
-  dep_time_utc: string | null; arr_time_utc: string | null; duration_min: number | null
-  dep_delay_min: number | null
-  fraction: number | null
-  t: string | null; alt_baro: number | 'ground' | null; gs: number | null
-  airline_iata: string | null; iata_number: string | null
-  isEstimated: boolean; isArrived: boolean; isAlp: boolean
-}
-
-function toFlight(item: DisplayItem): Flight {
-  const icao = item.callsign.replace(/\d/g,'').slice(0,3).toUpperCase()
-  const aIata = item.airline_iata ?? ICAO_TO_IATA[icao] ?? icao
-  const status = item.isArrived ? 'Arrived'
-    : item.isEstimated ? 'Departed'
-    : 'En Route'
-  const expectedArrISO = item.actual_dep_utc && item.duration_min
-    ? new Date(new Date(item.actual_dep_utc).getTime() + item.duration_min * 60_000).toISOString()
-    : null
-  const revisedArrUtc = !item.isArrived
-    ? (item.revised_arr_utc ?? ((item.dep_delay_min ?? 0) > 0 ? expectedArrISO : null))
-    : null
+function toFlight(ef: EmbedFlight): Flight {
+  const isArr = ef.arr_iata === 'DAM' || ef.arr_iata === 'ALP'
   return {
-    iata_number:    item.iata_number ?? item.callsign,
-    airline_name:   AIRLINE_NAME[aIata] ?? aIata,
-    airline_iata:   aIata,
+    iata_number:    ef.iata_number    ?? ef.callsign,
+    airline_name:   AIRLINE_NAMES[ef.airline_iata ?? ''] ?? ef.airline_iata ?? ef.callsign,
+    airline_iata:   ef.airline_iata   ?? '',
     country_flag:   '',
-    dep_iata:       item.dep_iata ?? '',
-    arr_iata:       item.arr_iata ?? '',
-    dep_time_utc:   item.actual_dep_utc ?? item.dep_time_utc ?? '--:--',
-    arr_time_utc:   item.arr_time_utc ?? expectedArrISO ?? item.actual_arr_utc ?? '--:--',
+    dep_iata:       ef.dep_iata       ?? '',
+    arr_iata:       ef.arr_iata       ?? '',
+    dep_time_utc:   ef.dep_time_utc   ?? '',
+    arr_time_utc:   ef.arr_time_utc   ?? '',
     sched_dep_unix: null,
-    duration_min:   item.duration_min ?? 0,
-    status,
-    actual_dep_utc:  item.actual_dep_utc,
-    actual_arr_utc:  item.actual_arr_utc,
-    revised_dep_utc: null,
-    revised_arr_utc: revisedArrUtc,
-    aircraft_type:   item.t,
+    duration_min:   ef.duration_min   ?? 0,
+    status:         ef.status,
+    actual_dep_utc:  ef.actual_dep_utc  ?? null,
+    actual_arr_utc:  ef.actual_arr_utc  ?? null,
+    revised_dep_utc: ef.revised_dep_utc ?? null,
+    revised_arr_utc: ef.revised_arr_utc ?? null,
+    aircraft_type:   ef.aircraft_type   ?? null,
     dep_terminal: null, dep_gate: null,
-    arr_terminal: null, arr_gate: null,
-    arr_baggage:  null,
+    arr_terminal: null, arr_gate: null, arr_baggage: null,
   }
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
 export default function MapTab() {
-  const [items, setItems]       = useState<DisplayItem[]>([])
-  const [selected, setSelected] = useState<DisplayItem | null>(null)
-  const [loading, setLoading]   = useState(true)
+  const webViewRef                          = useRef<WebView>(null)
+  const [selected, setSelected]            = useState<Flight | null>(null)
+  const [count, setCount]                  = useState<number | null>(null)
+  const [loading, setLoading]              = useState(true)
 
-  const routePathsRef    = useRef<Record<string, Waypoint[]>>({})
-  const lastKnownRef     = useRef<Record<string, { lat: number; lon: number }>>({})
-  const trackedRef       = useRef<Record<string, { a: Aircraft; lostAt: number; durationMin: number | null; revisedArrUtc: string | null }>>({})
-  const schedDepartedRef = useRef<Record<string, BoardDeparted>>({})
-  const predictorRef     = useRef<Record<string, FlightPredictor>>({})
-  useEffect(() => {
-    fetch(`${BASE}/api/routes`)
-      .then(r => r.json())
-      .then(d => {
-        if (!d.ok) return
-        const rec: Record<string, Waypoint[]> = {}
-        for (const p of (d.paths as { dep_iata: string; arr_iata: string; waypoints: Waypoint[] }[])) {
-          rec[`${p.dep_iata}|${p.arr_iata}`] = p.waypoints
-        }
-        routePathsRef.current = rec
-      })
-      .catch(() => {})
-  }, [])
+  const cardView = selected
+    ? (selected.arr_iata === 'DAM' || selected.arr_iata === 'ALP' ? 'arr' : 'dep')
+    : 'arr'
 
-  const buildItems = useCallback((aircraft: Aircraft[], boardDeparted: BoardDeparted[]) => {
-    const now = Date.now()
-    const result: DisplayItem[] = []
-    const covered = new Set<string>()
-    const freshCallsigns = new Set<string>()
-    const STALE_TTL_MS = 6 * 3_600_000  // 6-hour hard cleanup
-
-    // Debug: trace specific callsigns through buildItems to diagnose disappearance
-    const DEBUG_CS = __DEV__ ? new Set(['SYR381', 'FYC525', 'SYR502', 'FYC523']) : new Set<string>()
-    const DBG = (cs: string, msg: string) => {
-      if (DEBUG_CS.has(cs)) console.warn(`[FT|${cs}] ${msg}`)
-    }
-
-    // ── 1. Live ADS-B: add to result + feed predictor with live fix ───────────
-    for (const a of aircraft) {
-      if (!a.board_match || !a.lat || !a.lon) continue
-      const cs = (a.flight ?? '').trim()
-      if (!cs) continue
-      freshCallsigns.add(cs)
-      lastKnownRef.current[cs] = { lat: a.lat, lon: a.lon }
-      trackedRef.current[cs] = {
-        a, lostAt: 0,
-        durationMin: a.duration_min ?? trackedRef.current[cs]?.durationMin ?? null,
-        revisedArrUtc: trackedRef.current[cs]?.revisedArrUtc ?? null,
-      }
-      DBG(cs, `S1 live ADS-B lat=${a.lat} lon=${a.lon}`)
-      covered.add(cs)
-      const isArrived = !!a.actual_arr_utc
-      const isAlp     = a.arr_iata === 'ALP' || a.dep_iata === 'ALP'
-      const depC      = a.dep_iata ? AIRPORT[a.dep_iata] : null
-      const arrC      = a.arr_iata ? AIRPORT[a.arr_iata] : null
-      const routeTrk  = depC && arrC ? brng(depC[0], depC[1], arrC[0], arrC[1]) : 0
-      const liveTrk   = a.track ?? a.true_heading ?? routeTrk
-
-      // Create predictor on first sighting; setContext every poll
-      if (!predictorRef.current[cs]) predictorRef.current[cs] = new FlightPredictor()
-      const waypoints = (a.dep_iata && a.arr_iata)
-        ? (routePathsRef.current[`${a.dep_iata}|${a.arr_iata}`] ?? []) : []
-      predictorRef.current[cs].setContext({
-        dep_coords:        depC ?? [a.lat, a.lon],
-        arr_coords:        arrC ?? [a.lat, a.lon],
-        actual_dep_utc_ms: a.actual_dep_utc ? new Date(a.actual_dep_utc).getTime() : null,
-        duration_ms:       a.duration_min ? a.duration_min * 60_000 : null,
-        sched_dep_utc_ms:  null,
-        waypoints,
-      })
-      const predPos: PredictorLivePos = {
-        lat:         a.lat,
-        lon:         a.lon,
-        track_deg:   liveTrk,
-        gs_kts:      a.gs ?? 450,
-        vs_fpm:      0,
-        altitude_ft: typeof a.alt_baro === 'number' ? a.alt_baro : null,
-      }
-      predictorRef.current[cs].onLive(predPos, now)
-
-      result.push({
-        key: cs, callsign: cs, label: cs,
-        lat: a.lat, lon: a.lon, track: liveTrk,
-        dep_iata: a.dep_iata, arr_iata: a.arr_iata,
-        actual_dep_utc: a.actual_dep_utc, actual_arr_utc: a.actual_arr_utc, revised_arr_utc: null,
-        dep_time_utc: a.dep_time_utc ?? null, arr_time_utc: a.arr_time_utc,
-        duration_min: a.duration_min ?? null, dep_delay_min: a.dep_delay_min ?? null, fraction: null,
-        t: a.t, alt_baro: a.alt_baro, gs: a.gs,
-        airline_iata: a.airline_iata, iata_number: a.iata_number,
-        isEstimated: false, isArrived, isAlp,
-      })
-    }
-
-    // ── 2. Mark dropped signals — notify predictor of signal loss ─────────────
-    for (const [cs, entry] of Object.entries(trackedRef.current)) {
-      if (!freshCallsigns.has(cs) && entry.lostAt === 0) {
-        trackedRef.current[cs] = { ...entry, lostAt: now }
-        predictorRef.current[cs]?.onSignalLoss(now)
-      }
-    }
-
-    // ── 3. Pre-pass: refresh metadata from boardDeparted into stale entries ───
-    for (const bd of boardDeparted) {
-      const entry = trackedRef.current[bd.callsign]
-      if (!entry || entry.lostAt === 0) continue
-      DBG(bd.callsign, `S3 pre-pass revisedArrUtc=${bd.revised_arr_utc ?? 'null'} durationMin=${bd.duration_min}`)
-      trackedRef.current[bd.callsign] = {
-        ...entry,
-        durationMin: bd.duration_min ?? entry.durationMin,
-        revisedArrUtc: bd.revised_arr_utc ?? entry.revisedArrUtc,
-        a: {
-          ...entry.a,
-          actual_dep_utc: bd.actual_dep_utc ?? entry.a.actual_dep_utc,
-          actual_arr_utc: bd.actual_arr_utc ?? entry.a.actual_arr_utc,
-        },
-      }
-    }
-
-    // ── 4. Stale ADS-B — position from FlightPredictor ───────────────────────
-    for (const [cs, entry] of Object.entries(trackedRef.current)) {
-      if (covered.has(cs)) continue
-      const { a, lostAt, durationMin, revisedArrUtc } = entry
-      if (lostAt === 0) continue
-      DBG(cs, `S4 stale: lostAt=${lostAt > 0 ? Math.round((now-lostAt)/60000)+'min ago' : '0'} revisedArrUtc=${revisedArrUtc ?? 'null'} durationMin=${durationMin}`)
-
-      // Hard cleanup after 6 hours regardless of predictor state
-      if (now - lostAt > STALE_TTL_MS) {
-        delete trackedRef.current[cs]
-        delete predictorRef.current[cs]
-        continue
-      }
-
-      const isAlp    = a.arr_iata === 'ALP' || a.dep_iata === 'ALP'
-      const dep_iata = a.dep_iata ?? ''
-      const arr_iata = a.arr_iata ?? ''
-      const depC     = AIRPORT[dep_iata]
-      const arrC     = AIRPORT[arr_iata]
-
-      let isArrived = !!a.actual_arr_utc
-      let lat: number, lon: number, trk: number, isEstimated = true
-      DBG(cs, `S4 branch: isArrived=${isArrived} hasPred=${!!predictorRef.current[cs]} depC=${!!depC} arrC=${!!arrC} actual_arr_utc=${a.actual_arr_utc ?? 'null'}`)
-
-      if (isArrived) {
-        // FR24 confirmed arrival — keep at destination for 30 min
-        if (!arrC) { delete trackedRef.current[cs]; delete predictorRef.current[cs]; continue }
-        const sinceArrMin = (now - new Date(a.actual_arr_utc!).getTime()) / 60_000
-        if (sinceArrMin > 30) { delete trackedRef.current[cs]; delete predictorRef.current[cs]; continue }
-        lat = arrC[0]; lon = arrC[1]
-        trk = depC ? brng(depC[0], depC[1], arrC[0], arrC[1]) : 0
-        isEstimated = false
-      } else {
-        const pred = predictorRef.current[cs]
-        if (!pred || !depC || !arrC) {
-          // Missing predictor or airport coords — hold at last known position
-          const last = lastKnownRef.current[cs]
-          if (!last) { delete trackedRef.current[cs]; continue }
-          lat = last.lat; lon = last.lon; trk = a.track ?? a.true_heading ?? 0
-        } else {
-          // Use revised_arr_utc if available — matches web Map.tsx logic exactly
-          const effDurMs = (revisedArrUtc && a.actual_dep_utc)
-            ? (new Date(revisedArrUtc).getTime() - new Date(a.actual_dep_utc).getTime())
-            : (durationMin ?? a.duration_min ?? 0) * 60_000
-          pred.setContext({
-            dep_coords:        [depC[0], depC[1]],
-            arr_coords:        [arrC[0], arrC[1]],
-            actual_dep_utc_ms: a.actual_dep_utc ? new Date(a.actual_dep_utc).getTime() : null,
-            duration_ms:       effDurMs > 0 ? effDurMs : null,
-            sched_dep_utc_ms:  null,
-            waypoints:         routePathsRef.current[`${dep_iata}|${arr_iata}`] ?? [],
-          })
-          const disp = pred.getDisplay(now)
-          DBG(cs, `S4 predictor: routeFraction=${disp.routeFraction.toFixed(3)} effDurMin=${Math.round(effDurMs/60000)} lat=${disp.lat?.toFixed(2)} lon=${disp.lon?.toFixed(2)}`)
-
-          if (disp.routeFraction >= 0.99) {
-            // Predictor says arrived — snap to destination; require actual_arr_utc for confirmed style
-            const depMs     = a.actual_dep_utc ? new Date(a.actual_dep_utc).getTime() : 0
-            const effArrMs  = depMs + effDurMs
-            const sinceExpMin = (now - effArrMs) / 60_000
-            DBG(cs, `S4 arrivedGate: depMs=${depMs > 0 ? 'valid' : 'ZERO!'} effDurMin=${Math.round(effDurMs/60000)} sinceExpMin=${sinceExpMin.toFixed(1)}`)
-            if (sinceExpMin > 30) {
-              DBG(cs, `S4 DELETE sinceExpMin=${sinceExpMin.toFixed(1)} > 30`)
-              delete trackedRef.current[cs]; delete predictorRef.current[cs]; continue
-            }
-            lat = arrC[0]; lon = arrC[1]
-            trk = brng(depC[0], depC[1], arrC[0], arrC[1])
-            isArrived = !!a.actual_arr_utc; isEstimated = !isArrived
-          } else {
-            lat = disp.lat; lon = disp.lon; trk = disp.track_deg
-            isEstimated = disp.isEstimated
-          }
-        }
-      }
-
-      covered.add(cs)
-      result.push({
-        key: cs, callsign: cs, label: cs,
-        lat, lon, track: trk,
-        dep_iata: a.dep_iata, arr_iata: a.arr_iata,
-        actual_dep_utc: a.actual_dep_utc, actual_arr_utc: a.actual_arr_utc, revised_arr_utc: null,
-        dep_time_utc: a.dep_time_utc ?? null, arr_time_utc: a.arr_time_utc,
-        duration_min: durationMin ?? a.duration_min ?? null,
-        dep_delay_min: a.dep_delay_min ?? null, fraction: null,
-        t: a.t, alt_baro: a.alt_baro, gs: a.gs,
-        airline_iata: a.airline_iata, iata_number: a.iata_number,
-        isEstimated, isArrived, isAlp,
-      })
-    }
-
-    // ── 5. boardDeparted: FR24-only flights — FlightPredictor route-following ──
-    for (const bd of boardDeparted) {
-      const { callsign: cs, dep_iata, arr_iata, duration_min,
-              actual_dep_utc, actual_arr_utc, revised_arr_utc, iata_number, airline_iata, dep_delay_min } = bd
-      if (!cs || covered.has(cs) || !dep_iata || !arr_iata) continue
-      const depC = AIRPORT[dep_iata], arrC = AIRPORT[arr_iata]
-      if (!depC || !arrC) continue
-
-      let isArrived = !!actual_arr_utc
-
-      if (isArrived) {
-        // Confirmed arrival — show at destination for 90 min
-        const sinceArrMin = (now - new Date(actual_arr_utc!).getTime()) / 60_000
-        if (sinceArrMin > 30) continue
-        covered.add(cs)
-        lastKnownRef.current[cs] = { lat: arrC[0], lon: arrC[1] }
-        trackedRef.current[cs] = {
-          a: {
-            hex: '', flight: cs, lat: arrC[0], lon: arrC[1], track: 0, true_heading: null, t: null,
-            board_match: true, dep_iata, arr_iata, iata_number, airline_iata,
-            actual_dep_utc, actual_arr_utc, dep_time_utc: null, arr_time_utc: null,
-            duration_min, dep_delay_min: dep_delay_min ?? null, alt_baro: null, gs: null,
-          },
-          lostAt: 0, durationMin: duration_min, revisedArrUtc: revised_arr_utc ?? null,
-        }
-        const isAlp = arr_iata === 'ALP' || dep_iata === 'ALP'
-        result.push({
-          key: cs, callsign: cs, label: cs,
-          lat: arrC[0], lon: arrC[1], track: brng(depC[0], depC[1], arrC[0], arrC[1]),
-          dep_iata, arr_iata, actual_dep_utc, actual_arr_utc, revised_arr_utc: revised_arr_utc ?? null,
-          dep_time_utc: null, arr_time_utc: actual_arr_utc,
-          duration_min, dep_delay_min: dep_delay_min ?? null, fraction: null,
-          t: null, alt_baro: null, gs: null, airline_iata, iata_number,
-          isEstimated: false, isArrived: true, isAlp,
-        })
-        continue
-      }
-
-      if (!actual_dep_utc || duration_min <= 0) continue
-
-      // Create predictor on first encounter — seed with a synthetic departure fix so
-      // kinematic DR has a valid starting point; route-following takes over after 20 min.
-      if (!predictorRef.current[cs]) {
-        predictorRef.current[cs] = new FlightPredictor()
-        const depMs     = new Date(actual_dep_utc).getTime()
-        const routeTrk  = brng(depC[0], depC[1], arrC[0], arrC[1])
-        const depPos: PredictorLivePos = {
-          lat: depC[0], lon: depC[1],
-          track_deg:   routeTrk,
-          gs_kts:      450,
-          vs_fpm:      0,
-          altitude_ft: 0,
-        }
-        predictorRef.current[cs].onStaleFix(depPos, depMs, now)
-      }
-
-      const pred = predictorRef.current[cs]
-
-      // Effective duration: FR24 revised ETA wins over scheduled block time
-      const effDurMs = (revised_arr_utc && actual_dep_utc)
-        ? (new Date(revised_arr_utc).getTime() - new Date(actual_dep_utc).getTime())
-        : duration_min * 60_000
-      DBG(cs, `S5 boardDep: revisedArrUtc=${revised_arr_utc ?? 'null'} effDurMin=${Math.round(effDurMs/60000)} durationMin=${duration_min}`)
-      pred.setContext({
-        dep_coords:        [depC[0], depC[1]],
-        arr_coords:        [arrC[0], arrC[1]],
-        actual_dep_utc_ms: new Date(actual_dep_utc).getTime(),
-        duration_ms:       effDurMs > 0 ? effDurMs : null,
-        sched_dep_utc_ms:  null,
-        waypoints:         routePathsRef.current[`${dep_iata}|${arr_iata}`] ?? [],
-      })
-
-      const disp = pred.getDisplay(now)
-
-      let lat: number, lon: number, trk: number
-
-      DBG(cs, `S5 predictor: routeFraction=${disp.routeFraction.toFixed(3)} lat=${disp.lat?.toFixed(2)} lon=${disp.lon?.toFixed(2)}`)
-      if (disp.routeFraction >= 0.99) {
-        // Predictor says arrived — require actual_arr_utc for confirmed style (matches web)
-        const effArrMs    = new Date(actual_dep_utc).getTime() + effDurMs
-        const sinceExpMin = (now - effArrMs) / 60_000
-        DBG(cs, `S5 arrivedGate: sinceExpMin=${sinceExpMin.toFixed(1)}`)
-        if (sinceExpMin > 30) {
-          DBG(cs, `S5 SKIP expired sinceExpMin=${sinceExpMin.toFixed(1)} > 30`)
-          continue
-        }
-        lat = arrC[0]; lon = arrC[1]; trk = brng(depC[0], depC[1], arrC[0], arrC[1])
-        isArrived = !!actual_arr_utc
-      } else {
-        lat = disp.lat; lon = disp.lon; trk = disp.track_deg
-      }
-
-      covered.add(cs)
-      const isAlp = arr_iata === 'ALP' || dep_iata === 'ALP'
-      // Seed trackedRef so this plane survives boardDeparted cache gaps
-      lastKnownRef.current[cs] = { lat, lon }
-      trackedRef.current[cs] = {
-        a: {
-          hex: '', flight: cs, lat, lon, track: trk, true_heading: null, t: null,
-          board_match: true, dep_iata, arr_iata, iata_number, airline_iata,
-          actual_dep_utc, actual_arr_utc, dep_time_utc: null, arr_time_utc: null,
-          duration_min, dep_delay_min: dep_delay_min ?? null, alt_baro: null, gs: null,
-        },
-        lostAt: 0, durationMin: duration_min, revisedArrUtc: revised_arr_utc ?? null,
-      }
-      DBG(cs, `S5 seeded trackedRef revisedArrUtc=${revised_arr_utc ?? 'null'}`)
-      result.push({
-        key: cs, callsign: cs, label: cs,
-        lat, lon, track: trk, dep_iata, arr_iata,
-        actual_dep_utc, actual_arr_utc, revised_arr_utc: revised_arr_utc ?? null,
-        dep_time_utc: null,
-        arr_time_utc: actual_dep_utc && duration_min > 0
-          ? new Date(new Date(actual_dep_utc).getTime() + duration_min * 60_000).toISOString() : null,
-        duration_min, dep_delay_min: dep_delay_min ?? null,
-        fraction: disp.routeFraction < 1 ? disp.routeFraction : null,
-        t: null, alt_baro: null, gs: null, airline_iata, iata_number,
-        isEstimated: !isArrived, isArrived, isAlp,
-      })
-    }
-
-    // ── Cleanup: remove predictors for inactive flights ──
-    for (const cs of Object.keys(predictorRef.current)) {
-      if (!covered.has(cs) && !trackedRef.current[cs]) {
-        delete predictorRef.current[cs]
-      }
-    }
-
-    setItems(result)
-  }, [])
-
-  const load = useCallback(async () => {
-    if (__DEV__) console.log('[FT] poll start')
+  const onMessage = useCallback((e: WebViewMessageEvent) => {
     try {
-      const res = await fetch(`${BASE}/api/airspace`)
-      const json = await res.json()
-      if (__DEV__) console.log(`[FT] poll ok ac=${json.aircraft?.length ?? 0} board=${json.boardDeparted?.length ?? 0}`)
-      const now = Date.now()
-
-      // Accumulate boardDeparted into persistent registry
-      for (const bd of (json.boardDeparted ?? []) as BoardDeparted[]) {
-        if (!bd.callsign) continue
-        const prev = schedDepartedRef.current[bd.callsign]
-        schedDepartedRef.current[bd.callsign] = {
-          ...bd,
-          actual_dep_utc: bd.actual_dep_utc ?? prev?.actual_dep_utc ?? null,
-          actual_arr_utc: bd.actual_arr_utc,
-        }
-      }
-
-      // Expire entries: 90 min past effective arrival
-      for (const [cs, bd] of Object.entries(schedDepartedRef.current)) {
-        if (bd.actual_arr_utc) {
-          if ((now - new Date(bd.actual_arr_utc).getTime()) / 60_000 > 30) {
-            delete schedDepartedRef.current[cs]
-          }
-        } else {
-          const effArrMs = (bd.revised_arr_utc && bd.actual_dep_utc)
-            ? new Date(bd.revised_arr_utc).getTime()
-            : (bd.actual_dep_utc && bd.duration_min > 0)
-              ? new Date(bd.actual_dep_utc).getTime() + bd.duration_min * 60_000
-              : null
-          if (effArrMs !== null && (now - effArrMs) / 60_000 > 30) {
-            delete schedDepartedRef.current[cs]
-          }
-        }
-      }
-
-      buildItems(json.aircraft ?? [], Object.values(schedDepartedRef.current))
+      const msg: EmbedMsg = JSON.parse(e.nativeEvent.data)
+      if (msg.type === 'SELECT')  setSelected(toFlight(msg.flight))
+      if (msg.type === 'DESELECT') setSelected(null)
+      if (msg.type === 'COUNT')   setCount(msg.count)
     } catch {}
-    setLoading(false)
-  }, [buildItems])
-
-  useEffect(() => {
-    load()
-    const t = setInterval(load, 10_000)
-    return () => clearInterval(t)
-  }, [load])
-
-  const cardView = selected?.dep_iata && SYRIA.has(selected.dep_iata) ? 'dep' : 'arr'
+  }, [])
 
   return (
-    <View style={{ flex: 1 }}>
-      <MapView
-        style={{ flex: 1 }}
-        provider={PROVIDER_DEFAULT}
-        mapType="satellite"
-        initialRegion={{ latitude: 33, longitude: 40, latitudeDelta: 20, longitudeDelta: 30 }}
-        showsPointsOfInterest={false}
-        showsBuildings={false}
-        showsCompass={false}
-        showsScale={false}
-        showsTraffic={false}
-        onPress={() => setSelected(null)}
-      >
-        <UrlTile
-          urlTemplate="https://a.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png"
-          maximumZ={19}
-          flipY={false}
-          zIndex={0}
-        />
-        {SERVICED.map((c, i) => (
-          <Marker
-            key={`apt-${i}`}
-            coordinate={c}
-            anchor={{ x: 0.5, y: 0.5 }}
-            tracksViewChanges={false}
-            onPress={e => e.stopPropagation()}
-          >
-            <Text style={styles.airportLabel}>{c.iata}</Text>
-          </Marker>
-        ))}
-        {items.map(item => {
-          const isSelected = selected?.key === item.key
-          const color = isSelected   ? '#38bdf8'
-            : item.isArrived ? '#9ca3af'
-            : item.isAlp     ? '#f97316'
-            : '#16a34a'
+    <View style={styles.container}>
+      <WebView
+        ref={webViewRef}
+        source={{ uri: EMBED_URL }}
+        style={styles.webview}
+        onMessage={onMessage}
+        onLoadEnd={() => setLoading(false)}
+        scrollEnabled={false}
+        bounces={false}
+        allowsInlineMediaPlayback
+        mediaPlaybackRequiresUserAction={false}
+      />
 
-          return (
-            <Marker
-              key={item.key}
-              coordinate={{ latitude: item.lat, longitude: item.lon }}
-              onPress={e => { e.stopPropagation(); setSelected(item) }}
-              anchor={{ x: 0.5, y: 0.5 }}
-              tracksViewChanges
-            >
-              <View style={styles.markerWrap}>
-                <View style={{
-                  opacity: item.isArrived ? 0.35 : 1,
-                  transform: [{ rotate: `${item.track}deg` }],
-                }}>
-                  <MaterialIcons name="flight" size={22} color={color} />
-                </View>
-                <View style={styles.labelWrap}>
-                  <Text style={[styles.labelText, {
-                    color: item.isArrived ? 'rgba(251,191,36,0.45)' : '#4ade80',
-                  }]}>{item.callsign}</Text>
-                  {typeof item.alt_baro === 'number' && !item.isArrived && (
-                    <Text style={styles.altText}>{Math.round(item.alt_baro / 100) * 100}ft</Text>
-                  )}
-                  {item.isArrived && (
-                    <Text style={styles.arrivedText}>ARRIVED</Text>
-                  )}
-                </View>
-              </View>
-            </Marker>
-          )
-        })}
-      </MapView>
-
-      {loading && (
-        <View style={styles.loadingOverlay}>
-          <ActivityIndicator color="#16a34a" />
+      {/* In-air badge */}
+      {count !== null && (
+        <View style={styles.badge}>
+          <Text style={styles.badgeText}>{count} in Air</Text>
         </View>
       )}
 
-      <View style={styles.badge}>
-        <Text style={styles.badgeText}>{items.filter(i => !i.isArrived).length} in Air</Text>
-      </View>
-
-      {selected && (
-        <View style={styles.cardWrap}>
-          <TouchableOpacity style={styles.closeBtn} onPress={() => setSelected(null)}>
-            <Text style={styles.closeText}>Close</Text>
-          </TouchableOpacity>
-          <FlightCard f={toFlight(selected)} view={cardView} hideBadge />
+      {/* Loading overlay */}
+      {loading && (
+        <View style={styles.loadingOverlay}>
+          <Text style={styles.loadingText}>Loading map…</Text>
         </View>
+      )}
+
+      {/* Flight info card */}
+      {selected && (
+        <SafeAreaView style={styles.card}>
+          <TouchableOpacity style={styles.closeBtn} onPress={() => {
+            setSelected(null)
+            webViewRef.current?.injectJavaScript('window.__rnDeselect && window.__rnDeselect(); true;')
+          }}>
+            <Text style={styles.closeText}>✕</Text>
+          </TouchableOpacity>
+          <FlightCard f={selected} view={cardView as 'arr' | 'dep'} hideBadge />
+        </SafeAreaView>
       )}
     </View>
   )
 }
 
 const styles = StyleSheet.create({
-  airportLabel: {
-    color: 'rgba(107,114,128,1)',
-    fontSize: 9,
-    fontWeight: '600',
-    fontFamily: 'monospace',
-    textShadowColor: 'rgba(0,0,0,0.9)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
-  },
-  markerWrap:  { alignItems: 'center' },
-  labelWrap:   { alignItems: 'center', marginTop: 2 },
-  labelText: {
-    fontSize: 8, fontWeight: '700', fontFamily: 'monospace',
-    textShadowColor: 'rgba(0,0,0,0.95)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
-  },
-  altText: {
-    color: 'rgba(156,163,175,0.85)', fontSize: 8, fontWeight: '600', fontFamily: 'monospace',
-    textShadowColor: 'rgba(0,0,0,0.95)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
-  },
-  arrivedText: {
-    color: '#4b5563', fontSize: 8, fontWeight: '700', fontFamily: 'monospace',
-    textShadowColor: 'rgba(0,0,0,0.95)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
-  },
-  loadingOverlay: { ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center' },
+  container:    { flex: 1, backgroundColor: '#000' },
+  webview:      { flex: 1 },
   badge: {
-    position: 'absolute', top: 56, right: 12,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    borderRadius: 20, paddingHorizontal: 12, paddingVertical: 5,
-    borderWidth: 1, borderColor: '#374151',
+    position: 'absolute', top: 12, left: 12,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    paddingHorizontal: 10, paddingVertical: 4,
+    borderRadius: 12, borderWidth: 1, borderColor: '#374151',
   },
-  badgeText:  { color: '#d1d5db', fontSize: 11, fontWeight: '600' },
-  cardWrap: {
-    position: 'absolute', bottom: 16, left: 12, right: 12,
+  badgeText:    { color: '#9ca3af', fontSize: 12, fontWeight: '600' },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#111827',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  loadingText:  { color: '#6b7280', fontSize: 14 },
+  card: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    backgroundColor: '#0f172a',
+    borderTopWidth: 1, borderTopColor: '#1f2937',
+    paddingHorizontal: 16, paddingBottom: 8,
   },
   closeBtn: {
-    position: 'absolute', top: 8, right: 8, zIndex: 10,
-    backgroundColor: '#374151', borderRadius: 99,
-    paddingHorizontal: 12, paddingVertical: 5,
+    alignSelf: 'flex-end', padding: 8, marginBottom: 4,
   },
-  closeText: { color: '#d1d5db', fontSize: 13, fontWeight: '600' },
+  closeText:    { color: '#6b7280', fontSize: 18 },
 })
