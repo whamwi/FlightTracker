@@ -8,9 +8,6 @@ import { AIRLINE_NAMES, city, airportFlag, airlineLogo, LOGO_WHITE_BG, fmtLocal,
 const EMBED_URL = 'https://flighttracker-sy.vercel.app/embed'
 const IN_FLIGHT = new Set(['En Route', 'Departed', 'Approaching'])
 
-// Only try logo image for these — others show branded monogram
-const KNOWN_LOGOS = new Set(['XH', 'FYC', 'TK', 'EY', 'J9', 'FZ', 'G9', '3L', 'QR', 'PC', 'ME', 'RJ'])
-
 const AIRLINE_BRAND: Record<string, string> = {
   RB: '#0F3D6B', FYC: '#8B1A1A', TK: '#C70F3E', QR: '#5C0632',
   EY: '#B47E1A', RJ: '#002B7F', PC: '#D45000', ME: '#2D5A27',
@@ -43,7 +40,7 @@ function LogoTile({ iata }: { iata: string }) {
   const initials = iata.slice(0, 2).toUpperCase()
   const bg = AIRLINE_BRAND[iata] ?? '#3D3A3B'
 
-  if (!KNOWN_LOGOS.has(iata) || failed) {
+  if (failed) {
     return (
       <View style={{ width: 38, height: 38, borderRadius: 10, backgroundColor: bg, justifyContent: 'center', alignItems: 'center' }}>
         <Text style={{ color: '#FFF', fontSize: 12, fontWeight: '700', fontFamily: 'monospace' }}>{initials}</Text>
