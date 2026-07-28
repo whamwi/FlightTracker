@@ -510,7 +510,32 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
 type TrackedEntry    = { a: Aircraft; lostAt: number; isFr24: boolean }
 type KinematicState  = { lat: number; lon: number; gs_kts: number; track_deg: number; captured_at_ms: number }
 
-export default function Map() {
+declare global { interface Window { ReactNativeWebView?: { postMessage(msg: string): void } } }
+
+function rnPost(msg: object) {
+  window.ReactNativeWebView?.postMessage(JSON.stringify(msg))
+}
+
+function buildEmbedFlight(callsign: string, se: ScheduleEntry | null, fs: FlightStatus | null) {
+  return {
+    callsign,
+    iata_number:    fs?.flight_number  ?? callsign,
+    airline_iata:   fs?.airline_iata   ?? airlineIataFor(callsign),
+    dep_iata:       fs?.dep_iata       ?? se?.dep_iata  ?? null,
+    arr_iata:       fs?.arr_iata       ?? se?.arr_iata  ?? null,
+    dep_time_utc:   se?.dep_time_utc   ?? null,
+    arr_time_utc:   se?.arr_time_utc   ?? null,
+    duration_min:   se?.duration_min   ?? null,
+    status:         fs?.status         ?? 'En Route',
+    actual_dep_utc:  fs?.actual_dep_utc  ?? null,
+    actual_arr_utc:  fs?.actual_arr_utc  ?? null,
+    revised_dep_utc: fs?.revised_dep_utc ?? null,
+    revised_arr_utc: fs?.revised_arr_utc ?? null,
+    aircraft_type:   fs?.aircraft_type   ?? null,
+  }
+}
+
+export default function Map({ embed = false }: { embed?: boolean }) {
   const mapRef          = useRef<HTMLDivElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapInstanceRef  = useRef<any>(null)
@@ -562,6 +587,10 @@ export default function Map() {
         maxZoom: 19,
       }).addTo(map)
       mapInstanceRef.current = map
+
+      if (embed) {
+        map.on('click', () => rnPost({ type: 'DESELECT' }))
+      }
 
       // ── Syrian airport circles ─────────────────────────────────────────────
       const SERVICED: [number, number][] = [
@@ -1191,9 +1220,19 @@ export default function Map() {
         if (markersRef.current[cs]) {
           markersRef.current[cs].setLatLng([dispLat, dispLon])
           markersRef.current[cs].setIcon(icon)
-          markersRef.current[cs].setPopupContent(popup)
+          if (!embed) markersRef.current[cs].setPopupContent(popup)
         } else {
-          markersRef.current[cs] = L.marker([dispLat, dispLon], { icon }).addTo(map).bindPopup(popup, { className: 'fp-popup' })
+          const m = L.marker([dispLat, dispLon], { icon }).addTo(map)
+          if (embed) {
+            m.on('click', () => {
+              const fs = flightStatusRef.current[cs]
+              const se = scheduleRef.current.find(e => e.callsign === cs)
+              rnPost({ type: 'SELECT', flight: buildEmbedFlight(cs, se ?? null, fs ?? null) })
+            })
+          } else {
+            m.bindPopup(popup, { className: 'fp-popup' })
+          }
+          markersRef.current[cs] = m
         }
 
         // Fetch aircraft photo once per registration
@@ -1430,9 +1469,18 @@ export default function Map() {
         if (schedMarkersRef.current[callsign]) {
           schedMarkersRef.current[callsign].setLatLng([lat, lon])
           schedMarkersRef.current[callsign].setIcon(icon)
-          schedMarkersRef.current[callsign].setPopupContent(popup)
+          if (!embed) schedMarkersRef.current[callsign].setPopupContent(popup)
         } else {
-          schedMarkersRef.current[callsign] = L.marker([lat, lon], { icon }).addTo(map).bindPopup(popup, { className: 'fp-popup' })
+          const m = L.marker([lat, lon], { icon }).addTo(map)
+          if (embed) {
+            m.on('click', () => {
+              const fs = flightStatusRef.current[callsign]
+              rnPost({ type: 'SELECT', flight: buildEmbedFlight(callsign, entry, fs ?? null) })
+            })
+          } else {
+            m.bindPopup(popup, { className: 'fp-popup' })
+          }
+          schedMarkersRef.current[callsign] = m
         }
 
         schedLinesRef.current[callsign]?.forEach((l: any) => l.remove())  // eslint-disable-line
@@ -1445,6 +1493,12 @@ export default function Map() {
           schedMarkersRef.current[cs].remove(); delete schedMarkersRef.current[cs]
           schedLinesRef.current[cs]?.forEach((l: any) => l.remove()); delete schedLinesRef.current[cs]  // eslint-disable-line
         }
+      }
+
+      // Broadcast in-air count to React Native
+      if (embed) {
+        const total = Object.keys(markersRef.current).length + Object.keys(schedMarkersRef.current).length
+        rnPost({ type: 'COUNT', count: total })
       }
     }
 
