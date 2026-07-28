@@ -1,15 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native'
 import MaterialIcons from '@expo/vector-icons/MaterialIcons'
-import MapView, { Marker, UrlTile, Circle, PROVIDER_DEFAULT } from 'react-native-maps'
+import MapView, { Marker, UrlTile, PROVIDER_DEFAULT } from 'react-native-maps'
 import { FlightCard } from '../../components/FlightCard'
 import type { Flight } from '../../lib/types'
+import { FlightPredictor } from '../../lib/flight-predictor'
+import type { Waypoint, LivePosition as PredictorLivePos } from '../../lib/flight-predictor'
 
 const BASE = 'https://flighttracker-sy.vercel.app'
 
 // ── Airport coords ────────────────────────────────────────────────────────────
 const AIRPORT: Record<string, [number, number]> = {
   DAM:[33.4114,36.5156], ALP:[36.1807,37.2244], LTK:[35.4011,35.9488],
+  DEZ:[35.2854,40.1760],
   SAW:[40.8986,29.3092], IST:[41.2608,28.7418], AYT:[36.8987,30.7995],
   AMM:[31.7226,35.9930], BEY:[33.8208,35.4883], CAI:[30.1219,31.4056],
   HRG:[27.1783,33.7993], DXB:[25.2528,55.3644], SHJ:[25.3285,55.5172],
@@ -22,7 +25,6 @@ const AIRPORT: Record<string, [number, number]> = {
   DMM:[26.4712,49.7979], MED:[24.5534,39.7051], ADB:[38.2924,27.1570],
   MJI:[32.8942,13.2759], ATH:[37.9364,23.9445], SVO:[55.9736,37.4125],
   SKD:[39.7005,66.9838], TAS:[41.2579,69.2812], EVN:[40.1473,44.3959],
-  // Additional airports present in web but previously missing from mobile
   OTP:[44.5711,26.0850], VKO:[55.5965,37.2615], FCO:[41.8003,12.2389],
   CDG:[49.0097, 2.5479], LHR:[51.4700,-0.4543], FRA:[50.0379, 8.5622],
   LCA:[34.8751,33.6249], KHI:[24.9065,67.1608], NBO:[-1.3192,36.9275],
@@ -32,7 +34,6 @@ const AIRPORT: Record<string, [number, number]> = {
 
 const SYRIA = new Set(['DAM', 'ALP', 'LTK', 'DEZ'])
 
-// Serviced airports — shown as dashed circles on the map (matches web)
 const SERVICED: { latitude: number; longitude: number; iata: string }[] = [
   { latitude: 33.4114, longitude: 36.5156, iata: 'DAM' },
   { latitude: 36.1807, longitude: 37.2244, iata: 'ALP' },
@@ -73,65 +74,12 @@ const AIRLINE_NAME: Record<string, string> = {
   GF:'Gulf Air',        J2:'Azerbaijan Airlines',
 }
 
-// ── Geometry ──────────────────────────────────────────────────────────────────
-type Waypoint = { f: number; lat: number; lon: number }
-
-function slerpGreatCircle(lat1: number, lon1: number, lat2: number, lon2: number, f: number): [number, number] {
-  const r=Math.PI/180
-  const φ1=lat1*r,λ1=lon1*r,φ2=lat2*r,λ2=lon2*r
-  const x1=Math.cos(φ1)*Math.cos(λ1),y1=Math.cos(φ1)*Math.sin(λ1),z1=Math.sin(φ1)
-  const x2=Math.cos(φ2)*Math.cos(λ2),y2=Math.cos(φ2)*Math.sin(λ2),z2=Math.sin(φ2)
-  const dot=Math.min(1,Math.max(-1,x1*x2+y1*y2+z1*z2))
-  const omega=Math.acos(dot)
-  if (Math.abs(omega)<1e-6) return [lat1,lon1]
-  const s=Math.sin(omega)
-  const w1=Math.sin((1-f)*omega)/s,w2=Math.sin(f*omega)/s
-  const x=w1*x1+w2*x2,y=w1*y1+w2*y2,z=w1*z1+w2*z2
-  return [Math.atan2(z,Math.sqrt(x*x+y*y))/r,Math.atan2(y,x)/r]
-}
-
+// ── Initial bearing (great circle) — all route geometry handled by FlightPredictor ──
 function brng(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const r=Math.PI/180,dLon=(lon2-lon1)*r
-  const y=Math.sin(dLon)*Math.cos(lat2*r)
-  const x=Math.cos(lat1*r)*Math.sin(lat2*r)-Math.sin(lat1*r)*Math.cos(lat2*r)*Math.cos(dLon)
-  return (Math.atan2(y,x)/r+360)%360
-}
-
-function interpolatePath(wps: Waypoint[], f: number): [number, number] {
-  if (!wps.length) return [0,0]
-  if (f<=wps[0].f) return [wps[0].lat,wps[0].lon]
-  const last=wps[wps.length-1]
-  if (f>=last.f) return [last.lat,last.lon]
-  let lo=0,hi=wps.length-1
-  while (hi-lo>1){const mid=(lo+hi)>>1;if(wps[mid].f<=f)lo=mid;else hi=mid}
-  const a=wps[lo],b=wps[hi],t=(f-a.f)/(b.f-a.f)
-  return [a.lat+t*(b.lat-a.lat),a.lon+t*(b.lon-a.lon)]
-}
-
-function bearingFromPath(wps: Waypoint[], f: number): number {
-  const dt=0.01
-  const [aLat,aLon]=interpolatePath(wps,Math.max(0,f-dt/2))
-  const [bLat,bLon]=interpolatePath(wps,Math.min(1,f+dt/2))
-  return brng(aLat,aLon,bLat,bLon)
-}
-
-function bearingAlongPath(lat1: number,lon1: number,lat2: number,lon2: number,t: number): number {
-  const dt=Math.min(0.005,(1-t)*0.5)
-  const [aLat,aLon]=slerpGreatCircle(lat1,lon1,lat2,lon2,t)
-  const [bLat,bLon]=slerpGreatCircle(lat1,lon1,lat2,lon2,Math.min(1,t+dt))
-  return brng(aLat,aLon,bLat,bLon)
-}
-
-function greatCircleKm(lat1: number,lon1: number,lat2: number,lon2: number): number {
-  const r=Math.PI/180,dLat=(lat2-lat1)*r,dLon=(lon2-lon1)*r
-  const a=Math.sin(dLat/2)**2+Math.cos(lat1*r)*Math.cos(lat2*r)*Math.sin(dLon/2)**2
-  return 6371*2*Math.asin(Math.sqrt(a))
-}
-
-function nearestPathFraction(wps: Waypoint[],lat: number,lon: number): number {
-  let bestF=wps[0]?.f??0,bestDist=Infinity
-  for (const wp of wps){const d=greatCircleKm(lat,lon,wp.lat,wp.lon);if(d<bestDist){bestDist=d;bestF=wp.f}}
-  return bestF
+  const r = Math.PI / 180, dLon = (lon2 - lon1) * r
+  const y = Math.sin(dLon) * Math.cos(lat2 * r)
+  const x = Math.cos(lat1 * r) * Math.sin(lat2 * r) - Math.sin(lat1 * r) * Math.cos(lat2 * r) * Math.cos(dLon)
+  return (Math.atan2(y, x) / r + 360) % 360
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -180,7 +128,6 @@ function toFlight(item: DisplayItem): Flight {
   const expectedArrISO = item.actual_dep_utc && item.duration_min
     ? new Date(new Date(item.actual_dep_utc).getTime() + item.duration_min * 60_000).toISOString()
     : null
-  // Prefer the FR24-provided revised_arr_utc; fall back to computed from dep+duration if delayed
   const revisedArrUtc = !item.isArrived
     ? (item.revised_arr_utc ?? ((item.dep_delay_min ?? 0) > 0 ? expectedArrISO : null))
     : null
@@ -213,12 +160,12 @@ export default function MapTab() {
   const [selected, setSelected] = useState<DisplayItem | null>(null)
   const [loading, setLoading]   = useState(true)
 
-  const routePathsRef     = useRef<Record<string, Waypoint[]>>({})
-  const lastKnownRef      = useRef<Record<string, { lat: number; lon: number }>>({})
-  const trackedRef        = useRef<Record<string, { a: Aircraft; lostAt: number; durationMin: number | null }>>({})
-  // Persistent departed-flight registry — mirrors web's scheduleRef.
-  // Updated every poll from boardDeparted, but NEVER cleared during API cache gaps.
-  const schedDepartedRef  = useRef<Record<string, BoardDeparted>>({})
+  const routePathsRef    = useRef<Record<string, Waypoint[]>>({})
+  const lastKnownRef     = useRef<Record<string, { lat: number; lon: number }>>({})
+  const trackedRef       = useRef<Record<string, { a: Aircraft; lostAt: number; durationMin: number | null }>>({})
+  const schedDepartedRef = useRef<Record<string, BoardDeparted>>({})
+  // One FlightPredictor per callsign — mirrors web Map.tsx predictorRef
+  const predictorRef     = useRef<Record<string, FlightPredictor>>({})
 
   useEffect(() => {
     fetch(`${BASE}/api/routes`)
@@ -239,9 +186,9 @@ export default function MapTab() {
     const result: DisplayItem[] = []
     const covered = new Set<string>()
     const freshCallsigns = new Set<string>()
-    const STALE_TTL_MS = 6 * 3_600_000  // 6 hours, mirrors web
+    const STALE_TTL_MS = 6 * 3_600_000  // 6-hour hard cleanup
 
-    // ── 1. Live ADS-B: add to result + stamp trackedRef as live ───────────────
+    // ── 1. Live ADS-B: add to result + feed predictor with live fix ───────────
     for (const a of aircraft) {
       if (!a.board_match || !a.lat || !a.lon) continue
       const cs = (a.flight ?? '').trim()
@@ -249,40 +196,61 @@ export default function MapTab() {
       freshCallsigns.add(cs)
       lastKnownRef.current[cs] = { lat: a.lat, lon: a.lon }
       trackedRef.current[cs] = {
-        a,
-        lostAt: 0,
+        a, lostAt: 0,
         durationMin: a.duration_min ?? trackedRef.current[cs]?.durationMin ?? null,
       }
       covered.add(cs)
       const isArrived = !!a.actual_arr_utc
-      const isAlp = a.arr_iata === 'ALP' || a.dep_iata === 'ALP'
-      const depC = a.dep_iata ? AIRPORT[a.dep_iata] : null
-      const arrC = a.arr_iata ? AIRPORT[a.arr_iata] : null
-      const routeTrk = depC && arrC ? brng(depC[0], depC[1], arrC[0], arrC[1]) : 0
-      const liveTrk = a.track ?? a.true_heading ?? routeTrk
+      const isAlp     = a.arr_iata === 'ALP' || a.dep_iata === 'ALP'
+      const depC      = a.dep_iata ? AIRPORT[a.dep_iata] : null
+      const arrC      = a.arr_iata ? AIRPORT[a.arr_iata] : null
+      const routeTrk  = depC && arrC ? brng(depC[0], depC[1], arrC[0], arrC[1]) : 0
+      const liveTrk   = a.track ?? a.true_heading ?? routeTrk
+
+      // Create predictor on first sighting; setContext every poll
+      if (!predictorRef.current[cs]) predictorRef.current[cs] = new FlightPredictor()
+      const waypoints = (a.dep_iata && a.arr_iata)
+        ? (routePathsRef.current[`${a.dep_iata}|${a.arr_iata}`] ?? []) : []
+      predictorRef.current[cs].setContext({
+        dep_coords:        depC ?? [a.lat, a.lon],
+        arr_coords:        arrC ?? [a.lat, a.lon],
+        actual_dep_utc_ms: a.actual_dep_utc ? new Date(a.actual_dep_utc).getTime() : null,
+        duration_ms:       a.duration_min ? a.duration_min * 60_000 : null,
+        sched_dep_utc_ms:  null,
+        waypoints,
+      })
+      const predPos: PredictorLivePos = {
+        lat:         a.lat,
+        lon:         a.lon,
+        track_deg:   liveTrk,
+        gs_kts:      a.gs ?? 450,
+        vs_fpm:      0,
+        altitude_ft: typeof a.alt_baro === 'number' ? a.alt_baro : null,
+      }
+      predictorRef.current[cs].onLive(predPos, now)
+
       result.push({
         key: cs, callsign: cs, label: cs,
         lat: a.lat, lon: a.lon, track: liveTrk,
         dep_iata: a.dep_iata, arr_iata: a.arr_iata,
         actual_dep_utc: a.actual_dep_utc, actual_arr_utc: a.actual_arr_utc, revised_arr_utc: null,
         dep_time_utc: a.dep_time_utc ?? null, arr_time_utc: a.arr_time_utc,
-        duration_min: a.duration_min ?? null,
-        dep_delay_min: a.dep_delay_min ?? null, fraction: null,
+        duration_min: a.duration_min ?? null, dep_delay_min: a.dep_delay_min ?? null, fraction: null,
         t: a.t, alt_baro: a.alt_baro, gs: a.gs,
         airline_iata: a.airline_iata, iata_number: a.iata_number,
         isEstimated: false, isArrived, isAlp,
       })
     }
 
-    // ── 2. Mark dropped signals (lostAt=0 → lostAt=now) ──────────────────────
+    // ── 2. Mark dropped signals — notify predictor of signal loss ─────────────
     for (const [cs, entry] of Object.entries(trackedRef.current)) {
       if (!freshCallsigns.has(cs) && entry.lostAt === 0) {
         trackedRef.current[cs] = { ...entry, lostAt: now }
+        predictorRef.current[cs]?.onSignalLoss(now)
       }
     }
 
-    // ── 3. Pre-pass: push effective duration + arr time from boardDeparted
-    //       into stale trackedRef entries so DR uses the latest metadata ────────
+    // ── 3. Pre-pass: refresh metadata from boardDeparted into stale entries ───
     for (const bd of boardDeparted) {
       const entry = trackedRef.current[bd.callsign]
       if (!entry || entry.lostAt === 0) continue
@@ -297,136 +265,187 @@ export default function MapTab() {
       }
     }
 
-    // ── 4. Dead-reckoning for stale trackedRef entries ────────────────────────
+    // ── 4. Stale ADS-B — position from FlightPredictor ───────────────────────
     for (const [cs, entry] of Object.entries(trackedRef.current)) {
       if (covered.has(cs)) continue
       const { a, lostAt, durationMin } = entry
       if (lostAt === 0) continue
 
-      if (now - lostAt > STALE_TTL_MS) { delete trackedRef.current[cs]; continue }
+      // Hard cleanup after 6 hours regardless of predictor state
+      if (now - lostAt > STALE_TTL_MS) {
+        delete trackedRef.current[cs]
+        delete predictorRef.current[cs]
+        continue
+      }
 
-      let isArrived = !!a.actual_arr_utc
-      const isAlp = a.arr_iata === 'ALP' || a.dep_iata === 'ALP'
+      const isAlp    = a.arr_iata === 'ALP' || a.dep_iata === 'ALP'
       const dep_iata = a.dep_iata ?? ''
       const arr_iata = a.arr_iata ?? ''
-      const depC = AIRPORT[dep_iata], arrC = AIRPORT[arr_iata]
+      const depC     = AIRPORT[dep_iata]
+      const arrC     = AIRPORT[arr_iata]
 
-      let lat: number, lon: number, trk: number
+      let isArrived = !!a.actual_arr_utc
+      let lat: number, lon: number, trk: number, isEstimated = true
 
       if (isArrived) {
-        if (!arrC) { delete trackedRef.current[cs]; continue }
+        // FR24 confirmed arrival — keep at destination for 90 min
+        if (!arrC) { delete trackedRef.current[cs]; delete predictorRef.current[cs]; continue }
         const sinceArrMin = (now - new Date(a.actual_arr_utc!).getTime()) / 60_000
-        if (sinceArrMin > 90) { delete trackedRef.current[cs]; continue }
+        if (sinceArrMin > 90) { delete trackedRef.current[cs]; delete predictorRef.current[cs]; continue }
         lat = arrC[0]; lon = arrC[1]
         trk = depC ? brng(depC[0], depC[1], arrC[0], arrC[1]) : 0
+        isEstimated = false
       } else {
-        const effDur = durationMin ?? a.duration_min
-        if (a.actual_dep_utc && effDur && effDur > 0 && depC && arrC) {
-          const elapsedMin = (now - new Date(a.actual_dep_utc).getTime()) / 60_000
-          if (elapsedMin < 0) {
-            delete trackedRef.current[cs]; continue
-          } else if (elapsedMin >= effDur) {
-            // Past expected arrival — snap to destination airport
-            const sinceExpectedArrMin = elapsedMin - effDur
-            if (sinceExpectedArrMin > 90) { delete trackedRef.current[cs]; continue }
-            lat = arrC[0]; lon = arrC[1]
-            trk = depC ? brng(depC[0], depC[1], arrC[0], arrC[1]) : 0
-            isArrived = true
-          } else {
-            const timeFrac = Math.min(elapsedMin / effDur, 0.97)
-            const wps = routePathsRef.current[`${dep_iata}|${arr_iata}`]
-            if (wps?.length) {
-              const lastKnown = lastKnownRef.current[cs]
-              const anchorF = lastKnown ? nearestPathFraction(wps, lastKnown.lat, lastKnown.lon) : 0
-              const f = Math.min(Math.max(timeFrac, anchorF), 0.97)
-              ;[lat, lon] = interpolatePath(wps, f); trk = bearingFromPath(wps, f)
-            } else {
-              ;[lat, lon] = slerpGreatCircle(depC[0], depC[1], arrC[0], arrC[1], timeFrac)
-              trk = bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], timeFrac)
-            }
-          }
-        } else {
-          // No dep metadata or missing airport — hold at last known live lat/lon
+        const pred = predictorRef.current[cs]
+        if (!pred || !depC || !arrC) {
+          // Missing predictor or airport coords — hold at last known position
           const last = lastKnownRef.current[cs]
           if (!last) { delete trackedRef.current[cs]; continue }
           lat = last.lat; lon = last.lon; trk = a.track ?? a.true_heading ?? 0
+        } else {
+          const effDurMs = (durationMin ?? a.duration_min ?? 0) * 60_000
+          pred.setContext({
+            dep_coords:        [depC[0], depC[1]],
+            arr_coords:        [arrC[0], arrC[1]],
+            actual_dep_utc_ms: a.actual_dep_utc ? new Date(a.actual_dep_utc).getTime() : null,
+            duration_ms:       effDurMs > 0 ? effDurMs : null,
+            sched_dep_utc_ms:  null,
+            waypoints:         routePathsRef.current[`${dep_iata}|${arr_iata}`] ?? [],
+          })
+          const disp = pred.getDisplay(now)
+
+          if (disp.routeFraction >= 0.99) {
+            // Predictor says arrived — snap to destination, expire 90 min later
+            const depMs     = a.actual_dep_utc ? new Date(a.actual_dep_utc).getTime() : 0
+            const effArrMs  = depMs + effDurMs
+            const sinceExpMin = (now - effArrMs) / 60_000
+            if (sinceExpMin > 90) {
+              delete trackedRef.current[cs]; delete predictorRef.current[cs]; continue
+            }
+            lat = arrC[0]; lon = arrC[1]
+            trk = brng(depC[0], depC[1], arrC[0], arrC[1])
+            isArrived = true; isEstimated = false
+          } else {
+            lat = disp.lat; lon = disp.lon; trk = disp.track_deg
+            isEstimated = disp.isEstimated
+          }
         }
       }
 
       covered.add(cs)
-      const effDurFinal = durationMin ?? a.duration_min ?? null
       result.push({
         key: cs, callsign: cs, label: cs,
         lat, lon, track: trk,
         dep_iata: a.dep_iata, arr_iata: a.arr_iata,
         actual_dep_utc: a.actual_dep_utc, actual_arr_utc: a.actual_arr_utc, revised_arr_utc: null,
         dep_time_utc: a.dep_time_utc ?? null, arr_time_utc: a.arr_time_utc,
-        duration_min: effDurFinal, dep_delay_min: a.dep_delay_min ?? null, fraction: null,
+        duration_min: durationMin ?? a.duration_min ?? null,
+        dep_delay_min: a.dep_delay_min ?? null, fraction: null,
         t: a.t, alt_baro: a.alt_baro, gs: a.gs,
         airline_iata: a.airline_iata, iata_number: a.iata_number,
-        isEstimated: true, isArrived, isAlp,
+        isEstimated, isArrived, isAlp,
       })
     }
 
-    // ── 5. boardDeparted: flights never seen via ADS-B (no trackedRef entry) ──
+    // ── 5. boardDeparted: FR24-only flights — FlightPredictor route-following ──
     for (const bd of boardDeparted) {
       const { callsign: cs, dep_iata, arr_iata, duration_min,
               actual_dep_utc, actual_arr_utc, revised_arr_utc, iata_number, airline_iata, dep_delay_min } = bd
       if (!cs || covered.has(cs) || !dep_iata || !arr_iata) continue
       const depC = AIRPORT[dep_iata], arrC = AIRPORT[arr_iata]
       if (!depC || !arrC) continue
+
       let isArrived = !!actual_arr_utc
-      let lat: number, lon: number, trk: number
-      let bdFrac: number | null = null
+
       if (isArrived) {
+        // Confirmed arrival — show at destination for 90 min
         const sinceArrMin = (now - new Date(actual_arr_utc!).getTime()) / 60_000
         if (sinceArrMin > 90) continue
-        lat = arrC[0]; lon = arrC[1]; trk = brng(depC[0], depC[1], arrC[0], arrC[1])
-      } else if (actual_dep_utc && duration_min > 0) {
-        // Prefer FR24 ETA over scheduled block time for DR when flight is delayed
-        const effDuration = (revised_arr_utc && actual_dep_utc)
-          ? (new Date(revised_arr_utc).getTime() - new Date(actual_dep_utc).getTime()) / 60_000
-          : duration_min
-        const elapsedMin = (now - new Date(actual_dep_utc).getTime()) / 60_000
-        if (elapsedMin < 0) continue
-        const rawF = elapsedMin / effDuration
-        if (rawF >= 1.0) {
-          // Past effective arrival — snap to destination, expire 90 min after.
-          const sinceExpectedArrMin = elapsedMin - effDuration
-          if (sinceExpectedArrMin > 90) continue
-          lat = arrC[0]; lon = arrC[1]; trk = brng(depC[0], depC[1], arrC[0], arrC[1])
-          isArrived = true
-        } else {
-          const timeFrac = rawF
-          bdFrac = timeFrac
-          const wps = routePathsRef.current[`${dep_iata}|${arr_iata}`]
-          if (wps?.length) {
-            const lastKnown = lastKnownRef.current[cs]
-            const anchorF = lastKnown ? nearestPathFraction(wps, lastKnown.lat, lastKnown.lon) : 0
-            const f = Math.min(Math.max(timeFrac, anchorF), 0.97)
-            ;[lat, lon] = interpolatePath(wps, f); trk = bearingFromPath(wps, f)
-          } else {
-            ;[lat, lon] = slerpGreatCircle(depC[0], depC[1], arrC[0], arrC[1], timeFrac)
-            trk = bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], timeFrac)
-          }
+        covered.add(cs)
+        lastKnownRef.current[cs] = { lat: arrC[0], lon: arrC[1] }
+        trackedRef.current[cs] = {
+          a: {
+            hex: '', flight: cs, lat: arrC[0], lon: arrC[1], track: 0, true_heading: null, t: null,
+            board_match: true, dep_iata, arr_iata, iata_number, airline_iata,
+            actual_dep_utc, actual_arr_utc, dep_time_utc: null, arr_time_utc: null,
+            duration_min, dep_delay_min: dep_delay_min ?? null, alt_baro: null, gs: null,
+          },
+          lostAt: 0, durationMin: duration_min,
         }
-      } else continue
+        const isAlp = arr_iata === 'ALP' || dep_iata === 'ALP'
+        result.push({
+          key: cs, callsign: cs, label: cs,
+          lat: arrC[0], lon: arrC[1], track: brng(depC[0], depC[1], arrC[0], arrC[1]),
+          dep_iata, arr_iata, actual_dep_utc, actual_arr_utc, revised_arr_utc: revised_arr_utc ?? null,
+          dep_time_utc: null, arr_time_utc: actual_arr_utc,
+          duration_min, dep_delay_min: dep_delay_min ?? null, fraction: null,
+          t: null, alt_baro: null, gs: null, airline_iata, iata_number,
+          isEstimated: false, isArrived: true, isAlp,
+        })
+        continue
+      }
+
+      if (!actual_dep_utc || duration_min <= 0) continue
+
+      // Create predictor on first encounter — seed with a synthetic departure fix so
+      // kinematic DR has a valid starting point; route-following takes over after 20 min.
+      if (!predictorRef.current[cs]) {
+        predictorRef.current[cs] = new FlightPredictor()
+        const depMs     = new Date(actual_dep_utc).getTime()
+        const routeTrk  = brng(depC[0], depC[1], arrC[0], arrC[1])
+        const depPos: PredictorLivePos = {
+          lat: depC[0], lon: depC[1],
+          track_deg:   routeTrk,
+          gs_kts:      450,
+          vs_fpm:      0,
+          altitude_ft: 0,
+        }
+        predictorRef.current[cs].onStaleFix(depPos, depMs, now)
+      }
+
+      const pred = predictorRef.current[cs]
+
+      // Effective duration: FR24 revised ETA wins over scheduled block time
+      const effDurMs = (revised_arr_utc && actual_dep_utc)
+        ? (new Date(revised_arr_utc).getTime() - new Date(actual_dep_utc).getTime())
+        : duration_min * 60_000
+      pred.setContext({
+        dep_coords:        [depC[0], depC[1]],
+        arr_coords:        [arrC[0], arrC[1]],
+        actual_dep_utc_ms: new Date(actual_dep_utc).getTime(),
+        duration_ms:       effDurMs > 0 ? effDurMs : null,
+        sched_dep_utc_ms:  null,
+        waypoints:         routePathsRef.current[`${dep_iata}|${arr_iata}`] ?? [],
+      })
+
+      const disp = pred.getDisplay(now)
+
+      let lat: number, lon: number, trk: number
+
+      if (disp.routeFraction >= 0.99) {
+        // Predictor says arrived — expire 90 min after estimated arrival
+        const effArrMs    = new Date(actual_dep_utc).getTime() + effDurMs
+        const sinceExpMin = (now - effArrMs) / 60_000
+        if (sinceExpMin > 90) continue
+        lat = arrC[0]; lon = arrC[1]; trk = brng(depC[0], depC[1], arrC[0], arrC[1])
+        isArrived = true
+      } else {
+        lat = disp.lat; lon = disp.lon; trk = disp.track_deg
+      }
+
       covered.add(cs)
-      // Seed trackedRef + lastKnownRef so the DR step can hold this plane during
-      // boardCache refresh gaps (same protection live-ADS-B planes get).
+      const isAlp = arr_iata === 'ALP' || dep_iata === 'ALP'
+      // Seed trackedRef so this plane survives boardDeparted cache gaps
       lastKnownRef.current[cs] = { lat, lon }
       trackedRef.current[cs] = {
         a: {
           hex: '', flight: cs, lat, lon, track: trk, true_heading: null, t: null,
           board_match: true, dep_iata, arr_iata, iata_number, airline_iata,
-          actual_dep_utc, actual_arr_utc,
-          dep_time_utc: null, arr_time_utc: null, duration_min,
-          dep_delay_min: dep_delay_min ?? null, alt_baro: null, gs: null,
+          actual_dep_utc, actual_arr_utc, dep_time_utc: null, arr_time_utc: null,
+          duration_min, dep_delay_min: dep_delay_min ?? null, alt_baro: null, gs: null,
         },
-        lostAt: 0,
-        durationMin: duration_min,
+        lostAt: 0, durationMin: duration_min,
       }
-      const isAlp = arr_iata === 'ALP' || dep_iata === 'ALP'
       result.push({
         key: cs, callsign: cs, label: cs,
         lat, lon, track: trk, dep_iata, arr_iata,
@@ -434,11 +453,18 @@ export default function MapTab() {
         dep_time_utc: null,
         arr_time_utc: actual_dep_utc && duration_min > 0
           ? new Date(new Date(actual_dep_utc).getTime() + duration_min * 60_000).toISOString() : null,
-        duration_min, dep_delay_min: dep_delay_min ?? null, fraction: bdFrac,
-        t: null, alt_baro: null, gs: null,
-        airline_iata, iata_number,
-        isEstimated: true, isArrived, isAlp,
+        duration_min, dep_delay_min: dep_delay_min ?? null,
+        fraction: disp.routeFraction < 1 ? disp.routeFraction : null,
+        t: null, alt_baro: null, gs: null, airline_iata, iata_number,
+        isEstimated: !isArrived, isArrived, isAlp,
       })
+    }
+
+    // ── Cleanup: remove predictors for flights that are no longer active ──────
+    for (const cs of Object.keys(predictorRef.current)) {
+      if (!covered.has(cs) && !trackedRef.current[cs]) {
+        delete predictorRef.current[cs]
+      }
     }
 
     setItems(result)
@@ -450,21 +476,18 @@ export default function MapTab() {
       const json = await res.json()
       const now = Date.now()
 
-      // Accumulate boardDeparted into persistent registry (mirrors web's scheduleRef).
-      // Preserve actual_dep_utc across cache gaps but always take the fresh actual_arr_utc
-      // from the API — never carry a stale synthesised arrival forward, as a later poll
-      // may correctly clear it once the API threshold was tightened.
+      // Accumulate boardDeparted into persistent registry
       for (const bd of (json.boardDeparted ?? []) as BoardDeparted[]) {
         if (!bd.callsign) continue
         const prev = schedDepartedRef.current[bd.callsign]
         schedDepartedRef.current[bd.callsign] = {
           ...bd,
           actual_dep_utc: bd.actual_dep_utc ?? prev?.actual_dep_utc ?? null,
-          actual_arr_utc: bd.actual_arr_utc,  // always use fresh API value
+          actual_arr_utc: bd.actual_arr_utc,
         }
       }
 
-      // Expire entries: 90 min past effective arrival (prefer FR24 ETA over scheduled block)
+      // Expire entries: 90 min past effective arrival
       for (const [cs, bd] of Object.entries(schedDepartedRef.current)) {
         if (bd.actual_arr_utc) {
           if ((now - new Date(bd.actual_arr_utc).getTime()) / 60_000 > 90) {
@@ -574,7 +597,6 @@ export default function MapTab() {
         <Text style={styles.badgeText}>{items.filter(i => !i.isArrived).length} in Air</Text>
       </View>
 
-      {/* Flight card popup */}
       {selected && (
         <View style={styles.cardWrap}>
           <TouchableOpacity style={styles.closeBtn} onPress={() => setSelected(null)}>
