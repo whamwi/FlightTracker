@@ -162,7 +162,7 @@ export default function MapTab() {
 
   const routePathsRef    = useRef<Record<string, Waypoint[]>>({})
   const lastKnownRef     = useRef<Record<string, { lat: number; lon: number }>>({})
-  const trackedRef       = useRef<Record<string, { a: Aircraft; lostAt: number; durationMin: number | null }>>({})
+  const trackedRef       = useRef<Record<string, { a: Aircraft; lostAt: number; durationMin: number | null; revisedArrUtc: string | null }>>({})
   const schedDepartedRef = useRef<Record<string, BoardDeparted>>({})
   // One FlightPredictor per callsign — mirrors web Map.tsx predictorRef
   const predictorRef     = useRef<Record<string, FlightPredictor>>({})
@@ -188,6 +188,12 @@ export default function MapTab() {
     const freshCallsigns = new Set<string>()
     const STALE_TTL_MS = 6 * 3_600_000  // 6-hour hard cleanup
 
+    // Debug: trace specific callsigns through buildItems to diagnose disappearance
+    const DEBUG_CS = __DEV__ ? new Set(['ETD562', 'JZR178', 'ETD563', 'JZR179']) : new Set<string>()
+    const DBG = (cs: string, msg: string) => {
+      if (DEBUG_CS.has(cs)) console.warn(`[FT|${cs}] ${msg}`)
+    }
+
     // ── 1. Live ADS-B: add to result + feed predictor with live fix ───────────
     for (const a of aircraft) {
       if (!a.board_match || !a.lat || !a.lon) continue
@@ -198,7 +204,9 @@ export default function MapTab() {
       trackedRef.current[cs] = {
         a, lostAt: 0,
         durationMin: a.duration_min ?? trackedRef.current[cs]?.durationMin ?? null,
+        revisedArrUtc: trackedRef.current[cs]?.revisedArrUtc ?? null,
       }
+      DBG(cs, `S1 live ADS-B lat=${a.lat} lon=${a.lon}`)
       covered.add(cs)
       const isArrived = !!a.actual_arr_utc
       const isAlp     = a.arr_iata === 'ALP' || a.dep_iata === 'ALP'
@@ -254,9 +262,11 @@ export default function MapTab() {
     for (const bd of boardDeparted) {
       const entry = trackedRef.current[bd.callsign]
       if (!entry || entry.lostAt === 0) continue
+      DBG(bd.callsign, `S3 pre-pass revisedArrUtc=${bd.revised_arr_utc ?? 'null'} durationMin=${bd.duration_min}`)
       trackedRef.current[bd.callsign] = {
         ...entry,
         durationMin: bd.duration_min ?? entry.durationMin,
+        revisedArrUtc: bd.revised_arr_utc ?? entry.revisedArrUtc,
         a: {
           ...entry.a,
           actual_dep_utc: bd.actual_dep_utc ?? entry.a.actual_dep_utc,
@@ -268,8 +278,9 @@ export default function MapTab() {
     // ── 4. Stale ADS-B — position from FlightPredictor ───────────────────────
     for (const [cs, entry] of Object.entries(trackedRef.current)) {
       if (covered.has(cs)) continue
-      const { a, lostAt, durationMin } = entry
+      const { a, lostAt, durationMin, revisedArrUtc } = entry
       if (lostAt === 0) continue
+      DBG(cs, `S4 stale: lostAt=${lostAt > 0 ? Math.round((now-lostAt)/60000)+'min ago' : '0'} revisedArrUtc=${revisedArrUtc ?? 'null'} durationMin=${durationMin}`)
 
       // Hard cleanup after 6 hours regardless of predictor state
       if (now - lostAt > STALE_TTL_MS) {
@@ -303,7 +314,10 @@ export default function MapTab() {
           if (!last) { delete trackedRef.current[cs]; continue }
           lat = last.lat; lon = last.lon; trk = a.track ?? a.true_heading ?? 0
         } else {
-          const effDurMs = (durationMin ?? a.duration_min ?? 0) * 60_000
+          // Use revised_arr_utc if available — matches web Map.tsx logic exactly
+          const effDurMs = (revisedArrUtc && a.actual_dep_utc)
+            ? (new Date(revisedArrUtc).getTime() - new Date(a.actual_dep_utc).getTime())
+            : (durationMin ?? a.duration_min ?? 0) * 60_000
           pred.setContext({
             dep_coords:        [depC[0], depC[1]],
             arr_coords:        [arrC[0], arrC[1]],
@@ -313,13 +327,16 @@ export default function MapTab() {
             waypoints:         routePathsRef.current[`${dep_iata}|${arr_iata}`] ?? [],
           })
           const disp = pred.getDisplay(now)
+          DBG(cs, `S4 predictor: routeFraction=${disp.routeFraction.toFixed(3)} effDurMin=${Math.round(effDurMs/60000)} lat=${disp.lat?.toFixed(2)} lon=${disp.lon?.toFixed(2)}`)
 
           if (disp.routeFraction >= 0.99) {
             // Predictor says arrived — snap to destination, expire 90 min later
             const depMs     = a.actual_dep_utc ? new Date(a.actual_dep_utc).getTime() : 0
             const effArrMs  = depMs + effDurMs
             const sinceExpMin = (now - effArrMs) / 60_000
+            DBG(cs, `S4 arrivedGate: depMs=${depMs > 0 ? 'valid' : 'ZERO!'} effDurMin=${Math.round(effDurMs/60000)} sinceExpMin=${sinceExpMin.toFixed(1)}`)
             if (sinceExpMin > 90) {
+              DBG(cs, `S4 DELETE sinceExpMin=${sinceExpMin.toFixed(1)} > 90`)
               delete trackedRef.current[cs]; delete predictorRef.current[cs]; continue
             }
             lat = arrC[0]; lon = arrC[1]
@@ -370,7 +387,7 @@ export default function MapTab() {
             actual_dep_utc, actual_arr_utc, dep_time_utc: null, arr_time_utc: null,
             duration_min, dep_delay_min: dep_delay_min ?? null, alt_baro: null, gs: null,
           },
-          lostAt: 0, durationMin: duration_min,
+          lostAt: 0, durationMin: duration_min, revisedArrUtc: revised_arr_utc ?? null,
         }
         const isAlp = arr_iata === 'ALP' || dep_iata === 'ALP'
         result.push({
@@ -409,6 +426,7 @@ export default function MapTab() {
       const effDurMs = (revised_arr_utc && actual_dep_utc)
         ? (new Date(revised_arr_utc).getTime() - new Date(actual_dep_utc).getTime())
         : duration_min * 60_000
+      DBG(cs, `S5 boardDep: revisedArrUtc=${revised_arr_utc ?? 'null'} effDurMin=${Math.round(effDurMs/60000)} durationMin=${duration_min}`)
       pred.setContext({
         dep_coords:        [depC[0], depC[1]],
         arr_coords:        [arrC[0], arrC[1]],
@@ -422,11 +440,16 @@ export default function MapTab() {
 
       let lat: number, lon: number, trk: number
 
+      DBG(cs, `S5 predictor: routeFraction=${disp.routeFraction.toFixed(3)} lat=${disp.lat?.toFixed(2)} lon=${disp.lon?.toFixed(2)}`)
       if (disp.routeFraction >= 0.99) {
         // Predictor says arrived — expire 90 min after estimated arrival
         const effArrMs    = new Date(actual_dep_utc).getTime() + effDurMs
         const sinceExpMin = (now - effArrMs) / 60_000
-        if (sinceExpMin > 90) continue
+        DBG(cs, `S5 arrivedGate: sinceExpMin=${sinceExpMin.toFixed(1)}`)
+        if (sinceExpMin > 90) {
+          DBG(cs, `S5 SKIP expired sinceExpMin=${sinceExpMin.toFixed(1)} > 90`)
+          continue
+        }
         lat = arrC[0]; lon = arrC[1]; trk = brng(depC[0], depC[1], arrC[0], arrC[1])
         isArrived = true
       } else {
@@ -444,8 +467,9 @@ export default function MapTab() {
           actual_dep_utc, actual_arr_utc, dep_time_utc: null, arr_time_utc: null,
           duration_min, dep_delay_min: dep_delay_min ?? null, alt_baro: null, gs: null,
         },
-        lostAt: 0, durationMin: duration_min,
+        lostAt: 0, durationMin: duration_min, revisedArrUtc: revised_arr_utc ?? null,
       }
+      DBG(cs, `S5 seeded trackedRef revisedArrUtc=${revised_arr_utc ?? 'null'}`)
       result.push({
         key: cs, callsign: cs, label: cs,
         lat, lon, track: trk, dep_iata, arr_iata,
