@@ -1,31 +1,35 @@
 import { Tabs } from 'expo-router'
 
+// V2 accent — Forest (DAM default). Will match active airport globally when airport state is lifted.
+const ACTIVE_TINT = '#054239'
+const MUTED_TINT  = '#8A8578'
+
 export default function TabsLayout() {
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: '#ffffff',
-          borderTopColor: '#e5e7eb',
-          borderTopWidth: 0.5,
+          backgroundColor: 'rgba(255,255,255,0.96)',
+          borderTopColor: '#D8D3BF',
+          borderTopWidth: 1,
         },
-        tabBarActiveTintColor: '#111827',
-        tabBarInactiveTintColor: '#9ca3af',
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+        tabBarActiveTintColor: ACTIVE_TINT,
+        tabBarInactiveTintColor: MUTED_TINT,
+        tabBarLabelStyle: { fontSize: 10.5, fontWeight: '600' },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Board',
+          title: 'Flights',
           tabBarIcon: ({ color }) => <TabIcon emoji="✈️" color={color} />,
         }}
       />
       <Tabs.Screen
         name="map"
         options={{
-          title: 'Map',
+          title: 'Track',
           tabBarIcon: ({ color }) => <TabIcon emoji="🗺️" color={color} />,
         }}
       />
@@ -49,5 +53,5 @@ export default function TabsLayout() {
 
 function TabIcon({ emoji, color }: { emoji: string; color: string }) {
   const { Text } = require('react-native')
-  return <Text style={{ fontSize: 18, opacity: color === '#111827' ? 1 : 0.45 }}>{emoji}</Text>
+  return <Text style={{ fontSize: 18, opacity: color === ACTIVE_TINT ? 1 : 0.4 }}>{emoji}</Text>
 }

@@ -135,10 +135,10 @@ const styles = StyleSheet.create({
   },
   closeBtn: {
     position: 'absolute', top: 8, right: 20, zIndex: 10,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: '#F7F5EC',
     borderRadius: 12, width: 24, height: 24,
     justifyContent: 'center', alignItems: 'center',
-    borderWidth: 1, borderColor: '#e5e7eb',
+    borderWidth: 1, borderColor: '#D8D3BF',
   },
-  closeText:    { color: '#6b7280', fontSize: 14, lineHeight: 14 },
+  closeText:    { color: '#3D3A3B', fontSize: 14, lineHeight: 14 },
 })

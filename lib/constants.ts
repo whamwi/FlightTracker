@@ -51,19 +51,21 @@ export const AIRPORT_FLAG: Record<string, string> = {
   MJI: '🇱🇾', AMS: '🇳🇱',
 }
 
+// V2 — Syria palette status config
+// `border` is the solid rail color on the FlightCard left strip
 export const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string; border: string }> = {
-  Scheduled:   { label: 'Scheduled',   bg: '#1f2937', text: '#9ca3af', border: '#374151' },
-  Expected:    { label: 'Expected',    bg: '#422006', text: '#fde68a', border: '#ca8a04' },
-  CheckIn:     { label: 'Check-in',   bg: '#431407', text: '#fcd34d', border: '#d97706' },
-  Boarding:    { label: 'Boarding',    bg: '#431407', text: '#fde68a', border: '#f59e0b' },
-  GateClosed:  { label: 'Gate Closed', bg: '#431407', text: '#fdba74', border: '#ea580c' },
-  Departed:    { label: 'Departed',    bg: '#0c4a6e', text: '#bae6fd', border: '#0284c7' },
-  'En Route':  { label: 'En Route',   bg: '#0c4a6e', text: '#bae6fd', border: '#0284c7' },
-  Approaching: { label: 'Approaching', bg: '#042f2e', text: '#99f6e4', border: '#0d9488' },
-  Arrived:     { label: 'Arrived',     bg: '#052e16', text: '#86efac', border: '#16a34a' },
-  Cancelled:   { label: 'Cancelled',   bg: '#450a0a', text: '#fca5a5', border: '#dc2626' },
-  Delayed:     { label: 'Delayed',     bg: '#450a0a', text: '#fca5a5', border: '#ef4444' },
-  Unknown:     { label: 'Unknown',     bg: '#1f2937', text: '#6b7280', border: '#374151' },
+  Scheduled:   { label: 'Scheduled',   bg: '#EFEDE3', text: '#3D3A3B', border: '#D8D3BF' },
+  Expected:    { label: 'Expected',    bg: '#F3EFE0', text: '#6E5F3C', border: '#988561' },
+  CheckIn:     { label: 'Check-in',    bg: '#F3EFE0', text: '#6E5F3C', border: '#988561' },
+  Boarding:    { label: 'Boarding',    bg: '#F3EFE0', text: '#6E5F3C', border: '#988561' },
+  GateClosed:  { label: 'Gate Closed', bg: '#F3EFE0', text: '#6E5F3C', border: '#988561' },
+  Departed:    { label: 'Departed',    bg: '#428177', text: '#FFFFFF', border: '#428177' },
+  'En Route':  { label: 'En Route',   bg: '#428177', text: '#FFFFFF', border: '#428177' },
+  Approaching: { label: 'Approaching', bg: '#428177', text: '#FFFFFF', border: '#428177' },
+  Arrived:     { label: 'Arrived',     bg: '#E6EFEC', text: '#002623', border: '#9EBFB8' },
+  Cancelled:   { label: 'Cancelled',   bg: '#F1E6E7', text: '#4A151E', border: '#6B1F2A' },
+  Delayed:     { label: 'Delayed',     bg: '#F1E6E7', text: '#4A151E', border: '#6B1F2A' },
+  Unknown:     { label: 'Unknown',     bg: '#EFEDE3', text: '#8A8578', border: '#D8D3BF' },
 }
 
 export function city(iata: string): string {
