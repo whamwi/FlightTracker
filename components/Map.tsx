@@ -516,7 +516,7 @@ function rnPost(msg: object) {
   window.ReactNativeWebView?.postMessage(JSON.stringify(msg))
 }
 
-function buildEmbedFlight(callsign: string, se: ScheduleEntry | null, fs: FlightStatus | null) {
+function buildEmbedFlight(callsign: string, se: ScheduleEntry | null, fs: FlightStatus | null, photoUrl?: string | null) {
   return {
     callsign,
     iata_number:    fs?.flight_number  ?? callsign,
@@ -532,6 +532,7 @@ function buildEmbedFlight(callsign: string, se: ScheduleEntry | null, fs: Flight
     revised_dep_utc: fs?.revised_dep_utc ?? null,
     revised_arr_utc: fs?.revised_arr_utc ?? null,
     aircraft_type:   fs?.aircraft_type   ?? null,
+    photoUrl:        photoUrl           ?? null,
   }
 }
 
@@ -1231,9 +1232,11 @@ export default function Map({ embed = false }: { embed?: boolean }) {
           const m = L.marker([dispLat, dispLon], { icon }).addTo(map)
           if (embed) {
             m.on('click', () => {
-              const fs = flightStatusRef.current[cs]
-              const se = scheduleRef.current.find(e => e.callsign === cs)
-              rnPost({ type: 'SELECT', flight: buildEmbedFlight(cs, se ?? null, fs ?? null) })
+              const fs  = flightStatusRef.current[cs]
+              const se  = scheduleRef.current.find(e => e.callsign === cs)
+              const reg = fs?.aircraft_reg ?? a.r ?? null
+              const ph  = reg ? photoCacheRef.current[reg] ?? null : null
+              rnPost({ type: 'SELECT', flight: buildEmbedFlight(cs, se ?? null, fs ?? null, ph) })
             })
           } else {
             m.bindPopup(popup, { className: 'fp-popup' })
@@ -1480,8 +1483,10 @@ export default function Map({ embed = false }: { embed?: boolean }) {
           const m = L.marker([lat, lon], { icon }).addTo(map)
           if (embed) {
             m.on('click', () => {
-              const fs = flightStatusRef.current[callsign]
-              rnPost({ type: 'SELECT', flight: buildEmbedFlight(callsign, entry, fs ?? null) })
+              const fs  = flightStatusRef.current[callsign]
+              const reg = fs?.aircraft_reg ?? null
+              const ph  = reg ? photoCacheRef.current[reg] ?? null : null
+              rnPost({ type: 'SELECT', flight: buildEmbedFlight(callsign, entry, fs ?? null, ph) })
             })
           } else {
             m.bindPopup(popup, { className: 'fp-popup' })
