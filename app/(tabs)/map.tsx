@@ -207,9 +207,12 @@ export default function MapTab() {
   const [selected, setSelected] = useState<DisplayItem | null>(null)
   const [loading, setLoading]   = useState(true)
 
-  const routePathsRef  = useRef<Record<string, Waypoint[]>>({})
-  const lastKnownRef   = useRef<Record<string, { lat: number; lon: number }>>({})
-  const trackedRef     = useRef<Record<string, { a: Aircraft; lostAt: number; durationMin: number | null }>>({})
+  const routePathsRef     = useRef<Record<string, Waypoint[]>>({})
+  const lastKnownRef      = useRef<Record<string, { lat: number; lon: number }>>({})
+  const trackedRef        = useRef<Record<string, { a: Aircraft; lostAt: number; durationMin: number | null }>>({})
+  // Persistent departed-flight registry — mirrors web's scheduleRef.
+  // Updated every poll from boardDeparted, but NEVER cleared during API cache gaps.
+  const schedDepartedRef  = useRef<Record<string, BoardDeparted>>({})
 
   useEffect(() => {
     fetch(`${BASE}/api/routes`)
@@ -424,7 +427,28 @@ export default function MapTab() {
     try {
       const res = await fetch(`${BASE}/api/airspace`)
       const json = await res.json()
-      buildItems(json.aircraft??[], json.boardDeparted??[])
+      const now = Date.now()
+
+      // Accumulate boardDeparted into persistent registry (mirrors web's scheduleRef).
+      // Fresh data always overwrites; stale entries survive API cache gaps.
+      for (const bd of (json.boardDeparted ?? []) as BoardDeparted[]) {
+        if (bd.callsign) schedDepartedRef.current[bd.callsign] = bd
+      }
+
+      // Expire entries: arrived >90 min ago, or >1.5× duration since dep
+      for (const [cs, bd] of Object.entries(schedDepartedRef.current)) {
+        if (bd.actual_arr_utc) {
+          if ((now - new Date(bd.actual_arr_utc).getTime()) / 60_000 > 90) {
+            delete schedDepartedRef.current[cs]
+          }
+        } else if (bd.actual_dep_utc && bd.duration_min > 0) {
+          if ((now - new Date(bd.actual_dep_utc).getTime()) / 60_000 > bd.duration_min * 1.5) {
+            delete schedDepartedRef.current[cs]
+          }
+        }
+      }
+
+      buildItems(json.aircraft ?? [], Object.values(schedDepartedRef.current))
     } catch {}
     setLoading(false)
   }, [buildItems])
