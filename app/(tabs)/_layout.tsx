@@ -6,12 +6,12 @@ export default function TabsLayout() {
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: '#0a0f1e',
-          borderTopColor: '#1f2937',
-          borderTopWidth: 1,
+          backgroundColor: '#ffffff',
+          borderTopColor: '#e5e7eb',
+          borderTopWidth: 0.5,
         },
-        tabBarActiveTintColor: '#38bdf8',
-        tabBarInactiveTintColor: '#4b5563',
+        tabBarActiveTintColor: '#111827',
+        tabBarInactiveTintColor: '#9ca3af',
         tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
       }}
     >
@@ -49,5 +49,5 @@ export default function TabsLayout() {
 
 function TabIcon({ emoji, color }: { emoji: string; color: string }) {
   const { Text } = require('react-native')
-  return <Text style={{ fontSize: 18, opacity: color === '#38bdf8' ? 1 : 0.5 }}>{emoji}</Text>
+  return <Text style={{ fontSize: 18, opacity: color === '#111827' ? 1 : 0.45 }}>{emoji}</Text>
 }

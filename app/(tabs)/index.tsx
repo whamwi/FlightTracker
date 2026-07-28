@@ -36,7 +36,6 @@ function shortDate(tab: DateTab): string {
   return `${parseInt(d)} ${months[parseInt(m) - 1]}`
 }
 
-// Returns UTC HH:MM string for sorting/comparing
 function flightUtcHHMM(f: Flight, v: ViewType): string {
   const raw = v === 'arr'
     ? (f.actual_arr_utc ?? f.revised_arr_utc ?? f.arr_time_utc)
@@ -45,7 +44,6 @@ function flightUtcHHMM(f: Flight, v: ViewType): string {
   return raw.includes('T') ? raw.slice(11, 16) : raw
 }
 
-// Minutes from midnight in Syria local time (UTC+3)
 function flightSyriaMin(f: Flight, v: ViewType): number {
   const [h, m] = flightUtcHHMM(f, v).split(':').map(Number)
   return ((h + 3) * 60 + m) % 1440
@@ -54,22 +52,22 @@ function flightSyriaMin(f: Flight, v: ViewType): number {
 function NowLine({ time, inAir, done, doneLabel }: { time: string; inAir: number; done: number; doneLabel: string }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 10, gap: 6 }}>
-      <View style={{ flex: 1, height: 1, backgroundColor: '#9ca3af' }} />
+      <View style={{ flex: 1, height: 1, backgroundColor: '#d1d5db' }} />
       {inAir > 0 && (
-        <View style={{ backgroundColor: '#0c4a6e', borderRadius: 99, paddingHorizontal: 7, paddingVertical: 2 }}>
-          <Text style={{ color: '#38bdf8', fontSize: 11, fontWeight: '700' }}>{inAir} in air</Text>
+        <View style={{ backgroundColor: '#dbeafe', borderRadius: 99, paddingHorizontal: 7, paddingVertical: 2 }}>
+          <Text style={{ color: '#1d4ed8', fontSize: 11, fontWeight: '700' }}>{inAir} in air</Text>
         </View>
       )}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
         <Ionicons name="time-outline" size={14} color="#9ca3af" />
-        <Text style={{ color: '#9ca3af', fontSize: 13, fontWeight: '600' }}>{time} · Now</Text>
+        <Text style={{ color: '#6b7280', fontSize: 13, fontWeight: '600' }}>{time} · Now</Text>
       </View>
       {done > 0 && (
-        <View style={{ backgroundColor: '#052e16', borderRadius: 99, paddingHorizontal: 7, paddingVertical: 2 }}>
-          <Text style={{ color: '#4ade80', fontSize: 11, fontWeight: '700' }}>{done} {doneLabel}</Text>
+        <View style={{ backgroundColor: '#dcfce7', borderRadius: 99, paddingHorizontal: 7, paddingVertical: 2 }}>
+          <Text style={{ color: '#15803d', fontSize: 11, fontWeight: '700' }}>{done} {doneLabel}</Text>
         </View>
       )}
-      <View style={{ flex: 1, height: 1, backgroundColor: '#9ca3af' }} />
+      <View style={{ flex: 1, height: 1, backgroundColor: '#d1d5db' }} />
     </View>
   )
 }
@@ -101,12 +99,11 @@ export default function BoardScreen() {
 
   useEffect(() => { load() }, [load])
 
-  // Silent background refresh every 30 s on today's tab (no scroll jerk)
   const silentRefresh = useCallback(async () => {
     try {
       const all = await fetchFlights(dateForTab(dateTab))
       setFlights(all)
-    } catch { /* ignore — user can pull-to-refresh if needed */ }
+    } catch { /* ignore */ }
   }, [dateTab])
 
   useEffect(() => {
@@ -130,17 +127,13 @@ export default function BoardScreen() {
     }).catch(() => {})
   }, [airport])
 
-  // Sort in Syria local time so midnight wrap is handled correctly
   const sorted = useMemo(() => {
     const filtered = flights.filter(f =>
       (view === 'arr' ? f.arr_iata === airport : f.dep_iata === airport) && f.status !== 'Unknown'
     )
-    return [...filtered].sort((a, b) =>
-      flightSyriaMin(a, view) - flightSyriaMin(b, view)
-    )
+    return [...filtered].sort((a, b) => flightSyriaMin(a, view) - flightSyriaMin(b, view))
   }, [flights, airport, view])
 
-  // Inject Now divider at the correct position (today only)
   const listItems = useMemo((): ListItem[] => {
     if (dateTab !== 'today' || sorted.length === 0) return sorted
     const n = new Date()
@@ -165,24 +158,19 @@ export default function BoardScreen() {
     return items
   }, [sorted, dateTab, view])
 
-  // Scroll to show one flight above the Now line on initial load
   useEffect(() => {
     if (dateTab !== 'today' || loading || listItems.length === 0) return
     const nowIdx = listItems.findIndex(item => '_now' in item)
     if (nowIdx <= 0) return
     const scrollIdx = Math.max(0, nowIdx - 1)
     const timer = setTimeout(() => {
-      flatListRef.current?.scrollToIndex({
-        index: scrollIdx,
-        animated: true,
-        viewPosition: 0,
-      })
+      flatListRef.current?.scrollToIndex({ index: scrollIdx, animated: true, viewPosition: 0 })
     }, 400)
     return () => clearTimeout(timer)
   }, [loading, listItems, dateTab])
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#030712' }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#ffffff' }}>
       {/* Header */}
       <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8, gap: 10 }}>
 
@@ -197,18 +185,18 @@ export default function BoardScreen() {
                 alignItems: 'center',
                 paddingVertical: 8,
                 borderRadius: 10,
-                backgroundColor: dateTab === dt ? '#ffffff' : '#111827',
+                backgroundColor: dateTab === dt ? '#111827' : '#f3f4f6',
                 borderWidth: 1,
-                borderColor: dateTab === dt ? '#ffffff' : '#1f2937',
+                borderColor: dateTab === dt ? '#111827' : '#e5e7eb',
               }}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <Text style={{ color: dateTab === dt ? '#030712' : '#9ca3af', fontSize: 13, fontWeight: '600' }}>
+                <Text style={{ color: dateTab === dt ? '#ffffff' : '#6b7280', fontSize: 13, fontWeight: '600' }}>
                   {DATE_LABELS[dt]}
                 </Text>
                 {tabCounts[dt] > 0 && (
                   <View style={{
-                    backgroundColor: dateTab === dt ? '#111827' : '#1f2937',
+                    backgroundColor: dateTab === dt ? 'rgba(255,255,255,0.2)' : '#e5e7eb',
                     borderRadius: 99,
                     paddingHorizontal: 5,
                     paddingVertical: 1,
@@ -219,7 +207,7 @@ export default function BoardScreen() {
                   </View>
                 )}
               </View>
-              <Text style={{ color: dateTab === dt ? '#374151' : '#4b5563', fontSize: 11, marginTop: 1 }}>
+              <Text style={{ color: dateTab === dt ? 'rgba(255,255,255,0.7)' : '#9ca3af', fontSize: 11, marginTop: 1 }}>
                 {shortDate(dt)}
               </Text>
             </TouchableOpacity>
@@ -228,7 +216,7 @@ export default function BoardScreen() {
 
         {/* Arr/Dep + Airport on same row */}
         <View style={{ flexDirection: 'row', gap: 8 }}>
-          <View style={{ flex: 1, flexDirection: 'row', backgroundColor: '#111827', borderRadius: 8, padding: 3 }}>
+          <View style={{ flex: 1, flexDirection: 'row', backgroundColor: '#f3f4f6', borderRadius: 8, padding: 3 }}>
             {([['arr', 'Arrivals', arrCount], ['dep', 'Departures', depCount]] as [ViewType, string, number][]).map(([v, label, count]) => (
               <TouchableOpacity
                 key={v}
@@ -241,15 +229,15 @@ export default function BoardScreen() {
                   gap: 5,
                   paddingVertical: 6,
                   borderRadius: 6,
-                  backgroundColor: view === v ? '#ffffff' : 'transparent',
+                  backgroundColor: view === v ? '#111827' : 'transparent',
                 }}
               >
-                <Text style={{ color: view === v ? '#030712' : '#6b7280', fontWeight: '600', fontSize: 13 }}>
+                <Text style={{ color: view === v ? '#ffffff' : '#6b7280', fontWeight: '600', fontSize: 13 }}>
                   {label}
                 </Text>
                 {count > 0 && (
                   <View style={{
-                    backgroundColor: view === v ? '#111827' : '#1f2937',
+                    backgroundColor: view === v ? 'rgba(255,255,255,0.2)' : '#e5e7eb',
                     borderRadius: 99,
                     paddingHorizontal: 5,
                     paddingVertical: 1,
@@ -263,7 +251,7 @@ export default function BoardScreen() {
             ))}
           </View>
 
-          <View style={{ flexDirection: 'row', backgroundColor: '#111827', borderRadius: 8, padding: 3 }}>
+          <View style={{ flexDirection: 'row', backgroundColor: '#f3f4f6', borderRadius: 8, padding: 3 }}>
             {(['DAM', 'ALP'] as Airport[]).map(ap => (
               <TouchableOpacity
                 key={ap}
@@ -272,10 +260,10 @@ export default function BoardScreen() {
                   paddingHorizontal: 14,
                   paddingVertical: 6,
                   borderRadius: 6,
-                  backgroundColor: airport === ap ? '#ffffff' : 'transparent',
+                  backgroundColor: airport === ap ? '#111827' : 'transparent',
                 }}
               >
-                <Text style={{ color: airport === ap ? '#030712' : '#6b7280', fontWeight: '700', fontSize: 13 }}>
+                <Text style={{ color: airport === ap ? '#ffffff' : '#6b7280', fontWeight: '700', fontSize: 13 }}>
                   {ap}
                 </Text>
               </TouchableOpacity>
@@ -288,7 +276,7 @@ export default function BoardScreen() {
       {/* Content */}
       {loading ? (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-          <ActivityIndicator size="large" color="#38bdf8" />
+          <ActivityIndicator size="large" color="#111827" />
         </View>
       ) : error ? (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 }}>
@@ -296,7 +284,7 @@ export default function BoardScreen() {
         </View>
       ) : sorted.length === 0 ? (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 }}>
-          <Text style={{ color: '#4b5563', textAlign: 'center', fontSize: 14 }}>
+          <Text style={{ color: '#9ca3af', textAlign: 'center', fontSize: 14 }}>
             No {view === 'arr' ? 'arrivals' : 'departures'} for {airport} on {DATE_LABELS[dateTab].toLowerCase()}
           </Text>
         </View>
@@ -316,10 +304,9 @@ export default function BoardScreen() {
           }
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor="#38bdf8" />
+            <RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor="#111827" />
           }
           onScrollToIndexFailed={({ index }) => {
-            // Retry after list has rendered
             setTimeout(() => {
               flatListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0 })
             }, 300)
