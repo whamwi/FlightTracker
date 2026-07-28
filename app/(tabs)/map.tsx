@@ -1,5 +1,5 @@
 import { useRef, useState, useCallback } from 'react'
-import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView } from 'react-native'
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native'
 import WebView, { WebViewMessageEvent } from 'react-native-webview'
 import { FlightCard } from '../../components/FlightCard'
 import type { Flight } from '../../lib/types'
@@ -27,6 +27,7 @@ interface EmbedFlight {
   revised_dep_utc: string | null
   revised_arr_utc: string | null
   aircraft_type:   string | null
+  photoUrl:        string | null
 }
 
 function toFlight(ef: EmbedFlight): Flight {
@@ -56,6 +57,7 @@ function toFlight(ef: EmbedFlight): Flight {
 export default function MapTab() {
   const webViewRef                          = useRef<WebView>(null)
   const [selected, setSelected]            = useState<Flight | null>(null)
+  const [photoUrl, setPhotoUrl]            = useState<string | null>(null)
   const [count, setCount]                  = useState<number | null>(null)
   const [loading, setLoading]              = useState(true)
 
@@ -66,8 +68,8 @@ export default function MapTab() {
   const onMessage = useCallback((e: WebViewMessageEvent) => {
     try {
       const msg: EmbedMsg = JSON.parse(e.nativeEvent.data)
-      if (msg.type === 'SELECT')  setSelected(toFlight(msg.flight))
-      if (msg.type === 'DESELECT') setSelected(null)
+      if (msg.type === 'SELECT')  { setSelected(toFlight(msg.flight)); setPhotoUrl(msg.flight.photoUrl) }
+      if (msg.type === 'DESELECT') { setSelected(null); setPhotoUrl(null) }
       if (msg.type === 'COUNT')   setCount(msg.count)
     } catch {}
   }, [])
@@ -102,15 +104,15 @@ export default function MapTab() {
 
       {/* Flight info card */}
       {selected && (
-        <SafeAreaView style={styles.card}>
+        <View style={styles.card}>
           <TouchableOpacity style={styles.closeBtn} onPress={() => {
-            setSelected(null)
+            setSelected(null); setPhotoUrl(null)
             webViewRef.current?.injectJavaScript('window.__rnDeselect && window.__rnDeselect(); true;')
           }}>
             <Text style={styles.closeText}>✕</Text>
           </TouchableOpacity>
-          <FlightCard f={selected} view={cardView as 'arr' | 'dep'} hideBadge />
-        </SafeAreaView>
+          <FlightCard f={selected} view={cardView as 'arr' | 'dep'} hideBadge photoUrl={photoUrl} />
+        </View>
       )}
     </View>
   )
@@ -134,12 +136,14 @@ const styles = StyleSheet.create({
   loadingText:  { color: '#6b7280', fontSize: 14 },
   card: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: '#0f172a',
-    borderTopWidth: 1, borderTopColor: '#1f2937',
-    paddingHorizontal: 16, paddingBottom: 8,
+    paddingHorizontal: 12, paddingBottom: 12, paddingTop: 4,
   },
   closeBtn: {
-    alignSelf: 'flex-end', padding: 8, marginBottom: 4,
+    position: 'absolute', top: 8, right: 20, zIndex: 10,
+    backgroundColor: '#f3f4f6',
+    borderRadius: 12, width: 24, height: 24,
+    justifyContent: 'center', alignItems: 'center',
+    borderWidth: 1, borderColor: '#e5e7eb',
   },
-  closeText:    { color: '#6b7280', fontSize: 18 },
+  closeText:    { color: '#6b7280', fontSize: 14, lineHeight: 14 },
 })
