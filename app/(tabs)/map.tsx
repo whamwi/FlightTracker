@@ -48,20 +48,6 @@ interface EmbedFlight {
   photoUrl:        string | null
 }
 
-// Only pass real aircraft photos through — filter out placeholder/fallback URLs
-function realPhoto(url: string | null): string | null {
-  if (!url) return null
-  const lower = url.toLowerCase()
-  if (
-    lower.includes('placeholder') ||
-    lower.includes('no-photo') ||
-    lower.includes('no_photo') ||
-    lower.includes('noimg') ||
-    lower.includes('default') ||
-    lower.includes('blank')
-  ) return null
-  return url
-}
 
 function toFlight(ef: EmbedFlight): Flight {
   // Prefer the IATA prefix from the flight number (e.g. "FYC" from "FYC728")
@@ -126,7 +112,7 @@ export default function MapTab() {
       const msg: EmbedMsg = JSON.parse(e.nativeEvent.data)
       if (msg.type === 'SELECT') {
         setSelected(toFlight(msg.flight))
-        setPhotoUrl(realPhoto(msg.flight.photoUrl))
+        setPhotoUrl(msg.flight.photoUrl ?? null)
         setDepDelay(msg.flight.dep_delay_min)
         setArrDelay(msg.flight.arr_delay_min)
       }
@@ -212,7 +198,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 26,
     borderTopWidth: 1,
     borderColor: C.border,
-    paddingBottom: 22,   // home indicator safe area (sunken footer adds its own paddingBottom)
+
     shadowColor: C.ink,
     shadowOffset: { width: 0, height: -14 },
     shadowOpacity: 0.2,

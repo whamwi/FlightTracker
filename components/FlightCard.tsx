@@ -191,10 +191,10 @@ export function FlightCard({ f, view, hideBadge, photoUrl, depDelayMin, arrDelay
       )}
 
       {/* Times footer — sunken warm bg */}
-      <View style={{ height: 1, backgroundColor: C.separator }} />
+      {!bare && <View style={{ height: 1, backgroundColor: C.separator }} />}
       <View style={{
         backgroundColor: C.sunken,
-        paddingTop: 10, paddingRight: pr, paddingBottom: bare ? 14 : 12, paddingLeft: pl,
+        paddingTop: 10, paddingRight: pr, paddingBottom: bare ? 36 : 12, paddingLeft: pl,
         flexDirection: 'row',
         justifyContent: 'space-between',
       }}>
