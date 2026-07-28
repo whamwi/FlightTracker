@@ -10,7 +10,7 @@ const EMBED_URL = 'https://flighttracker-sy.vercel.app/embed'
 type EmbedMsg =
   | { type: 'SELECT';  flight: EmbedFlight }
   | { type: 'DESELECT' }
-  | { type: 'COUNT';   count: number }
+  | { type: 'COUNT';   count: number }  // kept for compat; badge removed
 
 interface EmbedFlight {
   callsign:       string
@@ -62,7 +62,6 @@ export default function MapTab() {
   const [photoUrl, setPhotoUrl]            = useState<string | null>(null)
   const [depDelay, setDepDelay]            = useState<number | null | undefined>(undefined)
   const [arrDelay, setArrDelay]            = useState<number | null | undefined>(undefined)
-  const [count, setCount]                  = useState<number | null>(null)
   const [loading, setLoading]              = useState(true)
 
   const cardView = selected
@@ -79,7 +78,6 @@ export default function MapTab() {
         setArrDelay(msg.flight.arr_delay_min)
       }
       if (msg.type === 'DESELECT') { setSelected(null); setPhotoUrl(null); setDepDelay(undefined); setArrDelay(undefined) }
-      if (msg.type === 'COUNT')   setCount(msg.count)
     } catch {}
   }, [])
 
@@ -96,13 +94,6 @@ export default function MapTab() {
         allowsInlineMediaPlayback
         mediaPlaybackRequiresUserAction={false}
       />
-
-      {/* In-air badge */}
-      {count !== null && (
-        <View style={styles.badge}>
-          <Text style={styles.badgeText}>{count} in Air</Text>
-        </View>
-      )}
 
       {/* Loading overlay */}
       {loading && (
@@ -130,13 +121,6 @@ export default function MapTab() {
 const styles = StyleSheet.create({
   container:    { flex: 1, backgroundColor: '#000' },
   webview:      { flex: 1 },
-  badge: {
-    position: 'absolute', top: 12, left: 12,
-    backgroundColor: 'rgba(0,0,0,0.75)',
-    paddingHorizontal: 10, paddingVertical: 4,
-    borderRadius: 12, borderWidth: 1, borderColor: '#374151',
-  },
-  badgeText:    { color: '#9ca3af', fontSize: 12, fontWeight: '600' },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: '#111827',
