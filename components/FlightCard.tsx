@@ -95,6 +95,23 @@ function calcDelay(schedHHMM: string | null | undefined, actual: string | null |
   return Math.round((actualMs - schedMs) / 60_000)
 }
 
+function AircraftPhoto({ url }: { url: string }) {
+  const [loaded, setLoaded] = useState(false)
+  return (
+    <View style={loaded
+      ? { marginRight: 12, marginBottom: 12, marginLeft: 17, borderRadius: 14, overflow: 'hidden', height: 130 }
+      : { height: 0 }}>
+      <Image
+        source={{ uri: url }}
+        style={{ width: '100%', height: 130 }}
+        resizeMode="cover"
+        onLoad={() => setLoaded(true)}
+        onError={() => setLoaded(false)}
+      />
+    </View>
+  )
+}
+
 export function FlightCard({ f, view, hideBadge, photoUrl, depDelayMin, arrDelayMin }: {
   f: Flight; view: ViewType; hideBadge?: boolean
   photoUrl?: string | null; depDelayMin?: number | null; arrDelayMin?: number | null
@@ -192,12 +209,8 @@ export function FlightCard({ f, view, hideBadge, photoUrl, depDelayMin, arrDelay
         </View>
       </View>
 
-      {/* Aircraft photo (only when available) */}
-      {photoUrl && (
-        <View style={{ marginRight: 12, marginBottom: 12, marginLeft: 17, borderRadius: 14, overflow: 'hidden', height: 130 }}>
-          <Image source={{ uri: photoUrl }} style={{ width: '100%', height: 130 }} resizeMode="cover" />
-        </View>
-      )}
+      {/* Aircraft photo — only render if image actually loads */}
+      {photoUrl && <AircraftPhoto url={photoUrl} />}
 
       {/* Times footer — sunken warm bg */}
       <View style={{ height: 1, backgroundColor: C.separator }} />

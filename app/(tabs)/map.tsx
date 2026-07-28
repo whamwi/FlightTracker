@@ -1,5 +1,12 @@
-import { useRef, useState, useCallback } from 'react'
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native'
+import { useRef, useState, useCallback, useEffect } from 'react'
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Modal,
+  Animated,
+} from 'react-native'
 import { StatusBar } from 'expo-status-bar'
 import WebView, { WebViewMessageEvent } from 'react-native-webview'
 import { FlightCard } from '../../components/FlightCard'
@@ -11,7 +18,7 @@ const EMBED_URL = 'https://flighttracker-sy.vercel.app/embed'
 type EmbedMsg =
   | { type: 'SELECT';  flight: EmbedFlight }
   | { type: 'DESELECT' }
-  | { type: 'COUNT';   count: number }  // kept for compat; badge removed
+  | { type: 'COUNT';   count: number }
 
 interface EmbedFlight {
   callsign:       string
@@ -34,11 +41,15 @@ interface EmbedFlight {
 }
 
 function toFlight(ef: EmbedFlight): Flight {
-  const isArr = ef.arr_iata === 'DAM' || ef.arr_iata === 'ALP'
+  // Prefer the IATA prefix from the flight number (e.g. "FYC" from "FYC728")
+  // over airline_iata from the ADS-B feed which may be a codeshare or operating carrier
+  const iataPrefix = (ef.iata_number ?? ef.callsign ?? '').replace(/[0-9].*/, '')
+  const resolvedIata = (iataPrefix && AIRLINE_NAMES[iataPrefix]) ? iataPrefix : (ef.airline_iata ?? '')
+
   return {
     iata_number:    ef.iata_number    ?? ef.callsign,
-    airline_name:   AIRLINE_NAMES[ef.airline_iata ?? ''] ?? ef.airline_iata ?? ef.callsign,
-    airline_iata:   ef.airline_iata   ?? '',
+    airline_name:   AIRLINE_NAMES[resolvedIata] ?? AIRLINE_NAMES[ef.airline_iata ?? ''] ?? ef.airline_iata ?? ef.callsign,
+    airline_iata:   resolvedIata,
     country_flag:   '',
     dep_iata:       ef.dep_iata       ?? '',
     arr_iata:       ef.arr_iata       ?? '',
@@ -65,6 +76,25 @@ export default function MapTab() {
   const [arrDelay, setArrDelay]            = useState<number | null | undefined>(undefined)
   const [loading, setLoading]              = useState(true)
 
+  const slideAnim = useRef(new Animated.Value(0)).current
+
+  useEffect(() => {
+    if (selected) {
+      slideAnim.setValue(0)
+      Animated.spring(slideAnim, { toValue: 1, useNativeDriver: true, tension: 65, friction: 11 }).start()
+    }
+  }, [selected])
+
+  const translateY = slideAnim.interpolate({ inputRange: [0, 1], outputRange: [480, 0] })
+
+  const dismiss = useCallback(() => {
+    setSelected(null)
+    setPhotoUrl(null)
+    setDepDelay(undefined)
+    setArrDelay(undefined)
+    webViewRef.current?.injectJavaScript('window.__rnDeselect && window.__rnDeselect(); true;')
+  }, [])
+
   const cardView = selected
     ? (selected.arr_iata === 'DAM' || selected.arr_iata === 'ALP' ? 'arr' : 'dep')
     : 'arr'
@@ -72,15 +102,15 @@ export default function MapTab() {
   const onMessage = useCallback((e: WebViewMessageEvent) => {
     try {
       const msg: EmbedMsg = JSON.parse(e.nativeEvent.data)
-      if (msg.type === 'SELECT')  {
+      if (msg.type === 'SELECT') {
         setSelected(toFlight(msg.flight))
         setPhotoUrl(msg.flight.photoUrl)
         setDepDelay(msg.flight.dep_delay_min)
         setArrDelay(msg.flight.arr_delay_min)
       }
-      if (msg.type === 'DESELECT') { setSelected(null); setPhotoUrl(null); setDepDelay(undefined); setArrDelay(undefined) }
+      if (msg.type === 'DESELECT') dismiss()
     } catch {}
-  }, [])
+  }, [dismiss])
 
   return (
     <View style={styles.container}>
@@ -97,25 +127,42 @@ export default function MapTab() {
         mediaPlaybackRequiresUserAction={false}
       />
 
-      {/* Loading overlay */}
       {loading && (
         <View style={styles.loadingOverlay}>
           <Text style={styles.loadingText}>Loading map…</Text>
         </View>
       )}
 
-      {/* Flight info card */}
-      {selected && (
-        <View style={styles.card}>
-          <TouchableOpacity style={styles.closeBtn} onPress={() => {
-            setSelected(null); setPhotoUrl(null); setDepDelay(undefined); setArrDelay(undefined)
-            webViewRef.current?.injectJavaScript('window.__rnDeselect && window.__rnDeselect(); true;')
-          }}>
-            <Text style={styles.closeText}>✕</Text>
-          </TouchableOpacity>
-          <FlightCard f={selected} view={cardView as 'arr' | 'dep'} hideBadge photoUrl={photoUrl} depDelayMin={depDelay} arrDelayMin={arrDelay} />
+      {/* Card renders as full-screen Modal so it covers the tab bar */}
+      <Modal
+        transparent
+        animationType="none"
+        visible={!!selected}
+        onRequestClose={dismiss}
+        statusBarTranslucent
+      >
+        <View style={{ flex: 1 }} pointerEvents="box-none">
+          {/* Transparent tap-to-dismiss area above card */}
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={dismiss} />
+
+          {/* Sliding card sheet */}
+          <Animated.View style={[styles.sheet, { transform: [{ translateY }] }]}>
+            <TouchableOpacity style={styles.closeBtn} onPress={dismiss}>
+              <Text style={styles.closeText}>✕</Text>
+            </TouchableOpacity>
+            {selected && (
+              <FlightCard
+                f={selected}
+                view={cardView as 'arr' | 'dep'}
+                hideBadge
+                photoUrl={photoUrl}
+                depDelayMin={depDelay}
+                arrDelayMin={arrDelay}
+              />
+            )}
+          </Animated.View>
         </View>
-      )}
+      </Modal>
     </View>
   )
 }
@@ -129,16 +176,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center',
   },
   loadingText:  { color: '#6b7280', fontSize: 14 },
-  card: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    paddingHorizontal: 12, paddingBottom: 12, paddingTop: 4,
+  sheet: {
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 34,   // home indicator safe area
+    backgroundColor: 'transparent',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 12,
   },
   closeBtn: {
-    position: 'absolute', top: 8, right: 20, zIndex: 10,
+    position: 'absolute', top: 14, right: 20, zIndex: 10,
     backgroundColor: '#F7F5EC',
-    borderRadius: 12, width: 24, height: 24,
+    borderRadius: 12, width: 26, height: 26,
     justifyContent: 'center', alignItems: 'center',
     borderWidth: 1, borderColor: '#D8D3BF',
   },
-  closeText:    { color: '#3D3A3B', fontSize: 14, lineHeight: 14 },
+  closeText: { color: '#3D3A3B', fontSize: 14, lineHeight: 14 },
 })
