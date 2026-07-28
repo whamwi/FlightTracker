@@ -875,7 +875,12 @@ export default function Map() {
             expired = true
           } else if (a.actual_dep_utc && a.duration_min) {
             const expectedArrMs = new Date(a.actual_dep_utc).getTime() + a.duration_min * 60_000
-            expired = now - expectedArrMs > bufMs
+            // Once past expected arrival, use 90 min grace regardless of a.stale/isOnGround —
+            // without route_master in scheduleRef the stale hand-off may not have fired yet
+            // (boardDeparted has a 60s server cache), so keep the entry alive long enough for
+            // the schedule overlay to take over rather than expiring after only 15 min.
+            const effectiveBufMs = now > expectedArrMs ? 90 * 60_000 : bufMs
+            expired = now - expectedArrMs > effectiveBufMs
           } else if (a.arr_time_utc) {
             const d = new Date(now)
             const nowSec = d.getUTCHours() * 3600 + d.getUTCMinutes() * 60 + d.getUTCSeconds()
