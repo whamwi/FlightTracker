@@ -581,7 +581,13 @@ export default function Map({ embed = false }: { embed?: boolean }) {
         iconUrl:       'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
         shadowUrl:     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
       })
-      const map = L.map(mapRef.current!, { center: [33.0, 40.0], zoom: 6 })
+      const map = L.map(mapRef.current!, {
+        center: [33.0, 40.0], zoom: 6,
+        maxBoundsViscosity: 0,
+      })
+      if (embed) {
+        map.fitBounds([[22, 26], [43, 62]])
+      }
       L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
         attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/">CARTO</a>',
         maxZoom: 19,
