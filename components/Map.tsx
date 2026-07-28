@@ -510,7 +510,7 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
 type TrackedEntry    = { a: Aircraft; lostAt: number; isFr24: boolean }
 type KinematicState  = { lat: number; lon: number; gs_kts: number; track_deg: number; captured_at_ms: number }
 
-declare global { interface Window { ReactNativeWebView?: { postMessage(msg: string): void } } }
+declare global { interface Window { ReactNativeWebView?: { postMessage(msg: string): void }; __rnDeselect?: () => void } }
 
 function rnPost(msg: object) {
   window.ReactNativeWebView?.postMessage(JSON.stringify(msg))
@@ -561,6 +561,7 @@ export default function Map({ embed = false }: { embed?: boolean }) {
   const flightStatusRef   = useRef<Record<string, FlightStatus>>({})
   const photoCacheRef     = useRef<Record<string, string | null>>({})
   const photoRequestedRef = useRef<Set<string>>(new Set())
+  const selectedCSRef     = useRef<string | null>(null)  // track which callsign is open in native
   // Last confirmed ADS-B lat/lon per callsign — kept alive through stale hand-off
   // so the schedule overlay GPS floor still works after trackedRef is cleared.
   const lastADSBPosRef    = useRef<Record<string, { lat: number; lon: number; lostAt: number }>>({})
@@ -599,7 +600,12 @@ export default function Map({ embed = false }: { embed?: boolean }) {
       mapInstanceRef.current = map
 
       if (embed) {
-        map.on('click', () => rnPost({ type: 'DESELECT' }))
+        map.on('click', () => {
+          selectedCSRef.current = null
+          rnPost({ type: 'DESELECT' })
+        })
+        // Called by native dismiss — keeps selectedCSRef in sync so photo re-fire is suppressed
+        window.__rnDeselect = () => { selectedCSRef.current = null }
       }
 
       // ── Syrian airport circles ─────────────────────────────────────────────
@@ -1239,6 +1245,7 @@ export default function Map({ embed = false }: { embed?: boolean }) {
               const se  = scheduleRef.current.find(e => e.callsign === cs)
               const reg = fs?.aircraft_reg ?? a.r ?? null
               const ph  = reg ? photoCacheRef.current[reg] ?? null : null
+              selectedCSRef.current = cs
               rnPost({ type: 'SELECT', flight: buildEmbedFlight(cs, se ?? null, fs ?? null, ph) })
             })
           } else {
@@ -1263,6 +1270,12 @@ export default function Map({ embed = false }: { embed?: boolean }) {
                 markersRef.current[capturedCS].setPopupContent(
                   buildPopup(capturedA, capturedLostAt > 0 ? capturedLostAt : undefined, false, fsNow, url)
                 )
+              }
+              // Re-fire SELECT so the native sheet gets the photo without requiring a re-tap
+              if (url && selectedCSRef.current === capturedCS) {
+                const fsNow = flightStatusRef.current[capturedCS]
+                const seNow = scheduleRef.current.find(e => e.callsign === capturedCS) ?? null
+                rnPost({ type: 'SELECT', flight: buildEmbedFlight(capturedCS, seNow, fsNow ?? null, url) })
               }
             })
             .catch(() => { photoCacheRef.current[regDr] = null })
@@ -1489,6 +1502,7 @@ export default function Map({ embed = false }: { embed?: boolean }) {
               const fs  = flightStatusRef.current[callsign]
               const reg = fs?.aircraft_reg ?? null
               const ph  = reg ? photoCacheRef.current[reg] ?? null : null
+              selectedCSRef.current = callsign
               rnPost({ type: 'SELECT', flight: buildEmbedFlight(callsign, entry, fs ?? null, ph) })
             })
           } else {
