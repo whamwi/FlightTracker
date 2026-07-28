@@ -1,11 +1,10 @@
 import { useState, useEffect } from 'react'
-import { View, Text, Image } from 'react-native'
+import { View, Text, Image, ViewStyle } from 'react-native'
 import type { Flight, View as ViewType } from '../lib/types'
 import { city, airportFlag, statusConfig, durationLabel, fmtLocal, tzOffset, airlineLogo, LOGO_WHITE_BG } from '../lib/constants'
 
 const IN_FLIGHT = new Set(['En Route', 'Departed', 'Approaching'])
 
-// V2 Syria palette tokens
 const C = {
   ink:        '#161616',
   secondary:  '#3D3A3B',
@@ -16,7 +15,7 @@ const C = {
   border:     '#D8D3BF',
   separator:  '#D8D3BF',
   trackEmpty: '#E0DCCB',
-  trackFill:  '#428177',   // En Route live color
+  trackFill:  '#428177',
   arrivedRail:'#9EBFB8',
 }
 
@@ -95,11 +94,11 @@ function calcDelay(schedHHMM: string | null | undefined, actual: string | null |
   return Math.round((actualMs - schedMs) / 60_000)
 }
 
-function AircraftPhoto({ url }: { url: string }) {
+function AircraftPhoto({ url, style }: { url: string; style?: ViewStyle }) {
   const [loaded, setLoaded] = useState(false)
   return (
     <View style={loaded
-      ? { marginRight: 12, marginBottom: 12, marginLeft: 17, borderRadius: 14, overflow: 'hidden', height: 130 }
+      ? [{ borderRadius: 14, overflow: 'hidden', height: 130 }, style]
       : { height: 0 }}>
       <Image
         source={{ uri: url }}
@@ -112,8 +111,8 @@ function AircraftPhoto({ url }: { url: string }) {
   )
 }
 
-export function FlightCard({ f, view, hideBadge, photoUrl, depDelayMin, arrDelayMin }: {
-  f: Flight; view: ViewType; hideBadge?: boolean
+export function FlightCard({ f, view, hideBadge, photoUrl, depDelayMin, arrDelayMin, bare }: {
+  f: Flight; view: ViewType; hideBadge?: boolean; bare?: boolean
   photoUrl?: string | null; depDelayMin?: number | null; arrDelayMin?: number | null
 }) {
   const isArr = view === 'arr'
@@ -134,41 +133,29 @@ export function FlightCard({ f, view, hideBadge, photoUrl, depDelayMin, arrDelay
   const depDelay = depDelayMin !== undefined ? depDelayMin : calcDelay(f.dep_time_utc, f.actual_dep_utc ?? f.revised_dep_utc)
   const arrDelay = arrDelayMin !== undefined ? arrDelayMin : calcDelay(f.arr_time_utc, f.actual_arr_utc ?? f.revised_arr_utc)
 
-  // confirmed = deep forest, estimated = warm amber, unconfirmed = plain ink
   const depTimeColor = f.actual_dep_utc ? '#002623' : f.revised_dep_utc ? '#6E5F3C' : C.ink
   const arrTimeColor = f.actual_arr_utc ? '#002623' : f.revised_arr_utc ? '#6E5F3C' : C.ink
+  const railColor    = cfg.border
 
-  const railColor = cfg.border
+  // Horizontal padding — bare mode is symmetric; card mode offsets left for the 4px rail
+  const pl = bare ? 16 : 17
+  const pr = 14
 
-  return (
-    <View style={{
-      backgroundColor: C.surface,
-      borderRadius: 16,
-      borderWidth: 1,
-      borderColor: C.border,
-      overflow: 'hidden',
-      shadowColor: C.ink,
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.05,
-      shadowRadius: 2,
-      elevation: 2,
-    }}>
-      {/* Status rail — absolute left strip */}
-      <View style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, backgroundColor: railColor, zIndex: 1 }} />
-
+  const inner = (
+    <>
       {/* Header: logo · airline + flight no · status badge */}
-      <View style={{ paddingTop: 12, paddingRight: 13, paddingBottom: 12, paddingLeft: 17, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+      <View style={{ paddingTop: 14, paddingRight: pr, paddingBottom: 12, paddingLeft: pl, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
         <View style={{
-          width: 36, height: 36, borderRadius: 10, overflow: 'hidden',
+          width: 44, height: 44, borderRadius: 12, overflow: 'hidden',
           backgroundColor: LOGO_WHITE_BG.has(f.airline_iata) ? C.surface : C.logoBg,
           justifyContent: 'center', alignItems: 'center',
           borderWidth: 1, borderColor: C.border,
         }}>
-          <Image source={{ uri: airlineLogo(f.airline_iata) }} style={{ width: 36, height: 36 }} resizeMode="contain" />
+          <Image source={{ uri: airlineLogo(f.airline_iata) }} style={{ width: 44, height: 44 }} resizeMode="contain" />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={{ color: C.ink, fontWeight: '600', fontSize: 14.5 }} numberOfLines={1}>{f.airline_name}</Text>
-          <Text style={{ color: C.muted, fontSize: 11, fontFamily: 'monospace', marginTop: 1, letterSpacing: 0.7 }}>
+          <Text style={{ color: C.ink, fontWeight: '700', fontSize: 16 }} numberOfLines={1}>{f.airline_name}</Text>
+          <Text style={{ color: C.muted, fontSize: 11.5, fontFamily: 'monospace', marginTop: 1, letterSpacing: 0.5 }}>
             {f.iata_number}{f.aircraft_type ? ` · ${f.aircraft_type}` : ''}
           </Text>
         </View>
@@ -176,7 +163,7 @@ export function FlightCard({ f, view, hideBadge, photoUrl, depDelayMin, arrDelay
       </View>
 
       {/* Route: dep → progress → arr */}
-      <View style={{ paddingRight: 13, paddingBottom: 13, paddingLeft: 17, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+      <View style={{ paddingRight: pr, paddingBottom: 14, paddingLeft: pl, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
         <View style={{ minWidth: 60 }}>
           <Text style={{ color: C.ink, fontWeight: '600', fontSize: 13.5, fontFamily: 'monospace' }}>
             {airportFlag(f.dep_iata)} {f.dep_iata}
@@ -192,7 +179,7 @@ export function FlightCard({ f, view, hideBadge, photoUrl, depDelayMin, arrDelay
               {f.duration_min > 0 && (
                 <Text style={{ color: C.muted, fontSize: 10.5, fontFamily: 'monospace' }}>{durationLabel(f.duration_min)}</Text>
               )}
-              <View style={{ flexDirection: 'row', alignItems: 'center', width: '100%', gap: 0 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', width: '100%' }}>
                 <View style={{ flex: 1, height: 4, borderRadius: 99, backgroundColor: isArrived ? C.arrivedRail : C.trackEmpty }} />
                 <Text style={{ color: C.muted, fontSize: 14, paddingHorizontal: 6 }}>✈</Text>
                 <View style={{ flex: 1, height: 4, borderRadius: 99, backgroundColor: C.trackEmpty }} />
@@ -209,14 +196,21 @@ export function FlightCard({ f, view, hideBadge, photoUrl, depDelayMin, arrDelay
         </View>
       </View>
 
-      {/* Aircraft photo — only render if image actually loads */}
-      {photoUrl && <AircraftPhoto url={photoUrl} />}
+      {/* Aircraft photo */}
+      {photoUrl && (
+        <AircraftPhoto
+          url={photoUrl}
+          style={bare
+            ? { marginHorizontal: 14, marginBottom: 14 }
+            : { marginRight: 12, marginBottom: 12, marginLeft: 17 }}
+        />
+      )}
 
       {/* Times footer — sunken warm bg */}
       <View style={{ height: 1, backgroundColor: C.separator }} />
       <View style={{
         backgroundColor: C.sunken,
-        paddingTop: 9, paddingRight: 14, paddingBottom: 11, paddingLeft: 17,
+        paddingTop: 10, paddingRight: pr, paddingBottom: bare ? 14 : 12, paddingLeft: pl,
         flexDirection: 'row',
         justifyContent: 'space-between',
       }}>
@@ -224,24 +218,44 @@ export function FlightCard({ f, view, hideBadge, photoUrl, depDelayMin, arrDelay
           <Text style={{ color: C.muted, fontSize: 9, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1.4, marginBottom: 2 }}>
             Departure
           </Text>
-          <Text style={{ color: depTimeColor, fontWeight: '600', fontSize: 18, fontFamily: 'monospace' }}>{depTime}</Text>
+          <Text style={{ color: depTimeColor, fontWeight: '600', fontSize: 20, fontFamily: 'monospace' }}>{depTime}</Text>
           <DelayChip min={depDelay} />
         </View>
-
         <View style={{ alignItems: 'center', justifyContent: 'center' }}>
           {(isArr ? f.arr_gate : f.dep_gate) ? (
             <Text style={{ color: C.secondary, fontSize: 11 }}>Gate {isArr ? f.arr_gate : f.dep_gate}</Text>
           ) : null}
         </View>
-
         <View style={{ alignItems: 'flex-end' }}>
           <Text style={{ color: C.muted, fontSize: 9, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1.4, marginBottom: 2 }}>
             Arrival
           </Text>
-          <Text style={{ color: arrTimeColor, fontWeight: '600', fontSize: 18, fontFamily: 'monospace' }}>{arrTime}</Text>
+          <Text style={{ color: arrTimeColor, fontWeight: '600', fontSize: 20, fontFamily: 'monospace' }}>{arrTime}</Text>
           {isArr && <DelayChip min={arrDelay} />}
         </View>
       </View>
+    </>
+  )
+
+  // bare = content sits directly on the sheet, no outer card wrapper or status rail
+  if (bare) return <>{inner}</>
+
+  return (
+    <View style={{
+      backgroundColor: C.surface,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: C.border,
+      overflow: 'hidden',
+      shadowColor: C.ink,
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.05,
+      shadowRadius: 2,
+      elevation: 2,
+    }}>
+      {/* Status rail — absolute left strip */}
+      <View style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, backgroundColor: railColor, zIndex: 1 }} />
+      {inner}
     </View>
   )
 }

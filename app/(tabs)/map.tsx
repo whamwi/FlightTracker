@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   Modal,
   Animated,
-  ScrollView,
 } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
 import WebView, { WebViewMessageEvent } from 'react-native-webview'
@@ -179,21 +178,17 @@ export default function MapTab() {
               <Text style={styles.closeText}>✕</Text>
             </TouchableOpacity>
 
-            <ScrollView
-              scrollEnabled={false}
-              contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 36 }}
-            >
-              {selected && (
-                <FlightCard
-                  f={selected}
-                  view={cardView as 'arr' | 'dep'}
-                  hideBadge
-                  photoUrl={photoUrl}
-                  depDelayMin={depDelay}
-                  arrDelayMin={arrDelay}
-                />
-              )}
-            </ScrollView>
+            {selected && (
+              <FlightCard
+                f={selected}
+                view={cardView as 'arr' | 'dep'}
+                hideBadge
+                bare
+                photoUrl={photoUrl}
+                depDelayMin={depDelay}
+                arrDelayMin={arrDelay}
+              />
+            )}
           </Animated.View>
         </View>
       </Modal>
@@ -217,6 +212,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 26,
     borderTopWidth: 1,
     borderColor: C.border,
+    paddingBottom: 22,   // home indicator safe area (sunken footer adds its own paddingBottom)
     shadowColor: C.ink,
     shadowOffset: { width: 0, height: -14 },
     shadowOpacity: 0.2,
