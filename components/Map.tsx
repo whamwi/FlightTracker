@@ -532,6 +532,8 @@ function buildEmbedFlight(callsign: string, se: ScheduleEntry | null, fs: Flight
     revised_dep_utc: fs?.revised_dep_utc ?? null,
     revised_arr_utc: fs?.revised_arr_utc ?? null,
     aircraft_type:   fs?.aircraft_type   ?? null,
+    dep_delay_min:   fs?.dep_delay_min   ?? null,
+    arr_delay_min:   fs?.arr_delay_min   ?? null,
     photoUrl:        photoUrl           ?? null,
   }
 }
