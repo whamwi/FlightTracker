@@ -1263,7 +1263,7 @@ export default function Map({ embed = false }: { embed?: boolean }) {
           fetch(`https://api.planespotters.net/pub/photos/reg/${encodeURIComponent(regDr)}`)
             .then(r => r.ok ? r.json() : null)
             .then(photoData => {
-              const url: string | null = photoData?.photos?.[0]?.thumbnail?.src ?? null
+              const url: string | null = photoData?.photos?.[0]?.thumbnail_large?.src ?? photoData?.photos?.[0]?.thumbnail?.src ?? null
               photoCacheRef.current[regDr] = url
               if (url && markersRef.current[capturedCS]) {
                 const fsNow = flightStatusRef.current[capturedCS]
