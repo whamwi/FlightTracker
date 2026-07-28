@@ -2,6 +2,8 @@
 
 import 'leaflet/dist/leaflet.css'
 import { useEffect, useRef, useState } from 'react'
+import { FlightPredictor } from '@/lib/flight-predictor'
+import type { LivePosition as PredictorLivePos } from '@/lib/flight-predictor'
 
 interface Aircraft {
   hex: string
@@ -534,8 +536,10 @@ export default function Map() {
   // Last confirmed ADS-B lat/lon per callsign — kept alive through stale hand-off
   // so the schedule overlay GPS floor still works after trackedRef is cleared.
   const lastADSBPosRef    = useRef<Record<string, { lat: number; lon: number; lostAt: number }>>({})
-  // Last kinematic state per callsign — never cleared, used for dead reckoning after signal loss.
+  // Last kinematic state per callsign — kept for schedule-overlay DR fallback.
   const kinematicStateRef = useRef<Record<string, KinematicState>>({})
+  // One FlightPredictor per callsign — handles hybrid DR + smooth recovery for ADS-B entries.
+  const predictorRef      = useRef<Record<string, FlightPredictor>>({})
 
   const [error, setError] = useState<string | null>(null)
 
@@ -761,6 +765,7 @@ export default function Map() {
       for (const [cs, entry] of Object.entries(trackedRef.current)) {
         if (!entry.isFr24 && entry.lostAt === 0 && !freshCallsigns.has(cs)) {
           trackedRef.current[cs] = { ...entry, lostAt: now }
+          predictorRef.current[cs]?.onSignalLoss(now)
         }
       }
 
@@ -812,6 +817,18 @@ export default function Map() {
             track_deg:     typeof a.track === 'number' ? a.track : 0,
             captured_at_ms: now,
           }
+
+          // Feed the predictor with this fresh fix.
+          if (!predictorRef.current[cs]) predictorRef.current[cs] = new FlightPredictor()
+          const predPos: PredictorLivePos = {
+            lat:         a.lat,
+            lon:         a.lon,
+            track_deg:   typeof a.track === 'number' ? a.track : 0,
+            gs_kts:      a.gs,
+            vs_fpm:      0,   // ADS-B feed does not provide vs directly
+            altitude_ft: typeof a.alt_baro === 'number' ? a.alt_baro : null,
+          }
+          predictorRef.current[cs].onLive(predPos, now)
         }
       }
 
@@ -827,29 +844,40 @@ export default function Map() {
         if (!isFr24 && lostAt > 0 && now - lostAt > STALE_TTL_SYRIA_MS) {
           markersRef.current[cs]?.remove(); delete markersRef.current[cs]
           linesRef.current[cs]?.forEach((l: any) => l.remove()); delete linesRef.current[cs]  // eslint-disable-line
-          delete trackedRef.current[cs]
+          delete trackedRef.current[cs]; delete predictorRef.current[cs]
           continue
         }
 
-        // FR24 hand-off: after 30 min let the schedule overlay take over
+        // FR24 hand-off: after 30 min let the schedule overlay take over,
+        // unless the predictor says the plane is still airborne (routeFraction < 0.99).
         if (isFr24 && now - lostAt > FR24_HAND_OFF_MS) {
-          markersRef.current[cs]?.remove(); delete markersRef.current[cs]
-          linesRef.current[cs]?.forEach((l: any) => l.remove()); delete linesRef.current[cs]  // eslint-disable-line
-          delete trackedRef.current[cs]
-          continue
+          const predFr24  = predictorRef.current[cs]
+          const predAlive = predFr24 && predFr24.getDisplay(now).routeFraction < 0.99
+          if (!predAlive) {
+            markersRef.current[cs]?.remove(); delete markersRef.current[cs]
+            linesRef.current[cs]?.forEach((l: any) => l.remove()); delete linesRef.current[cs]  // eslint-disable-line
+            delete trackedRef.current[cs]; delete predictorRef.current[cs]
+            continue
+          }
         }
 
         // Record last ADS-B lat/lon before any hand-off clears trackedRef,
         // so the schedule overlay GPS floor still works after hand-off.
         if (!isFr24) lastADSBPosRef.current[cs] = { lat: a.lat, lon: a.lon, lostAt }
 
-        // ADS-B stale hand-off: if schedule can now drive position, let it
+        // ADS-B stale hand-off: let schedule overlay take over only when the predictor
+        // believes the flight has arrived (routeFraction ≥ 0.99). Confidence level alone
+        // is not a valid trigger — GPS jamming in the region causes multi-hour outages
+        // while the plane is still airborne, so we must trust route progress over confidence.
         if (!isFr24 && lostAt > 0 && now - lostAt > STALE_HAND_OFF_MS) {
           const sched = scheduleRef.current.find(e => e.callsign === cs)
-          if (sched && isFlightActiveNow(sched.dep_time_utc, sched.arr_time_utc, sched.days_of_week, now) !== null) {
+          const pred  = predictorRef.current[cs]
+          // Hand off only when no predictor, or predictor says the plane has arrived.
+          const canHandOff = !pred || pred.getDisplay(now).routeFraction >= 0.99
+          if (canHandOff && sched && isFlightActiveNow(sched.dep_time_utc, sched.arr_time_utc, sched.days_of_week, now) !== null) {
             markersRef.current[cs]?.remove(); delete markersRef.current[cs]
             linesRef.current[cs]?.forEach((l: any) => l.remove()); delete linesRef.current[cs]  // eslint-disable-line
-            delete trackedRef.current[cs]
+            delete trackedRef.current[cs]; delete predictorRef.current[cs]
             continue
           }
         }
@@ -880,7 +908,13 @@ export default function Map() {
             // (boardDeparted has a 60s server cache), so keep the entry alive long enough for
             // the schedule overlay to take over rather than expiring after only 15 min.
             const effectiveBufMs = now > expectedArrMs ? 90 * 60_000 : bufMs
-            expired = now - expectedArrMs > effectiveBufMs
+            const schedExpired = now - expectedArrMs > effectiveBufMs
+            // If the predictor is still confident the plane was recently seen on ADS-B —
+            // trust that over a potentially-wrong duration_min estimate.
+            const predArr = predictorRef.current[cs]
+            const predConf = predArr?.confidence(now)
+            const predStillFlying = predConf === 'excellent' || predConf === 'high' || predConf === 'medium'
+            expired = schedExpired && !predStillFlying
           } else if (a.arr_time_utc) {
             const d = new Date(now)
             const nowSec = d.getUTCHours() * 3600 + d.getUTCMinutes() * 60 + d.getUTCSeconds()
@@ -889,13 +923,17 @@ export default function Map() {
             if (sinceArr > bufMs / 1000 && sinceArr < 22 * 3600) {
               const se_ = scheduleRef.current.find(e => e.callsign === cs)
               const activeFrac = se_ ? isFlightActiveNow(se_.dep_time_utc, se_.arr_time_utc, se_.days_of_week, now) : null
-              expired = !(activeFrac !== null && activeFrac <= 1.0)
+              const schedInactive = !(activeFrac !== null && activeFrac <= 1.0)
+              const predArr2  = predictorRef.current[cs]
+              const predConf2 = predArr2?.confidence(now)
+              const predFlying2 = predConf2 === 'excellent' || predConf2 === 'high' || predConf2 === 'medium'
+              expired = schedInactive && !predFlying2
             }
           }
           if (expired) {
             markersRef.current[cs]?.remove(); delete markersRef.current[cs]
             linesRef.current[cs]?.forEach((l: any) => l.remove()); delete linesRef.current[cs]  // eslint-disable-line
-            delete trackedRef.current[cs]
+            delete trackedRef.current[cs]; delete predictorRef.current[cs]
             continue
           }
         }
@@ -944,7 +982,30 @@ export default function Map() {
                 arrSnapped = true
               }
             } else if (isFr24) {
-              // Kinematic DR for FR24 entries
+              // FR24: prefer predictor (if fed from a prior live fix) over flat-Earth DR
+              const predFr24Render = predictorRef.current[cs]
+              if (predFr24Render && predFr24Render.confidence(now) !== 'very_low') {
+                const depI2 = schedEntry?.dep_iata ?? a.dep_iata ?? ''
+                const arrI2 = schedEntry?.arr_iata ?? a.arr_iata ?? ''
+                const dc2   = ALL_AIRPORT_COORDS[depI2]
+                const ac3   = ALL_AIRPORT_COORDS[arrI2]
+                if (dc2 && ac3) {
+                  predFr24Render.setContext({
+                    dep_coords:        dc2,
+                    arr_coords:        ac3,
+                    actual_dep_utc_ms: depUtcDr ? new Date(depUtcDr).getTime() : null,
+                    duration_ms:       durationMin > 0 ? durationMin * 60_000 : null,
+                    sched_dep_utc_ms:  null,
+                    waypoints:         wps ?? [],
+                  })
+                }
+                const displayFr24 = predFr24Render.getDisplay(now)
+                dispLat   = displayFr24.lat
+                dispLon   = displayFr24.lon
+                dispTrack = displayFr24.track_deg
+                projected = displayFr24.isEstimated
+              } else {
+              // Flat-Earth kinematic DR for FR24 entries (no prior live fix available)
               let drLat = a.lat, drLon = a.lon, drValid = false
               if (typeof a.gs === 'number' && a.gs > 50 && typeof a.track === 'number') {
                 ;[drLat, drLon] = projectPosition(a.lat, a.lon, a.track, a.gs, elapsed)
@@ -995,23 +1056,46 @@ export default function Map() {
                   dispTrack = bearingFromPath(wps, useF)
                 }
               }
+              } // end flat-Earth else
             } else {
-              // ADS-B stale: DR from real last-known position to prevent snap-back when
-              // a plane briefly enters ADS-B range then exits (real position is ahead of
-              // the schedule fraction — using it prevents backward jumps on signal loss).
-              if (typeof a.gs === 'number' && a.gs > 50 && typeof a.track === 'number') {
-                const [drLat, drLon] = projectPosition(a.lat, a.lon, a.track, a.gs, elapsed)
-                const drF = nearestPathFraction(wps, drLat, drLon)
-                if (drF >= useF) {
-                  dispLat = drLat; dispLon = drLon
-                  dispTrack = a.track
+              // ADS-B stale: use predictor for hybrid DR + smooth recovery.
+              const pred = predictorRef.current[cs]
+              if (pred) {
+                const depI = schedEntry?.dep_iata ?? a.dep_iata ?? ''
+                const arrI = schedEntry?.arr_iata ?? a.arr_iata ?? ''
+                const dc   = ALL_AIRPORT_COORDS[depI]
+                const ac2  = ALL_AIRPORT_COORDS[arrI]
+                if (dc && ac2) {
+                  pred.setContext({
+                    dep_coords:        dc,
+                    arr_coords:        ac2,
+                    actual_dep_utc_ms: depUtcDr ? new Date(depUtcDr).getTime() : null,
+                    duration_ms:       durationMin > 0 ? durationMin * 60_000 : null,
+                    sched_dep_utc_ms:  null,
+                    waypoints:         wps ?? [],
+                  })
+                }
+                const display = pred.getDisplay(now)
+                dispLat   = display.lat
+                dispLon   = display.lon
+                dispTrack = display.track_deg
+                // Override the projected flag based on predictor state
+                projected = display.isEstimated
+              } else {
+                // Predictor not yet set up — fallback to kinematic DR
+                if (typeof a.gs === 'number' && a.gs > 50 && typeof a.track === 'number') {
+                  const [drLat, drLon] = projectPosition(a.lat, a.lon, a.track, a.gs, elapsed)
+                  const drF = nearestPathFraction(wps, drLat, drLon)
+                  if (drF >= useF) {
+                    dispLat = drLat; dispLon = drLon; dispTrack = a.track
+                  } else {
+                    dispLat = timeLat; dispLon = timeLon
+                    dispTrack = bearingFromPath(wps, useF)
+                  }
                 } else {
                   dispLat = timeLat; dispLon = timeLon
                   dispTrack = bearingFromPath(wps, useF)
                 }
-              } else {
-                dispLat = timeLat; dispLon = timeLon
-                dispTrack = bearingFromPath(wps, useF)
               }
             }
             projected = true
@@ -1215,17 +1299,24 @@ export default function Map() {
         if (fs?.actual_dep_utc && !priorLegDone && duration_min > 0) {
           const elapsed = now - new Date(fs.actual_dep_utc).getTime()
           if (elapsed > 0) {
-            // Use kinematic dead reckoning when we have last known position + speed.
-            // projectPosition → nearestPathFraction gives a geometry-anchored fraction
-            // that advances with actual speed rather than the scheduled block time.
-            const ks  = kinematicStateRef.current[callsign]
+            // Prefer the predictor's route fraction (hybrid DR) when available,
+            // fall back to kinematic DR from kinematicStateRef, then time-based.
+            const pred = predictorRef.current[callsign]
             const wpsK = routePathsRef.current[`${dep_iata}|${arr_iata}`]
-            if (ks && wpsK?.length) {
-              const sinceCapMs = now - ks.captured_at_ms
-              const [drLat, drLon] = projectPosition(ks.lat, ks.lon, ks.track_deg, ks.gs_kts, sinceCapMs)
-              fraction = nearestPathFraction(wpsK, drLat, drLon)
+            if (pred && wpsK?.length) {
+              const display = pred.getDisplay(now)
+              fraction = display.routeFraction > 0
+                ? Math.min(display.routeFraction, 0.99)
+                : elapsed / (duration_min * 60_000)
             } else {
-              fraction = elapsed / (duration_min * 60_000)
+              const ks = kinematicStateRef.current[callsign]
+              if (ks && wpsK?.length) {
+                const sinceCapMs = now - ks.captured_at_ms
+                const [drLat, drLon] = projectPosition(ks.lat, ks.lon, ks.track_deg, ks.gs_kts, sinceCapMs)
+                fraction = nearestPathFraction(wpsK, drLat, drLon)
+              } else {
+                fraction = elapsed / (duration_min * 60_000)
+              }
             }
             // Expire dynamically: grace = max(2h, 1× flight duration) past expected arrival.
             // Short flights (EBL ~90min) expire ~3.5h after dep; long flights scale with duration.
