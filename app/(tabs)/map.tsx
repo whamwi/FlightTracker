@@ -1,5 +1,6 @@
 import { useRef, useState, useCallback } from 'react'
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native'
+import { StatusBar } from 'expo-status-bar'
 import WebView, { WebViewMessageEvent } from 'react-native-webview'
 import { FlightCard } from '../../components/FlightCard'
 import type { Flight } from '../../lib/types'
@@ -83,6 +84,7 @@ export default function MapTab() {
 
   return (
     <View style={styles.container}>
+      <StatusBar style="dark" />
       <WebView
         ref={webViewRef}
         source={{ uri: EMBED_URL }}
