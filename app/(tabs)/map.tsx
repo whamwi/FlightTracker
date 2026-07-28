@@ -76,9 +76,9 @@ function RouteCol({ iata, flipFlag }: { iata: string; flipFlag?: boolean }) {
     <View style={{ width: 76, alignItems: 'center' }}>
       <View style={{ flexDirection: flipFlag ? 'row-reverse' : 'row', alignItems: 'center', gap: 4 }}>
         <Text style={{ fontSize: 13 }}>{airportFlag(iata)}</Text>
-        <Text style={{ color: '#161616', fontWeight: '500', fontSize: 11 }} numberOfLines={1}>{city(iata)}</Text>
+        <Text style={{ color: '#161616', fontWeight: '600', fontSize: 13 }} numberOfLines={1}>{city(iata)}</Text>
       </View>
-      <Text style={{ color: '#161616', fontWeight: '700', fontSize: 15, fontFamily: 'monospace', letterSpacing: 0.5, marginTop: 2 }}>
+      <Text style={{ color: '#8A8578', fontWeight: '400', fontSize: 11, fontFamily: 'monospace', letterSpacing: 0.5, marginTop: 2 }}>
         {iata}
       </Text>
     </View>
@@ -91,8 +91,6 @@ const planeCircle = {
   justifyContent: 'center' as const, alignItems: 'center' as const,
   shadowColor: '#428177', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.4, shadowRadius: 6, elevation: 3,
 }
-const planeTxt = { color: '#428177', fontSize: 10, transform: [{ rotate: '90deg' }] } as const
-
 function ProgressBar({ depUtc, durationMin, altitude }: { depUtc: string; durationMin: number; altitude: number | null }) {
   const calc = () => Math.min(100, Math.max(0, ((Date.now() - new Date(depUtc).getTime()) / (durationMin * 60_000)) * 100))
   const [pct, setPct] = useState(calc)
@@ -112,7 +110,7 @@ function ProgressBar({ depUtc, durationMin, altitude }: { depUtc: string; durati
       <Text style={{ color: '#8A8578', fontSize: 10.5, fontFamily: 'monospace' }}>{label}</Text>
       <View style={{ flexDirection: 'row', width: '100%', alignItems: 'center', height: 21 }}>
         <View style={{ flex: fill, height: 5, borderRadius: 99, backgroundColor: '#428177' }} />
-        <View style={planeCircle}><Text style={planeTxt}>✈</Text></View>
+        <View style={planeCircle}><Text style={{ color: '#428177', fontSize: 10 }}>✈</Text></View>
         <View style={{ flex: empty, height: 5, borderRadius: 99, backgroundColor: '#E0DCCB' }} />
       </View>
     </View>
@@ -127,7 +125,7 @@ function ArrivalBar({ durationMin }: { durationMin: number }) {
       )}
       <View style={{ flexDirection: 'row', width: '100%', alignItems: 'center', height: 21 }}>
         <View style={{ flex: 1, height: 5, borderRadius: 99, backgroundColor: '#9EBFB8' }} />
-        <View style={planeCircle}><Text style={planeTxt}>✈</Text></View>
+        <View style={planeCircle}><Text style={{ color: '#428177', fontSize: 10, transform: [{ rotate: '90deg' }] }}>✈</Text></View>
       </View>
     </View>
   )
@@ -336,13 +334,10 @@ export default function MapTab() {
           <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={dismiss} />
           <Animated.View style={[styles.sheet, { transform: [{ translateY }] }]}>
 
-            {/* Drag handle row — ✕ sits here so it never overlaps the badge */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingBottom: 12 }}>
+            {/* Tap the drag pill to dismiss */}
+            <TouchableOpacity style={{ alignItems: 'center', paddingVertical: 10 }} activeOpacity={0.5} onPress={dismiss}>
               <View style={{ width: 38, height: 4, borderRadius: 99, backgroundColor: '#CFC9B2' }} />
-              <TouchableOpacity style={styles.closeBtn} onPress={dismiss}>
-                <Text style={styles.closeText}>✕</Text>
-              </TouchableOpacity>
-            </View>
+            </TouchableOpacity>
 
             {selected && (
               <FlightSheet f={selected} photoUrl={photoUrl} altitude={altitude} depDelayMin={depDelay} arrDelayMin={arrDelay} />
@@ -366,11 +361,4 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingTop: 8, paddingBottom: 30,
     shadowColor: '#161616', shadowOffset: { width: 0, height: -14 }, shadowOpacity: 0.2, shadowRadius: 34, elevation: 16,
   },
-  closeBtn: {
-    position: 'absolute', right: 0,
-    width: 28, height: 28, borderRadius: 14,
-    backgroundColor: '#F7F5EC', borderWidth: 1, borderColor: '#D8D3BF',
-    justifyContent: 'center', alignItems: 'center',
-  },
-  closeText: { color: '#3D3A3B', fontSize: 13, lineHeight: 13 },
 })
