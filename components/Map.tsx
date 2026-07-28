@@ -587,6 +587,7 @@ export default function Map({ embed = false }: { embed?: boolean }) {
       const map = L.map(mapRef.current!, {
         center: [33.0, 40.0], zoom: 6,
         maxBoundsViscosity: 0,
+        zoomControl: !embed,
       })
       if (embed) {
         map.fitBounds([[22, 26], [43, 62]])
