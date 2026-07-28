@@ -582,10 +582,15 @@ export default function Map({ embed = false }: { embed?: boolean }) {
         shadowUrl:     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
       })
       const map = L.map(mapRef.current!, { center: [33.0, 40.0], zoom: 6 })
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/">CARTO</a>',
-        maxZoom: 19,
-      }).addTo(map)
+      L.tileLayer(
+        embed
+          ? 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png'
+          : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+        {
+          attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/">CARTO</a>',
+          maxZoom: 19,
+        }
+      ).addTo(map)
       mapInstanceRef.current = map
 
       if (embed) {
