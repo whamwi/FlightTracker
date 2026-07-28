@@ -3,6 +3,7 @@
 // Add a key here whenever a new airline gets a custom logo in /public/airlines/.
 export const AIRLINE_LOGOS: Record<string, string> = {
   XH:  '/airlines/XH.jpg',
+  FYC: '/airlines/FYC.jpg',
   TK:  '/airlines/TK.jpg',
   EY:  '/airlines/EY.png',
   J9:  '/airlines/J9.png',
