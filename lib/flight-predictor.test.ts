@@ -678,3 +678,49 @@ describe('FlightPredictor edge cases', () => {
     assert.ok(DEFAULT_CONFIG.minRecoveryMs < DEFAULT_CONFIG.maxRecoveryMs)
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FlightPredictor — destination overshoot prevention
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('FlightPredictor destination overshoot prevention', () => {
+  const T0       = 1_700_000_000_000
+  const DAM: [number, number] = [33.4114, 36.5156]
+  const DOH: [number, number] = [25.2731, 51.6081]
+  const MID: [number, number] = [29.84225, 44.06068]
+  const wps: Waypoint[] = [
+    { f: 0, lat: DAM[0], lon: DAM[1] },
+    { f: 0.5, lat: MID[0], lon: MID[1] },
+    { f: 1, lat: DOH[0], lon: DOH[1] },
+  ]
+  const DURATION_MS = 2 * 3_600_000
+
+  test('at estimated arrival, position is within 200 km of destination', () => {
+    const p = new FlightPredictor()
+    p.setContext({
+      dep_coords: DAM, arr_coords: DOH,
+      actual_dep_utc_ms: T0, duration_ms: DURATION_MS,
+      sched_dep_utc_ms: null, waypoints: wps,
+    })
+    p.onLive({ lat: 26.5, lon: 50.0, track_deg: 135, gs_kts: 450, vs_fpm: 0, altitude_ft: 35_000 }, T0)
+    p.onSignalLoss(T0 + 30_000)
+
+    const d = p.getDisplay(T0 + DURATION_MS)
+    const distFromDOH = haversineKm(d.lat, d.lon, DOH[0], DOH[1])
+    assert.ok(distFromDOH < 200, `position should be near DOH, got ${distFromDOH.toFixed(0)} km away`)
+  })
+
+  test('kinematic heading east does not project past destination longitude', () => {
+    const p = new FlightPredictor()
+    p.setContext({
+      dep_coords: DAM, arr_coords: DOH,
+      actual_dep_utc_ms: T0, duration_ms: DURATION_MS,
+      sched_dep_utc_ms: null, waypoints: wps,
+    })
+    p.onLive({ lat: 25.5, lon: 50.0, track_deg: 90, gs_kts: 500, vs_fpm: 0, altitude_ft: 30_000 }, T0)
+    p.onSignalLoss(T0 + 30_000)
+
+    const d = p.getDisplay(T0 + DURATION_MS + 30 * 60_000)
+    assert.ok(d.lon <= DOH[1] + 2, `longitude should not exceed DOH: ${d.lon.toFixed(2)}`)
+  })
+})

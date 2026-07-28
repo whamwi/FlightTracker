@@ -549,15 +549,25 @@ export class FlightPredictor {
       const lp = this.lastLive
       return { lat: lp?.lat ?? 0, lon: lp?.lon ?? 0, track_deg: lp?.track_deg ?? 0, altitude_ft: lp?.altitude_ft ?? null }
     }
-    if (!hasRoute || wKin >= 1.0) return { lat: kinLat, lon: kinLon, track_deg: kinTrack, altitude_ft: kinAlt }
-    if (!hasKin  || wKin <= 0.0) return { lat: routeLat, lon: routeLon, track_deg: routeTrack, altitude_ft: kinAlt }
+
+    // ── Near destination: kill kinematic to prevent overshoot past arrival ───
+    // Kinematic DR has no awareness of the destination — it projects heading
+    // forward indefinitely. Within the last 10 % of the route, fade it out
+    // linearly so the plane is guaranteed to stop at the arrival airport.
+    const nearDestPenalty = (routeF !== null && routeF >= 0.90)
+      ? Math.max(0, 1 - (routeF - 0.90) / 0.10)   // 1.0 at f=0.90 → 0.0 at f=1.0
+      : 1
+    const wKinAdj = wKin * nearDestPenalty
+
+    if (!hasRoute || wKinAdj >= 1.0) return { lat: kinLat, lon: kinLon, track_deg: kinTrack, altitude_ft: kinAlt }
+    if (!hasKin  || wKinAdj <= 0.0) return { lat: routeLat, lon: routeLon, track_deg: routeTrack, altitude_ft: kinAlt }
 
     // ── Penalise kinematic weight when it has drifted far from the route ─────
     const kinDevKm = haversineKm(kinLat, kinLon, routeLat, routeLon)
     const penalty  = kinDevKm > this.cfg.maxKinematicDeviationKm
       ? Math.max(0, 1 - (kinDevKm - this.cfg.maxKinematicDeviationKm) / 150)
       : 1
-    const effWKin   = wKin * penalty
+    const effWKin   = wKinAdj * penalty
     const effWRoute = 1 - effWKin
 
     // Linear lat/lon blend is accurate within 0.01° for flights up to 10 000 km.
