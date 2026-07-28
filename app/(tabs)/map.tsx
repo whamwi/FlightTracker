@@ -383,13 +383,16 @@ export default function MapTab() {
         if (sinceArrMin > 90) continue
         lat = arrC[0]; lon = arrC[1]; trk = brng(depC[0], depC[1], arrC[0], arrC[1])
       } else if (actual_dep_utc && duration_min > 0) {
+        // Prefer FR24 ETA over scheduled block time for DR when flight is delayed
+        const effDuration = (revised_arr_utc && actual_dep_utc)
+          ? (new Date(revised_arr_utc).getTime() - new Date(actual_dep_utc).getTime()) / 60_000
+          : duration_min
         const elapsedMin = (now - new Date(actual_dep_utc).getTime()) / 60_000
         if (elapsedMin < 0) continue
-        const rawF = elapsedMin / duration_min
+        const rawF = elapsedMin / effDuration
         if (rawF >= 1.0) {
-          // Past expected arrival — snap to destination airport, treat as arrived.
-          // Expire 90 min after expected arrival (mirrors confirmed-arrival window).
-          const sinceExpectedArrMin = elapsedMin - duration_min
+          // Past effective arrival — snap to destination, expire 90 min after.
+          const sinceExpectedArrMin = elapsedMin - effDuration
           if (sinceExpectedArrMin > 90) continue
           lat = arrC[0]; lon = arrC[1]; trk = brng(depC[0], depC[1], arrC[0], arrC[1])
           isArrived = true
@@ -448,27 +451,32 @@ export default function MapTab() {
       const now = Date.now()
 
       // Accumulate boardDeparted into persistent registry (mirrors web's scheduleRef).
-      // Merge to preserve actual_dep_utc / actual_arr_utc if a later API response
-      // returns null for those fields (e.g. cache eviction mid-flight).
+      // Preserve actual_dep_utc across cache gaps but always take the fresh actual_arr_utc
+      // from the API — never carry a stale synthesised arrival forward, as a later poll
+      // may correctly clear it once the API threshold was tightened.
       for (const bd of (json.boardDeparted ?? []) as BoardDeparted[]) {
         if (!bd.callsign) continue
         const prev = schedDepartedRef.current[bd.callsign]
         schedDepartedRef.current[bd.callsign] = {
           ...bd,
           actual_dep_utc: bd.actual_dep_utc ?? prev?.actual_dep_utc ?? null,
-          actual_arr_utc: bd.actual_arr_utc ?? prev?.actual_arr_utc ?? null,
+          actual_arr_utc: bd.actual_arr_utc,  // always use fresh API value
         }
       }
 
-      // Expire entries: 90 min past expected arrival (dep+duration) or confirmed arrival
+      // Expire entries: 90 min past effective arrival (prefer FR24 ETA over scheduled block)
       for (const [cs, bd] of Object.entries(schedDepartedRef.current)) {
         if (bd.actual_arr_utc) {
           if ((now - new Date(bd.actual_arr_utc).getTime()) / 60_000 > 90) {
             delete schedDepartedRef.current[cs]
           }
-        } else if (bd.actual_dep_utc && bd.duration_min > 0) {
-          const sinceExpectedArr = (now - new Date(bd.actual_dep_utc).getTime()) / 60_000 - bd.duration_min
-          if (sinceExpectedArr > 90) {
+        } else {
+          const effArrMs = (bd.revised_arr_utc && bd.actual_dep_utc)
+            ? new Date(bd.revised_arr_utc).getTime()
+            : (bd.actual_dep_utc && bd.duration_min > 0)
+              ? new Date(bd.actual_dep_utc).getTime() + bd.duration_min * 60_000
+              : null
+          if (effArrMs !== null && (now - effArrMs) / 60_000 > 90) {
             delete schedDepartedRef.current[cs]
           }
         }
