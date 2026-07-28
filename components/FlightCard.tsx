@@ -64,7 +64,7 @@ function calcDelay(schedHHMM: string | null | undefined, actual: string | null |
   return Math.round((actualMs - schedMs) / 60_000)
 }
 
-export function FlightCard({ f, view, hideBadge, photoUrl }: { f: Flight; view: ViewType; hideBadge?: boolean; photoUrl?: string | null }) {
+export function FlightCard({ f, view, hideBadge, photoUrl, depDelayMin, arrDelayMin }: { f: Flight; view: ViewType; hideBadge?: boolean; photoUrl?: string | null; depDelayMin?: number | null; arrDelayMin?: number | null }) {
   const isArr      = view === 'arr'
   const cfg        = statusConfig(f.status)
   const showProgress = IN_FLIGHT.has(f.status) && !!f.actual_dep_utc && f.duration_min > 0
@@ -79,8 +79,8 @@ export function FlightCard({ f, view, hideBadge, photoUrl }: { f: Flight; view: 
                 : f.revised_arr_utc ? fmtLocal(f.revised_arr_utc, arrOff)
                 :                     fmtLocal(f.arr_time_utc,    arrOff)
 
-  const depDelay = calcDelay(f.dep_time_utc, f.actual_dep_utc ?? f.revised_dep_utc)
-  const arrDelay = calcDelay(f.arr_time_utc, f.actual_arr_utc ?? f.revised_arr_utc)
+  const depDelay = depDelayMin !== undefined ? depDelayMin : calcDelay(f.dep_time_utc, f.actual_dep_utc ?? f.revised_dep_utc)
+  const arrDelay = arrDelayMin !== undefined ? arrDelayMin : calcDelay(f.arr_time_utc, f.actual_arr_utc ?? f.revised_arr_utc)
 
   const depColor = f.actual_dep_utc ? '#16a34a' : f.revised_dep_utc ? '#d97706' : '#111827'
   const arrColor = f.actual_arr_utc ? '#16a34a' : f.revised_arr_utc ? '#d97706' : '#111827'

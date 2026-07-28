@@ -27,6 +27,8 @@ interface EmbedFlight {
   revised_dep_utc: string | null
   revised_arr_utc: string | null
   aircraft_type:   string | null
+  dep_delay_min:   number | null
+  arr_delay_min:   number | null
   photoUrl:        string | null
 }
 
@@ -58,6 +60,8 @@ export default function MapTab() {
   const webViewRef                          = useRef<WebView>(null)
   const [selected, setSelected]            = useState<Flight | null>(null)
   const [photoUrl, setPhotoUrl]            = useState<string | null>(null)
+  const [depDelay, setDepDelay]            = useState<number | null | undefined>(undefined)
+  const [arrDelay, setArrDelay]            = useState<number | null | undefined>(undefined)
   const [count, setCount]                  = useState<number | null>(null)
   const [loading, setLoading]              = useState(true)
 
@@ -68,8 +72,13 @@ export default function MapTab() {
   const onMessage = useCallback((e: WebViewMessageEvent) => {
     try {
       const msg: EmbedMsg = JSON.parse(e.nativeEvent.data)
-      if (msg.type === 'SELECT')  { setSelected(toFlight(msg.flight)); setPhotoUrl(msg.flight.photoUrl) }
-      if (msg.type === 'DESELECT') { setSelected(null); setPhotoUrl(null) }
+      if (msg.type === 'SELECT')  {
+        setSelected(toFlight(msg.flight))
+        setPhotoUrl(msg.flight.photoUrl)
+        setDepDelay(msg.flight.dep_delay_min)
+        setArrDelay(msg.flight.arr_delay_min)
+      }
+      if (msg.type === 'DESELECT') { setSelected(null); setPhotoUrl(null); setDepDelay(undefined); setArrDelay(undefined) }
       if (msg.type === 'COUNT')   setCount(msg.count)
     } catch {}
   }, [])
@@ -106,12 +115,12 @@ export default function MapTab() {
       {selected && (
         <View style={styles.card}>
           <TouchableOpacity style={styles.closeBtn} onPress={() => {
-            setSelected(null); setPhotoUrl(null)
+            setSelected(null); setPhotoUrl(null); setDepDelay(undefined); setArrDelay(undefined)
             webViewRef.current?.injectJavaScript('window.__rnDeselect && window.__rnDeselect(); true;')
           }}>
             <Text style={styles.closeText}>✕</Text>
           </TouchableOpacity>
-          <FlightCard f={selected} view={cardView as 'arr' | 'dep'} hideBadge photoUrl={photoUrl} />
+          <FlightCard f={selected} view={cardView as 'arr' | 'dep'} hideBadge photoUrl={photoUrl} depDelayMin={depDelay} arrDelayMin={arrDelay} />
         </View>
       )}
     </View>
