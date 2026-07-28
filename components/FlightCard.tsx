@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { View, Text, Image, ViewStyle } from 'react-native'
+import { View, Text, Image } from 'react-native'
 import type { Flight, View as ViewType } from '../lib/types'
 import { city, airportFlag, statusConfig, durationLabel, fmtLocal, tzOffset, airlineLogo, LOGO_WHITE_BG } from '../lib/constants'
 
@@ -94,22 +94,6 @@ function calcDelay(schedHHMM: string | null | undefined, actual: string | null |
   return Math.round((actualMs - schedMs) / 60_000)
 }
 
-function AircraftPhoto({ url, style }: { url: string; style?: ViewStyle }) {
-  const [loaded, setLoaded] = useState(false)
-  return (
-    <View style={loaded
-      ? [{ borderRadius: 14, overflow: 'hidden', height: 130 }, style]
-      : { height: 0 }}>
-      <Image
-        source={{ uri: url }}
-        style={{ width: '100%', height: 130 }}
-        resizeMode="cover"
-        onLoad={() => setLoaded(true)}
-        onError={() => setLoaded(false)}
-      />
-    </View>
-  )
-}
 
 export function FlightCard({ f, view, hideBadge, photoUrl, depDelayMin, arrDelayMin, bare }: {
   f: Flight; view: ViewType; hideBadge?: boolean; bare?: boolean
@@ -196,14 +180,14 @@ export function FlightCard({ f, view, hideBadge, photoUrl, depDelayMin, arrDelay
         </View>
       </View>
 
-      {/* Aircraft photo */}
+      {/* Aircraft photo — placeholder filtering is done upstream (realPhoto in map.tsx) */}
       {photoUrl && (
-        <AircraftPhoto
-          url={photoUrl}
-          style={bare
-            ? { marginHorizontal: 14, marginBottom: 14 }
-            : { marginRight: 12, marginBottom: 12, marginLeft: 17 }}
-        />
+        <View style={bare
+          ? { marginHorizontal: 14, marginBottom: 14, borderRadius: 14, overflow: 'hidden', height: 130 }
+          : { marginRight: 12, marginBottom: 12, marginLeft: 17, borderRadius: 14, overflow: 'hidden', height: 130 }
+        }>
+          <Image source={{ uri: photoUrl }} style={{ width: '100%', height: 130 }} resizeMode="cover" />
+        </View>
       )}
 
       {/* Times footer — sunken warm bg */}
