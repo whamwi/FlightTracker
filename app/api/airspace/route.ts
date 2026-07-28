@@ -152,11 +152,16 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<Bo
           }
           return f.duration_min ?? null
         })()
-        // Infer actual arrival when dep is confirmed + expected arr time is in the past (>15 min ago)
+        // Infer actual arrival when dep is confirmed + expected arr time is in the past.
+        // When FR24 has its own ETA (revised_arr_utc), trust it — use a tight 15-min window.
+        // Without an FR24 ETA we're working from the scheduled block time; use 90 min so a
+        // delayed flight on final approach isn't prematurely marked as arrived and snapped to
+        // the destination airport on the map while still airborne.
         const actual_arr_utc = raw_actual_arr_utc ?? (() => {
           if (!actual_dep_utc || !effectiveDurationMin || effectiveDurationMin <= 0) return null
-          const expectedMs = new Date(actual_dep_utc).getTime() + effectiveDurationMin * 60_000
-          return expectedMs < Date.now() - 15 * 60_000 ? new Date(expectedMs).toISOString() : null
+          const expectedMs  = new Date(actual_dep_utc).getTime() + effectiveDurationMin * 60_000
+          const thresholdMs = revised_arr_utc ? 15 * 60_000 : 90 * 60_000
+          return expectedMs < Date.now() - thresholdMs ? new Date(expectedMs).toISOString() : null
         })()
         const schedDepMs   = f.sched_dep ? f.sched_dep * 1000 : null
         const actualDepMs  = actual_dep_utc ? new Date(actual_dep_utc).getTime() : null
