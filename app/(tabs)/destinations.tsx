@@ -15,7 +15,6 @@ import {
 import { API_BASE, city, airportFlag, airlineLogo, LOGO_WHITE_BG, durationLabel } from '../../lib/constants'
 import type { Airport } from '../../lib/types'
 
-// V2 Syria palette tokens
 const C = {
   canvas:    '#EDEBE0',
   surface:   '#FFFFFF',
@@ -25,10 +24,10 @@ const C = {
   ink:       '#161616',
   secondary: '#3D3A3B',
   muted:     '#8A8578',
+  faint:     '#B5AFA0',
   logoBg:    '#F7F5EC',
   damAccent: '#054239',
   alpAccent: '#6B1F2A',
-  bubble:    '#F7F5EC',  // inactive day bubble bg
 }
 
 interface ScheduleRow {
@@ -69,14 +68,7 @@ function sortDays(days: string[]): string[] {
   )
 }
 
-function DayBubbles({ days, size = 'md', accent }: {
-  days: string[]
-  size?: 'sm' | 'md'
-  accent: string
-}) {
-  const dim = size === 'md' ? 24 : 20
-  const fontSize = size === 'md' ? 10 : 9
-  const radius = size === 'md' ? 8 : 6
+function DayBubbles({ days, accent }: { days: string[]; accent: string }) {
   return (
     <View style={{ flexDirection: 'row', gap: 4 }}>
       {DOW_ORDER.map(d => {
@@ -85,14 +77,14 @@ function DayBubbles({ days, size = 'md', accent }: {
           <View
             key={d}
             style={{
-              width: dim, height: dim, borderRadius: radius,
-              backgroundColor: active ? accent : C.bubble,
+              width: 24, height: 24, borderRadius: 8,
+              backgroundColor: active ? accent : C.sunken,
               borderWidth: active ? 0 : 1,
               borderColor: C.border,
               justifyContent: 'center', alignItems: 'center',
             }}
           >
-            <Text style={{ color: active ? '#FFFFFF' : C.muted, fontSize, fontWeight: '600' }}>
+            <Text style={{ color: active ? '#FFFFFF' : C.faint, fontSize: 10.5, fontWeight: '600', lineHeight: 24 }}>
               {DOW_LABEL[d]}
             </Text>
           </View>
@@ -102,20 +94,22 @@ function DayBubbles({ days, size = 'md', accent }: {
   )
 }
 
+// Stacked overlapping airline logo tiles with -7px overlap
 function AirlineLogoStack({ airlines }: { airlines: AirlineEntry[] }) {
   const MAX = 3
   const shown = airlines.slice(0, MAX)
   const extra = airlines.length - MAX
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-      {shown.map(a => (
+    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+      {shown.map((a, i) => (
         <View
           key={a.prefix}
           style={{
             width: 24, height: 24, borderRadius: 7, overflow: 'hidden',
             backgroundColor: LOGO_WHITE_BG.has(a.prefix) ? C.surface : C.logoBg,
             justifyContent: 'center', alignItems: 'center',
-            borderWidth: 1, borderColor: C.border,
+            borderWidth: 1.5, borderColor: '#FFFFFF',
+            marginLeft: i === 0 ? 0 : -7,
           }}
         >
           <Image
@@ -126,7 +120,9 @@ function AirlineLogoStack({ airlines }: { airlines: AirlineEntry[] }) {
         </View>
       ))}
       {extra > 0 && (
-        <Text style={{ color: C.muted, fontSize: 10, fontWeight: '600', fontFamily: 'monospace' }}>+{extra}</Text>
+        <Text style={{ color: C.muted, fontSize: 10, fontWeight: '600', fontFamily: 'monospace', marginLeft: 5 }}>
+          +{extra}
+        </Text>
       )}
     </View>
   )
@@ -140,32 +136,41 @@ function DestCard({ dest, onPress, accent }: {
   return (
     <TouchableOpacity
       onPress={onPress}
-      activeOpacity={0.7}
+      activeOpacity={0.75}
       style={{
-        borderBottomWidth: 1,
-        borderBottomColor: C.border,
-        paddingHorizontal: 14,
-        paddingVertical: 13,
+        backgroundColor: C.surface,
+        borderWidth: 1, borderColor: C.border,
+        borderRadius: 14,
+        padding: 13,
+        gap: 10,
+        shadowColor: C.ink,
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.04,
+        shadowRadius: 2,
+        elevation: 1,
       }}
     >
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, marginRight: 8 }}>
-          {airportFlag(dest.iata) ? (
-            <Text style={{ fontSize: 16 }}>{airportFlag(dest.iata)}</Text>
-          ) : null}
-          <Text style={{ color: C.ink, fontWeight: '600', fontSize: 15 }} numberOfLines={1}>
-            {city(dest.iata)}
-          </Text>
-          <Text style={{ color: C.muted, fontSize: 11.5, fontFamily: 'monospace' }}>
-            {dest.iata}
-          </Text>
-        </View>
+      {/* Row 1: flag · city · IATA · spacer · stacked logos */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        {airportFlag(dest.iata) ? (
+          <Text style={{ fontSize: 16 }}>{airportFlag(dest.iata)}</Text>
+        ) : null}
+        <Text style={{ color: C.ink, fontWeight: '600', fontSize: 15, lineHeight: 19 }} numberOfLines={1}>
+          {city(dest.iata)}
+        </Text>
+        <Text style={{ color: C.muted, fontSize: 11.5, fontFamily: 'monospace', letterSpacing: 0.6 }}>
+          {dest.iata}
+        </Text>
+        <View style={{ flex: 1 }} />
         <AirlineLogoStack airlines={dest.airlines} />
       </View>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-        <DayBubbles days={dest.allDays} size="md" accent={accent} />
+
+      {/* Row 2: day bubbles · spacer · duration */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+        <DayBubbles days={dest.allDays} accent={accent} />
+        <View style={{ flex: 1 }} />
         {dest.minDuration > 0 && (
-          <Text style={{ color: C.muted, fontSize: 12, fontWeight: '600', fontFamily: 'monospace' }}>
+          <Text style={{ color: C.secondary, fontSize: 12, fontWeight: '600', fontFamily: 'monospace' }}>
             {durationLabel(dest.minDuration)}
           </Text>
         )}
@@ -177,13 +182,13 @@ function DestCard({ dest, onPress, accent }: {
 function FlightRow({ f, accent }: { f: ScheduleRow; accent: string }) {
   return (
     <View style={{
-      borderRadius: 14,
+      backgroundColor: C.surface,
       borderWidth: 1, borderColor: C.border,
-      marginHorizontal: 14, marginBottom: 8,
+      borderRadius: 14,
       overflow: 'hidden',
       shadowColor: C.ink, shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 2, elevation: 1,
     }}>
-      {/* Airline + flight no + times */}
+      {/* Header: logo + name + flight no + times */}
       <View style={{ flexDirection: 'row', alignItems: 'center', padding: 12, paddingBottom: 10 }}>
         <View style={{
           width: 32, height: 32, borderRadius: 9, overflow: 'hidden',
@@ -201,15 +206,20 @@ function FlightRow({ f, accent }: { f: ScheduleRow; accent: string }) {
           <Text style={{ color: C.ink, fontWeight: '600', fontSize: 13.5 }} numberOfLines={1}>{f.airline_name}</Text>
           <Text style={{ color: C.muted, fontSize: 11, fontFamily: 'monospace', marginTop: 1 }}>{f.iata_number}</Text>
         </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
           <Text style={{ color: C.ink, fontWeight: '600', fontSize: 15, fontFamily: 'monospace' }}>{f.dep_time}</Text>
           <Text style={{ color: C.muted, fontSize: 11 }}>→</Text>
           <Text style={{ color: C.ink, fontWeight: '600', fontSize: 15, fontFamily: 'monospace' }}>{f.arr_time}</Text>
         </View>
       </View>
-      {/* Day bubbles + aircraft type — sunken */}
-      <View style={{ backgroundColor: C.sunken, borderTopWidth: 1, borderTopColor: C.border, paddingHorizontal: 12, paddingVertical: 9, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-        <DayBubbles days={f.days_of_week} size="sm" accent={accent} />
+      {/* Footer: day bubbles + duration — sunken */}
+      <View style={{
+        backgroundColor: C.sunken,
+        borderTopWidth: 1, borderTopColor: C.border,
+        paddingHorizontal: 12, paddingVertical: 9,
+        flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+      }}>
+        <DayBubbles days={f.days_of_week} accent={accent} />
         {f.duration_min > 0 && (
           <Text style={{ color: C.muted, fontSize: 10.5, fontFamily: 'monospace' }}>
             {durationLabel(f.duration_min)}
@@ -244,6 +254,8 @@ function BottomSheet({ dest, airport, onClose }: {
 
   if (!dest) return null
 
+  const airportName = airport === 'DAM' ? 'Damascus' : 'Aleppo'
+
   return (
     <Modal transparent animationType="none" visible={!!dest} onRequestClose={onClose}>
       <View style={{ flex: 1 }}>
@@ -252,27 +264,18 @@ function BottomSheet({ dest, airport, onClose }: {
           style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(22,22,22,0.45)' }}
         />
         <Animated.View style={{
-          position: 'absolute',
-          bottom: 0, left: 0, right: 0,
+          position: 'absolute', bottom: 0, left: 0, right: 0,
           maxHeight: '82%',
           backgroundColor: C.surface,
-          borderTopLeftRadius: 26,
-          borderTopRightRadius: 26,
-          borderTopWidth: 1,
-          borderColor: C.border,
+          borderTopLeftRadius: 26, borderTopRightRadius: 26,
+          borderTopWidth: 1, borderColor: C.border,
           transform: [{ translateY }],
-          shadowColor: C.ink,
-          shadowOffset: { width: 0, height: -14 },
-          shadowOpacity: 0.25,
-          shadowRadius: 34,
-          elevation: 16,
+          shadowColor: C.ink, shadowOffset: { width: 0, height: -14 }, shadowOpacity: 0.25, shadowRadius: 34, elevation: 16,
         }}>
-          {/* Drag handle */}
           <View style={{ alignItems: 'center', paddingTop: 10, paddingBottom: 4 }}>
             <View style={{ width: 38, height: 4, borderRadius: 2, backgroundColor: C.border }} />
           </View>
 
-          {/* Header */}
           <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: C.border }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
               <View>
@@ -314,7 +317,7 @@ function BottomSheet({ dest, airport, onClose }: {
             )}
           </View>
 
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: 10 }}>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 12, gap: 8 }}>
             {flights.map((f, i) => (
               <FlightRow key={`${f.id}-${i}`} f={f} accent={accent} />
             ))}
@@ -323,7 +326,7 @@ function BottomSheet({ dest, airport, onClose }: {
                 <Text style={{ color: C.muted, fontSize: 14 }}>No scheduled flights</Text>
               </View>
             )}
-            <View style={{ height: 32 }} />
+            <View style={{ height: 20 }} />
           </ScrollView>
         </Animated.View>
       </View>
@@ -380,25 +383,25 @@ export default function DestinationsScreen() {
 
   const handleClose = useCallback(() => setSelected(null), [])
   const accent = airport === 'ALP' ? C.alpAccent : C.damAccent
-  const airportName = airport === 'DAM' ? 'Damascus' : 'Aleppo'
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.canvas }}>
       {/* Header */}
       <View style={{
         backgroundColor: C.surface,
-        paddingHorizontal: 14, paddingTop: 10, paddingBottom: 10,
+        paddingHorizontal: 14, paddingTop: 8, paddingBottom: 12,
         borderBottomWidth: 1, borderBottomColor: C.border,
         gap: 10,
         shadowColor: C.ink, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.08, shadowRadius: 14, elevation: 4,
       }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', paddingHorizontal: 2 }}>
           <Text style={{ color: C.ink, fontWeight: '700', fontSize: 20, letterSpacing: -0.15 }}>Destinations</Text>
           {!loading && destinations.length > 0 && (
             <Text style={{ color: C.muted, fontSize: 11.5 }}>{destinations.length} cities</Text>
           )}
         </View>
-        <View style={{ flexDirection: 'row', backgroundColor: C.track, borderRadius: 10, padding: 3, gap: 3 }}>
+        {/* Airport toggle: "Damascus · DAM" / "Aleppo · ALP" */}
+        <View style={{ flexDirection: 'row', backgroundColor: C.track, borderRadius: 12, padding: 3, gap: 3 }}>
           {(['DAM', 'ALP'] as Airport[]).map(ap => {
             const active = airport === ap
             const apAccent = ap === 'ALP' ? C.alpAccent : C.damAccent
@@ -407,12 +410,12 @@ export default function DestinationsScreen() {
                 key={ap}
                 onPress={() => setAirport(ap)}
                 style={{
-                  flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center',
+                  flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center',
                   backgroundColor: active ? apAccent : 'transparent',
                 }}
               >
                 <Text style={{ color: active ? '#FFFFFF' : C.muted, fontWeight: active ? '700' : '600', fontSize: 13 }}>
-                  {ap === 'DAM' ? 'Damascus' : 'Aleppo'}
+                  {ap === 'DAM' ? 'Damascus · DAM' : 'Aleppo · ALP'}
                 </Text>
               </TouchableOpacity>
             )
@@ -420,22 +423,12 @@ export default function DestinationsScreen() {
         </View>
       </View>
 
-      {!loading && (
-        <Text style={{ color: C.muted, fontSize: 11.5, paddingHorizontal: 14, paddingVertical: 8 }}>
-          {destinations.length === 0
-            ? 'No routes found'
-            : `${destinations.length} destination${destinations.length === 1 ? '' : 's'} from ${airportName}`}
-        </Text>
-      )}
-
       {loading ? (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 }}>
           <ActivityIndicator size="large" color={accent} />
-          <Text style={{ color: C.muted, fontSize: 14 }}>Loading routes…</Text>
         </View>
       ) : destinations.length === 0 ? (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', gap: 8, paddingHorizontal: 24 }}>
-          <Text style={{ fontSize: 40 }}>✈</Text>
           <Text style={{ color: C.secondary, fontWeight: '600', fontSize: 15 }}>No routes found</Text>
           <Text style={{ color: C.muted, fontSize: 13, textAlign: 'center' }}>Try switching airport</Text>
         </View>
@@ -446,8 +439,8 @@ export default function DestinationsScreen() {
           renderItem={({ item }) => (
             <DestCard dest={item} onPress={() => setSelected(item)} accent={accent} />
           )}
-          contentContainerStyle={{ paddingBottom: 24 }}
-          style={{ backgroundColor: C.surface }}
+          contentContainerStyle={{ paddingHorizontal: 14, paddingTop: 12, paddingBottom: 32 }}
+          ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
         />
       )}
 

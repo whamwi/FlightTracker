@@ -18,7 +18,6 @@ import { Ionicons } from '@expo/vector-icons'
 import { API_BASE, city, airportFlag, airlineLogo, LOGO_WHITE_BG, durationLabel } from '../../lib/constants'
 import type { Airport } from '../../lib/types'
 
-// V2 Syria palette tokens
 const C = {
   canvas:    '#EDEBE0',
   surface:   '#FFFFFF',
@@ -28,10 +27,10 @@ const C = {
   ink:       '#161616',
   secondary: '#3D3A3B',
   muted:     '#8A8578',
+  faint:     '#B5AFA0',
   logoBg:    '#F7F5EC',
   damAccent: '#054239',
   alpAccent: '#6B1F2A',
-  bubble:    '#F7F5EC',
 }
 
 interface ScheduleRow {
@@ -75,6 +74,11 @@ function sortDays(days: string[]): string[] {
   )
 }
 
+function frequencyLabel(days: string[]): string {
+  if (days.length >= 7) return 'daily'
+  return `${days.length}×/wk`
+}
+
 function DayBubbles({ days, size = 'md', accent }: {
   days: string[]
   size?: 'sm' | 'md'
@@ -92,13 +96,13 @@ function DayBubbles({ days, size = 'md', accent }: {
             key={d}
             style={{
               width: dim, height: dim, borderRadius: radius,
-              backgroundColor: active ? accent : C.bubble,
+              backgroundColor: active ? accent : C.sunken,
               borderWidth: active ? 0 : 1,
               borderColor: C.border,
               justifyContent: 'center', alignItems: 'center',
             }}
           >
-            <Text style={{ color: active ? '#FFFFFF' : C.muted, fontSize, fontWeight: '600' }}>
+            <Text style={{ color: active ? '#FFFFFF' : C.faint, fontSize, fontWeight: '600' }}>
               {DOW_LABEL[d]}
             </Text>
           </View>
@@ -120,44 +124,69 @@ function AirlineCard({ airline, onPress, accent }: {
       .filter(Boolean)
   )]
 
+  const routeCount = airline.routes.length
+
   return (
     <TouchableOpacity
       onPress={onPress}
-      activeOpacity={0.7}
+      activeOpacity={0.75}
       style={{
-        borderBottomWidth: 1,
-        borderBottomColor: C.border,
-        paddingHorizontal: 14,
-        paddingVertical: 14,
+        backgroundColor: C.surface,
+        borderWidth: 1, borderColor: C.border,
+        borderRadius: 14,
+        padding: 13,
+        flexDirection: 'row',
+        gap: 11,
+        shadowColor: C.ink,
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.04,
+        shadowRadius: 2,
+        elevation: 1,
       }}
     >
-      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10, gap: 12 }}>
-        <View style={{
-          width: 44, height: 44, borderRadius: 12, overflow: 'hidden',
-          backgroundColor: LOGO_WHITE_BG.has(airline.prefix) ? C.surface : C.logoBg,
-          justifyContent: 'center', alignItems: 'center',
-          borderWidth: 1, borderColor: C.border,
-        }}>
-          <Image source={{ uri: airlineLogo(airline.prefix) }} style={{ width: 44, height: 44 }} resizeMode="contain" />
+      {/* Logo tile */}
+      <View style={{
+        width: 44, height: 44, borderRadius: 12, overflow: 'hidden',
+        backgroundColor: LOGO_WHITE_BG.has(airline.prefix) ? C.surface : C.logoBg,
+        justifyContent: 'center', alignItems: 'center',
+        borderWidth: 1, borderColor: C.border,
+        flexShrink: 0,
+      }}>
+        <Image source={{ uri: airlineLogo(airline.prefix) }} style={{ width: 44, height: 44 }} resizeMode="contain" />
+      </View>
+
+      {/* Right column */}
+      <View style={{ flex: 1, gap: 7 }}>
+        {/* Row 1: name + subtitle + flags */}
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <View style={{ flex: 1, marginRight: 8 }}>
+            <Text style={{ color: C.ink, fontWeight: '600', fontSize: 15, lineHeight: 19 }} numberOfLines={1}>
+              {airline.name}
+            </Text>
+            <Text style={{ color: C.muted, fontSize: 11, fontFamily: 'monospace', marginTop: 1 }}>
+              {airline.prefix} · {routeCount} {routeCount === 1 ? 'route' : 'routes'}
+            </Text>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 2, flexShrink: 0 }}>
+            {destFlags.slice(0, 3).map((flag, i) => (
+              <Text key={i} style={{ fontSize: 15 }}>{flag}</Text>
+            ))}
+            {destFlags.length > 3 && (
+              <Text style={{ color: C.muted, fontSize: 10, fontWeight: '600', alignSelf: 'center', marginLeft: 2 }}>
+                +{destFlags.length - 3}
+              </Text>
+            )}
+          </View>
         </View>
-        <View style={{ flex: 1 }}>
-          <Text style={{ color: C.ink, fontWeight: '600', fontSize: 15 }} numberOfLines={1}>{airline.name}</Text>
-          <Text style={{ color: C.muted, fontSize: 11, fontFamily: 'monospace', marginTop: 1 }}>
-            {airline.prefix} · {airline.routes.length} {airline.routes.length === 1 ? 'route' : 'routes'}
+
+        {/* Row 2: day bubbles + frequency label */}
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <DayBubbles days={airline.allDays} size="md" accent={accent} />
+          <Text style={{ color: C.muted, fontSize: 11, fontWeight: '500' }}>
+            {frequencyLabel(airline.allDays)}
           </Text>
         </View>
-        <View style={{ flexDirection: 'row', gap: 2 }}>
-          {destFlags.slice(0, 3).map((flag, i) => (
-            <Text key={i} style={{ fontSize: 20 }}>{flag}</Text>
-          ))}
-          {destFlags.length > 3 && (
-            <Text style={{ color: C.muted, fontSize: 11, fontWeight: '600', alignSelf: 'center' }}>
-              +{destFlags.length - 3}
-            </Text>
-          )}
-        </View>
       </View>
-      <DayBubbles days={airline.allDays} size="md" accent={accent} />
     </TouchableOpacity>
   )
 }
@@ -167,11 +196,9 @@ function RouteRow({ f, accent }: { f: ScheduleRow; accent: string }) {
     <View style={{
       borderRadius: 14,
       borderWidth: 1, borderColor: C.border,
-      marginHorizontal: 14, marginBottom: 8,
       overflow: 'hidden',
       shadowColor: C.ink, shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 2, elevation: 1,
     }}>
-      {/* Route times */}
       <View style={{ flexDirection: 'row', alignItems: 'center', padding: 12, paddingBottom: 10 }}>
         <View style={{ alignItems: 'flex-start', minWidth: 80 }}>
           <Text style={{ color: C.ink, fontWeight: '600', fontSize: 18, fontFamily: 'monospace' }}>{f.dep_time}</Text>
@@ -195,7 +222,6 @@ function RouteRow({ f, accent }: { f: ScheduleRow; accent: string }) {
           <Text style={{ color: C.muted, fontSize: 11, fontFamily: 'monospace', marginTop: 1 }}>{f.arr_iata}</Text>
         </View>
       </View>
-      {/* Day bubbles + flight info — sunken */}
       <View style={{ backgroundColor: C.sunken, borderTopWidth: 1, borderTopColor: C.border, paddingHorizontal: 12, paddingVertical: 9, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
         <DayBubbles days={f.days_of_week} size="sm" accent={accent} />
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -232,6 +258,13 @@ function BottomSheet({ airline, airport, onClose }: {
 
   if (!airline) return null
 
+  const outRoutes = airline.routes.filter(r => r.dep_iata === airport)
+  const inRoutes  = airline.routes.filter(r => r.arr_iata === airport)
+  const hasIn  = inRoutes.length > 0
+  const hasOut = outRoutes.length > 0
+  const routes = dir === 'out' ? outRoutes : inRoutes
+  const airportCity = airport === 'DAM' ? 'Damascus' : 'Aleppo'
+
   return (
     <Modal transparent animationType="none" visible={!!airline} onRequestClose={onClose}>
       <View style={{ flex: 1 }}>
@@ -255,12 +288,10 @@ function BottomSheet({ airline, airport, onClose }: {
           shadowRadius: 34,
           elevation: 16,
         }}>
-          {/* Drag handle */}
           <View style={{ alignItems: 'center', paddingTop: 10, paddingBottom: 4 }}>
             <View style={{ width: 38, height: 4, borderRadius: 2, backgroundColor: C.border }} />
           </View>
 
-          {/* Airline header */}
           <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: C.border }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 }}>
               <View style={{
@@ -285,7 +316,6 @@ function BottomSheet({ airline, airport, onClose }: {
               </TouchableOpacity>
             </View>
 
-            {/* Link buttons */}
             <View style={{ flexDirection: 'row', gap: 8 }}>
               {([
                 { icon: 'globe-outline',  label: 'Website',   url: airline.website_url },
@@ -314,46 +344,35 @@ function BottomSheet({ airline, airport, onClose }: {
             </View>
           </View>
 
-          {(() => {
-            const outRoutes = airline.routes.filter(r => r.dep_iata === airport)
-            const inRoutes  = airline.routes.filter(r => r.arr_iata === airport)
-            const hasIn = inRoutes.length > 0
-            const hasOut = outRoutes.length > 0
-            const routes = dir === 'out' ? outRoutes : inRoutes
-            const airportCity = airport === 'DAM' ? 'Damascus' : 'Aleppo'
-            return (
-              <>
-                {(hasOut && hasIn) && (
-                  <View style={{
-                    flexDirection: 'row', backgroundColor: C.track,
-                    borderRadius: 11, padding: 3, gap: 3,
-                    marginHorizontal: 16, marginVertical: 10,
-                  }}>
-                    {(['out', 'in'] as const).map(d => (
-                      <TouchableOpacity
-                        key={d}
-                        onPress={() => setDir(d)}
-                        style={{
-                          flex: 1, paddingVertical: 7, borderRadius: 9, alignItems: 'center',
-                          backgroundColor: dir === d ? C.ink : 'transparent',
-                        }}
-                      >
-                        <Text style={{ color: dir === d ? '#FFFFFF' : C.muted, fontWeight: '700', fontSize: 12.5 }}>
-                          {d === 'out' ? `From ${airportCity}` : `To ${airportCity}`}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                )}
-                <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: 10 }}>
-                  {routes.map((f, i) => (
-                    <RouteRow key={`${f.id}-${i}`} f={f} accent={accent} />
-                  ))}
-                  <View style={{ height: 32 }} />
-                </ScrollView>
-              </>
-            )
-          })()}
+          {hasOut && hasIn && (
+            <View style={{
+              flexDirection: 'row', backgroundColor: C.track,
+              borderRadius: 11, padding: 3, gap: 3,
+              marginHorizontal: 16, marginVertical: 10,
+            }}>
+              {(['out', 'in'] as const).map(d => (
+                <TouchableOpacity
+                  key={d}
+                  onPress={() => setDir(d)}
+                  style={{
+                    flex: 1, paddingVertical: 7, borderRadius: 9, alignItems: 'center',
+                    backgroundColor: dir === d ? C.ink : 'transparent',
+                  }}
+                >
+                  <Text style={{ color: dir === d ? '#FFFFFF' : C.muted, fontWeight: '700', fontSize: 12.5 }}>
+                    {d === 'out' ? `From ${airportCity}` : `To ${airportCity}`}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 12, gap: 8 }}>
+            {routes.map((f, i) => (
+              <RouteRow key={`${f.id}-${i}`} f={f} accent={accent} />
+            ))}
+            <View style={{ height: 32 }} />
+          </ScrollView>
         </Animated.View>
       </View>
     </Modal>
@@ -412,25 +431,25 @@ export default function AirlinesScreen() {
 
   const handleClose = useCallback(() => setSelected(null), [])
   const accent = airport === 'ALP' ? C.alpAccent : C.damAccent
-  const airportName = airport === 'DAM' ? 'Damascus' : 'Aleppo'
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.canvas }}>
       {/* Header */}
       <View style={{
         backgroundColor: C.surface,
-        paddingHorizontal: 14, paddingTop: 10, paddingBottom: 10,
+        paddingHorizontal: 14, paddingTop: 8, paddingBottom: 12,
         borderBottomWidth: 1, borderBottomColor: C.border,
         gap: 10,
         shadowColor: C.ink, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.08, shadowRadius: 14, elevation: 4,
       }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', paddingHorizontal: 2 }}>
           <Text style={{ color: C.ink, fontWeight: '700', fontSize: 20, letterSpacing: -0.15 }}>Airlines</Text>
           {!loading && airlines.length > 0 && (
-            <Text style={{ color: C.muted, fontSize: 11.5 }}>{airlines.length} flying to {airport}</Text>
+            <Text style={{ color: C.muted, fontSize: 11.5 }}>{airlines.length} airlines</Text>
           )}
         </View>
-        <View style={{ flexDirection: 'row', backgroundColor: C.track, borderRadius: 10, padding: 3, gap: 3 }}>
+        {/* Airport toggle: "Damascus · DAM" / "Aleppo · ALP" */}
+        <View style={{ flexDirection: 'row', backgroundColor: C.track, borderRadius: 12, padding: 3, gap: 3 }}>
           {(['DAM', 'ALP'] as Airport[]).map(ap => {
             const active = airport === ap
             const apAccent = ap === 'ALP' ? C.alpAccent : C.damAccent
@@ -439,12 +458,12 @@ export default function AirlinesScreen() {
                 key={ap}
                 onPress={() => setAirport(ap)}
                 style={{
-                  flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center',
+                  flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center',
                   backgroundColor: active ? apAccent : 'transparent',
                 }}
               >
                 <Text style={{ color: active ? '#FFFFFF' : C.muted, fontWeight: active ? '700' : '600', fontSize: 13 }}>
-                  {ap === 'DAM' ? 'Damascus' : 'Aleppo'}
+                  {ap === 'DAM' ? 'Damascus · DAM' : 'Aleppo · ALP'}
                 </Text>
               </TouchableOpacity>
             )
@@ -452,22 +471,12 @@ export default function AirlinesScreen() {
         </View>
       </View>
 
-      {!loading && (
-        <Text style={{ color: C.muted, fontSize: 11.5, paddingHorizontal: 14, paddingVertical: 8 }}>
-          {airlines.length === 0
-            ? 'No airlines found'
-            : `${airlines.length} airline${airlines.length === 1 ? '' : 's'} flying to ${airportName}`}
-        </Text>
-      )}
-
       {loading ? (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 }}>
           <ActivityIndicator size="large" color={accent} />
-          <Text style={{ color: C.muted, fontSize: 14 }}>Loading airlines…</Text>
         </View>
       ) : airlines.length === 0 ? (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', gap: 8, paddingHorizontal: 24 }}>
-          <Text style={{ fontSize: 40 }}>🛫</Text>
           <Text style={{ color: C.secondary, fontWeight: '600', fontSize: 15 }}>No airlines found</Text>
           <Text style={{ color: C.muted, fontSize: 13, textAlign: 'center' }}>Try switching airport</Text>
         </View>
@@ -478,8 +487,8 @@ export default function AirlinesScreen() {
           renderItem={({ item }) => (
             <AirlineCard airline={item} onPress={() => setSelected(item)} accent={accent} />
           )}
-          contentContainerStyle={{ paddingBottom: 24 }}
-          style={{ backgroundColor: C.surface }}
+          contentContainerStyle={{ paddingHorizontal: 14, paddingTop: 12, paddingBottom: 32 }}
+          ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor={accent} />
           }
