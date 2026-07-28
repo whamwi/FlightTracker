@@ -65,7 +65,7 @@ function calcDelay(schedHHMM: string | null | undefined, actual: string | null |
   return Math.round((actualMs - schedMs) / 60_000)
 }
 
-export function FlightCard({ f, view }: { f: Flight; view: ViewType }) {
+export function FlightCard({ f, view, hideBadge }: { f: Flight; view: ViewType; hideBadge?: boolean }) {
   const isArr      = view === 'arr'
   const cfg        = statusConfig(f.status)
   const showProgress = IN_FLIGHT.has(f.status) && !!f.actual_dep_utc && f.duration_min > 0
@@ -124,7 +124,7 @@ export function FlightCard({ f, view }: { f: Flight; view: ViewType }) {
               </Text>
             </View>
           </View>
-          <StatusBadge status={f.status} />
+          {!hideBadge && <StatusBadge status={f.status} />}
         </View>
 
         {/* Row 2: route */}

@@ -164,9 +164,7 @@ export default function MapTab() {
   const lastKnownRef     = useRef<Record<string, { lat: number; lon: number }>>({})
   const trackedRef       = useRef<Record<string, { a: Aircraft; lostAt: number; durationMin: number | null; revisedArrUtc: string | null }>>({})
   const schedDepartedRef = useRef<Record<string, BoardDeparted>>({})
-  // One FlightPredictor per callsign — mirrors web Map.tsx predictorRef
   const predictorRef     = useRef<Record<string, FlightPredictor>>({})
-
   useEffect(() => {
     fetch(`${BASE}/api/routes`)
       .then(r => r.json())
@@ -189,7 +187,7 @@ export default function MapTab() {
     const STALE_TTL_MS = 6 * 3_600_000  // 6-hour hard cleanup
 
     // Debug: trace specific callsigns through buildItems to diagnose disappearance
-    const DEBUG_CS = __DEV__ ? new Set(['ETD562', 'JZR178', 'ETD563', 'JZR179']) : new Set<string>()
+    const DEBUG_CS = __DEV__ ? new Set(['SYR381', 'FYC525', 'SYR502', 'FYC523']) : new Set<string>()
     const DBG = (cs: string, msg: string) => {
       if (DEBUG_CS.has(cs)) console.warn(`[FT|${cs}] ${msg}`)
     }
@@ -297,12 +295,13 @@ export default function MapTab() {
 
       let isArrived = !!a.actual_arr_utc
       let lat: number, lon: number, trk: number, isEstimated = true
+      DBG(cs, `S4 branch: isArrived=${isArrived} hasPred=${!!predictorRef.current[cs]} depC=${!!depC} arrC=${!!arrC} actual_arr_utc=${a.actual_arr_utc ?? 'null'}`)
 
       if (isArrived) {
-        // FR24 confirmed arrival — keep at destination for 90 min
+        // FR24 confirmed arrival — keep at destination for 30 min
         if (!arrC) { delete trackedRef.current[cs]; delete predictorRef.current[cs]; continue }
         const sinceArrMin = (now - new Date(a.actual_arr_utc!).getTime()) / 60_000
-        if (sinceArrMin > 90) { delete trackedRef.current[cs]; delete predictorRef.current[cs]; continue }
+        if (sinceArrMin > 30) { delete trackedRef.current[cs]; delete predictorRef.current[cs]; continue }
         lat = arrC[0]; lon = arrC[1]
         trk = depC ? brng(depC[0], depC[1], arrC[0], arrC[1]) : 0
         isEstimated = false
@@ -330,18 +329,18 @@ export default function MapTab() {
           DBG(cs, `S4 predictor: routeFraction=${disp.routeFraction.toFixed(3)} effDurMin=${Math.round(effDurMs/60000)} lat=${disp.lat?.toFixed(2)} lon=${disp.lon?.toFixed(2)}`)
 
           if (disp.routeFraction >= 0.99) {
-            // Predictor says arrived — snap to destination, expire 90 min later
+            // Predictor says arrived — snap to destination; require actual_arr_utc for confirmed style
             const depMs     = a.actual_dep_utc ? new Date(a.actual_dep_utc).getTime() : 0
             const effArrMs  = depMs + effDurMs
             const sinceExpMin = (now - effArrMs) / 60_000
             DBG(cs, `S4 arrivedGate: depMs=${depMs > 0 ? 'valid' : 'ZERO!'} effDurMin=${Math.round(effDurMs/60000)} sinceExpMin=${sinceExpMin.toFixed(1)}`)
-            if (sinceExpMin > 90) {
-              DBG(cs, `S4 DELETE sinceExpMin=${sinceExpMin.toFixed(1)} > 90`)
+            if (sinceExpMin > 30) {
+              DBG(cs, `S4 DELETE sinceExpMin=${sinceExpMin.toFixed(1)} > 30`)
               delete trackedRef.current[cs]; delete predictorRef.current[cs]; continue
             }
             lat = arrC[0]; lon = arrC[1]
             trk = brng(depC[0], depC[1], arrC[0], arrC[1])
-            isArrived = true; isEstimated = false
+            isArrived = !!a.actual_arr_utc; isEstimated = !isArrived
           } else {
             lat = disp.lat; lon = disp.lon; trk = disp.track_deg
             isEstimated = disp.isEstimated
@@ -377,7 +376,7 @@ export default function MapTab() {
       if (isArrived) {
         // Confirmed arrival — show at destination for 90 min
         const sinceArrMin = (now - new Date(actual_arr_utc!).getTime()) / 60_000
-        if (sinceArrMin > 90) continue
+        if (sinceArrMin > 30) continue
         covered.add(cs)
         lastKnownRef.current[cs] = { lat: arrC[0], lon: arrC[1] }
         trackedRef.current[cs] = {
@@ -442,16 +441,16 @@ export default function MapTab() {
 
       DBG(cs, `S5 predictor: routeFraction=${disp.routeFraction.toFixed(3)} lat=${disp.lat?.toFixed(2)} lon=${disp.lon?.toFixed(2)}`)
       if (disp.routeFraction >= 0.99) {
-        // Predictor says arrived — expire 90 min after estimated arrival
+        // Predictor says arrived — require actual_arr_utc for confirmed style (matches web)
         const effArrMs    = new Date(actual_dep_utc).getTime() + effDurMs
         const sinceExpMin = (now - effArrMs) / 60_000
         DBG(cs, `S5 arrivedGate: sinceExpMin=${sinceExpMin.toFixed(1)}`)
-        if (sinceExpMin > 90) {
-          DBG(cs, `S5 SKIP expired sinceExpMin=${sinceExpMin.toFixed(1)} > 90`)
+        if (sinceExpMin > 30) {
+          DBG(cs, `S5 SKIP expired sinceExpMin=${sinceExpMin.toFixed(1)} > 30`)
           continue
         }
         lat = arrC[0]; lon = arrC[1]; trk = brng(depC[0], depC[1], arrC[0], arrC[1])
-        isArrived = true
+        isArrived = !!actual_arr_utc
       } else {
         lat = disp.lat; lon = disp.lon; trk = disp.track_deg
       }
@@ -484,7 +483,7 @@ export default function MapTab() {
       })
     }
 
-    // ── Cleanup: remove predictors for flights that are no longer active ──────
+    // ── Cleanup: remove predictors for inactive flights ──
     for (const cs of Object.keys(predictorRef.current)) {
       if (!covered.has(cs) && !trackedRef.current[cs]) {
         delete predictorRef.current[cs]
@@ -495,9 +494,11 @@ export default function MapTab() {
   }, [])
 
   const load = useCallback(async () => {
+    if (__DEV__) console.log('[FT] poll start')
     try {
       const res = await fetch(`${BASE}/api/airspace`)
       const json = await res.json()
+      if (__DEV__) console.log(`[FT] poll ok ac=${json.aircraft?.length ?? 0} board=${json.boardDeparted?.length ?? 0}`)
       const now = Date.now()
 
       // Accumulate boardDeparted into persistent registry
@@ -514,7 +515,7 @@ export default function MapTab() {
       // Expire entries: 90 min past effective arrival
       for (const [cs, bd] of Object.entries(schedDepartedRef.current)) {
         if (bd.actual_arr_utc) {
-          if ((now - new Date(bd.actual_arr_utc).getTime()) / 60_000 > 90) {
+          if ((now - new Date(bd.actual_arr_utc).getTime()) / 60_000 > 30) {
             delete schedDepartedRef.current[cs]
           }
         } else {
@@ -523,7 +524,7 @@ export default function MapTab() {
             : (bd.actual_dep_utc && bd.duration_min > 0)
               ? new Date(bd.actual_dep_utc).getTime() + bd.duration_min * 60_000
               : null
-          if (effArrMs !== null && (now - effArrMs) / 60_000 > 90) {
+          if (effArrMs !== null && (now - effArrMs) / 60_000 > 30) {
             delete schedDepartedRef.current[cs]
           }
         }
@@ -575,9 +576,9 @@ export default function MapTab() {
         ))}
         {items.map(item => {
           const isSelected = selected?.key === item.key
-          const color = isSelected ? '#38bdf8'
-            : item.isAlp     ? '#f97316'
+          const color = isSelected   ? '#38bdf8'
             : item.isArrived ? '#9ca3af'
+            : item.isAlp     ? '#f97316'
             : '#16a34a'
 
           return (
@@ -586,22 +587,22 @@ export default function MapTab() {
               coordinate={{ latitude: item.lat, longitude: item.lon }}
               onPress={e => { e.stopPropagation(); setSelected(item) }}
               anchor={{ x: 0.5, y: 0.5 }}
-              tracksViewChanges={false}
+              tracksViewChanges
             >
               <View style={styles.markerWrap}>
                 <View style={{
-                  opacity: item.isArrived ? 0.35 : item.isEstimated ? 0.65 : 1,
+                  opacity: item.isArrived ? 0.35 : 1,
                   transform: [{ rotate: `${item.track}deg` }],
                 }}>
                   <MaterialIcons name="flight" size={22} color={color} />
                 </View>
                 <View style={styles.labelWrap}>
                   <Text style={[styles.labelText, {
-                    color: item.isAlp      ? '#f97316'
-                         : item.isArrived  ? '#4b5563'
-                         : item.isEstimated ? '#fbbf24'
-                         : '#4ade80',
+                    color: item.isArrived ? 'rgba(251,191,36,0.45)' : '#4ade80',
                   }]}>{item.callsign}</Text>
+                  {typeof item.alt_baro === 'number' && !item.isArrived && (
+                    <Text style={styles.altText}>{Math.round(item.alt_baro / 100) * 100}ft</Text>
+                  )}
                   {item.isArrived && (
                     <Text style={styles.arrivedText}>ARRIVED</Text>
                   )}
@@ -636,7 +637,7 @@ export default function MapTab() {
 
 const styles = StyleSheet.create({
   airportLabel: {
-    color: 'rgba(229,62,62,0.7)',
+    color: 'rgba(107,114,128,1)',
     fontSize: 9,
     fontWeight: '600',
     fontFamily: 'monospace',
@@ -647,10 +648,16 @@ const styles = StyleSheet.create({
   markerWrap:  { alignItems: 'center' },
   labelWrap:   { alignItems: 'center', marginTop: 2 },
   labelText: {
-    fontSize: 10, fontWeight: '700', fontFamily: 'monospace',
+    fontSize: 8, fontWeight: '700', fontFamily: 'monospace',
     textShadowColor: 'rgba(0,0,0,0.95)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 4,
+  },
+  altText: {
+    color: 'rgba(156,163,175,0.85)', fontSize: 8, fontWeight: '600', fontFamily: 'monospace',
+    textShadowColor: 'rgba(0,0,0,0.95)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
   arrivedText: {
     color: '#4b5563', fontSize: 8, fontWeight: '700', fontFamily: 'monospace',

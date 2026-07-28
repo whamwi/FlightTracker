@@ -133,7 +133,7 @@ export default function BoardScreen() {
   // Sort in Syria local time so midnight wrap is handled correctly
   const sorted = useMemo(() => {
     const filtered = flights.filter(f =>
-      view === 'arr' ? f.arr_iata === airport : f.dep_iata === airport
+      (view === 'arr' ? f.arr_iata === airport : f.dep_iata === airport) && f.status !== 'Unknown'
     )
     return [...filtered].sort((a, b) =>
       flightSyriaMin(a, view) - flightSyriaMin(b, view)
