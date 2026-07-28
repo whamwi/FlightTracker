@@ -209,8 +209,7 @@ export default function MapTab() {
 
   const routePathsRef  = useRef<Record<string, Waypoint[]>>({})
   const lastKnownRef   = useRef<Record<string, { lat: number; lon: number }>>({})
-  const prevItemsRef   = useRef<Record<string, DisplayItem>>({})
-  const gapStartRef    = useRef<Record<string, number>>({})
+  const trackedRef     = useRef<Record<string, { a: Aircraft; lostAt: number; durationMin: number | null }>>({})
 
   useEffect(() => {
     fetch(`${BASE}/api/routes`)
@@ -230,130 +229,180 @@ export default function MapTab() {
     const now = Date.now()
     const result: DisplayItem[] = []
     const covered = new Set<string>()
+    const freshCallsigns = new Set<string>()
+    const STALE_TTL_MS = 6 * 3_600_000  // 6 hours, mirrors web
 
+    // ── 1. Live ADS-B: add to result + stamp trackedRef as live ───────────────
     for (const a of aircraft) {
       if (!a.board_match || !a.lat || !a.lon) continue
       const cs = (a.flight ?? '').trim()
       if (!cs) continue
-      covered.add(cs)
+      freshCallsigns.add(cs)
       lastKnownRef.current[cs] = { lat: a.lat, lon: a.lon }
+      trackedRef.current[cs] = {
+        a,
+        lostAt: 0,
+        durationMin: a.duration_min ?? trackedRef.current[cs]?.durationMin ?? null,
+      }
+      covered.add(cs)
       const isArrived = !!a.actual_arr_utc
       const isAlp = a.arr_iata === 'ALP' || a.dep_iata === 'ALP'
-      // track fallback: ADS-B track → true_heading → route bearing dep→arr
       const depC = a.dep_iata ? AIRPORT[a.dep_iata] : null
       const arrC = a.arr_iata ? AIRPORT[a.arr_iata] : null
       const routeTrk = depC && arrC ? brng(depC[0], depC[1], arrC[0], arrC[1]) : 0
       const liveTrk = a.track ?? a.true_heading ?? routeTrk
       result.push({
-        key:cs, callsign:cs, label:cs,
-        lat:a.lat, lon:a.lon, track:liveTrk,
-        dep_iata:a.dep_iata, arr_iata:a.arr_iata,
-        actual_dep_utc:a.actual_dep_utc, actual_arr_utc:a.actual_arr_utc, revised_arr_utc:null,
-        dep_time_utc:a.dep_time_utc??null, arr_time_utc:a.arr_time_utc, duration_min:a.duration_min??null,
-        dep_delay_min:a.dep_delay_min??null, fraction:null,
-        t:a.t, alt_baro:a.alt_baro, gs:a.gs,
-        airline_iata:a.airline_iata, iata_number:a.iata_number,
-        isEstimated:false, isArrived, isAlp,
+        key: cs, callsign: cs, label: cs,
+        lat: a.lat, lon: a.lon, track: liveTrk,
+        dep_iata: a.dep_iata, arr_iata: a.arr_iata,
+        actual_dep_utc: a.actual_dep_utc, actual_arr_utc: a.actual_arr_utc, revised_arr_utc: null,
+        dep_time_utc: a.dep_time_utc ?? null, arr_time_utc: a.arr_time_utc,
+        duration_min: a.duration_min ?? null,
+        dep_delay_min: a.dep_delay_min ?? null, fraction: null,
+        t: a.t, alt_baro: a.alt_baro, gs: a.gs,
+        airline_iata: a.airline_iata, iata_number: a.iata_number,
+        isEstimated: false, isArrived, isAlp,
       })
     }
 
+    // ── 2. Mark dropped signals (lostAt=0 → lostAt=now) ──────────────────────
+    for (const [cs, entry] of Object.entries(trackedRef.current)) {
+      if (!freshCallsigns.has(cs) && entry.lostAt === 0) {
+        trackedRef.current[cs] = { ...entry, lostAt: now }
+      }
+    }
+
+    // ── 3. Pre-pass: push effective duration + arr time from boardDeparted
+    //       into stale trackedRef entries so DR uses the latest metadata ────────
     for (const bd of boardDeparted) {
-      const {callsign:cs,dep_iata,arr_iata,duration_min,
-             actual_dep_utc,actual_arr_utc,revised_arr_utc,iata_number,airline_iata,dep_delay_min} = bd
-      if (!cs||covered.has(cs)||!dep_iata||!arr_iata) continue
-      const depC=AIRPORT[dep_iata],arrC=AIRPORT[arr_iata]
-      if (!depC||!arrC) continue
-      const isArrived = !!actual_arr_utc
-      let lat: number,lon: number,trk: number
-      if (isArrived) {
-        const sinceArrMin=(now-new Date(actual_arr_utc!).getTime())/60_000
-        if (sinceArrMin>90) continue
-        lat=arrC[0];lon=arrC[1];trk=brng(depC[0],depC[1],arrC[0],arrC[1])
-      } else if (actual_dep_utc&&duration_min>0) {
-        const elapsedMin=(now-new Date(actual_dep_utc).getTime())/60_000
-        if (elapsedMin<0) continue
-        const rawF=elapsedMin/duration_min
-        if (rawF>1.5) continue
-        const timeFrac=Math.min(rawF,0.97)
-        const wps=routePathsRef.current[`${dep_iata}|${arr_iata}`]
-        if (wps?.length){
-          const lastKnown=lastKnownRef.current[cs]
-          const anchorF=lastKnown?nearestPathFraction(wps,lastKnown.lat,lastKnown.lon):0
-          const f=Math.min(Math.max(timeFrac,anchorF),0.97)
-          ;[lat,lon]=interpolatePath(wps,f);trk=bearingFromPath(wps,f)
-        } else {
-          const f=timeFrac
-          ;[lat,lon]=slerpGreatCircle(depC[0],depC[1],arrC[0],arrC[1],f);trk=bearingAlongPath(depC[0],depC[1],arrC[0],arrC[1],f)
-        }
-      } else continue
-      covered.add(cs)
-      const bdFrac=(!isArrived&&actual_dep_utc&&duration_min>0)
-        ?Math.min((now-new Date(actual_dep_utc).getTime())/60_000/duration_min,0.97):null
-      const isAlp=arr_iata==='ALP'||dep_iata==='ALP'
-      result.push({
-        key:cs,callsign:cs,label:cs,
-        lat,lon,track:trk,dep_iata,arr_iata,
-        actual_dep_utc,actual_arr_utc,revised_arr_utc:revised_arr_utc??null,
-        dep_time_utc:null,
-        arr_time_utc:actual_dep_utc&&duration_min>0?new Date(new Date(actual_dep_utc).getTime()+duration_min*60_000).toISOString():null,
-        duration_min,dep_delay_min:dep_delay_min??null,fraction:bdFrac,
-        t:null,alt_baro:null,gs:null,
-        airline_iata,iata_number,
-        isEstimated:true,isArrived,isAlp,
-      })
+      const entry = trackedRef.current[bd.callsign]
+      if (!entry || entry.lostAt === 0) continue
+      trackedRef.current[bd.callsign] = {
+        ...entry,
+        durationMin: bd.duration_min ?? entry.durationMin,
+        a: {
+          ...entry.a,
+          actual_dep_utc: bd.actual_dep_utc ?? entry.a.actual_dep_utc,
+          actual_arr_utc: bd.actual_arr_utc ?? entry.a.actual_arr_utc,
+        },
+      }
     }
 
-    // Gap-fill: hold planes visible during the 60s boardCache stale window that
-    // follows leaving the ADS-B radius. Two modes:
-    //   A) Moving estimate  — when actual_dep_utc + duration_min + airports are all
-    //      available, advance the marker along the route path.
-    //   B) Hold position    — when departure metadata is missing (e.g. just took
-    //      off, boardCache not yet refreshed), freeze at the last known live lat/lon.
-    // Both modes expire after GAP_HOLD_MS so zombie planes can't accumulate.
-    const GAP_HOLD_MS = 90_000
-    const resultKeys = new Set(result.map(i => i.key))
+    // ── 4. Dead-reckoning for stale trackedRef entries ────────────────────────
+    for (const [cs, entry] of Object.entries(trackedRef.current)) {
+      if (covered.has(cs)) continue
+      const { a, lostAt, durationMin } = entry
+      if (lostAt === 0) continue
 
-    // Release gapStart tracking for flights that came back (live or boardDeparted)
-    for (const cs of resultKeys) delete gapStartRef.current[cs]
+      if (now - lostAt > STALE_TTL_MS) { delete trackedRef.current[cs]; continue }
 
-    for (const [cs, prev] of Object.entries(prevItemsRef.current)) {
-      if (resultKeys.has(cs)) continue
-      if (prev.isArrived) continue
-
-      // Record when this callsign first entered the gap
-      if (!gapStartRef.current[cs]) gapStartRef.current[cs] = now
-      if (now - gapStartRef.current[cs] > GAP_HOLD_MS) continue
-
-      const dep_iata = prev.dep_iata ?? ''
-      const arr_iata = prev.arr_iata ?? ''
+      const isArrived = !!a.actual_arr_utc
+      const isAlp = a.arr_iata === 'ALP' || a.dep_iata === 'ALP'
+      const dep_iata = a.dep_iata ?? ''
+      const arr_iata = a.arr_iata ?? ''
       const depC = AIRPORT[dep_iata], arrC = AIRPORT[arr_iata]
 
-      // Mode A: moving estimate
-      if (prev.actual_dep_utc && prev.duration_min && depC && arrC) {
-        const elapsedMin = (now - new Date(prev.actual_dep_utc).getTime()) / 60_000
-        if (elapsedMin >= 0 && elapsedMin <= prev.duration_min * 1.5) {
-          const timeFrac = Math.min(elapsedMin / prev.duration_min, 0.97)
-          const wps = routePathsRef.current[`${dep_iata}|${arr_iata}`]
-          let lat: number, lon: number, trk: number
-          if (wps?.length) {
-            const lastKnown = lastKnownRef.current[cs]
-            const anchorF = lastKnown ? nearestPathFraction(wps, lastKnown.lat, lastKnown.lon) : 0
-            const f = Math.min(Math.max(timeFrac, anchorF), 0.97)
-            ;[lat, lon] = interpolatePath(wps, f); trk = bearingFromPath(wps, f)
+      let lat: number, lon: number, trk: number
+
+      if (isArrived) {
+        if (!arrC) { delete trackedRef.current[cs]; continue }
+        const sinceArrMin = (now - new Date(a.actual_arr_utc!).getTime()) / 60_000
+        if (sinceArrMin > 90) { delete trackedRef.current[cs]; continue }
+        lat = arrC[0]; lon = arrC[1]
+        trk = depC ? brng(depC[0], depC[1], arrC[0], arrC[1]) : 0
+      } else {
+        const effDur = durationMin ?? a.duration_min
+        if (a.actual_dep_utc && effDur && effDur > 0 && depC && arrC) {
+          const elapsedMin = (now - new Date(a.actual_dep_utc).getTime()) / 60_000
+          if (elapsedMin >= 0 && elapsedMin <= effDur * 1.5) {
+            const timeFrac = Math.min(elapsedMin / effDur, 0.97)
+            const wps = routePathsRef.current[`${dep_iata}|${arr_iata}`]
+            if (wps?.length) {
+              const lastKnown = lastKnownRef.current[cs]
+              const anchorF = lastKnown ? nearestPathFraction(wps, lastKnown.lat, lastKnown.lon) : 0
+              const f = Math.min(Math.max(timeFrac, anchorF), 0.97)
+              ;[lat, lon] = interpolatePath(wps, f); trk = bearingFromPath(wps, f)
+            } else {
+              ;[lat, lon] = slerpGreatCircle(depC[0], depC[1], arrC[0], arrC[1], timeFrac)
+              trk = bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], timeFrac)
+            }
           } else {
-            ;[lat, lon] = slerpGreatCircle(depC[0], depC[1], arrC[0], arrC[1], timeFrac)
-            trk = bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], timeFrac)
+            // Past 1.5× duration — hold at last known live position
+            const last = lastKnownRef.current[cs]
+            if (!last) { delete trackedRef.current[cs]; continue }
+            lat = last.lat; lon = last.lon; trk = a.track ?? a.true_heading ?? 0
           }
-          result.push({ ...prev, lat, lon, track: trk, isEstimated: true })
-          continue
+        } else {
+          // No dep metadata — hold at last known live lat/lon
+          const last = lastKnownRef.current[cs]
+          if (!last) { delete trackedRef.current[cs]; continue }
+          lat = last.lat; lon = last.lon; trk = a.track ?? a.true_heading ?? 0
         }
       }
 
-      // Mode B: hold at last known live lat/lon (covers null duration_min / null actual_dep_utc)
-      result.push({ ...prev, isEstimated: true })
+      covered.add(cs)
+      const effDurFinal = durationMin ?? a.duration_min ?? null
+      result.push({
+        key: cs, callsign: cs, label: cs,
+        lat, lon, track: trk,
+        dep_iata: a.dep_iata, arr_iata: a.arr_iata,
+        actual_dep_utc: a.actual_dep_utc, actual_arr_utc: a.actual_arr_utc, revised_arr_utc: null,
+        dep_time_utc: a.dep_time_utc ?? null, arr_time_utc: a.arr_time_utc,
+        duration_min: effDurFinal, dep_delay_min: a.dep_delay_min ?? null, fraction: null,
+        t: a.t, alt_baro: a.alt_baro, gs: a.gs,
+        airline_iata: a.airline_iata, iata_number: a.iata_number,
+        isEstimated: true, isArrived, isAlp,
+      })
     }
 
-    prevItemsRef.current = Object.fromEntries(result.map(i => [i.key, i]))
+    // ── 5. boardDeparted: flights never seen via ADS-B (no trackedRef entry) ──
+    for (const bd of boardDeparted) {
+      const { callsign: cs, dep_iata, arr_iata, duration_min,
+              actual_dep_utc, actual_arr_utc, revised_arr_utc, iata_number, airline_iata, dep_delay_min } = bd
+      if (!cs || covered.has(cs) || !dep_iata || !arr_iata) continue
+      const depC = AIRPORT[dep_iata], arrC = AIRPORT[arr_iata]
+      if (!depC || !arrC) continue
+      const isArrived = !!actual_arr_utc
+      let lat: number, lon: number, trk: number
+      if (isArrived) {
+        const sinceArrMin = (now - new Date(actual_arr_utc!).getTime()) / 60_000
+        if (sinceArrMin > 90) continue
+        lat = arrC[0]; lon = arrC[1]; trk = brng(depC[0], depC[1], arrC[0], arrC[1])
+      } else if (actual_dep_utc && duration_min > 0) {
+        const elapsedMin = (now - new Date(actual_dep_utc).getTime()) / 60_000
+        if (elapsedMin < 0) continue
+        const rawF = elapsedMin / duration_min
+        if (rawF > 1.5) continue
+        const timeFrac = Math.min(rawF, 0.97)
+        const wps = routePathsRef.current[`${dep_iata}|${arr_iata}`]
+        if (wps?.length) {
+          const lastKnown = lastKnownRef.current[cs]
+          const anchorF = lastKnown ? nearestPathFraction(wps, lastKnown.lat, lastKnown.lon) : 0
+          const f = Math.min(Math.max(timeFrac, anchorF), 0.97)
+          ;[lat, lon] = interpolatePath(wps, f); trk = bearingFromPath(wps, f)
+        } else {
+          ;[lat, lon] = slerpGreatCircle(depC[0], depC[1], arrC[0], arrC[1], timeFrac)
+          trk = bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], timeFrac)
+        }
+      } else continue
+      covered.add(cs)
+      const bdFrac = (!isArrived && actual_dep_utc && duration_min > 0)
+        ? Math.min((now - new Date(actual_dep_utc).getTime()) / 60_000 / duration_min, 0.97) : null
+      const isAlp = arr_iata === 'ALP' || dep_iata === 'ALP'
+      result.push({
+        key: cs, callsign: cs, label: cs,
+        lat, lon, track: trk, dep_iata, arr_iata,
+        actual_dep_utc, actual_arr_utc, revised_arr_utc: revised_arr_utc ?? null,
+        dep_time_utc: null,
+        arr_time_utc: actual_dep_utc && duration_min > 0
+          ? new Date(new Date(actual_dep_utc).getTime() + duration_min * 60_000).toISOString() : null,
+        duration_min, dep_delay_min: dep_delay_min ?? null, fraction: bdFrac,
+        t: null, alt_baro: null, gs: null,
+        airline_iata, iata_number,
+        isEstimated: true, isArrived, isAlp,
+      })
+    }
+
     setItems(result)
   }, [])
 
