@@ -562,6 +562,7 @@ export default function MapTab() {
               coordinate={{ latitude: item.lat, longitude: item.lon }}
               onPress={e => { e.stopPropagation(); setSelected(item) }}
               anchor={{ x: 0.5, y: 0.5 }}
+              tracksViewChanges={false}
             >
               <View style={styles.markerWrap}>
                 <View style={{

@@ -559,8 +559,10 @@ export class FlightPredictor {
       : 1
     const wKinAdj = wKin * nearDestPenalty
 
+    // No kinematic data — must use route regardless of weight
+    if (!hasKin) return { lat: routeLat, lon: routeLon, track_deg: routeTrack, altitude_ft: kinAlt }
     if (!hasRoute || wKinAdj >= 1.0) return { lat: kinLat, lon: kinLon, track_deg: kinTrack, altitude_ft: kinAlt }
-    if (!hasKin  || wKinAdj <= 0.0) return { lat: routeLat, lon: routeLon, track_deg: routeTrack, altitude_ft: kinAlt }
+    if (wKinAdj <= 0.0) return { lat: routeLat, lon: routeLon, track_deg: routeTrack, altitude_ft: kinAlt }
 
     // ── Penalise kinematic weight when it has drifted far from the route ─────
     const kinDevKm = haversineKm(kinLat, kinLon, routeLat, routeLon)
