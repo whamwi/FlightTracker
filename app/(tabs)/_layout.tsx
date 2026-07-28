@@ -1,8 +1,29 @@
 import { Tabs } from 'expo-router'
+import { Ionicons } from '@expo/vector-icons'
 
-// V2 accent — Forest (DAM default). Will match active airport globally when airport state is lifted.
-const ACTIVE_TINT = '#054239'
-const MUTED_TINT  = '#8A8578'
+// V2 Forest accent for DAM (default) active state
+const ACTIVE   = '#054239'
+const INACTIVE = '#8A8578'
+
+type IoniconsName = React.ComponentProps<typeof Ionicons>['name']
+
+function TabIcon({
+  name,
+  nameOutline,
+  focused,
+}: {
+  name: IoniconsName
+  nameOutline: IoniconsName
+  focused: boolean
+}) {
+  return (
+    <Ionicons
+      name={focused ? name : nameOutline}
+      size={22}
+      color={focused ? ACTIVE : INACTIVE}
+    />
+  )
+}
 
 export default function TabsLayout() {
   return (
@@ -14,44 +35,48 @@ export default function TabsLayout() {
           borderTopColor: '#D8D3BF',
           borderTopWidth: 1,
         },
-        tabBarActiveTintColor: ACTIVE_TINT,
-        tabBarInactiveTintColor: MUTED_TINT,
-        tabBarLabelStyle: { fontSize: 10.5, fontWeight: '600' },
+        tabBarActiveTintColor:   ACTIVE,
+        tabBarInactiveTintColor: INACTIVE,
+        tabBarLabelStyle: { fontSize: 10.5 },
       }}
     >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Flights',
-          tabBarIcon: ({ color }) => <TabIcon emoji="✈️" color={color} />,
-        }}
-      />
+      {/* Design order: Track · Flights · Destinations · Airlines */}
       <Tabs.Screen
         name="map"
         options={{
           title: 'Track',
-          tabBarIcon: ({ color }) => <TabIcon emoji="🗺️" color={color} />,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon name="navigate" nameOutline="navigate-outline" focused={focused} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="index"
+        options={{
+          title: 'Flights',
+          tabBarIcon: ({ focused }) => (
+            <TabIcon name="airplane" nameOutline="airplane-outline" focused={focused} />
+          ),
         }}
       />
       <Tabs.Screen
         name="destinations"
         options={{
           title: 'Destinations',
-          tabBarIcon: ({ color }) => <TabIcon emoji="🏙️" color={color} />,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon name="business" nameOutline="business-outline" focused={focused} />
+          ),
         }}
       />
       <Tabs.Screen
         name="airlines"
         options={{
           title: 'Airlines',
-          tabBarIcon: ({ color }) => <TabIcon emoji="🛫" color={color} />,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon name="ticket" nameOutline="ticket-outline" focused={focused} />
+          ),
         }}
       />
     </Tabs>
   )
-}
-
-function TabIcon({ emoji, color }: { emoji: string; color: string }) {
-  const { Text } = require('react-native')
-  return <Text style={{ fontSize: 18, opacity: color === ACTIVE_TINT ? 1 : 0.4 }}>{emoji}</Text>
 }
