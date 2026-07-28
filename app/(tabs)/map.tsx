@@ -22,6 +22,12 @@ const AIRPORT: Record<string, [number, number]> = {
   DMM:[26.4712,49.7979], MED:[24.5534,39.7051], ADB:[38.2924,27.1570],
   MJI:[32.8942,13.2759], ATH:[37.9364,23.9445], SVO:[55.9736,37.4125],
   SKD:[39.7005,66.9838], TAS:[41.2579,69.2812], EVN:[40.1473,44.3959],
+  // Additional airports present in web but previously missing from mobile
+  OTP:[44.5711,26.0850], VKO:[55.5965,37.2615], FCO:[41.8003,12.2389],
+  CDG:[49.0097, 2.5479], LHR:[51.4700,-0.4543], FRA:[50.0379, 8.5622],
+  LCA:[34.8751,33.6249], KHI:[24.9065,67.1608], NBO:[-1.3192,36.9275],
+  ADD:[ 8.9779,38.7993], KBP:[50.3450,30.8947], TIP:[32.6635,13.1515],
+  KRT:[15.5895,32.5532],
 }
 
 const SYRIA = new Set(['DAM', 'ALP', 'LTK', 'DEZ'])
@@ -299,7 +305,7 @@ export default function MapTab() {
 
       if (now - lostAt > STALE_TTL_MS) { delete trackedRef.current[cs]; continue }
 
-      const isArrived = !!a.actual_arr_utc
+      let isArrived = !!a.actual_arr_utc
       const isAlp = a.arr_iata === 'ALP' || a.dep_iata === 'ALP'
       const dep_iata = a.dep_iata ?? ''
       const arr_iata = a.arr_iata ?? ''
@@ -317,7 +323,16 @@ export default function MapTab() {
         const effDur = durationMin ?? a.duration_min
         if (a.actual_dep_utc && effDur && effDur > 0 && depC && arrC) {
           const elapsedMin = (now - new Date(a.actual_dep_utc).getTime()) / 60_000
-          if (elapsedMin >= 0 && elapsedMin <= effDur * 1.5) {
+          if (elapsedMin < 0) {
+            delete trackedRef.current[cs]; continue
+          } else if (elapsedMin >= effDur) {
+            // Past expected arrival — snap to destination airport
+            const sinceExpectedArrMin = elapsedMin - effDur
+            if (sinceExpectedArrMin > 90) { delete trackedRef.current[cs]; continue }
+            lat = arrC[0]; lon = arrC[1]
+            trk = depC ? brng(depC[0], depC[1], arrC[0], arrC[1]) : 0
+            isArrived = true
+          } else {
             const timeFrac = Math.min(elapsedMin / effDur, 0.97)
             const wps = routePathsRef.current[`${dep_iata}|${arr_iata}`]
             if (wps?.length) {
@@ -329,14 +344,9 @@ export default function MapTab() {
               ;[lat, lon] = slerpGreatCircle(depC[0], depC[1], arrC[0], arrC[1], timeFrac)
               trk = bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], timeFrac)
             }
-          } else {
-            // Past 1.5× duration — hold at last known live position
-            const last = lastKnownRef.current[cs]
-            if (!last) { delete trackedRef.current[cs]; continue }
-            lat = last.lat; lon = last.lon; trk = a.track ?? a.true_heading ?? 0
           }
         } else {
-          // No dep metadata — hold at last known live lat/lon
+          // No dep metadata or missing airport — hold at last known live lat/lon
           const last = lastKnownRef.current[cs]
           if (!last) { delete trackedRef.current[cs]; continue }
           lat = last.lat; lon = last.lon; trk = a.track ?? a.true_heading ?? 0
@@ -365,8 +375,9 @@ export default function MapTab() {
       if (!cs || covered.has(cs) || !dep_iata || !arr_iata) continue
       const depC = AIRPORT[dep_iata], arrC = AIRPORT[arr_iata]
       if (!depC || !arrC) continue
-      const isArrived = !!actual_arr_utc
+      let isArrived = !!actual_arr_utc
       let lat: number, lon: number, trk: number
+      let bdFrac: number | null = null
       if (isArrived) {
         const sinceArrMin = (now - new Date(actual_arr_utc!).getTime()) / 60_000
         if (sinceArrMin > 90) continue
@@ -375,17 +386,26 @@ export default function MapTab() {
         const elapsedMin = (now - new Date(actual_dep_utc).getTime()) / 60_000
         if (elapsedMin < 0) continue
         const rawF = elapsedMin / duration_min
-        if (rawF > 1.5) continue
-        const timeFrac = Math.min(rawF, 0.97)
-        const wps = routePathsRef.current[`${dep_iata}|${arr_iata}`]
-        if (wps?.length) {
-          const lastKnown = lastKnownRef.current[cs]
-          const anchorF = lastKnown ? nearestPathFraction(wps, lastKnown.lat, lastKnown.lon) : 0
-          const f = Math.min(Math.max(timeFrac, anchorF), 0.97)
-          ;[lat, lon] = interpolatePath(wps, f); trk = bearingFromPath(wps, f)
+        if (rawF >= 1.0) {
+          // Past expected arrival — snap to destination airport, treat as arrived.
+          // Expire 90 min after expected arrival (mirrors confirmed-arrival window).
+          const sinceExpectedArrMin = elapsedMin - duration_min
+          if (sinceExpectedArrMin > 90) continue
+          lat = arrC[0]; lon = arrC[1]; trk = brng(depC[0], depC[1], arrC[0], arrC[1])
+          isArrived = true
         } else {
-          ;[lat, lon] = slerpGreatCircle(depC[0], depC[1], arrC[0], arrC[1], timeFrac)
-          trk = bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], timeFrac)
+          const timeFrac = rawF
+          bdFrac = timeFrac
+          const wps = routePathsRef.current[`${dep_iata}|${arr_iata}`]
+          if (wps?.length) {
+            const lastKnown = lastKnownRef.current[cs]
+            const anchorF = lastKnown ? nearestPathFraction(wps, lastKnown.lat, lastKnown.lon) : 0
+            const f = Math.min(Math.max(timeFrac, anchorF), 0.97)
+            ;[lat, lon] = interpolatePath(wps, f); trk = bearingFromPath(wps, f)
+          } else {
+            ;[lat, lon] = slerpGreatCircle(depC[0], depC[1], arrC[0], arrC[1], timeFrac)
+            trk = bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], timeFrac)
+          }
         }
       } else continue
       covered.add(cs)
@@ -403,8 +423,6 @@ export default function MapTab() {
         lostAt: 0,
         durationMin: duration_min,
       }
-      const bdFrac = (!isArrived && actual_dep_utc && duration_min > 0)
-        ? Math.min((now - new Date(actual_dep_utc).getTime()) / 60_000 / duration_min, 0.97) : null
       const isAlp = arr_iata === 'ALP' || dep_iata === 'ALP'
       result.push({
         key: cs, callsign: cs, label: cs,
@@ -430,19 +448,27 @@ export default function MapTab() {
       const now = Date.now()
 
       // Accumulate boardDeparted into persistent registry (mirrors web's scheduleRef).
-      // Fresh data always overwrites; stale entries survive API cache gaps.
+      // Merge to preserve actual_dep_utc / actual_arr_utc if a later API response
+      // returns null for those fields (e.g. cache eviction mid-flight).
       for (const bd of (json.boardDeparted ?? []) as BoardDeparted[]) {
-        if (bd.callsign) schedDepartedRef.current[bd.callsign] = bd
+        if (!bd.callsign) continue
+        const prev = schedDepartedRef.current[bd.callsign]
+        schedDepartedRef.current[bd.callsign] = {
+          ...bd,
+          actual_dep_utc: bd.actual_dep_utc ?? prev?.actual_dep_utc ?? null,
+          actual_arr_utc: bd.actual_arr_utc ?? prev?.actual_arr_utc ?? null,
+        }
       }
 
-      // Expire entries: arrived >90 min ago, or >1.5× duration since dep
+      // Expire entries: 90 min past expected arrival (dep+duration) or confirmed arrival
       for (const [cs, bd] of Object.entries(schedDepartedRef.current)) {
         if (bd.actual_arr_utc) {
           if ((now - new Date(bd.actual_arr_utc).getTime()) / 60_000 > 90) {
             delete schedDepartedRef.current[cs]
           }
         } else if (bd.actual_dep_utc && bd.duration_min > 0) {
-          if ((now - new Date(bd.actual_dep_utc).getTime()) / 60_000 > bd.duration_min * 1.5) {
+          const sinceExpectedArr = (now - new Date(bd.actual_dep_utc).getTime()) / 60_000 - bd.duration_min
+          if (sinceExpectedArr > 90) {
             delete schedDepartedRef.current[cs]
           }
         }
