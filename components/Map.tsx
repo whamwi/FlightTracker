@@ -424,7 +424,7 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
   const aiata   = airlineIataFor(e.callsign, fs)
 
   const photoHtml = photoUrl
-    ? `<img src="${photoUrl}" style="width:calc(100% + 26px);height:110px;object-fit:cover;display:block;border-radius:4px 4px 0 0;margin:-9px -13px 0">`
+    ? `<img src="${photoUrl}" style="width:100%;height:110px;object-fit:cover;display:block;border-radius:4px 4px 0 0">`
     : ''
 
   const logoHtml = aiata
@@ -460,16 +460,18 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
 
   if (arrived && isSyria && e.arr_time_utc && e.arr_time_utc !== '—') {
     const localTime = bestArrISO ? toLocal(bestArrISO) : schedToLocal(e.arr_time_utc)
-    return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:200px;padding:9px 13px 11px">
+    return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:200px">
       ${photoHtml}
-      <div style="display:flex;align-items:center;margin-bottom:3px">
-        ${logoHtml}<b style="font-size:14px">${e.callsign}</b>
-        ${acType ? `<span style="margin-left:auto;color:#9ca3af;font-size:11px">${acType}</span>` : ''}
+      <div style="padding:9px 13px 11px">
+        <div style="display:flex;align-items:center;margin-bottom:3px">
+          ${logoHtml}<b style="font-size:14px">${e.callsign}</b>
+          ${acType ? `<span style="margin-left:auto;color:#9ca3af;font-size:11px">${acType}</span>` : ''}
+        </div>
+        ${routeLine}
+        <div style="color:#16a34a;font-size:11px">Arrived ${e.arr_iata} ~${localTime} local</div>
+        ${depDelay}${arrDelay}
+        <div style="color:#9ca3af;font-size:10px;margin-top:3px">Schedule-estimated · no live signal</div>
       </div>
-      ${routeLine}
-      <div style="color:#16a34a;font-size:11px">Arrived ${e.arr_iata} ~${localTime} local</div>
-      ${depDelay}${arrDelay}
-      <div style="color:#9ca3af;font-size:10px;margin-top:3px">Schedule-estimated · no live signal</div>
     </div>`
   }
 
@@ -496,18 +498,20 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
       </div>`
     : ''
 
-  return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:200px;padding:9px 13px 11px">
+  return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:200px">
     ${photoHtml}
-    <div style="display:flex;align-items:center;margin-bottom:3px">
-      ${logoHtml}<b style="font-size:14px">${e.callsign}</b>
-      <span style="color:#f59e0b;font-size:10px;font-weight:400;margin-left:4px"> ~ est</span>
-      ${acType ? `<span style="margin-left:auto;color:#9ca3af;font-size:11px">${acType}</span>` : ''}
+    <div style="padding:9px 13px 11px">
+      <div style="display:flex;align-items:center;margin-bottom:3px">
+        ${logoHtml}<b style="font-size:14px">${e.callsign}</b>
+        <span style="color:#f59e0b;font-size:10px;font-weight:400;margin-left:4px"> ~ est</span>
+        ${acType ? `<span style="margin-left:auto;color:#9ca3af;font-size:11px">${acType}</span>` : ''}
+      </div>
+      ${routeLine}
+      ${syriaLine}
+      ${depDelay}${arrDelay}
+      ${progressHtml}
+      <div style="color:#9ca3af;font-size:10px;margin-top:3px">Schedule projection · no signal yet</div>
     </div>
-    ${routeLine}
-    ${syriaLine}
-    ${depDelay}${arrDelay}
-    ${progressHtml}
-    <div style="color:#9ca3af;font-size:10px;margin-top:3px">Schedule projection · no signal yet</div>
   </div>`
 }
 
