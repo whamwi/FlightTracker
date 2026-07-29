@@ -670,6 +670,7 @@ export default function BoardPage() {
         .ft-controls { gap: 8px !important; flex-wrap: wrap !important; }
         .ft-airport-btn { padding: 8px 14px !important; }
         .ft-card-actions { display: none !important; }
+        .ft-body { align-items: stretch !important; }
         @media (min-width: 768px) {
           .ft-nav { padding: 0 28px !important; gap: 20px !important; height: 68px !important; }
           .ft-nav-tabs { display: flex !important; }
@@ -680,6 +681,7 @@ export default function BoardPage() {
           .ft-controls { gap: 12px !important; }
           .ft-airport-btn { padding: 8px 32px !important; }
           .ft-card-actions { display: flex !important; }
+          .ft-body { align-items: flex-start !important; }
         }
         @media (min-width: 1100px) {
           .ft-nav { padding: 0 40px !important; }
