@@ -252,7 +252,9 @@ interface EmbedFlight {
 }
 
 function toFlight(ef: EmbedFlight): Flight {
-  const prefix = (ef.iata_number ?? ef.callsign ?? '').replace(/[0-9].*/, '')
+  const _raw   = ef.iata_number ?? ef.callsign ?? ''
+  const _m     = _raw.match(/^([A-Z0-9]{2})\d/i)
+  const prefix = _m ? _m[1].toUpperCase() : _raw.replace(/[0-9].*/, '')
   const iata   = (prefix && AIRLINE_NAMES[prefix]) ? prefix : (ef.airline_iata ?? '')
   return {
     iata_number: ef.iata_number ?? ef.callsign, airline_iata: iata, country_flag: '',
