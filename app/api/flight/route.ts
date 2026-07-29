@@ -45,13 +45,21 @@ function resolveActualDep(f: any): string | null {
 function resolveActualArr(f: any): string | null {
   return f.fr24_actual_arr ?? (f.real_arr ? new Date((f.real_arr as number) * 1000).toISOString() : null)
 }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function resolveRevisedDep(f: any): string | null {
+  return f.fr24_revised_dep ?? (f.est_dep ? new Date((f.est_dep as number) * 1000).toISOString() : null)
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function resolveRevisedArr(f: any): string | null {
+  return f.fr24_revised_arr ?? (f.est_arr ? new Date((f.est_arr as number) * 1000).toISOString() : null)
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function effectiveStatusFor(f: any): { status: string; rank: number } {
   const base       = normaliseStatus(f.status)
   const actualDep  = resolveActualDep(f)
   const actualArr  = resolveActualArr(f)
-  const revisedArr = f.fr24_revised_arr ?? null
+  const revisedArr = resolveRevisedArr(f)
   const dur = (() => {
     if (actualDep && revisedArr) {
       const d = Math.round((new Date(revisedArr).getTime() - new Date(actualDep).getTime()) / 60_000)
@@ -75,7 +83,7 @@ function buildFlight(f: any, num: string, status: string, airlineMap: Record<str
   const airlineIata = f.airline_iata || PREFIX_TO_IATA[num.slice(0, 3)] || ''
   const al = airlineMap[airlineIata] ?? { name: f.airline ?? airlineIata, flag: '', icao: '' }
   const actualDep = resolveActualDep(f)
-  const revisedArr = f.fr24_revised_arr ?? null
+  const revisedArr = resolveRevisedArr(f)
   const dur = (() => {
     if (actualDep && revisedArr) {
       const d = Math.round((new Date(revisedArr).getTime() - new Date(actualDep).getTime()) / 60_000)
@@ -98,8 +106,8 @@ function buildFlight(f: any, num: string, status: string, airlineMap: Record<str
     status,
     actual_dep_utc:  resolveActualDep(f),
     actual_arr_utc:  resolveActualArr(f),
-    revised_dep_utc: f.fr24_revised_dep ?? null,
-    revised_arr_utc: f.fr24_revised_arr ?? null,
+    revised_dep_utc: resolveRevisedDep(f),
+    revised_arr_utc: resolveRevisedArr(f),
     aircraft_type:   f.aircraft_type ?? f.aircraft ?? null,
     aircraft_reg:    f.aircraft_reg  ?? f.reg     ?? null,
     dep_terminal:    f.dep_terminal     ?? null,
