@@ -8,28 +8,58 @@ import { airportCity, airportFlag as _apFlag, airportOffset, loadGeoData } from 
 const city = (iata: string) => airportCity[iata] ?? iata
 const airportFlag = (iata: string) => _apFlag[iata] ?? ''
 
-// ── Status badge config ──────────────────────────────────────────────────────
-const STATUS: Record<string, { label: string; cls: string; color: string }> = {
-  Scheduled:   { label: 'Scheduled',   cls: 'bg-gray-800 text-gray-400',     color: '#374151' },
-  Expected:    { label: 'Expected',    cls: 'bg-yellow-950 text-yellow-300', color: '#ca8a04' },
-  CheckIn:     { label: 'Check-in',    cls: 'bg-amber-950 text-amber-300',   color: '#d97706' },
-  Boarding:    { label: 'Boarding',    cls: 'bg-amber-900 text-amber-200',   color: '#f59e0b' },
-  GateClosed:  { label: 'Gate Closed', cls: 'bg-orange-950 text-orange-300', color: '#ea580c' },
-  Departed:    { label: 'Departed',    cls: 'bg-sky-900 text-sky-200',       color: '#0284c7' },
-  'En Route':  { label: 'En Route',    cls: 'bg-sky-900 text-sky-200',       color: '#0284c7' },
-  Approaching: { label: 'Approaching', cls: 'bg-teal-900 text-teal-200',     color: '#0d9488' },
-  Arrived:     { label: 'Arrived',     cls: 'bg-green-950 text-green-300',   color: '#16a34a' },
-  Landed:      { label: 'Arrived',     cls: 'bg-green-950 text-green-300',   color: '#16a34a' },
-  Cancelled:   { label: 'Cancelled',   cls: 'bg-red-950 text-red-400',       color: '#dc2626' },
-  Diverted:    { label: 'Diverted',    cls: 'bg-orange-900 text-orange-300', color: '#ea580c' },
-  Delayed:     { label: 'Delayed',     cls: 'bg-red-900 text-red-300',       color: '#ef4444' },
-  Unknown:     { label: 'Unknown',     cls: 'bg-gray-800 text-gray-500',     color: '#374151' },
+// ── Palette ──────────────────────────────────────────────────────────────────
+const C = {
+  bg:         '#EDEBE0',
+  surface:    '#FFFFFF',
+  sunken:     '#F7F5EC',
+  ink:        '#161616',
+  secondary:  '#3D3A3B',
+  muted:      '#8A8578',
+  border:     '#D8D3BF',
+  separator:  '#CFC9B2',
+  trackEmpty: '#E0DCCB',
+  forest:     '#054239',
+  forestMid:  '#428177',
+  forestLight:'#9EBFB8',
+  golden:     '#988561',
+  goldenBg:   '#F3EFE0',
+  goldenBdr:  '#DFD3B4',
+  goldenText: '#6E5F3C',
+  wine:       '#6B1F2A',
+  wineBg:     '#F1E6E7',
+  wineText:   '#6B1F2A',
 }
 
-const STATUS_ALIAS: Record<string, string> = {
-  Landed: 'Arrived',
-  Land:   'Arrived',
+// ── Status config ─────────────────────────────────────────────────────────────
+type StatusCfg = {
+  label: string
+  bg: string
+  text: string
+  dot?: string
+  border?: string
+  rail: string
+  strikethrough?: boolean
 }
+
+const STATUS: Record<string, StatusCfg> = {
+  Scheduled:   { label: 'Scheduled',   bg: '#F7F5EC', text: C.muted,      rail: C.border },
+  Expected:    { label: 'Expected',    bg: C.goldenBg, text: C.goldenText, dot: C.golden,    border: C.goldenBdr, rail: C.golden },
+  CheckIn:     { label: 'Check-in',   bg: C.goldenBg, text: C.goldenText, dot: C.golden,    border: C.goldenBdr, rail: C.golden },
+  Boarding:    { label: 'Boarding',   bg: C.goldenBg, text: C.goldenText, dot: C.golden,    border: C.goldenBdr, rail: C.golden },
+  GateClosed:  { label: 'Gate Closed',bg: C.goldenBg, text: C.goldenText, dot: C.golden,    border: C.goldenBdr, rail: C.golden },
+  Departed:    { label: 'Departed',   bg: C.forestMid, text: '#fff',      dot: '#fff',                           rail: C.forestMid },
+  'En Route':  { label: 'En route',   bg: C.forestMid, text: '#fff',      dot: '#fff',                           rail: C.forestMid },
+  Approaching: { label: 'Approaching',bg: C.forest,   text: '#EDEBE0',   dot: '#EDEBE0',                        rail: C.forestMid },
+  Arrived:     { label: 'Arrived',    bg: '#E6EFEC',  text: '#002623',   dot: C.forest,    border: '#B4CFC9',   rail: C.forestLight },
+  Landed:      { label: 'Arrived',    bg: '#E6EFEC',  text: '#002623',   dot: C.forest,    border: '#B4CFC9',   rail: C.forestLight },
+  Cancelled:   { label: 'Cancelled',  bg: C.wine,     text: '#fff',                                             rail: C.wine, strikethrough: true },
+  Diverted:    { label: 'Diverted',   bg: '#7f3100',  text: '#fff',                                             rail: '#7f3100' },
+  Delayed:     { label: 'Delayed',    bg: C.goldenBg, text: C.goldenText, dot: C.golden,    border: C.goldenBdr, rail: C.golden },
+  Unknown:     { label: 'Unknown',    bg: '#E4E1D2',  text: C.muted,                                            rail: C.border },
+}
+
+const STATUS_ALIAS: Record<string, string> = { Landed: 'Arrived', Land: 'Arrived' }
 
 const LOCAL_LOGOS = AIRLINE_LOGOS
 
@@ -59,18 +89,16 @@ type Flight = {
   arr_baggage: string | null
 }
 
-type Tab     = -1 | 0 | 1        // yesterday / today / tomorrow
+type Tab     = -1 | 0 | 1
 type View    = 'arr' | 'dep'
 type Airport = 'DAM' | 'ALP'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
 function syriaDate(offsetDays: number): string {
   const ms = Date.now() + 3 * 3_600_000 + offsetDays * 86_400_000
   return new Date(ms).toISOString().slice(0, 10)
 }
 
-// ── Airport UTC offsets (default = 3 = UTC+3, Syria's timezone) ─────────────
 function tzOffset(iata: string): number { return airportOffset[iata] ?? 3 }
 
 function utcHHMMtoLocal(hhmm: string, offsetH: number): string {
@@ -79,7 +107,6 @@ function utcHHMMtoLocal(hhmm: string, offsetH: number): string {
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
 }
 
-// Accepts either an ISO timestamp or a HH:MM UTC string
 function fmtLocal(raw: string | null | undefined, offsetH: number): string {
   if (!raw) return '—'
   if (raw.includes('T')) {
@@ -97,25 +124,17 @@ function durationLabel(min: number): string {
 
 function effectiveStatus(f: Flight): string {
   const s = STATUS_ALIAS[f.status] ?? f.status
-  // actual_arr_utc is ground truth — if the plane landed, override Cancelled/Unknown
   if (f.actual_arr_utc) return 'Arrived'
   if (s === 'Arrived' || s === 'Landed' || s === 'Cancelled' || s === 'Diverted') return s
-  // Departure happened — check if delayed vs schedule, or already landed
   if (f.actual_dep_utc) {
     const actMs = new Date(f.actual_dep_utc).getTime()
-    // If dep + block time is > 15 min in the past, the flight has landed
     if (f.duration_min && actMs + f.duration_min * 60_000 < Date.now() - 15 * 60_000) return 'Arrived'
-    const schedMs = new Date(`1970-01-01T${f.dep_time_utc}:00Z`).getTime()
-    const actHHMM = f.actual_dep_utc.slice(11, 16)
-    const actMin  = parseInt(actHHMM.slice(0, 2)) * 60 + parseInt(actHHMM.slice(3))
-    const schMin  = schedMs / 60_000
     return s !== 'Unknown' ? s : 'Departed'
   }
   if (f.revised_arr_utc && (s === 'Scheduled' || s === 'Unknown')) return 'Expected'
   return s
 }
 
-// Compute estimated arrival from ATD + schedule block time (fallback when no revised_arr_utc)
 function computedETA(f: Flight): string | null {
   if (!f.actual_dep_utc || !f.duration_min) return null
   if (f.actual_arr_utc || f.revised_arr_utc) return null
@@ -128,14 +147,10 @@ function calcDelay(schedHHMM: string, actualISO: string | null): number | null {
   const opDate   = actualISO.slice(0, 10)
   const actualMs = new Date(actualISO).getTime()
   let   schedMs  = new Date(`${opDate}T${schedHHMM}:00Z`).getTime()
-  // If scheduled HH:MM is >12 h after actual it belongs to the previous calendar day (midnight-crossing)
   if (schedMs - actualMs > 12 * 3_600_000) schedMs -= 86_400_000
   return Math.round((actualMs - schedMs) / 60_000)
 }
 
-// Sort key: actual → revised → scheduled, in Syria local minutes (UTC+3).
-// Midnight-crossing flights (arr 00:16 local) must sort to the start of the day,
-// not the end — raw UTC minutes would place them at minute 1276 instead of 16.
 function effectiveLocalMin(f: Flight, v: View): number {
   const iso = v === 'arr'
     ? (f.actual_arr_utc ?? f.revised_arr_utc)
@@ -145,15 +160,15 @@ function effectiveLocalMin(f: Flight, v: View): number {
     const d = new Date(localMs)
     return d.getUTCHours() * 60 + d.getUTCMinutes()
   }
-  // arr_time_utc / dep_time_utc are UTC HH:MM — shift to Syria local
   const hhmm = v === 'arr' ? f.arr_time_utc : f.dep_time_utc
   if (!hhmm) return 0
   const [h, m] = hhmm.split(':').map(Number)
   return (h * 60 + m + 3 * 60) % 1440
 }
 
-// ── Airline logo with CDN + local fallback ───────────────────────────────────
-function AirlineLogo({ iata, flag, name }: { iata: string; flag: string; name: string }) {
+// ── Airline logo ─────────────────────────────────────────────────────────────
+function AirlineLogo({ iata, name }: { iata: string; name: string }) {
+  const initials = iata.slice(0, 2).toUpperCase()
   const [src, setSrc] = useState<string>(
     LOCAL_LOGOS[iata] ?? (iata ? `https://images.flightsfrom.com/airlines/100/${iata}_100px.png` : '')
   )
@@ -168,22 +183,36 @@ function AirlineLogo({ iata, flag, name }: { iata: string; flag: string; name: s
   }
 
   if (failed || !src) {
-    return <span className="text-xl leading-none" title={name}>{flag}</span>
+    return (
+      <div style={{
+        width: 38, height: 38, borderRadius: 10, background: '#E4E1D2',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: C.muted, fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, fontWeight: 700,
+        flexShrink: 0,
+      }}>
+        {initials}
+      </div>
+    )
   }
+
   return (
-    <img
-      src={src}
-      alt={name}
-      title={name}
-      width={32}
-      height={32}
-      className={`rounded-lg object-cover shrink-0${LOGO_WHITE_BG.has(iata) ? ' bg-white p-0.5' : ''}`}
-      onError={handleError}
-    />
+    <div style={{
+      width: 38, height: 38, borderRadius: 10, overflow: 'hidden', flexShrink: 0,
+      background: LOGO_WHITE_BG.has(iata) ? '#fff' : '#F7F5EC',
+      border: `1px solid ${C.border}`,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <img
+        src={src} alt={name} title={name}
+        width={38} height={38}
+        style={{ objectFit: 'contain', width: 38, height: 38 }}
+        onError={handleError}
+      />
+    </div>
   )
 }
 
-// ── Flight progress bar (en-route only) ─────────────────────────────────────
+// ── Progress route (en-route) ────────────────────────────────────────────────
 function ProgressRoute({ depUtc, durationMin }: { depUtc: string; durationMin: number }) {
   const calc = () => {
     const dep = new Date(depUtc).getTime()
@@ -196,212 +225,308 @@ function ProgressRoute({ depUtc, durationMin }: { depUtc: string; durationMin: n
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [depUtc, durationMin])
 
-  const leftPct = Math.max(2, Math.min(98, pct))
-  // Grows from 1.1rem at departure to 1.7rem approaching
-  const size = 1.1 + (pct / 100) * 0.6
+  const remainingMin = Math.round((1 - pct / 100) * durationMin)
+  const fill  = Math.max(1, pct)
+  const empty = Math.max(1, 100 - pct)
 
   return (
-    <div className="flex-1 flex flex-col items-center gap-0.5">
-      {durationMin > 0 && (() => {
-        const remainingMin = Math.round((1 - pct / 100) * durationMin)
-        return <p className="text-gray-600 text-xs">{remainingMin > 0 ? durationLabel(remainingMin) : 'Arriving'}</p>
-      })()}
-      <div className="relative w-full" style={{ height: '1.75rem' }}>
-        {/* Track */}
-        <div className="absolute inset-x-0" style={{ top: '50%', transform: 'translateY(-50%)' }}>
-          <div className="w-full h-px bg-gray-800" />
-          <div
-            className="absolute top-0 left-0 h-px bg-sky-700 transition-all duration-1000"
-            style={{ width: `${pct}%` }}
-          />
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+      <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: C.muted, whiteSpace: 'nowrap' }}>
+        {remainingMin > 0 ? `${durationLabel(remainingMin)} left` : 'Arriving'}
+      </span>
+      <div style={{ display: 'flex', flexDirection: 'row', width: '100%', alignItems: 'center', height: 20 }}>
+        <div style={{ flex: fill, height: 4, borderRadius: 99, background: C.forestMid }} />
+        <div style={{
+          width: 18, height: 18, borderRadius: 9, background: C.surface, flexShrink: 0,
+          border: `1.5px solid ${C.forestMid}`, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: `0 2px 5px rgba(66,129,119,.35)`,
+        }}>
+          <svg width="9" height="9" viewBox="0 0 10 10" fill={C.forestMid}><path d="M.7 1.1 9.3 5 .7 8.9 2.5 5z"/></svg>
         </div>
-        {/* Moving plane */}
-        <div
-          className="absolute text-sky-400 transition-all duration-1000"
-          style={{
-            left: `${leftPct}%`,
-            top: '50%',
-            transform: 'translate(-50%, -50%)',
-            fontSize: `${size.toFixed(2)}rem`,
-            lineHeight: 1,
-          }}
-        >
-          ✈
+        <div style={{ flex: empty, height: 4, borderRadius: 99, background: C.trackEmpty }} />
+      </div>
+    </div>
+  )
+}
+
+// ── Arrived route ─────────────────────────────────────────────────────────────
+function ArrivedRoute({ durationMin }: { durationMin: number }) {
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+      {durationMin > 0 && (
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: C.muted, whiteSpace: 'nowrap' }}>
+          {durationLabel(durationMin)}
+        </span>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'row', width: '100%', alignItems: 'center', height: 20 }}>
+        <div style={{ flex: 1, height: 4, borderRadius: 99, background: C.forestLight, position: 'relative' }}>
+          <div style={{ position: 'absolute', inset: 0, background: C.forestLight, borderRadius: 99 }} />
+        </div>
+        <div style={{
+          width: 18, height: 18, borderRadius: 9, background: C.surface, flexShrink: 0,
+          border: `1.5px solid ${C.forestLight}`, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: '0 2px 5px rgba(22,22,22,.12)',
+        }}>
+          <svg width="9" height="9" viewBox="0 0 10 10" fill={C.forest} style={{ transform: 'rotate(45deg)' }}><path d="M.7 1.1 9.3 5 .7 8.9 2.5 5z"/></svg>
         </div>
       </div>
     </div>
   )
 }
 
-// ── Sub-components ───────────────────────────────────────────────────────────
-function StatusBadge({ status }: { status: string }) {
-  const cfg = STATUS[status] ?? STATUS.Unknown
+// ── Status badge ──────────────────────────────────────────────────────────────
+function StatusBadge({ status, view }: { status: string; view?: View }) {
+  const cfg = (() => {
+    if (view === 'dep' && status === 'Departed') {
+      return { ...STATUS.Departed, bg: '#E6EFEC', text: '#002623', dot: C.forest, border: '#B4CFC9' }
+    }
+    return STATUS[status] ?? STATUS.Unknown
+  })()
   return (
-    <span className={`inline-block text-xs font-semibold px-2 py-0.5 rounded-full ${cfg.cls}`}>
-      {cfg.label}
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
+      padding: cfg.dot ? '5px 11px 5px 9px' : '5px 11px',
+      borderRadius: 999, background: cfg.bg,
+      border: cfg.border ? `1px solid ${cfg.border}` : undefined,
+    }}>
+      {cfg.dot && <span style={{ width: 6, height: 6, borderRadius: 99, background: cfg.dot, display: 'block', flexShrink: 0 }} />}
+      <span style={{ font: `600 11.5px/1 'Instrument Sans', system-ui`, color: cfg.text, whiteSpace: 'nowrap' }}>
+        {cfg.label}
+      </span>
+    </div>
+  )
+}
+
+// ── Delay chip ────────────────────────────────────────────────────────────────
+function DelayChip({ min }: { min: number | null }) {
+  if (!min || Math.abs(min) < 1) return null
+  const isLate = min > 0
+  return (
+    <span style={{
+      fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, fontWeight: 600,
+      padding: '3px 5px', borderRadius: 5, lineHeight: 1,
+      background: isLate ? C.wineBg : '#E6EFEC',
+      color: isLate ? C.wineText : '#002623',
+    }}>
+      {isLate ? `+${min}m` : `${min}m`}
     </span>
   )
 }
 
-function actualColor(hasActual: boolean, delayMin: number | null): string {
-  if (!hasActual) return 'text-yellow-400'       // estimated / revised only
-  if (delayMin !== null && delayMin > 2) return 'text-orange-400'  // departed/arrived late
-  return 'text-green-400'                         // on time or early
-}
+// ── WhatsApp SVG ──────────────────────────────────────────────────────────────
+const WhatsAppSVG = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#1E8E4C" strokeWidth="1.85" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3.6 20.4 5 16.2A8.2 8.2 0 1 1 7.9 19z"/>
+    <path d="M8.9 8.6c.4 1.9 2.4 3.9 4.3 4.3l.9-1.2 1.9.9-.2 1.5c-3 .6-6.9-2.7-7.5-5.6l1.5-.3z"/>
+  </svg>
+)
 
-function DelayBadge({ min }: { min: number | null }) {
-  if (min == null || Math.abs(min) < 1) return null
-  return (
-    <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${min > 0 ? 'bg-red-900 text-red-300' : 'bg-green-900 text-green-300'}`}>
-      {min > 0 ? `+${min}m` : `${min}m`}
-    </span>
-  )
-}
+const PinSVG = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth="1.85" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 17v5"/>
+    <path d="M9 10.8V4h6v6.8a2 2 0 0 0 .55 1.38l1.9 2a1 1 0 0 1-.72 1.7H6.27a1 1 0 0 1-.72-1.7l1.9-2A2 2 0 0 0 8 10.8"/>
+  </svg>
+)
 
+// ── Flight card ───────────────────────────────────────────────────────────────
 function FlightCard({ f, view }: { f: Flight; view: View }) {
   const isArr   = view === 'arr'
   const status  = effectiveStatus(f)
+  const cfg     = STATUS[status] ?? STATUS.Unknown
   const isCancelled = status === 'Cancelled'
 
-  // Departures: dep = Syria local (+3), arr = destination local
-  // Arrivals:   dep = origin local,     arr = Syria local (+3)
   const depOff = isArr ? tzOffset(f.dep_iata) : 3
   const arrOff = isArr ? 3 : tzOffset(f.arr_iata)
 
-  const depSched  = fmtLocal(f.dep_time_utc, depOff)
-  const arrSched  = fmtLocal(f.arr_time_utc, arrOff)
-  const depActual = fmtLocal(f.actual_dep_utc ?? f.revised_dep_utc, depOff)
-  const arrActual = fmtLocal(f.actual_arr_utc ?? f.revised_arr_utc, arrOff)
+  const depTime = fmtLocal(f.actual_dep_utc ?? f.revised_dep_utc ?? f.dep_time_utc, depOff)
+  const arrTime = fmtLocal(f.actual_arr_utc ?? f.revised_arr_utc ?? f.arr_time_utc, arrOff)
 
   const depDelay = calcDelay(f.dep_time_utc, f.actual_dep_utc ?? f.revised_dep_utc)
   const arrDelay = calcDelay(f.arr_time_utc, f.actual_arr_utc ?? f.revised_arr_utc)
 
-  const statusCfg = STATUS[status] ?? STATUS.Unknown
-  const borderColor = isCancelled ? '#7f1d1d' : statusCfg.color
+  const hasActualDep = !!f.actual_dep_utc
+  const hasActualArr = !!f.actual_arr_utc
+  const hasEstArr    = !!f.revised_arr_utc && !hasActualArr
+  const hasComputedETA = !!computedETA(f) && !hasActualArr && !hasEstArr
+
   const depForProgress = f.actual_dep_utc ?? f.revised_dep_utc
     ?? (f.sched_dep_unix ? new Date(f.sched_dep_unix * 1000).toISOString() : null)
   const showProgress = (status === 'Departed' || status === 'En Route' || status === 'Approaching')
     && !!depForProgress && f.duration_min > 0 && !f.actual_arr_utc
+  const showArrived  = status === 'Arrived' && f.duration_min > 0
+
+  const depTimeColor = hasActualDep ? C.ink : f.revised_dep_utc ? C.goldenText : C.ink
+  const arrTimeColor = hasActualArr ? C.ink : hasEstArr ? C.goldenText : C.ink
+
+  const showTrack = showProgress
 
   return (
-    <div
-      className={`bg-gray-900 border border-gray-800 rounded-xl overflow-hidden flex flex-col ${isCancelled ? 'opacity-60' : ''}`}
-      style={{ borderLeftColor: borderColor, borderLeftWidth: '3px' }}
-    >
-      <div className="p-4 flex flex-col gap-3">
+    <div style={{
+      position: 'relative',
+      background: C.surface,
+      border: `1px solid ${C.border}`,
+      borderRadius: 16,
+      overflow: 'hidden',
+      boxShadow: isCancelled ? 'none' : '0 1px 2px rgba(22,22,22,.05), 0 12px 26px -22px rgba(22,22,22,.5)',
+      opacity: isCancelled ? 0.72 : 1,
+    }}>
+      {/* Status rail */}
+      <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, background: cfg.rail, zIndex: 1 }} />
 
-      {/* Row 1: Airline logo + name + status */}
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <AirlineLogo iata={f.airline_iata} flag={f.country_flag} name={f.airline_name} />
-          <div className="min-w-0">
-            <p className="text-white font-semibold text-sm leading-tight truncate">{f.airline_name}</p>
-            <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-gray-300 text-xs font-mono font-medium">{f.iata_number}</span>
-            </div>
-          </div>
+      {/* Header */}
+      <div style={{ padding: '14px 16px 13px 20px', display: 'flex', alignItems: 'center', gap: 11 }}>
+        <AirlineLogo iata={f.airline_iata} name={f.airline_name} />
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <span style={{
+            font: `600 14.5px/1.1 'Instrument Sans', system-ui`, color: C.ink,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            textDecoration: isCancelled ? 'line-through' : 'none',
+            textDecorationColor: '#C4BEAE',
+          }}>
+            {f.airline_name}
+          </span>
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: C.muted, letterSpacing: '.07em' }}>
+            {f.iata_number}{f.aircraft_type ? ` · ${f.aircraft_type}` : ''}
+          </span>
         </div>
-        <StatusBadge status={status} />
+
+        <StatusBadge status={status} view={view} />
+
+        {showTrack && (
+          <Link href="/" style={{
+            display: 'flex', alignItems: 'center', gap: 6, padding: '7px 12px 7px 10px',
+            borderRadius: 9, background: C.forest, textDecoration: 'none',
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+              <g transform="translate(1.6 -1) scale(0.86)"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></g>
+              <path d="M2.2 21.6c1.6-1.7 3.4-3.2 5.5-4.4" strokeDasharray="2.3 2.5"/>
+            </svg>
+            <span style={{ font: `600 12px/1 'Instrument Sans', system-ui`, color: '#fff' }}>Track</span>
+          </Link>
+        )}
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 12, marginLeft: 2, borderLeft: `1px solid ${C.trackEmpty}` }}>
+          <button title="Pin flight" style={{
+            width: 30, height: 30, borderRadius: 9, background: C.sunken, border: `1px solid ${C.trackEmpty}`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+          }}>
+            <PinSVG />
+          </button>
+          <button title="Send on WhatsApp" style={{
+            width: 30, height: 30, borderRadius: 9, background: '#E9F5EC', border: '1px solid #C9E6D3',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+          }}>
+            <WhatsAppSVG />
+          </button>
+        </div>
       </div>
 
-      {/* Row 2: Route */}
-      <div className="flex items-center gap-2">
-        <div className="text-left min-w-[5rem]">
-          <p className="text-white font-bold text-sm leading-tight truncate">{airportFlag(f.dep_iata)} {city(f.dep_iata)}</p>
-          <p className="text-gray-500 text-xs font-mono text-center">{f.dep_iata}</p>
+      {/* Footer */}
+      <div style={{ borderTop: `1px dashed ${C.separator}`, background: C.sunken, padding: '13px 16px 15px 20px', display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+
+        {/* Dep */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5, width: 118, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 14 }}>{airportFlag(f.dep_iata)}</span>
+            <span style={{ font: `600 13.5px/1.1 'Instrument Sans', system-ui`, color: isCancelled ? C.secondary : C.ink, whiteSpace: 'nowrap' }}>
+              {city(f.dep_iata)}
+            </span>
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: C.muted, letterSpacing: '.06em' }}>{f.dep_iata}</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+            <span style={{
+              font: `600 20px/1 'IBM Plex Mono', monospace`,
+              color: isCancelled ? '#A6A093' : depTimeColor,
+              textDecoration: isCancelled ? 'line-through' : 'none',
+            }}>
+              {depTime}
+            </span>
+            {!isCancelled && <DelayChip min={depDelay} />}
+          </div>
         </div>
-        {showProgress && depForProgress ? (
+
+        {/* Middle: track */}
+        {isCancelled ? (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 5 }}>
+            <span style={{ font: `500 11px/1 'Instrument Sans', system-ui`, color: C.muted, textAlign: 'center' }}>
+              Cancelled
+            </span>
+          </div>
+        ) : showProgress && depForProgress ? (
           <ProgressRoute depUtc={depForProgress} durationMin={f.duration_min} />
+        ) : showArrived ? (
+          <ArrivedRoute durationMin={f.duration_min} />
         ) : (
-          <div className="flex-1 flex flex-col items-center gap-0.5">
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, paddingTop: 5 }}>
             {f.duration_min > 0 && (
-              <p className="text-gray-600 text-xs">{durationLabel(f.duration_min)}</p>
+              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: C.muted, whiteSpace: 'nowrap' }}>
+                {durationLabel(f.duration_min)}
+              </span>
             )}
-            <div className="flex items-center gap-1 w-full">
-              <div className="flex-1 h-px bg-gray-700" />
-              <span className="text-gray-600 text-xs">✈</span>
-              <div className="flex-1 h-px bg-gray-700" />
-            </div>
+            <div style={{ width: '100%', height: 4, borderRadius: 99, background: C.trackEmpty }} />
+            {(isArr ? f.arr_gate : f.dep_gate) && (
+              <span style={{ font: `600 10.5px/1 'Instrument Sans', system-ui`, color: C.goldenText }}>
+                Gate {isArr ? f.arr_gate : f.dep_gate}
+              </span>
+            )}
           </div>
         )}
-        <div className="text-right min-w-[5rem]">
-          <p className="text-white font-bold text-sm leading-tight truncate">{airportFlag(f.arr_iata)} {city(f.arr_iata)}</p>
-          <p className="text-gray-500 text-xs font-mono text-center">{f.arr_iata}</p>
+
+        {/* Arr */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5, width: 118, alignItems: 'flex-end', minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ font: `600 13.5px/1.1 'Instrument Sans', system-ui`, color: isCancelled ? C.secondary : C.ink, whiteSpace: 'nowrap' }}>
+              {city(f.arr_iata)}
+            </span>
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: C.muted, letterSpacing: '.06em' }}>{f.arr_iata}</span>
+            <span style={{ fontSize: 14 }}>{airportFlag(f.arr_iata)}</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+            {!isCancelled && isArr && <DelayChip min={arrDelay} />}
+            {hasEstArr && !isCancelled && (
+              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, fontWeight: 600, padding: '3px 5px', borderRadius: 5, background: C.goldenBg, color: C.goldenText }}>est.</span>
+            )}
+            {hasComputedETA && !isCancelled && (
+              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, fontWeight: 600, padding: '3px 5px', borderRadius: 5, background: C.goldenBg, color: C.goldenText }}>~</span>
+            )}
+            <span style={{
+              font: `600 20px/1 'IBM Plex Mono', monospace`,
+              color: isCancelled ? '#A6A093' : arrTimeColor,
+              textDecoration: isCancelled ? 'line-through' : 'none',
+            }}>
+              {hasComputedETA && !isCancelled ? fmtLocal(computedETA(f), arrOff) : arrTime}
+            </span>
+          </div>
         </div>
-      </div>
-
-      {/* Row 3: Times + details */}
-      <div className="flex items-start justify-between gap-2">
-
-        <div className="min-w-[3.5rem]">
-          <p className="text-gray-500 text-xs mb-0.5">Departure</p>
-          <p className={`font-mono font-semibold text-base ${
-            isCancelled       ? 'line-through text-gray-600' :
-            f.actual_dep_utc  ? 'text-green-400' :
-            f.revised_dep_utc ? 'text-yellow-400' :
-                                'text-white'
-          }`}>
-            {(f.actual_dep_utc || f.revised_dep_utc) ? depActual : depSched}
-          </p>
-          <DelayBadge min={depDelay} />
-        </div>
-
-        <div className="flex-1 flex flex-col items-center justify-center gap-0.5">
-          {f.aircraft_type && <p className="text-gray-600 text-xs">{f.aircraft_type}</p>}
-          {(isArr ? f.arr_terminal : f.dep_terminal) && (
-            <p className="text-gray-500 text-xs">T{isArr ? f.arr_terminal : f.dep_terminal}</p>
-          )}
-          {(isArr ? f.arr_gate : f.dep_gate) && (
-            <p className="text-gray-500 text-xs">Gate {isArr ? f.arr_gate : f.dep_gate}</p>
-          )}
-          {isArr && f.arr_baggage && (
-            <p className="text-sky-600 text-xs">Belt {f.arr_baggage}</p>
-          )}
-        </div>
-
-        <div className="min-w-[3.5rem] text-right">
-          <p className="text-gray-500 text-xs mb-0.5">Arrival</p>
-          <p className={`font-mono font-semibold text-base ${
-            isCancelled       ? 'line-through text-gray-600' :
-            f.actual_arr_utc  ? 'text-green-400' :
-            f.revised_arr_utc ? 'text-yellow-400' :
-                                'text-white'
-          }`}>
-            {(f.actual_arr_utc || f.revised_arr_utc) ? arrActual : arrSched}
-          </p>
-          {computedETA(f) && !f.actual_arr_utc && !f.revised_arr_utc && !isCancelled && (
-            <p className="font-mono text-xs mt-0.5 text-orange-400" title="Estimated (ATD + block time)">
-              ~{fmtLocal(computedETA(f), arrOff)}
-            </p>
-          )}
-          {isArr && <DelayBadge min={arrDelay} />}
-        </div>
-      </div>
-
       </div>
     </div>
   )
 }
 
-// ── Main page ────────────────────────────────────────────────────────────────
-
-const TAB_LABELS: Record<Tab, string> = { [-1]: 'Yesterday', 0: 'Today', 1: 'Tomorrow' }
-
+// ── Tab date label ────────────────────────────────────────────────────────────
 function tabDateLabel(offset: number): string {
   const d = syriaDate(offset)
   return new Date(d + 'T12:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
 }
 
+// ── Plane SVG ─────────────────────────────────────────────────────────────────
+const LogoPlane = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#EDEBE0" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2 22h20"/>
+    <path d="M6.36 17.4 4 17l-2-4 1.1-.55a2 2 0 0 1 1.8 0l.7.35 1.7-3.4 1.9-.95a2 2 0 0 1 1.8 0l.7.35"/>
+    <path d="m14.5 12.5 2.5-5.5a2 2 0 0 1 1.5-1.1l2.9-.5a1 1 0 0 1 1.1 1.3l-1.1 3a2 2 0 0 1-1.1 1.2L6.4 17.4"/>
+  </svg>
+)
+
+// ── Main page ─────────────────────────────────────────────────────────────────
 export default function BoardPage() {
   const [tab, setTab]         = useState<Tab>(0)
   const [view, setView]       = useState<View>('arr')
   const [airport, setAirport] = useState<Airport>('DAM')
   const [flights, setFlights] = useState<Flight[]>([])
   const [loading, setLoading] = useState(true)
-  const [date, setDate]               = useState('')
+  const [date, setDate]       = useState('')
 
-  // Version counter: each load call captures a version; stale completions are discarded.
-  // Prevents the silent auto-refresh (tab=0) from overwriting a newer tab switch load.
   const loadVer = useRef(0)
 
   const load = useCallback(async (offsetDays: number, silent = false) => {
@@ -420,13 +545,6 @@ export default function BoardPage() {
     }
   }, [])
 
-  // Warm the FR24 cache for a given airport: fetch the live widget data from FR24
-  // and write it through to fr24_daily_cache so the board picks up intraday status updates.
-  // depth=0 (default): also warms origin airports of arrivals so their "Departed" status
-  // wins in the flightboard dedup over the destination's stale "Scheduled" arrival entry.
-  // depth=1: leaf call — only writes the airport's own data, no further recursion.
-  // Always holds the latest load function so warmFR24Cache can call it without
-  // being in its dependency array (warmFR24Cache has [] deps to avoid re-creation).
   const loadRef = useRef(load)
   useEffect(() => { loadRef.current = load }, [load])
 
@@ -464,16 +582,12 @@ export default function BoardPage() {
           const flight = normFlight(f); if (!flight) continue
           bucket(new Date(flight.sched_arr * 1000).toLocaleDateString('en-CA', { timeZone: TZ })).arrivals.push(flight)
         }
-        // Wait for ALL cache writes to finish, then reload the board (depth=0 only —
-        // origin-airport warms at depth=1 don't need to trigger a reload themselves).
         const writes = Object.entries(byDate).map(([d, v]) =>
           fetch('/api/fr24-cache', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ airport_iata: airportCode, flight_date: d, ...v }) }).catch(() => {})
         )
         if (depth === 0) {
           Promise.all(writes).then(() => loadRef.current(0, true)).catch(() => {})
         }
-        // Warm origin airports of arrivals so the flightboard can show "Departed" status
-        // for in-flight arrivals (the origin knows departure status; destination only knows landing).
         if (depth === 0) {
           const origins = new Set<string>()
           for (const f of (sched.arrivals?.data ?? [])) {
@@ -499,14 +613,11 @@ export default function BoardPage() {
     return () => { clearInterval(loadTimer); clearInterval(warmTimer) }
   }, [tab, load, warmFR24Cache])
 
-  // On mount: warm both airports. Reload is triggered inside warmFR24Cache once writes land.
   useEffect(() => {
     warmFR24Cache('DAM')
     warmFR24Cache('ALP')
   }, [warmFR24Cache])
 
-  // When the user switches airport tabs: warm the selected airport, then silently
-  // reload the board ~4 s later so the freshly-written cache data is visible immediately.
   const mountedRef = useRef(false)
   useEffect(() => {
     if (!mountedRef.current) { mountedRef.current = true; return }
@@ -516,13 +627,10 @@ export default function BoardPage() {
   }, [airport]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const byViewAndAirport = (() => {
-    // Cache is bucketed by Syria operating date (sched_dep for dep, sched_arr for arr),
-    // so what's in today's cache belongs to today — no midnight-crossing adjustments needed.
     if (view === 'dep') return flights.filter(f => f.dep_iata === airport)
     return flights.filter(f => f.arr_iata === airport)
   })()
 
-  // Sort by effective time: actual → revised → scheduled (Syria local minutes)
   const sorted = [...byViewAndAirport]
     .filter(f => effectiveStatus(f) !== 'Unknown')
     .sort((a, b) => effectiveLocalMin(a, view) - effectiveLocalMin(b, view))
@@ -532,143 +640,300 @@ export default function BoardPage() {
   const cancelled = sorted.filter(f => effectiveStatus(f) === 'Cancelled').length
   const enroute   = sorted.filter(f => ['En Route', 'Departed', 'Approaching'].includes(effectiveStatus(f))).length
 
-  const dateLabel = date
-    ? new Date(date + 'T12:00:00Z').toLocaleDateString('en-GB', {
-        weekday: 'long', day: 'numeric', month: 'long'
-      })
-    : ''
-
   const nowSyriaHHMM = (() => {
     const d = new Date(Date.now() + 3 * 3_600_000)
     return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
   })()
 
   const nowSyriaMin = Math.floor((Date.now() + 3 * 3_600_000) / 60_000) % 1440
-
   const nowIdx = tab === 0
     ? sorted.findIndex(f => effectiveLocalMin(f, view) >= nowSyriaMin)
     : -1
 
-  return (
-    <div className="min-h-screen bg-gray-950 text-white">
+  const dateLabel = date
+    ? new Date(date + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
+    : ''
 
-      {/* ── Header ── */}
-      <div className="sticky top-0 z-20 bg-gray-950/95 backdrop-blur border-b border-gray-800">
-        <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <Link href="/" className="text-gray-400 hover:text-white text-sm transition-colors">
-              ← Map
-            </Link>
-            <span className="text-gray-700">|</span>
-            <h1 className="font-semibold text-base">Flight Board</h1>
+  const airportLabel = airport === 'DAM' ? 'Damascus International · DAM' : 'Aleppo International · ALP'
+  const viewTitle    = view === 'arr' ? 'Arrivals' : 'Departures'
+  const tabTitle     = tab === 0 ? 'today' : tab === -1 ? 'yesterday' : 'tomorrow'
+
+  return (
+    <div style={{ minHeight: '100vh', background: C.bg, fontFamily: "'Instrument Sans', system-ui, sans-serif" }}>
+
+      {/* ── Nav bar ── */}
+      <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, padding: '0 40px', display: 'flex', alignItems: 'center', gap: 28, height: 68, position: 'sticky', top: 0, zIndex: 20 }}>
+
+        {/* Logo */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+          <div style={{ width: 32, height: 32, borderRadius: 9, background: C.forest, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <LogoPlane />
           </div>
-          <span className="text-gray-500 text-xs">{tab === 0 ? 'Auto-refresh 60s' : dateLabel}</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ font: `700 16px/1 'Instrument Sans', system-ui`, color: C.ink, letterSpacing: '-.01em' }}>Syria Flights</span>
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: C.muted, letterSpacing: '.1em' }}>DAM · ALP</span>
+          </div>
         </div>
 
-        {/* ── Day tabs ── */}
-        <div className="max-w-2xl mx-auto px-4 pb-3 flex gap-2">
-          {([-1, 0, 1] as Tab[]).map(t => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
-                tab === t ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-              }`}
-            >
-              <div className="leading-tight">{TAB_LABELS[t]}</div>
-              <div className={`text-xs font-normal mt-0.5 ${tab === t ? 'text-blue-200' : 'text-gray-500'}`}>
-                {tabDateLabel(t)}
-              </div>
-            </button>
+        {/* Nav tabs */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 14 }}>
+          {[
+            { label: 'Flights', active: true },
+            { label: 'Track',   active: false },
+            { label: 'Destinations', active: false },
+            { label: 'Airlines', active: false },
+          ].map(item => (
+            <div key={item.label} style={{
+              display: 'flex', alignItems: 'center', gap: 7,
+              padding: '9px 14px', borderRadius: 10,
+              background: item.active ? C.sunken : 'transparent',
+            }}>
+              <span style={{ font: `${item.active ? 700 : 600} 13.5px/1 'Instrument Sans', system-ui`, color: item.active ? C.forest : C.secondary }}>
+                {item.label}
+              </span>
+            </div>
           ))}
         </div>
 
-        {/* ── 4 controls: Departures / Arrivals | DAM / ALP ── */}
-        <div className="max-w-2xl mx-auto px-4 pb-3">
-          <div className="flex bg-gray-800 rounded-xl p-1 gap-1">
-            {(['dep', 'arr'] as View[]).map(v => (
-              <button
-                key={v}
-                onClick={() => setView(v)}
-                className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                  view === v ? 'bg-white text-gray-900' : 'text-gray-400 hover:text-white'
-                }`}
-              >
-                {v === 'dep' ? 'Departures' : 'Arrivals'}
-              </button>
-            ))}
-            <div className="w-px bg-gray-700 my-1" />
-            {(['DAM', 'ALP'] as Airport[]).map(ap => (
-              <button
-                key={ap}
-                onClick={() => setAirport(ap)}
-                className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                  airport === ap ? 'bg-white text-gray-900' : 'text-gray-400 hover:text-white'
-                }`}
-              >
-                {ap}
-              </button>
-            ))}
-          </div>
+        <div style={{ flex: 1 }} />
+
+        {/* Search */}
+        <div style={{
+          width: 260, height: 38, borderRadius: 10, background: C.sunken, border: `1px solid ${C.border}`,
+          display: 'flex', alignItems: 'center', gap: 9, padding: '0 12px',
+        }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth="1.9" strokeLinecap="round">
+            <circle cx="11" cy="11" r="7"/><path d="m20 20-4.3-4.3"/>
+          </svg>
+          <span style={{ font: `500 12.5px/1 'Instrument Sans', system-ui`, color: C.muted }}>Flight number, city or airline</span>
+          <div style={{ flex: 1 }} />
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, fontWeight: 600, color: '#A6A093', background: C.bg, padding: '3px 5px', borderRadius: 4 }}>⌘K</span>
+        </div>
+
+        {/* LIVE indicator */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 13px', borderRadius: 10, background: C.sunken, border: `1px solid ${C.border}` }}>
+          <span style={{ width: 7, height: 7, borderRadius: 99, background: C.forestMid, display: 'block' }} />
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, fontWeight: 600, color: C.secondary }}>
+            LIVE {nowSyriaHHMM}
+          </span>
         </div>
       </div>
 
-      {/* ── Body ── */}
-      <div className="max-w-2xl mx-auto px-4 py-4">
+      {/* ── Main body ── */}
+      <div style={{ maxWidth: 1400, margin: '0 auto', padding: '26px 40px 40px', display: 'flex', gap: 20, alignItems: 'flex-start' }}>
 
-        {/* Summary strip */}
-        {!loading && sorted.length > 0 && (
-          <div className="flex gap-4 text-xs text-gray-500 mb-4 px-1">
-            <span>{total} flights</span>
-            {enroute   > 0 && <span className="text-sky-400">{enroute} in air</span>}
-            {landed    > 0 && <span className="text-green-400">{landed} arrived</span>}
-            {cancelled > 0 && <span className="text-red-400">{cancelled} cancelled</span>}
-            {tab !== 0 && <span className="ml-auto">{dateLabel}</span>}
+        {/* ── Left: flight list ── */}
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+          {/* Title + controls */}
+          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              <span style={{ font: `500 12px/1 'Instrument Sans', system-ui`, color: C.muted, letterSpacing: '.02em' }}>{airportLabel}</span>
+              <h1 style={{ margin: 0, font: `700 34px/1 'Instrument Sans', system-ui`, color: C.ink, letterSpacing: '-.025em' }}>
+                {viewTitle} {tabTitle}
+              </h1>
+            </div>
           </div>
-        )}
 
-        {/* Loading */}
-        {loading && (
-          <div className="flex flex-col items-center justify-center py-20 gap-3">
-            <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-            <p className="text-gray-500 text-sm">Loading flights…</p>
+          {/* Controls row */}
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+            {/* Date tabs */}
+            <div style={{ display: 'flex', gap: 6 }}>
+              {([-1, 0, 1] as Tab[]).map(t => (
+                <button key={t} onClick={() => setTab(t)} style={{
+                  padding: '9px 14px 10px', borderRadius: 12, cursor: 'pointer',
+                  background: tab === t ? C.ink : C.surface,
+                  border: tab === t ? 'none' : `1px solid ${C.border}`,
+                  display: 'flex', alignItems: 'baseline', gap: 7,
+                  boxShadow: tab === t ? '0 8px 18px -10px rgba(22,22,22,.55)' : 'none',
+                }}>
+                  <span style={{ font: `${tab === t ? 700 : 600} 13px/1 'Instrument Sans', system-ui`, color: tab === t ? '#fff' : C.secondary }}>
+                    {t === -1 ? 'Yesterday' : t === 0 ? `Today · ${tabDateLabel(0)}` : 'Tomorrow'}
+                  </span>
+                  {tab === t && total > 0 && (
+                    <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, fontWeight: 600, background: '#B9A779', color: C.ink, padding: '3px 5px', borderRadius: 5 }}>
+                      {total}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {/* Arr / Dep + DAM / ALP */}
+            <div style={{ display: 'flex', padding: 3, background: C.bg, borderRadius: 11, gap: 3 }}>
+              {(['arr', 'dep'] as View[]).map(v => (
+                <button key={v} onClick={() => setView(v)} style={{
+                  display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 9, cursor: 'pointer',
+                  background: view === v ? C.surface : 'transparent',
+                  border: 'none',
+                  boxShadow: view === v ? '0 1px 3px rgba(22,22,22,.14)' : 'none',
+                }}>
+                  <span style={{ font: `600 13px/1 'Instrument Sans', system-ui`, color: view === v ? C.ink : C.muted }}>
+                    {v === 'arr' ? 'Arrivals' : 'Departures'}
+                  </span>
+                  {view === v && (
+                    <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, fontWeight: 600, color: C.forest, background: '#E6EFEC', padding: '2px 5px', borderRadius: 5 }}>
+                      {total}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', padding: 3, background: C.bg, borderRadius: 11, gap: 3 }}>
+              {(['DAM', 'ALP'] as Airport[]).map(ap => (
+                <button key={ap} onClick={() => setAirport(ap)} style={{
+                  padding: '8px 32px', borderRadius: 9, cursor: 'pointer',
+                  background: airport === ap ? C.forest : 'transparent',
+                  border: 'none',
+                  fontFamily: "'IBM Plex Mono', monospace", fontSize: 14, fontWeight: 700,
+                  color: airport === ap ? '#fff' : C.muted,
+                  letterSpacing: '.07em',
+                }}>
+                  {ap}
+                </button>
+              ))}
+            </div>
           </div>
-        )}
 
-        {/* Empty */}
-        {!loading && sorted.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-20 gap-2 text-center">
-            <span className="text-4xl">✈</span>
-            <p className="text-gray-400 font-medium">
-              No {view === 'arr' ? 'arrivals' : 'departures'}
+          {/* Loading */}
+          {loading && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '80px 0', gap: 12 }}>
+              <div style={{ width: 32, height: 32, border: `2px solid ${C.forestMid}`, borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+              <p style={{ color: C.muted, fontSize: 14, margin: 0 }}>Loading flights…</p>
+              <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+            </div>
+          )}
+
+          {/* Empty */}
+          {!loading && sorted.length === 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '80px 0', gap: 8, textAlign: 'center' }}>
+              <span style={{ fontSize: 48 }}>✈</span>
+              <p style={{ color: C.secondary, fontWeight: 600, margin: 0 }}>No {view === 'arr' ? 'arrivals' : 'departures'}</p>
+              <p style={{ color: C.muted, fontSize: 14, margin: 0 }}>{airport} · {dateLabel}</p>
+            </div>
+          )}
+
+          {/* Flight cards */}
+          {!loading && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {sorted.map((f, i) => (
+                <Fragment key={`${f.iata_number}-${f.dep_iata}-${f.arr_iata}-${f.dep_time_utc}-${f.arr_time_utc}`}>
+                  {i === nowIdx && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '2px 0' }}>
+                      <div style={{ flex: 1, height: 1, background: C.separator }} />
+                      {landed > 0 && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px 5px 9px', borderRadius: 999, background: '#E6EFEC', border: '1px solid #B4CFC9' }}>
+                          <span style={{ width: 6, height: 6, borderRadius: 99, background: C.forest, display: 'block' }} />
+                          <span style={{ font: `600 11.5px/1 'Instrument Sans', system-ui`, color: '#002623', whiteSpace: 'nowrap' }}>
+                            {landed} {view === 'arr' ? 'arrived' : 'departed'}
+                          </span>
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 12px', borderRadius: 999, background: C.ink }}>
+                        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, fontWeight: 600, color: '#fff', letterSpacing: '.04em' }}>
+                          {nowSyriaHHMM} NOW
+                        </span>
+                      </div>
+                      {enroute > 0 && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px 5px 9px', borderRadius: 999, background: C.forestMid }}>
+                          <span style={{ width: 6, height: 6, borderRadius: 99, background: '#fff', display: 'block' }} />
+                          <span style={{ font: `600 11.5px/1 'Instrument Sans', system-ui`, color: '#fff', whiteSpace: 'nowrap' }}>
+                            {enroute} in air
+                          </span>
+                        </div>
+                      )}
+                      <div style={{ flex: 1, height: 1, background: C.separator }} />
+                    </div>
+                  )}
+                  <FlightCard f={f} view={view} />
+                </Fragment>
+              ))}
+            </div>
+          )}
+
+          {tab === 1 && !loading && sorted.length > 0 && (
+            <p style={{ textAlign: 'center', color: C.muted, fontSize: 12, marginTop: 24 }}>
+              Tomorrow's flights show scheduled times only · Live data arrives on the day
             </p>
-            <p className="text-gray-600 text-sm">{airport} · {dateLabel}</p>
-          </div>
-        )}
+          )}
+        </div>
 
-        {/* Flight cards */}
-        {!loading && (
-          <div className="flex flex-col gap-3">
-            {sorted.map((f, i) => (
-              <Fragment key={`${f.iata_number}-${f.dep_iata}-${f.arr_iata}-${f.dep_time_utc}-${f.arr_time_utc}`}>
-                {i === nowIdx && (
-                  <div className="flex items-center gap-2 py-1">
-                    <div className="flex-1 h-px bg-blue-900" />
-                    <span className="text-blue-400 text-xs font-semibold tabular-nums">{nowSyriaHHMM} · Now</span>
-                    <div className="flex-1 h-px bg-blue-900" />
+        {/* ── Sidebar (desktop only) ── */}
+        <div style={{ width: 320, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 16 }} className="hidden lg:flex">
+
+          {/* Live map card */}
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 2px rgba(22,22,22,.05)' }}>
+            <div style={{ position: 'relative', height: 200, background: '#D8D3BF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, opacity: 0.5 }}>
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={C.secondary} strokeWidth="1.5">
+                  <g transform="translate(1.6 -1) scale(0.86)"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></g>
+                </svg>
+                <span style={{ font: `600 12px/1 'Instrument Sans', system-ui`, color: C.secondary }}>{enroute} flights in air</span>
+              </div>
+              {enroute > 0 && (
+                <div style={{ position: 'absolute', top: 14, left: 14, display: 'flex', alignItems: 'center', gap: 7, padding: '7px 11px', borderRadius: 9, background: 'rgba(255,255,255,.94)', border: `1px solid ${C.border}` }}>
+                  <span style={{ width: 6, height: 6, borderRadius: 99, background: C.forestMid, display: 'block' }} />
+                  <span style={{ font: `600 11px/1 'Instrument Sans', system-ui`, color: C.ink }}>{enroute} flights in air</span>
+                </div>
+              )}
+            </div>
+            <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: `1px solid ${C.trackEmpty}` }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <span style={{ font: `600 13.5px/1 'Instrument Sans', system-ui`, color: C.ink }}>Live map</span>
+                <span style={{ font: `500 11px/1 'Instrument Sans', system-ui`, color: C.muted }}>Track flights in real-time</span>
+              </div>
+              <Link href="/" style={{
+                display: 'flex', alignItems: 'center', gap: 7, padding: '8px 13px', borderRadius: 9,
+                background: C.forest, textDecoration: 'none',
+              }}>
+                <span style={{ font: `600 12px/1 'Instrument Sans', system-ui`, color: '#fff' }}>Open</span>
+              </Link>
+            </div>
+          </div>
+
+          {/* Stats card */}
+          {!loading && total > 0 && (
+            <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 16, display: 'flex', flexDirection: 'column', gap: 12, boxShadow: '0 1px 2px rgba(22,22,22,.05)' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+                <span style={{ font: `600 13.5px/1 'Instrument Sans', system-ui`, color: C.ink }}>Today's summary</span>
+                <span style={{ font: `500 11px/1 'Instrument Sans', system-ui`, color: C.muted }}>{airport}</span>
+              </div>
+              {[
+                { label: 'Total flights', val: total, color: C.forest },
+                { label: view === 'arr' ? 'Arrived' : 'Departed', val: landed, color: C.forestMid },
+                { label: 'In the air', val: enroute, color: C.golden },
+                { label: 'Cancelled', val: cancelled, color: C.wine },
+              ].filter(r => r.val > 0).map(row => (
+                <div key={row.label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ font: `600 12.5px/1 'Instrument Sans', system-ui`, color: C.ink, width: 100 }}>{row.label}</span>
+                  <div style={{ flex: 1, height: 6, borderRadius: 99, background: C.trackEmpty, position: 'relative' }}>
+                    <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${Math.round((row.val / total) * 100)}%`, background: row.color, borderRadius: 99 }} />
                   </div>
-                )}
-                <FlightCard f={f} view={view} />
-              </Fragment>
-            ))}
-          </div>
-        )}
+                  <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600, color: C.secondary, width: 20, textAlign: 'right' }}>{row.val}</span>
+                </div>
+              ))}
+            </div>
+          )}
 
-        {tab === 1 && !loading && sorted.length > 0 && (
-          <p className="text-center text-gray-600 text-xs mt-6">
-            Tomorrow's flights show scheduled times only · Live data arrives on the day
-          </p>
-        )}
+          {/* CTA card */}
+          <div style={{ background: C.forest, borderRadius: 16, padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <span style={{ font: `700 15px/1.25 'Instrument Sans', system-ui`, color: '#EDEBE0', letterSpacing: '-.01em' }}>
+              Follow a flight from anywhere
+            </span>
+            <span style={{ font: `400 12px/1.5 'Instrument Sans', system-ui`, color: 'rgba(237,235,224,.72)' }}>
+              Get gate, delay and landing alerts for the flights your family is on — free, no account needed.
+            </span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1, padding: '10px 12px', borderRadius: 9, background: '#EDEBE0', textAlign: 'center', font: `600 12px/1 'Instrument Sans', system-ui`, color: C.forest }}>
+                App Store
+              </div>
+              <div style={{ flex: 1, padding: '10px 12px', borderRadius: 9, background: 'rgba(237,235,224,.15)', textAlign: 'center', font: `600 12px/1 'Instrument Sans', system-ui`, color: '#EDEBE0' }}>
+                Google Play
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   )
