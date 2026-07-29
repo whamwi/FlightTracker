@@ -125,13 +125,14 @@ function AirlineLogo({ iata, name }: { iata: string; name: string }) {
   )
 }
 
-// Plane marker — sits directly on the route bar, no circle
 function PlanePin() {
   return (
-    <svg width={22} height={22} viewBox="0 0 24 24" fill="none" style={{ display: 'block', pointerEvents: 'none' }}>
-      <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"
-        fill="#054239" transform="rotate(90 12 12)" />
-    </svg>
+    <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#fff', border: '1px solid #D8D3BF', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <svg width={18} height={18} viewBox="0 0 24 24" fill="none" style={{ display: 'block', pointerEvents: 'none' }}>
+        <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"
+          fill="#054239" transform="rotate(90 12 12)" />
+      </svg>
+    </div>
   )
 }
 
@@ -202,6 +203,11 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
   const depOffset = flight ? tzOff(flight.dep_iata) : 3
   const arrOffset = flight ? tzOff(flight.arr_iata) : 3
 
+  // Estimated arrival: actual_dep + duration when no explicit revised/actual arr is available
+  const estimatedArrUtc = flight && !flight.actual_arr_utc && !flight.revised_arr_utc && flight.actual_dep_utc && flight.duration_min > 0
+    ? new Date(new Date(flight.actual_dep_utc).getTime() + flight.duration_min * 60_000).toISOString()
+    : null
+
   const depDisplay = flight
     ? (flight.actual_dep_utc ? isoToLocal(flight.actual_dep_utc, depOffset)
       : flight.revised_dep_utc ? isoToLocal(flight.revised_dep_utc, depOffset)
@@ -210,13 +216,15 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
   const arrDisplay = flight
     ? (flight.actual_arr_utc ? isoToLocal(flight.actual_arr_utc, arrOffset)
       : flight.revised_arr_utc ? isoToLocal(flight.revised_arr_utc, arrOffset)
+      : estimatedArrUtc ? isoToLocal(estimatedArrUtc, arrOffset)
       : utcHHMMtoLocal(flight.arr_time_utc, arrOffset))
     : '—'
 
   const depDelay = flight?.actual_dep_utc ? calcDelayMin(flight.dep_time_utc, flight.actual_dep_utc, flight.date)
     : flight?.revised_dep_utc ? calcDelayMin(flight.dep_time_utc, flight.revised_dep_utc, flight.date) : 0
   const arrDelay = flight?.actual_arr_utc ? calcDelayMin(flight.arr_time_utc, flight.actual_arr_utc, flight.date)
-    : flight?.revised_arr_utc ? calcDelayMin(flight.arr_time_utc, flight.revised_arr_utc, flight.date) : 0
+    : flight?.revised_arr_utc ? calcDelayMin(flight.arr_time_utc, flight.revised_arr_utc, flight.date)
+    : estimatedArrUtc ? calcDelayMin(flight!.arr_time_utc, estimatedArrUtc, flight!.date) : 0
 
   // En-route progress (uses live `now` so it ticks every 30s)
   const depMs = isEnRoute && flight?.actual_dep_utc ? new Date(flight.actual_dep_utc).getTime() : null
@@ -319,7 +327,7 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
               </div>
 
               {/* Bar + plane */}
-              <div style={{ flex: 1, position: 'relative', height: 3, background: C.track, borderRadius: 2 }}>
+              <div style={{ flex: 1, position: 'relative', height: 2, background: C.track, borderRadius: 2 }}>
                 {/* Blue fill */}
                 <div style={{
                   position: 'absolute', left: 0, top: 0, bottom: 0, borderRadius: 2,
@@ -328,7 +336,7 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
                 }} />
                 {/* Scheduled/pre-departure: plane centered on bar left edge */}
                 {!isEnRoute && !isArrived && (
-                  <div style={{ position: 'absolute', top: '50%', left: -11, transform: 'translateY(-50%)', zIndex: 2 }}>
+                  <div style={{ position: 'absolute', top: '50%', left: -14, transform: 'translateY(-50%)', zIndex: 2 }}>
                     <PlanePin />
                   </div>
                 )}
@@ -340,7 +348,7 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
                 )}
                 {/* Arrived: plane centered on bar right edge */}
                 {isArrived && (
-                  <div style={{ position: 'absolute', top: '50%', right: -11, transform: 'translateY(-50%)', zIndex: 2 }}>
+                  <div style={{ position: 'absolute', top: '50%', right: -14, transform: 'translateY(-50%)', zIndex: 2 }}>
                     <PlanePin />
                   </div>
                 )}

@@ -109,12 +109,18 @@ export default async function Image(
   const ac      = flight?.aircraft_type ?? ''
   const reg     = flight?.aircraft_reg ?? ''
 
-  // Best available time: actual > revised/estimated > scheduled
+  // Estimated arrival when no explicit revised/actual: actual_dep + duration
+  const estimatedArrUtc = flight && !flight.actual_arr_utc && !flight.revised_arr_utc && flight.actual_dep_utc && flight.duration_min > 0
+    ? new Date(new Date(flight.actual_dep_utc as string).getTime() + (flight.duration_min as number) * 60_000).toISOString()
+    : null
+
+  // Best available time: actual > revised > estimated (dep+dur) > scheduled
   const depTime = isoToSyria(flight?.actual_dep_utc)
                || isoToSyria(flight?.revised_dep_utc)
                || toSyria(flight?.dep_time_utc)
   const arrTime = isoToSyria(flight?.actual_arr_utc)
                || isoToSyria(flight?.revised_arr_utc)
+               || isoToSyria(estimatedArrUtc)
                || toSyria(flight?.arr_time_utc)
 
   const dur     = fmtDur(flight?.duration_min ?? null)
