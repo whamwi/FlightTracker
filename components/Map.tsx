@@ -424,7 +424,7 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
   const aiata   = airlineIataFor(e.callsign, fs)
 
   const photoHtml = photoUrl
-    ? `<img src="${photoUrl}" style="width:100%;height:110px;object-fit:cover;display:block;border-radius:4px 4px 0 0;margin:-9px -13px 8px;width:calc(100% + 26px)">`
+    ? `<img src="${photoUrl}" style="width:calc(100% + 26px);height:110px;object-fit:cover;display:block;border-radius:4px 4px 0 0;margin:-9px -13px 0">`
     : ''
 
   const logoHtml = aiata
@@ -1255,7 +1255,7 @@ export default function Map({ embed = false }: { embed?: boolean }) {
               rnPost({ type: 'SELECT', flight: buildEmbedFlight(cs, se ?? null, fs ?? null, ph) })
             })
           } else {
-            m.bindPopup(popup, { className: 'fp-popup' })
+            m.bindPopup(popup, { className: 'fp-popup', closeButton: false })
           }
           markersRef.current[cs] = m
         }
@@ -1533,7 +1533,7 @@ export default function Map({ embed = false }: { embed?: boolean }) {
               })
             })
           } else {
-            m.bindPopup(popup, { className: 'fp-popup' })
+            m.bindPopup(popup, { className: 'fp-popup', closeButton: false })
             m.on('click', () => {
               const fs  = flightStatusRef.current[callsign]
               const reg = fs?.aircraft_reg ?? null
