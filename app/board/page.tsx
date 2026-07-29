@@ -660,13 +660,36 @@ export default function BoardPage() {
 
   return (
     <div style={{ minHeight: '100vh', background: C.bg, fontFamily: "'Instrument Sans', system-ui, sans-serif" }}>
+      <style>{`
+        .ft-nav { padding: 0 16px !important; gap: 12px !important; height: 56px !important; }
+        .ft-nav-tabs { display: none !important; }
+        .ft-search { display: none !important; }
+        .ft-body { padding: 16px 16px 32px !important; flex-direction: column !important; }
+        .ft-title { font-size: 26px !important; }
+        .ft-sidebar { display: none !important; }
+        .ft-controls { gap: 8px !important; }
+        @media (min-width: 768px) {
+          .ft-nav { padding: 0 28px !important; gap: 20px !important; height: 68px !important; }
+          .ft-nav-tabs { display: flex !important; }
+          .ft-search { display: flex !important; }
+          .ft-body { padding: 26px 28px 40px !important; flex-direction: row !important; }
+          .ft-title { font-size: 34px !important; }
+          .ft-sidebar { display: flex !important; flex-direction: column; gap: 16px; width: 300px; flex-shrink: 0; }
+          .ft-controls { gap: 12px !important; }
+        }
+        @media (min-width: 1100px) {
+          .ft-nav { padding: 0 40px !important; }
+          .ft-body { padding: 26px 40px 40px !important; }
+          .ft-sidebar { width: 320px; }
+        }
+      `}</style>
 
       {/* ── Nav bar ── */}
-      <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, padding: '0 40px', display: 'flex', alignItems: 'center', gap: 28, height: 68, position: 'sticky', top: 0, zIndex: 20 }}>
+      <div className="ft-nav" style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', position: 'sticky', top: 0, zIndex: 20 }}>
 
         {/* Logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 9, background: C.forest, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: 32, height: 32, borderRadius: 9, background: C.forest, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <LogoPlane />
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -675,8 +698,8 @@ export default function BoardPage() {
           </div>
         </div>
 
-        {/* Nav tabs */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 14 }}>
+        {/* Nav tabs — desktop only */}
+        <div className="ft-nav-tabs" style={{ alignItems: 'center', gap: 4, marginLeft: 14 }}>
           {[
             { label: 'Flights', active: true },
             { label: 'Track',   active: false },
@@ -697,10 +720,10 @@ export default function BoardPage() {
 
         <div style={{ flex: 1 }} />
 
-        {/* Search */}
-        <div style={{
+        {/* Search — desktop only */}
+        <div className="ft-search" style={{
           width: 260, height: 38, borderRadius: 10, background: C.sunken, border: `1px solid ${C.border}`,
-          display: 'flex', alignItems: 'center', gap: 9, padding: '0 12px',
+          alignItems: 'center', gap: 9, padding: '0 12px',
         }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth="1.9" strokeLinecap="round">
             <circle cx="11" cy="11" r="7"/><path d="m20 20-4.3-4.3"/>
@@ -711,16 +734,16 @@ export default function BoardPage() {
         </div>
 
         {/* LIVE indicator */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 13px', borderRadius: 10, background: C.sunken, border: `1px solid ${C.border}` }}>
-          <span style={{ width: 7, height: 7, borderRadius: 99, background: C.forestMid, display: 'block' }} />
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, fontWeight: 600, color: C.secondary }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 10px', borderRadius: 10, background: C.sunken, border: `1px solid ${C.border}`, flexShrink: 0 }}>
+          <span style={{ width: 6, height: 6, borderRadius: 99, background: C.forestMid, display: 'block' }} />
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600, color: C.secondary, whiteSpace: 'nowrap' }}>
             LIVE {nowSyriaHHMM}
           </span>
         </div>
       </div>
 
       {/* ── Main body ── */}
-      <div style={{ maxWidth: 1400, margin: '0 auto', padding: '26px 40px 40px', display: 'flex', gap: 20, alignItems: 'flex-start' }}>
+      <div className="ft-body" style={{ maxWidth: 1400, margin: '0 auto', display: 'flex', gap: 20, alignItems: 'flex-start' }}>
 
         {/* ── Left: flight list ── */}
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -729,7 +752,7 @@ export default function BoardPage() {
           <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
               <span style={{ font: `500 12px/1 'Instrument Sans', system-ui`, color: C.muted, letterSpacing: '.02em' }}>{airportLabel}</span>
-              <h1 style={{ margin: 0, font: `700 34px/1 'Instrument Sans', system-ui`, color: C.ink, letterSpacing: '-.025em' }}>
+              <h1 className="ft-title" style={{ margin: 0, font: `700 34px/1 'Instrument Sans', system-ui`, color: C.ink, letterSpacing: '-.025em' }}>
                 {viewTitle} {tabTitle}
               </h1>
             </div>
@@ -860,7 +883,7 @@ export default function BoardPage() {
         </div>
 
         {/* ── Sidebar (desktop only) ── */}
-        <div style={{ width: 320, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 16 }} className="hidden lg:flex">
+        <div className="ft-sidebar" style={{ width: 320, flexShrink: 0 }}>
 
           {/* Live map card */}
           <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 2px rgba(22,22,22,.05)' }}>
