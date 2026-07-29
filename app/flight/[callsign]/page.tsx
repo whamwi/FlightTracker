@@ -19,6 +19,14 @@ export async function generateMetadata(
       title: `${pretty} · Flight Status`,
       description: `Track ${pretty} live on FlySyria Tracker`,
       siteName: 'FlySyria Tracker',
+      images: [{ url: 'https://www.flysyria.app/flysyria-og-image.png', width: 1200, height: 630 }],
+      type: 'website',
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: `${pretty} · Flight Status`,
+      description: `Track ${pretty} live on FlySyria Tracker`,
+      images: ['https://www.flysyria.app/flysyria-og-image.png'],
     },
   }
 }
