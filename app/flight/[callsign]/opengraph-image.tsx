@@ -156,7 +156,7 @@ export default async function Image(
           {/* Logo — actual SVG + wordmark */}
           <div style={{ display: 'flex', alignItems: 'center' }}>
             {/* Inline globe+plane SVG from flysyria-globe-logo.svg (transparent bg) */}
-            <svg width="50" height="53" viewBox="6 2 84 90" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ marginRight: 10 }}>
+            <svg width="72" height="76" viewBox="6 2 84 90" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ marginRight: 14 }}>
               <circle cx="40" cy="58" r="32" stroke="#054239" strokeWidth="2.6" />
               <circle cx="40" cy="58" r="25" fill="#054239" stroke="#054239" strokeWidth="2.6" />
               <g transform="rotate(90 40 58)">
@@ -168,8 +168,8 @@ export default async function Image(
             </svg>
             {/* Wordmark: FlySyria dark green / Tracker light green */}
             <span style={{ display: 'flex', alignItems: 'baseline' }}>
-              <span style={{ fontSize: 22, fontWeight: 800, color: C.forest, letterSpacing: '-.4px', display: 'flex' }}>FlySyria</span>
-              <span style={{ fontSize: 22, fontWeight: 600, color: C.forestMid, letterSpacing: '-.2px', marginLeft: 6, display: 'flex' }}>Tracker</span>
+              <span style={{ fontSize: 28, fontWeight: 800, color: C.forest, letterSpacing: '-.4px', display: 'flex' }}>FlySyria</span>
+              <span style={{ fontSize: 28, fontWeight: 600, color: C.forestMid, letterSpacing: '-.2px', marginLeft: 6, display: 'flex' }}>Tracker</span>
             </span>
           </div>
 
@@ -229,7 +229,7 @@ export default async function Image(
                 <div style={{ fontSize: cityFontSize(depCity), fontWeight: 900, color: C.ink, lineHeight: 1.05, display: 'flex' }}>{depCity}</div>
                 <div style={{ fontSize: 14, fontWeight: 600, color: C.muted, marginTop: 3, letterSpacing: '.04em', display: 'flex' }}>{dep}</div>
                 {depTime ? (
-                  <div style={{ fontSize: 30, fontWeight: 800, color: C.forest, marginTop: 8, letterSpacing: '-1px', display: 'flex' }}>{depTime}</div>
+                  <div style={{ fontSize: 48, fontWeight: 800, color: C.forest, marginTop: 8, letterSpacing: '-1px', display: 'flex' }}>{depTime}</div>
                 ) : null}
               </div>
 
@@ -262,7 +262,7 @@ export default async function Image(
                 <div style={{ fontSize: cityFontSize(arrCity), fontWeight: 900, color: C.ink, lineHeight: 1.05, display: 'flex' }}>{arrCity}</div>
                 <div style={{ fontSize: 14, fontWeight: 600, color: C.muted, marginTop: 3, letterSpacing: '.04em', display: 'flex' }}>{arr}</div>
                 {arrTime ? (
-                  <div style={{ fontSize: 30, fontWeight: 800, color: C.forest, marginTop: 8, letterSpacing: '-1px', display: 'flex' }}>{arrTime}</div>
+                  <div style={{ fontSize: 48, fontWeight: 800, color: C.forest, marginTop: 8, letterSpacing: '-1px', display: 'flex' }}>{arrTime}</div>
                 ) : null}
               </div>
             </div>
