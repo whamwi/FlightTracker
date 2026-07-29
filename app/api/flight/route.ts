@@ -8,6 +8,8 @@ const HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 
 const PREFIX_TO_IATA: Record<string, string> = { FYC: 'XH', SYR: 'RB', HST: 'RB' }
 
+const SYRIAN_AIRPORTS = new Set(['DAM', 'ALP', 'LTK'])
+
 const STATUS_RANK: Record<string, number> = {
   Arrived: 8, Landed: 8, Approaching: 7, 'En Route': 6,
   Departed: 5, Cancelled: 5, Delayed: 4, GateClosed: 3, Boarding: 3,
@@ -155,6 +157,9 @@ export async function GET(req: Request) {
     const rows = await fetchCaches(date)
     let bestFlight = null
     let bestRank   = -1
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let bestRaw: any = null
+    let bestSide: 'arr' | 'dep' = 'dep'
 
     for (const row of rows) {
       const airport = row.airport_iata
@@ -177,6 +182,38 @@ export async function GET(req: Request) {
           if (rank > bestRank) {
             bestFlight = buildFlight(f, num, status, airlineMap, date)
             bestRank   = rank
+            bestRaw    = f
+            bestSide   = side as 'arr' | 'dep'
+          }
+        }
+      }
+    }
+
+    // Second pass: for inbound flights, read origin airport departure cache
+    // to get est_dep / est_arr (mirrors what the flightboard does).
+    if (bestFlight && bestSide === 'arr' && bestRaw) {
+      const originIata = bestRaw.dep_iata as string | null
+      if (originIata && !SYRIAN_AIRPORTS.has(originIata)) {
+        const originRes = await fetch(
+          `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${date}&airport_iata=eq.${originIata}&select=departures`,
+          { headers: HEADERS }
+        )
+        if (originRes.ok) {
+          const originRows: { departures: unknown[] }[] = await originRes.json()
+          for (const originRow of originRows) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            for (const f of (originRow.departures ?? []) as any[]) {
+              const fNum = (f.num ?? '').replace(/\s+/g, '').toUpperCase()
+              if (fNum !== num) continue
+              const merged = {
+                ...bestRaw,
+                est_dep: f.est_dep ?? bestRaw.est_dep,
+                est_arr: f.est_arr ?? bestRaw.est_arr,
+              }
+              const { status } = effectiveStatusFor(merged)
+              bestFlight = buildFlight(merged, num, status, airlineMap, date)
+              break
+            }
           }
         }
       }
