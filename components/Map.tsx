@@ -1493,7 +1493,7 @@ export default function Map({ embed = false }: { embed?: boolean }) {
         const isAlp = dep_iata === 'ALP' || arr_iata === 'ALP'
         const icon  = planeIcon(L, track, true, arrived, label, isAlp, !arrived)
         const schedReg   = fs?.aircraft_reg ?? null
-        const schedPhoto = schedReg ? photoCacheRef.current[schedReg] ?? null : null
+        const schedPhoto = (schedReg ? photoCacheRef.current[schedReg] : null) ?? photoCacheRef.current[`cs:${callsign}`] ?? null
         const popup = buildSchedulePopup(entry, arrived, fs, fPos, schedPhoto)
 
         activeSchedKeys.add(callsign)
@@ -1504,49 +1504,49 @@ export default function Map({ embed = false }: { embed?: boolean }) {
           if (!embed) schedMarkersRef.current[callsign].setPopupContent(popup)
         } else {
           const m = L.marker([lat, lon], { icon }).addTo(map)
+          const fetchSchedPhoto = (cacheKey: string, apiUrl: string, onLoad: (url: string) => void) => {
+            if (cacheKey in photoCacheRef.current || photoRequestedRef.current.has(cacheKey)) return
+            photoRequestedRef.current.add(cacheKey)
+            fetch(apiUrl)
+              .then(r => r.ok ? r.json() : null)
+              .then(d => {
+                const url: string | null = d?.url ?? null
+                photoCacheRef.current[cacheKey] = url
+                if (url) onLoad(url)
+              })
+              .catch(() => { photoCacheRef.current[cacheKey] = null })
+          }
           if (embed) {
             m.on('click', () => {
               const fs  = flightStatusRef.current[callsign]
               const reg = fs?.aircraft_reg ?? null
-              const ph  = reg ? photoCacheRef.current[reg] ?? null : null
+              const ph  = reg ? photoCacheRef.current[reg] ?? null : photoCacheRef.current[`cs:${callsign}`] ?? null
               selectedCSRef.current = callsign
               rnPost({ type: 'SELECT', flight: buildEmbedFlight(callsign, entry, fs ?? null, ph) })
-              if (reg && !(reg in photoCacheRef.current) && !photoRequestedRef.current.has(reg)) {
-                photoRequestedRef.current.add(reg)
-                fetch(`/api/photo/${encodeURIComponent(reg)}`)
-                  .then(r => r.ok ? r.json() : null)
-                  .then(photoData => {
-                    const url: string | null = photoData?.url ?? null
-                    photoCacheRef.current[reg] = url
-                    if (url && selectedCSRef.current === callsign) {
-                      const fsNow = flightStatusRef.current[callsign]
-                      rnPost({ type: 'SELECT', flight: buildEmbedFlight(callsign, entry, fsNow ?? null, url) })
-                    }
-                  })
-                  .catch(() => { photoCacheRef.current[reg] = null })
-              }
+              const cacheKey = reg ?? `cs:${callsign}`
+              const apiUrl   = reg ? `/api/photo/${encodeURIComponent(reg)}` : `/api/photo-cs/${encodeURIComponent(callsign)}`
+              fetchSchedPhoto(cacheKey, apiUrl, url => {
+                if (selectedCSRef.current === callsign) {
+                  const fsNow = flightStatusRef.current[callsign]
+                  rnPost({ type: 'SELECT', flight: buildEmbedFlight(callsign, entry, fsNow ?? null, url) })
+                }
+              })
             })
           } else {
             m.bindPopup(popup, { className: 'fp-popup' })
             m.on('click', () => {
               const fs  = flightStatusRef.current[callsign]
               const reg = fs?.aircraft_reg ?? null
-              if (reg && !(reg in photoCacheRef.current) && !photoRequestedRef.current.has(reg)) {
-                photoRequestedRef.current.add(reg)
-                fetch(`/api/photo/${encodeURIComponent(reg)}`)
-                  .then(r => r.ok ? r.json() : null)
-                  .then(photoData => {
-                    const url: string | null = photoData?.url ?? null
-                    photoCacheRef.current[reg] = url
-                    if (url && schedMarkersRef.current[callsign]) {
-                      const fsNow = flightStatusRef.current[callsign]
-                      schedMarkersRef.current[callsign].setPopupContent(
-                        buildSchedulePopup(entry, arrived, fsNow, fPos, url)
-                      )
-                    }
-                  })
-                  .catch(() => { photoCacheRef.current[reg] = null })
-              }
+              const cacheKey = reg ?? `cs:${callsign}`
+              const apiUrl   = reg ? `/api/photo/${encodeURIComponent(reg)}` : `/api/photo-cs/${encodeURIComponent(callsign)}`
+              fetchSchedPhoto(cacheKey, apiUrl, url => {
+                if (schedMarkersRef.current[callsign]) {
+                  const fsNow = flightStatusRef.current[callsign]
+                  schedMarkersRef.current[callsign].setPopupContent(
+                    buildSchedulePopup(entry, arrived, fsNow, fPos, url)
+                  )
+                }
+              })
             })
           }
           schedMarkersRef.current[callsign] = m
