@@ -156,7 +156,7 @@ export default async function Image(
           {/* Logo — actual SVG + wordmark */}
           <div style={{ display: 'flex', alignItems: 'center' }}>
             {/* Inline globe+plane SVG from flysyria-globe-logo.svg (transparent bg) */}
-            <svg width="100" height="106" viewBox="6 2 84 90" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ marginRight: 16 }}>
+            <svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ marginRight: 16 }}>
               <circle cx="40" cy="58" r="32" stroke="#054239" strokeWidth="2.6" />
               <circle cx="40" cy="58" r="25" fill="#054239" stroke="#054239" strokeWidth="2.6" />
               <g transform="rotate(90 40 58)">
