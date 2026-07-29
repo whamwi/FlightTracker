@@ -511,8 +511,9 @@ const REGION: Record<string, string> = {
   KWI: 'Middle East', BAH: 'Middle East', DOH: 'Middle East', MCT: 'Middle East',
   // Iraq
   BGW: 'Middle East', BSR: 'Middle East', NJF: 'Middle East', EBL: 'Middle East', ISU: 'Middle East',
-  // Levant
+  // Levant + North Africa
   AMM: 'Middle East', BEY: 'Middle East',
+  MJI: 'Middle East', TIP: 'Middle East',
   // Egypt
   CAI: 'Middle East', HRG: 'Middle East', SSH: 'Middle East', RMF: 'Middle East',
   // Saudi Arabia
@@ -713,9 +714,19 @@ export default function BoardPage() {
   })()
   const maxFreq = destFreq[0]?.count ?? 1
 
+  const IATA_ALIAS: Record<string, string> = { SAW: 'IST' }
   const weeklyFreq = weeklyStats
-    ? (view === 'arr' ? weeklyStats.arrivals : weeklyStats.departures)
-        .map(d => ({ iata: d.iata, flag: airportFlag(d.iata), c: city(d.iata), count: d.count }))
+    ? (() => {
+        const src = view === 'arr' ? weeklyStats.arrivals : weeklyStats.departures
+        const merged: Record<string, number> = {}
+        for (const d of src) {
+          const canonical = IATA_ALIAS[d.iata] ?? d.iata
+          merged[canonical] = (merged[canonical] ?? 0) + d.count
+        }
+        return Object.entries(merged)
+          .sort(([, a], [, b]) => b - a)
+          .map(([iata, count]) => ({ iata, flag: airportFlag(iata), c: city(iata), count }))
+      })()
     : null
   const weeklyMaxFreq = weeklyFreq?.[0]?.count ?? 1
 
