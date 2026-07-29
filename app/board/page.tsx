@@ -503,6 +503,49 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
   )
 }
 
+// ── Region classification ────────────────────────────────────────────────────
+const REGION: Record<string, string> = {
+  // UAE
+  DXB: 'Middle East', SHJ: 'Middle East', AUH: 'Middle East',
+  // Gulf
+  KWI: 'Middle East', BAH: 'Middle East', DOH: 'Middle East', MCT: 'Middle East',
+  // Iraq
+  BGW: 'Middle East', BSR: 'Middle East', NJF: 'Middle East', EBL: 'Middle East', ISU: 'Middle East',
+  // Levant
+  AMM: 'Middle East', BEY: 'Middle East',
+  // Egypt
+  CAI: 'Middle East', HRG: 'Middle East', SSH: 'Middle East', RMF: 'Middle East',
+  // Saudi Arabia
+  RUH: 'Middle East', JED: 'Middle East', MED: 'Middle East', DMM: 'Middle East', TIF: 'Middle East',
+  // Iran
+  IKA: 'Middle East', MHD: 'Middle East', TBZ: 'Middle East', KIH: 'Middle East', AWZ: 'Middle East',
+  // Turkey
+  IST: 'Europe', SAW: 'Europe', AYT: 'Europe', ESB: 'Europe',
+  // Germany
+  BER: 'Europe', FRA: 'Europe', MUC: 'Europe', HAM: 'Europe', DUS: 'Europe', STR: 'Europe', CGN: 'Europe',
+  // Netherlands
+  AMS: 'Europe', EIN: 'Europe',
+  // France
+  CDG: 'Europe', ORY: 'Europe', LYS: 'Europe', NCE: 'Europe',
+  // UK
+  LHR: 'Europe', LGW: 'Europe', STN: 'Europe', MAN: 'Europe', BHX: 'Europe', EDI: 'Europe',
+  // Scandinavia
+  ARN: 'Europe', GOT: 'Europe', OSL: 'Europe', CPH: 'Europe', HEL: 'Europe',
+  // Austria / Switzerland
+  VIE: 'Europe', ZRH: 'Europe', GVA: 'Europe', BSL: 'Europe',
+  // Italy
+  FCO: 'Europe', MXP: 'Europe', VCE: 'Europe', CIA: 'Europe', BGY: 'Europe', NAP: 'Europe',
+  // Spain / Portugal
+  BCN: 'Europe', MAD: 'Europe', PMI: 'Europe', LIS: 'Europe',
+  // Greece
+  ATH: 'Europe', HER: 'Europe', SKG: 'Europe',
+  // Eastern Europe
+  PRG: 'Europe', WAW: 'Europe', KRK: 'Europe', BRU: 'Europe',
+  OTP: 'Europe', CLJ: 'Europe', BUD: 'Europe', SOF: 'Europe', SKP: 'Europe',
+  ZAG: 'Europe', LJU: 'Europe', KBP: 'Europe',
+}
+const REGION_ORDER = ['Middle East', 'Europe', 'Other']
+
 // ── Tab date label ────────────────────────────────────────────────────────────
 function tabDateLabel(offset: number): string {
   const d = syriaDate(offset)
@@ -1000,31 +1043,44 @@ export default function BoardPage() {
             </div>
           </div>
 
-          {/* Top origins/destinations — 7-day frequency */}
-          {(weeklyFreq ?? destFreq).length > 0 && (
-            <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 16, display: 'flex', flexDirection: 'column', gap: 12, boxShadow: '0 1px 2px rgba(22,22,22,.05)' }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-                <span style={{ font: `600 13.5px/1 'Instrument Sans', system-ui`, color: C.ink }}>
-                  {view === 'arr' ? 'Origins' : 'Destinations'}
-                </span>
-                <span style={{ font: `500 11px/1 'Instrument Sans', system-ui`, color: C.muted }}>
-                  {weeklyStats ? `${weeklyStats.days}d` : 'today'}
-                </span>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {(weeklyFreq ?? destFreq).map(d => (
-                  <div key={d.iata} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: 14 }}>{d.flag}</span>
-                    <span style={{ font: `600 12.5px/1 'Instrument Sans', system-ui`, color: C.ink, width: 84, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.c}</span>
-                    <div style={{ flex: 1, height: 6, borderRadius: 99, background: C.trackEmpty, position: 'relative' }}>
-                      <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${Math.round((d.count / (weeklyFreq ? weeklyMaxFreq : maxFreq)) * 100)}%`, background: d.count === (weeklyFreq ? weeklyMaxFreq : maxFreq) ? C.forest : C.forestMid, borderRadius: 99 }} />
-                    </div>
-                    <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600, color: C.secondary, width: 20, textAlign: 'right' }}>{d.count}</span>
+          {/* Top origins/destinations — 7-day frequency, split by region */}
+          {(() => {
+            const freq = weeklyFreq ?? destFreq
+            if (!freq.length) return null
+            const periodLabel = weeklyStats ? 'this week' : 'today'
+
+            const groups: Record<string, typeof freq> = {}
+            for (const d of freq) {
+              const r = REGION[d.iata] ?? 'Other'
+              if (!groups[r]) groups[r] = []
+              groups[r].push(d)
+            }
+
+            return REGION_ORDER.filter(r => groups[r]?.length).map(region => {
+              const items = groups[region]
+              const regionMax = items[0].count
+              return (
+                <div key={region} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 16, display: 'flex', flexDirection: 'column', gap: 12, boxShadow: '0 1px 2px rgba(22,22,22,.05)' }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+                    <span style={{ font: `600 13.5px/1 'Instrument Sans', system-ui`, color: C.ink }}>{region}</span>
+                    <span style={{ font: `500 11px/1 'Instrument Sans', system-ui`, color: C.muted }}>{periodLabel}</span>
                   </div>
-                ))}
-              </div>
-            </div>
-          )}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {items.map(d => (
+                      <div key={d.iata} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ fontSize: 14 }}>{d.flag}</span>
+                        <span style={{ font: `600 12.5px/1 'Instrument Sans', system-ui`, color: C.ink, width: 84, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.c}</span>
+                        <div style={{ flex: 1, height: 6, borderRadius: 99, background: C.trackEmpty, position: 'relative' }}>
+                          <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${Math.round((d.count / regionMax) * 100)}%`, background: d.count === regionMax ? C.forest : C.forestMid, borderRadius: 99 }} />
+                        </div>
+                        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600, color: C.secondary, width: 20, textAlign: 'right' }}>{d.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })
+          })()}
 
           {/* CTA card */}
           <div style={{ background: C.forest, borderRadius: 16, padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>

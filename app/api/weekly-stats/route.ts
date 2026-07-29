@@ -54,7 +54,7 @@ export async function GET(req: Request) {
     Object.entries(m)
       .map(([iata, count]) => ({ iata, count }))
       .sort((a, b) => b.count - a.count)
-      .slice(0, 10)
+      .slice(0, 25)
 
   return NextResponse.json({
     ok: true,
