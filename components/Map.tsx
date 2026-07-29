@@ -92,11 +92,11 @@ function iataCity(code: string | null | undefined): string {
 }
 function airlineIataFor(callsign: string, fs?: FlightStatus | null): string | null {
   if (fs?.airline_iata) return fs.airline_iata
-  // flight_number is IATA format like "FZ1847" — first 2 alpha chars = IATA
-  const fn = fs?.flight_number ?? ''
-  const fnLetters = fn.replace(/[^A-Za-z]/g, '')
-  if (fnLetters.length === 2) return fnLetters.toUpperCase()
-  // Fall back: first 3 alpha chars of callsign = ICAO prefix
+  // IATA callsigns: exactly 2-char code (can include leading digit, e.g. '3L', 'B6') then digits
+  const src = fs?.flight_number ?? callsign
+  const m = src.match(/^([A-Z0-9]{2})\d/i)
+  if (m) return m[1].toUpperCase()
+  // ICAO callsign fallback: 3 alpha chars → map to IATA
   const icao = callsign.replace(/\d/g, '').toUpperCase()
   return ICAO_TO_IATA[icao] ?? null
 }
