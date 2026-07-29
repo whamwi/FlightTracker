@@ -141,6 +141,12 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
   const [notFound, setNotFound] = useState(false)
   const [photo, setPhoto]     = useState<string | null>(null)
   const [lastRefresh, setLastRefresh] = useState(0)
+  const [now, setNow] = useState(Date.now())
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000)
+    return () => clearInterval(id)
+  }, [])
 
   useEffect(() => { loadGeoData() }, [])
 
@@ -197,7 +203,9 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
   const arrOffset = flight ? tzOff(flight.arr_iata) : 3
 
   const depDisplay = flight
-    ? (flight.actual_dep_utc ? isoToLocal(flight.actual_dep_utc, depOffset) : utcHHMMtoLocal(flight.dep_time_utc, depOffset))
+    ? (flight.actual_dep_utc ? isoToLocal(flight.actual_dep_utc, depOffset)
+      : flight.revised_dep_utc ? isoToLocal(flight.revised_dep_utc, depOffset)
+      : utcHHMMtoLocal(flight.dep_time_utc, depOffset))
     : '—'
   const arrDisplay = flight
     ? (flight.actual_arr_utc ? isoToLocal(flight.actual_arr_utc, arrOffset)
@@ -205,21 +213,22 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
       : utcHHMMtoLocal(flight.arr_time_utc, arrOffset))
     : '—'
 
-  const depDelay = flight?.actual_dep_utc ? calcDelayMin(flight.dep_time_utc, flight.actual_dep_utc, flight.date) : 0
-  const arrDelay = flight?.actual_arr_utc ? calcDelayMin(flight.arr_time_utc, flight.actual_arr_utc, flight.date) : 0
+  const depDelay = flight?.actual_dep_utc ? calcDelayMin(flight.dep_time_utc, flight.actual_dep_utc, flight.date)
+    : flight?.revised_dep_utc ? calcDelayMin(flight.dep_time_utc, flight.revised_dep_utc, flight.date) : 0
+  const arrDelay = flight?.actual_arr_utc ? calcDelayMin(flight.arr_time_utc, flight.actual_arr_utc, flight.date)
+    : flight?.revised_arr_utc ? calcDelayMin(flight.arr_time_utc, flight.revised_arr_utc, flight.date) : 0
 
-  // En-route progress
+  // En-route progress (uses live `now` so it ticks every 30s)
+  const depMs = isEnRoute && flight?.actual_dep_utc ? new Date(flight.actual_dep_utc).getTime() : null
   const progressPct = (() => {
-    if (!isEnRoute || !flight?.actual_dep_utc || !flight.duration_min) return null
-    const p = ((Date.now() - new Date(flight.actual_dep_utc).getTime()) / (flight.duration_min * 60_000)) * 100
+    if (!isEnRoute || depMs == null || !flight?.duration_min) return null
+    const p = ((now - depMs) / (flight.duration_min * 60_000)) * 100
     return Math.min(95, Math.max(3, p))
   })()
 
-  const etaStr = (() => {
-    if (!isEnRoute || progressPct == null || !flight?.duration_min) return ''
-    const rem = Math.round(flight.duration_min * (1 - progressPct / 100))
-    return rem >= 60 ? `${Math.floor(rem / 60)}h ${rem % 60}m left` : `${rem}m left`
-  })()
+  const elapsedMin = depMs != null ? Math.max(0, Math.floor((now - depMs) / 60_000)) : null
+  const remainingMin = elapsedMin != null && flight?.duration_min
+    ? Math.max(0, flight.duration_min - elapsedMin) : null
 
   const boardAirport = flight
     ? (['DAM', 'ALP'].includes(flight.arr_iata) ? flight.arr_iata : flight.dep_iata) || 'DAM'
@@ -290,12 +299,16 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
           {/* 3. Route progress */}
           <div style={{ padding: '2px 14px 14px' }}>
 
-            {/* ETA (en route) or duration (arrived) */}
-            {isEnRoute && etaStr && (
-              <div style={{ textAlign: 'center', color: C.muted, fontSize: 11, marginBottom: 6 }}>{etaStr}</div>
+            {/* Elapsed / remaining — above the bar, live */}
+            {isEnRoute && elapsedMin != null && remainingMin != null && (
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: C.muted }}>{durationLabel(elapsedMin)} elapsed</span>
+                <span style={{ fontSize: 11, color: C.border }}>·</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: C.forest }}>{durationLabel(remainingMin)} left</span>
+              </div>
             )}
             {isArrived && flight.duration_min > 0 && (
-              <div style={{ textAlign: 'center', color: C.muted, fontSize: 11, marginBottom: 6 }}>{durationLabel(flight.duration_min)}</div>
+              <div style={{ textAlign: 'center', color: C.muted, fontSize: 11, marginBottom: 6 }}>{durationLabel(flight.duration_min)} total</div>
             )}
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
