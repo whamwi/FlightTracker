@@ -68,10 +68,26 @@ interface FlightStatus {
 }
 
 // ICAO airline prefix → IATA code (for airline logo)
-const ICAO_TO_IATA: Record<string, string> = {
+// Seeded from the airlines table on mount via /api/airlines — updated dynamically
+const _icaoToIata: Record<string, string> = {
   FDB: 'FZ', ABY: 'G9', THY: 'TK', RJA: 'RJ',
   QTR: 'QR', ETD: 'EY', PGT: 'PC', SYR: 'RB',
-  JZR: 'J9', ADY: 'TK', FYC: 'XH', DLD: 'F3',
+  JZR: 'J9', ADY: '3L', FYC: 'XH', FAD: 'F3',
+  KNE: 'XY', KAC: 'KU', TKJ: 'VF', JOC: 'DN',
+  NGN: 'KK', SDR: 'SR', UAE: 'EK',
+}
+const _iataName: Record<string, string> = {}
+
+async function loadAirlinesMap() {
+  try {
+    const res = await fetch('/api/airlines')
+    if (!res.ok) return
+    const rows: { iata: string; icao: string; name_en: string }[] = await res.json()
+    for (const r of rows) {
+      if (r.icao) _icaoToIata[r.icao] = r.iata
+      if (r.iata && r.name_en) _iataName[r.iata] = r.name_en
+    }
+  } catch {}
 }
 
 // Airport IATA → city name for popup route line
@@ -98,7 +114,11 @@ function airlineIataFor(callsign: string, fs?: FlightStatus | null): string | nu
   if (m) return m[1].toUpperCase()
   // ICAO callsign fallback: 3 alpha chars → map to IATA
   const icao = callsign.replace(/\d/g, '').toUpperCase()
-  return ICAO_TO_IATA[icao] ?? null
+  return _icaoToIata[icao] ?? null
+}
+
+function airlineNameFor(iata: string | null): string | null {
+  return iata ? (_iataName[iata] ?? null) : null
 }
 
 // Syria destination airports — used for route lines
@@ -528,10 +548,12 @@ function rnPost(msg: object) {
 }
 
 function buildEmbedFlight(callsign: string, se: ScheduleEntry | null, fs: FlightStatus | null, photoUrl?: string | null) {
+  const aiata = fs?.airline_iata ?? airlineIataFor(callsign)
   return {
     callsign,
     iata_number:    fs?.flight_number  ?? callsign,
-    airline_iata:   fs?.airline_iata   ?? airlineIataFor(callsign),
+    airline_iata:   aiata,
+    airline_name:   airlineNameFor(aiata) ?? null,
     dep_iata:       fs?.dep_iata       ?? se?.dep_iata  ?? null,
     arr_iata:       fs?.arr_iata       ?? se?.arr_iata  ?? null,
     dep_time_utc:   se?.dep_time_utc   ?? null,
@@ -584,6 +606,8 @@ export default function Map({ embed = false }: { embed?: boolean }) {
   const [error, setError] = useState<string | null>(null)
 
   // ── Map init ────────────────────────────────────────────────────────────────
+  useEffect(() => { loadAirlinesMap() }, [])
+
   useEffect(() => {
     if (!mapRef.current || mapInstanceRef.current) return
     import('leaflet').then(L => {
