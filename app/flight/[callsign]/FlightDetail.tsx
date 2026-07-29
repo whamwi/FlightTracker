@@ -296,7 +296,7 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
             </span>
           </div>
 
-          {/* 3. Route progress — exact popup structure, blue bar + plane circle */}
+          {/* 3. Route progress */}
           <div style={{ padding: '2px 14px 14px' }}>
 
             {/* ETA (en route) or duration (arrived) */}
@@ -307,14 +307,14 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
               <div style={{ textAlign: 'center', color: C.muted, fontSize: 11, marginBottom: 6 }}>{durationLabel(flight.duration_min)}</div>
             )}
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              {/* Dep city */}
-              <div style={{ flexShrink: 0 }}>
-                <div style={{ fontSize: 12, color: C.mid, whiteSpace: 'nowrap' }}>{flagOf(flight.dep_iata)} {cityOf(flight.dep_iata)}</div>
-                <div style={{ fontSize: 10, color: C.muted, fontFamily: 'monospace' }}>{flight.dep_iata}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {/* DEP — bordered frame */}
+              <div style={{ flexShrink: 0, border: `1px solid ${C.border}`, borderRadius: 8, padding: '6px 8px', background: C.bg, minWidth: 64 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: C.mid, whiteSpace: 'nowrap' }}>{flagOf(flight.dep_iata)} {cityOf(flight.dep_iata)}</div>
+                <div style={{ fontSize: 10, color: C.muted, fontFamily: 'monospace', marginTop: 1 }}>{flight.dep_iata}</div>
               </div>
 
-              {/* Bar */}
+              {/* Bar + plane */}
               <div style={{ flex: 1, position: 'relative', height: 3, background: C.track, borderRadius: 2 }}>
                 {/* Blue fill */}
                 <div style={{
@@ -322,12 +322,19 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
                   background: BLUE,
                   width: isArrived ? '100%' : isEnRoute && progressPct != null ? `${progressPct}%` : '0%',
                 }} />
-                {/* Plane pin: at progress position (en route) or at far right (arrived) */}
-                {(isEnRoute && progressPct != null) && (
+                {/* Scheduled/pre-departure: plane sits at the start */}
+                {!isEnRoute && !isArrived && (
+                  <div style={{ position: 'absolute', top: '50%', left: -11, transform: 'translateY(-50%)', zIndex: 2 }}>
+                    <PlanePin />
+                  </div>
+                )}
+                {/* En route: plane at progress position */}
+                {isEnRoute && progressPct != null && (
                   <div style={{ position: 'absolute', top: '50%', left: `${progressPct}%`, transform: 'translate(-50%, -50%)', zIndex: 2 }}>
                     <PlanePin />
                   </div>
                 )}
+                {/* Arrived: plane at far right */}
                 {isArrived && (
                   <div style={{ position: 'absolute', top: '50%', right: -11, transform: 'translateY(-50%)', zIndex: 2 }}>
                     <PlanePin />
@@ -335,10 +342,10 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
                 )}
               </div>
 
-              {/* Arr city */}
-              <div style={{ flexShrink: 0, textAlign: 'right' }}>
-                <div style={{ fontSize: 12, color: C.mid, whiteSpace: 'nowrap' }}>{cityOf(flight.arr_iata)} {flagOf(flight.arr_iata)}</div>
-                <div style={{ fontSize: 10, color: C.muted, fontFamily: 'monospace' }}>{flight.arr_iata}</div>
+              {/* ARR — bordered frame */}
+              <div style={{ flexShrink: 0, border: `1px solid ${C.border}`, borderRadius: 8, padding: '6px 8px', background: C.bg, minWidth: 64, textAlign: 'right' }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: C.mid, whiteSpace: 'nowrap' }}>{cityOf(flight.arr_iata)} {flagOf(flight.arr_iata)}</div>
+                <div style={{ fontSize: 10, color: C.muted, fontFamily: 'monospace', marginTop: 1 }}>{flight.arr_iata}</div>
               </div>
             </div>
           </div>
@@ -367,8 +374,9 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
 
           {/* 5. Actions */}
           <div style={{ display: 'flex', gap: 8, padding: '10px 13px 13px' }}>
-            <button onClick={handleShare} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, background: C.forest, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 12px', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
-              <svg width={13} height={13} viewBox="0 0 16 16" fill="none">
+            {/* Share */}
+            <button onClick={handleShare} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.forest, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 8px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+              <svg width={12} height={12} viewBox="0 0 16 16" fill="none">
                 <circle cx="12" cy="3"  r="1.8" stroke="currentColor" strokeWidth="1.5"/>
                 <circle cx="12" cy="13" r="1.8" stroke="currentColor" strokeWidth="1.5"/>
                 <circle cx="3"  cy="8"  r="1.8" stroke="currentColor" strokeWidth="1.5"/>
@@ -377,9 +385,22 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
               </svg>
               Share
             </button>
-            <Link href="/board" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: '#F7F5EC', color: C.ink, border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 12px', fontSize: 13, fontWeight: 600, textDecoration: 'none' }}>
-              {boardAirport} flights
-              <svg width={12} height={12} viewBox="0 0 14 14" fill="none"><path d="M4 7h7M8 4l3 3-3 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            {/* Track → FR24 live map */}
+            <a
+              href={`https://www.flightradar24.com/${flight.iata_number}`}
+              target="_blank" rel="noopener noreferrer"
+              style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#EBF3EF', color: C.forest, border: `1px solid #B8D8CC`, borderRadius: 10, padding: '10px 8px', fontSize: 12, fontWeight: 600, textDecoration: 'none' }}
+            >
+              <svg width={12} height={12} viewBox="0 0 16 16" fill="none">
+                <circle cx="8" cy="6.5" r="3" stroke="currentColor" strokeWidth="1.5"/>
+                <path d="M8 15C8 15 2.5 10 2.5 6.5a5.5 5.5 0 0 1 11 0C13.5 10 8 15 8 15z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+              </svg>
+              Track
+            </a>
+            {/* Airport board */}
+            <Link href="/board" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: '#F7F5EC', color: C.ink, border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 8px', fontSize: 12, fontWeight: 600, textDecoration: 'none' }}>
+              {boardAirport}
+              <svg width={11} height={11} viewBox="0 0 14 14" fill="none"><path d="M4 7h7M8 4l3 3-3 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </Link>
           </div>
 
