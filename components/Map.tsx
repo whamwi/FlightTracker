@@ -1254,31 +1254,64 @@ export default function Map({ embed = false }: { embed?: boolean }) {
           markersRef.current[cs] = m
         }
 
-        // Fetch aircraft photo once per registration
+        // Fetch aircraft photo once per registration.
+        // Runs two sources in parallel: Wikimedia Commons (high-res, selective coverage)
+        // and Planespotters (broad coverage, 421×280 max). Whichever resolves with a URL
+        // fires first; Wikimedia also upgrades the cache if it arrives later.
         if (regDr && !photoRequestedRef.current.has(regDr)) {
           photoRequestedRef.current.add(regDr)
-          const capturedCS = cs
-          const capturedA  = a
-          const capturedLostAt = lostAt
+          const capturedCS      = cs
+          const capturedA       = a
+          const capturedLostAt  = lostAt
+
+          const emitPhoto = (url: string) => {
+            // Only upgrade if this URL is better (Wikimedia) or cache is still null
+            if (!photoCacheRef.current[regDr] || url.includes('wikimedia')) {
+              photoCacheRef.current[regDr] = url
+            }
+            if (markersRef.current[capturedCS]) {
+              const fsNow = flightStatusRef.current[capturedCS]
+              markersRef.current[capturedCS].setPopupContent(
+                buildPopup(capturedA, capturedLostAt > 0 ? capturedLostAt : undefined, false, fsNow, url)
+              )
+            }
+            if (selectedCSRef.current === capturedCS) {
+              const fsNow = flightStatusRef.current[capturedCS]
+              const seNow = scheduleRef.current.find(e => e.callsign === capturedCS) ?? null
+              rnPost({ type: 'SELECT', flight: buildEmbedFlight(capturedCS, seNow, fsNow ?? null, url) })
+            }
+          }
+
+          // Planespotters — broad coverage, ~421×280px max
           fetch(`https://api.planespotters.net/pub/photos/reg/${encodeURIComponent(regDr)}`)
             .then(r => r.ok ? r.json() : null)
-            .then(photoData => {
-              const url: string | null = photoData?.photos?.[0]?.thumbnail_large?.src ?? photoData?.photos?.[0]?.thumbnail?.src ?? null
-              photoCacheRef.current[regDr] = url
-              if (url && markersRef.current[capturedCS]) {
-                const fsNow = flightStatusRef.current[capturedCS]
-                markersRef.current[capturedCS].setPopupContent(
-                  buildPopup(capturedA, capturedLostAt > 0 ? capturedLostAt : undefined, false, fsNow, url)
-                )
-              }
-              // Re-fire SELECT so the native sheet gets the photo without requiring a re-tap
-              if (url && selectedCSRef.current === capturedCS) {
-                const fsNow = flightStatusRef.current[capturedCS]
-                const seNow = scheduleRef.current.find(e => e.callsign === capturedCS) ?? null
-                rnPost({ type: 'SELECT', flight: buildEmbedFlight(capturedCS, seNow, fsNow ?? null, url) })
-              }
+            .then(d => {
+              const url: string | null = d?.photos?.[0]?.thumbnail_large?.src ?? d?.photos?.[0]?.thumbnail?.src ?? null
+              if (url && !photoCacheRef.current[regDr]) emitPhoto(url)
+              else if (!url) photoCacheRef.current[regDr] = null
             })
-            .catch(() => { photoCacheRef.current[regDr] = null })
+            .catch(() => { if (!photoCacheRef.current[regDr]) photoCacheRef.current[regDr] = null })
+
+          // Wikimedia Commons — selective coverage, up to 960px wide (Retina-quality)
+          fetch(
+            `https://commons.wikimedia.org/w/api.php?action=query&list=search` +
+            `&srsearch=${encodeURIComponent(regDr + ' aircraft')}&srnamespace=6&srlimit=5&format=json&origin=*`
+          )
+            .then(r => r.ok ? r.json() : null)
+            .then(async searchData => {
+              const files: any[] = searchData?.query?.search ?? []
+              const hit = files.find(f => f.title.toUpperCase().includes(regDr.toUpperCase()))
+              if (!hit) return
+              const imgRes = await fetch(
+                `https://commons.wikimedia.org/w/api.php?action=query&titles=${encodeURIComponent(hit.title)}` +
+                `&prop=imageinfo&iiprop=url&iiurlwidth=960&format=json&origin=*`
+              )
+              const imgData = imgRes.ok ? await imgRes.json() : null
+              const pages = imgData?.query?.pages ?? {}
+              const thumbUrl: string | null = (Object.values(pages)[0] as any)?.imageinfo?.[0]?.thumburl ?? null
+              if (thumbUrl) emitPhoto(thumbUrl)
+            })
+            .catch(() => {})
         }
 
         linesRef.current[cs]?.forEach((l: any) => l.remove())  // eslint-disable-line
