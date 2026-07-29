@@ -483,9 +483,6 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
             {!isCancelled && isArr && <DelayChip min={arrDelay} />}
-            {hasEstArr && !isCancelled && (
-              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, fontWeight: 600, padding: '3px 5px', borderRadius: 5, background: C.goldenBg, color: C.goldenText }}>est.</span>
-            )}
             {hasComputedETA && !isCancelled && (
               <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, fontWeight: 600, padding: '3px 5px', borderRadius: 5, background: C.goldenBg, color: C.goldenText }}>~</span>
             )}
@@ -754,6 +751,7 @@ export default function BoardPage() {
         .ft-nav { padding: 0 16px !important; gap: 12px !important; height: 56px !important; }
         .ft-nav-tabs { display: none !important; }
         .ft-search { display: none !important; }
+        .ft-mobile-tabs { display: flex !important; }
         .ft-body { padding: 16px 16px 32px !important; flex-direction: column !important; }
         .ft-title { font-size: 26px !important; }
         .ft-content { flex-direction: column !important; }
@@ -766,6 +764,7 @@ export default function BoardPage() {
           .ft-nav { padding: 0 28px !important; gap: 20px !important; height: 68px !important; }
           .ft-nav-tabs { display: flex !important; }
           .ft-search { display: flex !important; }
+          .ft-mobile-tabs { display: none !important; }
           .ft-body { padding: 26px 28px 40px !important; }
           .ft-title { font-size: 34px !important; }
           .ft-content { flex-direction: row !important; align-items: flex-start !important; }
@@ -831,26 +830,47 @@ export default function BoardPage() {
           <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, fontWeight: 600, color: '#A6A093', background: C.bg, padding: '3px 5px', borderRadius: 4 }}>⌘K</span>
         </div>
 
-        {/* LIVE indicator */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 10px', borderRadius: 10, background: C.sunken, border: `1px solid ${C.border}`, flexShrink: 0 }}>
-          <span style={{ width: 6, height: 6, borderRadius: 99, background: C.forestMid, display: 'block' }} />
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600, color: C.secondary, whiteSpace: 'nowrap' }}>
-            LIVE {nowSyriaHHMM}
-          </span>
-        </div>
+      </div>
+
+      {/* ── Mobile nav tabs ── */}
+      <div className="ft-mobile-tabs" style={{
+        background: C.surface, borderBottom: `1px solid ${C.border}`,
+        padding: '0 16px', gap: 0, overflowX: 'auto',
+      }}>
+        {[
+          { label: 'Flights', active: true },
+          { label: 'Track', active: false },
+          { label: 'Destinations', active: false },
+          { label: 'Airlines', active: false },
+        ].map(item => (
+          <div key={item.label} style={{
+            padding: '10px 14px', whiteSpace: 'nowrap', flexShrink: 0,
+            borderBottom: item.active ? `2px solid ${C.forest}` : '2px solid transparent',
+          }}>
+            <span style={{ font: `${item.active ? 700 : 600} 13px/1 'Instrument Sans', system-ui`, color: item.active ? C.forest : C.secondary }}>
+              {item.label}
+            </span>
+          </div>
+        ))}
       </div>
 
       {/* ── Main body ── */}
       <div className="ft-body" style={{ maxWidth: 1400, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
           {/* Title + controls */}
-          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
               <span style={{ font: `500 12px/1 'Instrument Sans', system-ui`, color: C.muted, letterSpacing: '.02em' }}>{airportLabel}</span>
-              <h1 className="ft-title" style={{ margin: 0, font: `700 34px/1 'Instrument Sans', system-ui`, color: C.ink, letterSpacing: '-.025em' }}>
-                {viewTitle} {tabTitle}
-              </h1>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 9px', borderRadius: 8, background: C.sunken, border: `1px solid ${C.border}`, flexShrink: 0 }}>
+                <span style={{ width: 6, height: 6, borderRadius: 99, background: C.forestMid, display: 'block' }} />
+                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, fontWeight: 600, color: C.secondary, whiteSpace: 'nowrap' }}>
+                  LIVE {nowSyriaHHMM}
+                </span>
+              </div>
             </div>
+            <h1 className="ft-title" style={{ margin: 0, font: `700 34px/1 'Instrument Sans', system-ui`, color: C.ink, letterSpacing: '-.025em' }}>
+              {viewTitle} {tabTitle}
+            </h1>
           </div>
 
           {/* Controls row */}
