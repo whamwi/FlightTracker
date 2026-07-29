@@ -17,7 +17,7 @@ const CITY: Record<string, string> = {
   DEL: 'Delhi',          BOM: 'Mumbai',           BGW: 'Baghdad',
   ESB: 'Ankara',         SKD: 'Samarkand',        NJF: 'Najaf',
   OTP: 'Bucharest',      EBL: 'Erbil',            MJI: 'Tripoli',
-  AMS: 'Amsterdam',   MED: 'Medina',
+  AMS: 'Amsterdam',   MED: 'Medina',   DUS: 'Düsseldorf',
 }
 const city = (iata: string) => CITY[iata] ?? iata
 
@@ -42,6 +42,7 @@ const AIRPORT_FLAG: Record<string, string> = {
   MJI: '🇱🇾',
   AMS: '🇳🇱',
   EVN: '🇦🇲',
+  DUS: '🇩🇪',
 }
 const airportFlag = (iata: string) => AIRPORT_FLAG[iata] ?? ''
 

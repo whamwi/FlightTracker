@@ -15,7 +15,7 @@ const CITY: Record<string, string> = {
   GYD: 'Baku',       TBS: 'Tbilisi',      BGW: 'Baghdad',
   EBL: 'Erbil',      NJF: 'Najaf',        ESB: 'Ankara',
   SKD: 'Samarkand',  TAS: 'Tashkent',     AMS: 'Amsterdam',
-  MJI: 'Tripoli',    MED: 'Medina',
+  MJI: 'Tripoli',    MED: 'Medina',       DUS: 'Düsseldorf',
 }
 const cityName = (iata: string) => CITY[iata] ?? iata
 
@@ -29,7 +29,7 @@ const AIRPORT_FLAG: Record<string, string> = {
   OTP: '🇷🇴', BUH: '🇷🇴', EVN: '🇦🇲', GYD: '🇦🇿', TBS: '🇬🇪',
   BGW: '🇮🇶', EBL: '🇮🇶', NJF: '🇮🇶',
   SKD: '🇺🇿', TAS: '🇺🇿',
-  AMS: '🇳🇱', MJI: '🇱🇾', MED: '🇸🇦',
+  AMS: '🇳🇱', MJI: '🇱🇾', MED: '🇸🇦', DUS: '🇩🇪',
 }
 
 // ── Day display: Sun-first order matching airport FIDS convention ─────────────
