@@ -667,7 +667,8 @@ export default function BoardPage() {
         .ft-body { padding: 16px 16px 32px !important; flex-direction: column !important; }
         .ft-title { font-size: 26px !important; }
         .ft-sidebar { display: none !important; }
-        .ft-controls { gap: 8px !important; }
+        .ft-controls { gap: 8px !important; flex-wrap: wrap !important; }
+        .ft-airport-btn { padding: 8px 14px !important; }
         @media (min-width: 768px) {
           .ft-nav { padding: 0 28px !important; gap: 20px !important; height: 68px !important; }
           .ft-nav-tabs { display: flex !important; }
@@ -676,6 +677,7 @@ export default function BoardPage() {
           .ft-title { font-size: 34px !important; }
           .ft-sidebar { display: flex !important; flex-direction: column; gap: 16px; width: 300px; flex-shrink: 0; }
           .ft-controls { gap: 12px !important; }
+          .ft-airport-btn { padding: 8px 32px !important; }
         }
         @media (min-width: 1100px) {
           .ft-nav { padding: 0 40px !important; }
@@ -759,7 +761,7 @@ export default function BoardPage() {
           </div>
 
           {/* Controls row */}
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div className="ft-controls" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             {/* Date tabs */}
             <div style={{ display: 'flex', gap: 6 }}>
               {([-1, 0, 1] as Tab[]).map(t => (
@@ -805,7 +807,7 @@ export default function BoardPage() {
 
             <div style={{ display: 'flex', padding: 3, background: C.bg, borderRadius: 11, gap: 3 }}>
               {(['DAM', 'ALP'] as Airport[]).map(ap => (
-                <button key={ap} onClick={() => setAirport(ap)} style={{
+                <button key={ap} onClick={() => setAirport(ap)} className="ft-airport-btn" style={{
                   padding: '8px 32px', borderRadius: 9, cursor: 'pointer',
                   background: airport === ap ? C.forest : 'transparent',
                   border: 'none',
