@@ -611,8 +611,10 @@ export default function BoardPage() {
     const flightDate = new Date().toLocaleDateString('en-CA', { timeZone: TZ })
     const ts = Math.floor(new Date(flightDate + 'T00:00:00+03:00').getTime() / 1000)
     const url = `https://api.flightradar24.com/common/v1/airport.json?code=${airportCode}&plugin=&plugin-setting[schedule][mode]=&plugin-setting[schedule][timestamp]=${ts}&page=1&limit=100&fleet=&token=`
-    fetch(url)
-      .then(r => r.ok ? r.json() : null)
+    const fr24abort = new AbortController()
+    const fr24timeout = setTimeout(() => fr24abort.abort(), 8_000)
+    fetch(url, { signal: fr24abort.signal })
+      .then(r => { clearTimeout(fr24timeout); return r.ok ? r.json() : null })
       .then(data => {
         if (!data) return
         const sched = data?.result?.response?.airport?.pluginData?.schedule ?? {}
