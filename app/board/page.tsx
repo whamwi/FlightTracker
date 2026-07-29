@@ -3,48 +3,10 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react'
 import Link from 'next/link'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
+import { airportCity, airportFlag as _apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
 
-// ── Airport display names ────────────────────────────────────────────────────
-const CITY: Record<string, string> = {
-  DAM: 'Damascus',       ALP: 'Aleppo',          SHJ: 'Sharjah',
-  DXB: 'Dubai',          AUH: 'Abu Dhabi',        MCT: 'Muscat',
-  IST: 'Istanbul',       SAW: 'Istanbul',          AMM: 'Amman',
-  BEY: 'Beirut',         CAI: 'Cairo',            DOH: 'Doha',
-  KWI: 'Kuwait City',    RUH: 'Riyadh',           JED: 'Jeddah',
-  DMM: 'Dammam',         BUH: 'Bucharest',        GYD: 'Baku',
-  LED: 'St. Petersburg', SVO: 'Moscow',           KJA: 'Krasnoyarsk',
-  IKT: 'Irkutsk',        TAS: 'Tashkent',         ALA: 'Almaty',
-  DEL: 'Delhi',          BOM: 'Mumbai',           BGW: 'Baghdad',
-  ESB: 'Ankara',         SKD: 'Samarkand',        NJF: 'Najaf',
-  OTP: 'Bucharest',      EBL: 'Erbil',            MJI: 'Tripoli',
-  AMS: 'Amsterdam',   MED: 'Medina',   DUS: 'Düsseldorf',
-}
-const city = (iata: string) => CITY[iata] ?? iata
-
-const AIRPORT_FLAG: Record<string, string> = {
-  DAM: '🇸🇾', ALP: '🇸🇾',
-  SHJ: '🇦🇪', DXB: '🇦🇪', AUH: '🇦🇪',
-  MCT: '🇴🇲',
-  IST: '🇹🇷', SAW: '🇹🇷', ESB: '🇹🇷',
-  AMM: '🇯🇴',
-  BEY: '🇱🇧',
-  CAI: '🇪🇬',
-  DOH: '🇶🇦',
-  KWI: '🇰🇼',
-  RUH: '🇸🇦', JED: '🇸🇦', DMM: '🇸🇦', MED: '🇸🇦',
-  BGW: '🇮🇶', NJF: '🇮🇶', EBL: '🇮🇶',
-  BUH: '🇷🇴', OTP: '🇷🇴',
-  GYD: '🇦🇿',
-  LED: '🇷🇺', SVO: '🇷🇺', KJA: '🇷🇺', IKT: '🇷🇺',
-  TAS: '🇺🇿', SKD: '🇺🇿',
-  ALA: '🇰🇿',
-  DEL: '🇮🇳', BOM: '🇮🇳',
-  MJI: '🇱🇾',
-  AMS: '🇳🇱',
-  EVN: '🇦🇲',
-  DUS: '🇩🇪',
-}
-const airportFlag = (iata: string) => AIRPORT_FLAG[iata] ?? ''
+const city = (iata: string) => airportCity[iata] ?? iata
+const airportFlag = (iata: string) => _apFlag[iata] ?? ''
 
 // ── Status badge config ──────────────────────────────────────────────────────
 const STATUS: Record<string, { label: string; cls: string; color: string }> = {
@@ -109,14 +71,7 @@ function syriaDate(offsetDays: number): string {
 }
 
 // ── Airport UTC offsets (default = 3 = UTC+3, Syria's timezone) ─────────────
-const UTC_OFFSET: Record<string, number> = {
-  IKT: 8,  KJA: 7,
-  DEL: 5.5, BOM: 5.5,
-  TAS: 5,  ALA: 5,  SKD: 5,
-  SHJ: 4,  DXB: 4,  AUH: 4,  MCT: 4,  EVN: 4,  GYD: 4,
-  AMS: 2,  MJI: 2,  TIP: 2,
-}
-function tzOffset(iata: string): number { return UTC_OFFSET[iata] ?? 3 }
+function tzOffset(iata: string): number { return airportOffset[iata] ?? 3 }
 
 function utcHHMMtoLocal(hhmm: string, offsetH: number): string {
   const [h, m] = hhmm.slice(0, 5).split(':').map(Number)
@@ -532,6 +487,7 @@ export default function BoardPage() {
       .catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => { loadGeoData() }, [])
   useEffect(() => { load(tab) }, [tab, load])
   useEffect(() => {
     if (tab !== 0) return

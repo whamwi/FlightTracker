@@ -67,119 +67,26 @@ interface FlightStatus {
   airline_iata:      string | null
 }
 
-// ICAO airline prefix → IATA code (for airline logo)
-// Seeded from the airlines table on mount via /api/airlines — updated dynamically
-const _icaoToIata: Record<string, string> = {
-  FDB: 'FZ', ABY: 'G9', THY: 'TK', RJA: 'RJ',
-  QTR: 'QR', ETD: 'EY', PGT: 'PC', SYR: 'RB',
-  JZR: 'J9', ADY: '3L', FYC: 'XH', FAD: 'F3',
-  KNE: 'XY', KAC: 'KU', TKJ: 'VF', JOC: 'DN',
-  NGN: 'KK', SDR: 'SR', UAE: 'EK',
-}
-const _iataName: Record<string, string> = {}
+import { airportCity as _apCity, airportCoords as _apCoords, airlineByIata as _alByIata, icaoToIata as _icaoToIata, loadGeoData } from '../lib/geo-data'
 
-async function loadAirlinesMap() {
-  try {
-    const res = await fetch('/api/airlines')
-    if (!res.ok) return
-    const rows: { iata: string; icao: string; name_en: string }[] = await res.json()
-    for (const r of rows) {
-      if (r.icao) _icaoToIata[r.icao] = r.iata
-      if (r.iata && r.name_en) _iataName[r.iata] = r.name_en
-    }
-  } catch {}
-}
-
-// Airport IATA → city name for popup route line
-const IATA_CITY: Record<string, string> = {
-  DAM: 'Damascus',  ALP: 'Aleppo',    DXB: 'Dubai',
-  SHJ: 'Sharjah',  AUH: 'Abu Dhabi', BEY: 'Beirut',
-  AMM: 'Amman',    CAI: 'Cairo',      IST: 'Istanbul',
-  SAW: 'Istanbul', AYT: 'Antalya',    ADB: 'Izmir',
-  ESB: 'Ankara',   BAH: 'Bahrain',    DOH: 'Doha',
-  KWI: 'Kuwait',   MCT: 'Muscat',     BGW: 'Baghdad',
-  BSR: 'Basra',    NJF: 'Najaf',      THR: 'Tehran',
-  MHD: 'Mashhad',  JED: 'Jeddah',     RUH: 'Riyadh',
-  SVO: 'Moscow',   HRG: 'Hurghada',   TBS: 'Tbilisi',
-  GYD: 'Baku',     KBP: 'Kyiv',       VIE: 'Vienna',
-  DUS: 'Düsseldorf',
-}
 function iataCity(code: string | null | undefined): string {
-  return (code && IATA_CITY[code]) ? IATA_CITY[code] : (code ?? '—')
+  return (code && _apCity[code]) ? _apCity[code] : (code ?? '—')
 }
 function airlineIataFor(callsign: string, fs?: FlightStatus | null): string | null {
   if (fs?.airline_iata) return fs.airline_iata
-  // IATA callsigns: exactly 2-char code (can include leading digit, e.g. '3L', 'B6') then digits
   const src = fs?.flight_number ?? callsign
   const m = src.match(/^([A-Z0-9]{2})\d/i)
   if (m) return m[1].toUpperCase()
-  // ICAO callsign fallback: 3 alpha chars → map to IATA
   const icao = callsign.replace(/\d/g, '').toUpperCase()
   return _icaoToIata[icao] ?? null
 }
-
 function airlineNameFor(iata: string | null): string | null {
-  return iata ? (_iataName[iata] ?? null) : null
+  return iata ? (_alByIata[iata]?.name_en ?? null) : null
 }
-
-// Syria destination airports — used for route lines
+// Syria home airports — tiny fallback so route lines draw before geo-data loads
 const AIRPORT_COORDS: Record<string, [number, number]> = {
   DAM: [33.4114, 36.5156],
   ALP: [36.1807, 37.2244],
-}
-
-// All airports in our schedule — used for great-circle projection origin
-const ALL_AIRPORT_COORDS: Record<string, [number, number]> = {
-  DAM: [33.4114, 36.5156],
-  ALP: [36.1807, 37.2244],
-  SAW: [40.8986, 29.3092],
-  IST: [41.2608, 28.7418],
-  AYT: [36.8987, 30.7995],
-  AMM: [31.7226, 35.9930],
-  BEY: [33.8208, 35.4883],
-  CAI: [30.1219, 31.4056],
-  HRG: [27.1783, 33.7993],
-  DXB: [25.2528, 55.3644],
-  SHJ: [25.3285, 55.5172],
-  AUH: [24.4330, 54.6511],
-  KWI: [29.2267, 47.9689],
-  MCT: [23.5933, 58.2844],
-  RUH: [24.9578, 46.6989],
-  DMM: [26.4712, 49.7979],
-  JED: [21.6796, 39.1565],
-  MED: [24.5534, 39.7051],
-  BGW: [33.2626, 44.2346],
-  BSR: [30.5491, 47.6622],
-  TBS: [41.6692, 44.9547],
-  SKD: [39.7005, 66.9838],
-  TAS: [41.2579, 69.2812],
-  VKO: [55.5965, 37.2615],
-  SVO: [55.9736, 37.4125],
-  EVN: [40.1473, 44.3959],
-  KHI: [24.9065, 67.1608],
-  LCA: [34.8751, 33.6249],
-  // Added from schedule validation
-  AMS: [52.3086,  4.7639],  // Amsterdam Schiphol
-  DOH: [25.2731, 51.6081],  // Doha Hamad International
-  EBL: [36.2376, 43.9631],  // Erbil International
-  MJI: [32.8942, 13.2759],  // Mitiga (Tripoli)
-  TIP: [32.6635, 13.1515],  // Tripoli International
-  BAH: [26.2708, 50.6336],  // Bahrain
-  NJF: [31.9890, 44.4042],  // Najaf
-  ADB: [38.2924, 27.1570],  // Izmir
-  ESB: [40.1281, 32.9951],  // Ankara Esenboga
-  THR: [35.6892, 51.3130],  // Tehran Mehrabad
-  MHD: [36.2352, 59.6400],  // Mashhad
-  GYD: [40.4675, 50.0467],  // Baku
-  ATH: [37.9364, 23.9445],  // Athens
-  FCO: [41.8003, 12.2389],  // Rome
-  CDG: [49.0097,  2.5479],  // Paris CDG
-  LHR: [51.4700, -0.4543],  // London Heathrow
-  FRA: [50.0379,  8.5622],  // Frankfurt
-  VIE: [48.1103, 16.5697],  // Vienna
-  DUS: [51.2895,  6.7668],  // Düsseldorf
-  ADD: [ 8.9779, 38.7993],  // Addis Ababa
-  NBO: [-1.3192, 36.9275],  // Nairobi
 }
 
 const STALE_TTL_MS       = 30 * 60 * 1000
@@ -373,7 +280,7 @@ function buildPopup(
 
   // Distance + ETA to destination
   const destCode  = fs?.arr_iata ?? a.arr_iata ?? null
-  const destCoord = destCode ? ALL_AIRPORT_COORDS[destCode] : null
+  const destCoord = destCode ? _apCoords[destCode] : null
   let distLine = ''
   if (destCoord && typeof a.lat === 'number' && typeof a.lon === 'number') {
     const nm  = greatCircleKm(a.lat, a.lon, destCoord[0], destCoord[1]) / 1.852
@@ -608,7 +515,7 @@ export default function Map({ embed = false }: { embed?: boolean }) {
   const [error, setError] = useState<string | null>(null)
 
   // ── Map init ────────────────────────────────────────────────────────────────
-  useEffect(() => { loadAirlinesMap() }, [])
+  useEffect(() => { loadGeoData() }, [])
 
   useEffect(() => {
     if (!mapRef.current || mapInstanceRef.current) return
@@ -1057,7 +964,7 @@ export default function Map({ embed = false }: { embed?: boolean }) {
                 dispLat = adfLat; dispLon = adfLon
                 dispTrack = bearingFromPath(wps, useF)
               } else {
-                const arrC2 = schedEntry ? ALL_AIRPORT_COORDS[schedEntry.arr_iata] : null
+                const arrC2 = schedEntry ? _apCoords[schedEntry.arr_iata] : null
                 if (arrC2) { dispLat = arrC2[0]; dispLon = arrC2[1] }
                 else { dispLat = timeLat; dispLon = timeLon }
                 dispTrack = bearingFromPath(wps, Math.min(1, fraction))
@@ -1069,8 +976,8 @@ export default function Map({ embed = false }: { embed?: boolean }) {
               if (predFr24Render && predFr24Render.confidence(now) !== 'very_low') {
                 const depI2 = schedEntry?.dep_iata ?? a.dep_iata ?? ''
                 const arrI2 = schedEntry?.arr_iata ?? a.arr_iata ?? ''
-                const dc2   = ALL_AIRPORT_COORDS[depI2]
-                const ac3   = ALL_AIRPORT_COORDS[arrI2]
+                const dc2   = _apCoords[depI2]
+                const ac3   = _apCoords[arrI2]
                 if (dc2 && ac3) {
                   predFr24Render.setContext({
                     dep_coords:        dc2,
@@ -1091,7 +998,7 @@ export default function Map({ embed = false }: { embed?: boolean }) {
               let drLat = a.lat, drLon = a.lon, drValid = false
               if (typeof a.gs === 'number' && a.gs > 50 && typeof a.track === 'number') {
                 ;[drLat, drLon] = projectPosition(a.lat, a.lon, a.track, a.gs, elapsed)
-                const arrC2  = schedEntry ? ALL_AIRPORT_COORDS[schedEntry.arr_iata] : null
+                const arrC2  = schedEntry ? _apCoords[schedEntry.arr_iata] : null
                 const distFix = arrC2 ? greatCircleKm(a.lat,  a.lon,  arrC2[0], arrC2[1]) : 0
                 const distDR  = arrC2 ? greatCircleKm(drLat, drLon, arrC2[0], arrC2[1]) : 0
                 drValid = !arrC2 || distDR <= distFix + 20
@@ -1122,8 +1029,8 @@ export default function Map({ embed = false }: { embed?: boolean }) {
                   if (durationMin > 0) {
                     elapsedFrac = elapsed / (durationMin * 60_000)
                   } else {
-                    const depC2 = ALL_AIRPORT_COORDS[schedEntry?.dep_iata ?? a.dep_iata ?? ''] ?? null
-                    const arrC2 = ALL_AIRPORT_COORDS[schedEntry?.arr_iata ?? a.arr_iata ?? ''] ?? null
+                    const depC2 = _apCoords[schedEntry?.dep_iata ?? a.dep_iata ?? ''] ?? null
+                    const arrC2 = _apCoords[schedEntry?.arr_iata ?? a.arr_iata ?? ''] ?? null
                     if (depC2 && arrC2) {
                       const routeKm = greatCircleKm(depC2[0], depC2[1], arrC2[0], arrC2[1])
                       if (routeKm > 0) {
@@ -1145,8 +1052,8 @@ export default function Map({ embed = false }: { embed?: boolean }) {
               if (pred) {
                 const depI = schedEntry?.dep_iata ?? a.dep_iata ?? ''
                 const arrI = schedEntry?.arr_iata ?? a.arr_iata ?? ''
-                const dc   = ALL_AIRPORT_COORDS[depI]
-                const ac2  = ALL_AIRPORT_COORDS[arrI]
+                const dc   = _apCoords[depI]
+                const ac2  = _apCoords[arrI]
                 if (dc && ac2) {
                   pred.setContext({
                     dep_coords:        dc,
@@ -1182,7 +1089,7 @@ export default function Map({ embed = false }: { embed?: boolean }) {
             }
             projected = true
           } else if (schedEntry && fraction !== null && fraction > 1.0) {
-            const arrC = ALL_AIRPORT_COORDS[schedEntry.arr_iata]
+            const arrC = _apCoords[schedEntry.arr_iata]
             if (arrC) { dispLat = arrC[0]; dispLon = arrC[1]; arrSnapped = true; projected = true }
           } else if (a.gs && a.track &&
               (schedEntry == null || fraction !== null ||
@@ -1215,7 +1122,7 @@ export default function Map({ embed = false }: { embed?: boolean }) {
         if (isOnGround && !arrSnapped) {
           const se_ = scheduleRef.current.find(e => e.callsign === cs)
           const arrIata_ = se_?.arr_iata ?? a.arr_iata ?? null
-          const arrC_ = arrIata_ ? ALL_AIRPORT_COORDS[arrIata_] : null
+          const arrC_ = arrIata_ ? _apCoords[arrIata_] : null
           if (arrC_) { dispLat = arrC_[0]; dispLon = arrC_[1]; arrSnapped = true; projected = true }
         }
 
@@ -1224,9 +1131,9 @@ export default function Map({ embed = false }: { embed?: boolean }) {
           const fsFix = flightStatusRef.current[cs]
           if (fsFix?.actual_arr_utc && now - new Date(fsFix.actual_arr_utc).getTime() < 4 * 3_600_000) {
             const seFix = scheduleRef.current.find(e => e.callsign === cs)
-            const arrFix = (seFix ? ALL_AIRPORT_COORDS[seFix.arr_iata] : null)
-                        ?? (fsFix.arr_iata ? ALL_AIRPORT_COORDS[fsFix.arr_iata] : null)
-                        ?? (a.arr_iata    ? ALL_AIRPORT_COORDS[a.arr_iata]    : null)
+            const arrFix = (seFix ? _apCoords[seFix.arr_iata] : null)
+                        ?? (fsFix.arr_iata ? _apCoords[fsFix.arr_iata] : null)
+                        ?? (a.arr_iata    ? _apCoords[a.arr_iata]    : null)
             if (arrFix) { dispLat = arrFix[0]; dispLon = arrFix[1]; arrSnapped = true }
           }
         }
@@ -1244,10 +1151,10 @@ export default function Map({ embed = false }: { embed?: boolean }) {
             const sinceArr2 = (nowSec2 - arrSec2 + 86400) % 86400
             if (se.days_of_week.includes(todayDay2)) {
               if (nowSec2 < depSec2) {
-                const depC = ALL_AIRPORT_COORDS[se.dep_iata]
+                const depC = _apCoords[se.dep_iata]
                 if (depC) { dispLat = depC[0]; dispLon = depC[1] }
               } else if (sinceArr2 > 0 && sinceArr2 <= 90 * 60) {
-                const arrC = ALL_AIRPORT_COORDS[se.arr_iata]
+                const arrC = _apCoords[se.arr_iata]
                 if (arrC) { dispLat = arrC[0]; dispLon = arrC[1]; arrSnapped = true }
               }
             }
@@ -1486,8 +1393,8 @@ export default function Map({ embed = false }: { embed?: boolean }) {
           continue
         }
 
-        const depC = ALL_AIRPORT_COORDS[dep_iata]
-        const arrC = ALL_AIRPORT_COORDS[arr_iata]
+        const depC = _apCoords[dep_iata]
+        const arrC = _apCoords[arr_iata]
         if (!depC || !arrC) continue
 
         const confirmedArr = !!(fs?.actual_arr_utc)

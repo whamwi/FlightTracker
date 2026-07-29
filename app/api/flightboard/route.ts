@@ -12,30 +12,6 @@ const PREFIX_TO_IATA: Record<string, string> = {
   HST: 'RB',
 }
 
-// Hardcoded airline data — eliminates a Supabase round trip on every board load.
-// Update here when a new carrier starts serving Syrian airports.
-const AIRLINE_MAP: Record<string, { name: string; flag: string }> = {
-  '3L': { name: 'Air Arabia Abu Dhabi', flag: '🇦🇪' },
-  DN:   { name: 'Dan Air',              flag: '🇷🇴' },
-  EK:   { name: 'Emirates',             flag: '🇦🇪' },
-  EY:   { name: 'Etihad Airways',       flag: '🇦🇪' },
-  F3:   { name: 'Flyadeal',             flag: '🇸🇦' },
-  FZ:   { name: 'Flydubai',             flag: '🇦🇪' },
-  G9:   { name: 'Air Arabia',           flag: '🇦🇪' },
-  J9:   { name: 'Jazeera Airways',      flag: '🇰🇼' },
-  KU:   { name: 'Kuwait Airways',       flag: '🇰🇼' },
-  PC:   { name: 'Pegasus Airlines',     flag: '🇹🇷' },
-  QR:   { name: 'Qatar Airways',        flag: '🇶🇦' },
-  RB:   { name: 'Syrian Arab Airlines', flag: '🇸🇾' },
-  RJ:   { name: 'Royal Jordanian',      flag: '🇯🇴' },
-  TK:   { name: 'Turkish Airlines',     flag: '🇹🇷' },
-  VF:   { name: 'Anadolujet',           flag: '🇹🇷' },
-  XH:   { name: 'Fly Cham',             flag: '🇸🇾' },
-  XY:   { name: 'Flynas',               flag: '🇸🇦' },
-  KK:   { name: 'LEAV Aviation',        flag: '🇩🇪' },
-  SR:   { name: 'Sundair',              flag: '🇩🇪' },
-}
-
 function unixToUtcHHMM(unix: number | null): string {
   if (!unix) return ''
   const d = new Date(unix * 1000)
@@ -71,6 +47,17 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
   const date = searchParams.get('date')
   if (!date) return NextResponse.json({ ok: false, error: 'date required' }, { status: 400 })
+
+  // Build airline map from DB (1-hour Next.js cache)
+  const alRes = await fetch(
+    `${SB_URL}/rest/v1/airlines?select=iata,name_en,country_flag&order=iata`,
+    { headers: HEADERS, next: { revalidate: 3600 } }
+  )
+  const airlineMap: Record<string, { name: string; flag: string }> = {}
+  if (alRes.ok) {
+    const alRows: { iata: string; name_en: string; country_flag: string | null }[] = await alRes.json()
+    for (const r of alRows) airlineMap[r.iata] = { name: r.name_en, flag: r.country_flag ?? '' }
+  }
 
   // Only fetch Syrian airport rows — origin-airport caches (IST, DXB…) are excluded;
   // they bloated the response to 2950 flights and added no unique data for the board.
@@ -176,7 +163,7 @@ export async function GET(req: Request) {
     }
 
     const airlineIata = f.airline_iata || PREFIX_TO_IATA[num.slice(0, 3)] || ''
-    const al          = AIRLINE_MAP[airlineIata] ?? { name: f.airline ?? airlineIata, flag: '' }
+    const al          = airlineMap[airlineIata] ?? { name: f.airline ?? airlineIata, flag: '' }
 
     flightMap[key] = {
       iata_number:     num,

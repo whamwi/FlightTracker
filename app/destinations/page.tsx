@@ -3,34 +3,9 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
+import { airportCity, airportFlag as _apFlag, loadGeoData } from '@/lib/geo-data'
 
-// ── Airport city names ───────────────────────────────────────────────────────
-const CITY: Record<string, string> = {
-  DAM: 'Damascus',    ALP: 'Aleppo',       DXB: 'Dubai',
-  SHJ: 'Sharjah',    AUH: 'Abu Dhabi',    MCT: 'Muscat',
-  IST: 'Istanbul',   SAW: 'Istanbul',     AMM: 'Amman',
-  BEY: 'Beirut',     CAI: 'Cairo',        DOH: 'Doha',
-  KWI: 'Kuwait City',RUH: 'Riyadh',       JED: 'Jeddah',
-  DMM: 'Dammam',     OTP: 'Bucharest',  BUH: 'Bucharest',    EVN: 'Yerevan',
-  GYD: 'Baku',       TBS: 'Tbilisi',      BGW: 'Baghdad',
-  EBL: 'Erbil',      NJF: 'Najaf',        ESB: 'Ankara',
-  SKD: 'Samarkand',  TAS: 'Tashkent',     AMS: 'Amsterdam',
-  MJI: 'Tripoli',    MED: 'Medina',       DUS: 'Düsseldorf',
-}
-const cityName = (iata: string) => CITY[iata] ?? iata
-
-// ── Destination country flags ─────────────────────────────────────────────────
-const AIRPORT_FLAG: Record<string, string> = {
-  DAM: '🇸🇾', ALP: '🇸🇾',
-  DXB: '🇦🇪', SHJ: '🇦🇪', AUH: '🇦🇪', MCT: '🇴🇲',
-  IST: '🇹🇷', SAW: '🇹🇷', ESB: '🇹🇷',
-  AMM: '🇯🇴', BEY: '🇱🇧', CAI: '🇪🇬',
-  DOH: '🇶🇦', KWI: '🇰🇼', RUH: '🇸🇦', JED: '🇸🇦', DMM: '🇸🇦',
-  OTP: '🇷🇴', BUH: '🇷🇴', EVN: '🇦🇲', GYD: '🇦🇿', TBS: '🇬🇪',
-  BGW: '🇮🇶', EBL: '🇮🇶', NJF: '🇮🇶',
-  SKD: '🇺🇿', TAS: '🇺🇿',
-  AMS: '🇳🇱', MJI: '🇱🇾', MED: '🇸🇦', DUS: '🇩🇪',
-}
+const cityName = (iata: string) => airportCity[iata] ?? iata
 
 // ── Day display: Sun-first order matching airport FIDS convention ─────────────
 const DOW_ORDER = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
@@ -163,8 +138,8 @@ function DestCard({ dest, onClick, color }: { dest: Destination; onClick: () => 
       {/* Row 1: city + IATA + airline flags */}
       <div className="flex items-start justify-between gap-3 mb-2.5">
         <div className="flex items-baseline gap-2 min-w-0">
-          {AIRPORT_FLAG[dest.iata] && (
-            <span className="text-base leading-none shrink-0">{AIRPORT_FLAG[dest.iata]}</span>
+          {_apFlag[dest.iata] && (
+            <span className="text-base leading-none shrink-0">{_apFlag[dest.iata]}</span>
           )}
           <span className="text-white font-semibold text-base leading-tight truncate">
             {cityName(dest.iata)}
@@ -343,6 +318,8 @@ export default function DestinationsPage() {
   const [loading, setLoading] = useState(true)
   const [airport, setAirport] = useState<'DAM' | 'ALP'>('DAM')
   const [selected, setSelected] = useState<Destination | null>(null)
+
+  useEffect(() => { loadGeoData() }, [])
 
   useEffect(() => {
     fetch('/api/schedule')
