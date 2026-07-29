@@ -238,7 +238,7 @@ type EmbedMsg =
   | { type: 'COUNT';   count: number }
 
 interface EmbedFlight {
-  callsign: string; iata_number: string | null; airline_iata: string | null
+  callsign: string; iata_number: string | null; airline_iata: string | null; airline_name?: string | null
   dep_iata: string | null; arr_iata: string | null
   dep_time_utc: string | null; arr_time_utc: string | null
   duration_min: number | null; status: string
@@ -258,7 +258,7 @@ function toFlight(ef: EmbedFlight): Flight {
   const iata   = (prefix && AIRLINE_NAMES[prefix]) ? prefix : (ef.airline_iata ?? '')
   return {
     iata_number: ef.iata_number ?? ef.callsign, airline_iata: iata, country_flag: '',
-    airline_name: AIRLINE_NAMES[iata] ?? AIRLINE_NAMES[ef.airline_iata ?? ''] ?? ef.airline_iata ?? ef.callsign,
+    airline_name: ef.airline_name ?? AIRLINE_NAMES[iata] ?? AIRLINE_NAMES[ef.airline_iata ?? ''] ?? ef.airline_iata ?? ef.callsign,
     dep_iata: ef.dep_iata ?? '', arr_iata: ef.arr_iata ?? '',
     dep_time_utc: ef.dep_time_utc ?? '', arr_time_utc: ef.arr_time_utc ?? '',
     sched_dep_unix: null, duration_min: ef.duration_min ?? 0, status: ef.status,
