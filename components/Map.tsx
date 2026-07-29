@@ -1503,6 +1503,20 @@ export default function Map({ embed = false }: { embed?: boolean }) {
               const ph  = reg ? photoCacheRef.current[reg] ?? null : null
               selectedCSRef.current = callsign
               rnPost({ type: 'SELECT', flight: buildEmbedFlight(callsign, entry, fs ?? null, ph) })
+              if (reg && !(reg in photoCacheRef.current) && !photoRequestedRef.current.has(reg)) {
+                photoRequestedRef.current.add(reg)
+                fetch(`/api/photo/${encodeURIComponent(reg)}`)
+                  .then(r => r.ok ? r.json() : null)
+                  .then(photoData => {
+                    const url: string | null = photoData?.url ?? null
+                    photoCacheRef.current[reg] = url
+                    if (url && selectedCSRef.current === callsign) {
+                      const fsNow = flightStatusRef.current[callsign]
+                      rnPost({ type: 'SELECT', flight: buildEmbedFlight(callsign, entry, fsNow ?? null, url) })
+                    }
+                  })
+                  .catch(() => { photoCacheRef.current[reg] = null })
+              }
             })
           } else {
             m.bindPopup(popup, { className: 'fp-popup' })
