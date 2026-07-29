@@ -1,5 +1,5 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
-import { View, Text, StyleSheet, TouchableOpacity, Modal, Animated, Image } from 'react-native'
+import { View, Text, StyleSheet, TouchableOpacity, Modal, Animated, Image, Platform } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
 import WebView, { WebViewMessageEvent } from 'react-native-webview'
 import type { Flight } from '../../lib/types'
@@ -279,6 +279,7 @@ export default function MapTab() {
   const [depDelay, setDepDelay] = useState<number | null | undefined>(undefined)
   const [arrDelay, setArrDelay] = useState<number | null | undefined>(undefined)
   const [loading,  setLoading]  = useState(true)
+  const [flightCount, setFlightCount] = useState<number | null>(null)
   const slideAnim = useRef(new Animated.Value(0)).current
 
   useEffect(() => {
@@ -307,6 +308,7 @@ export default function MapTab() {
         setArrDelay(msg.flight.arr_delay_min)
       }
       if (msg.type === 'DESELECT') dismiss()
+      if (msg.type === 'COUNT') setFlightCount(msg.count)
     } catch {}
   }, [dismiss])
 
@@ -328,6 +330,29 @@ export default function MapTab() {
       {loading && (
         <View style={styles.loadingOverlay}>
           <Text style={styles.loadingText}>Loading map…</Text>
+        </View>
+      )}
+
+      {/* Map overlay — flight count + airport legend */}
+      {!loading && (
+        <View pointerEvents="none" style={styles.mapOverlay}>
+          {flightCount !== null && (
+            <View style={styles.countPill}>
+              <Text style={styles.countPlane}>✈</Text>
+              <Text style={styles.countNum}>{flightCount}</Text>
+              <Text style={styles.countLabel}>En Route</Text>
+            </View>
+          )}
+          <View style={styles.legendCard}>
+            <View style={styles.legendRow}>
+              <View style={[styles.legendDot, { backgroundColor: '#16a34a' }]} />
+              <Text style={styles.legendText}>Damascus</Text>
+            </View>
+            <View style={styles.legendRow}>
+              <View style={[styles.legendDot, { backgroundColor: '#f97316' }]} />
+              <Text style={styles.legendText}>Aleppo</Text>
+            </View>
+          </View>
         </View>
       )}
 
@@ -356,6 +381,17 @@ const styles = StyleSheet.create({
   webview:        { flex: 1 },
   loadingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#111827', justifyContent: 'center', alignItems: 'center' },
   loadingText:    { color: '#6b7280', fontSize: 14 },
+
+  mapOverlay:  { position: 'absolute', top: Platform.OS === 'ios' ? 56 : 36, left: 12, gap: 6 },
+  countPill:   { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(17,24,39,0.80)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 99 },
+  countPlane:  { color: '#fff', fontSize: 12 },
+  countNum:    { color: '#fff', fontSize: 14, fontWeight: '700' },
+  countLabel:  { color: '#9ca3af', fontSize: 11 },
+  legendCard:  { backgroundColor: 'rgba(17,24,39,0.80)', paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, gap: 5 },
+  legendRow:   { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  legendDot:   { width: 8, height: 8, borderRadius: 99 },
+  legendText:  { color: '#f9fafb', fontSize: 11, fontWeight: '500' },
+
   sheet: {
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 26, borderTopRightRadius: 26,
