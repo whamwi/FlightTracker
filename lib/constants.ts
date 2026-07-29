@@ -5,6 +5,7 @@ export const AIRLINE_NAMES: Record<string, string> = {
   J9: 'Jazeera Airways', FZ: 'flydubai', G9: 'Air Arabia',
   RJ: 'Royal Jordanian', RB: 'Syrian Air', QR: 'Qatar Airways',
   PC: 'Pegasus Airlines', '3L': 'Air Arabia', ME: 'Middle East Airlines',
+  F3: 'Flydeal',
 }
 
 const LOCAL_LOGOS: Record<string, string> = {
