@@ -1254,61 +1254,30 @@ export default function Map({ embed = false }: { embed?: boolean }) {
           markersRef.current[cs] = m
         }
 
-        // Fetch aircraft photo once per registration.
-        // Planespotters fires first (broad coverage, 421×280 max).
-        // Wikimedia Commons fires in parallel; if it finds a match it upgrades
-        // the photo to ~960px Retina-quality by re-firing SELECT.
+        // Fetch aircraft photo once per registration
         if (regDr && !photoRequestedRef.current.has(regDr)) {
           photoRequestedRef.current.add(regDr)
           const capturedCS     = cs
           const capturedA      = a
           const capturedLostAt = lostAt
-
-          const pushPhoto = (url: string) => {
-            photoCacheRef.current[regDr] = url
-            if (markersRef.current[capturedCS]) {
-              const fsNow = flightStatusRef.current[capturedCS]
-              markersRef.current[capturedCS].setPopupContent(
-                buildPopup(capturedA, capturedLostAt > 0 ? capturedLostAt : undefined, false, fsNow, url)
-              )
-            }
-            if (selectedCSRef.current === capturedCS) {
-              const fsNow = flightStatusRef.current[capturedCS]
-              const seNow = scheduleRef.current.find(e => e.callsign === capturedCS) ?? null
-              rnPost({ type: 'SELECT', flight: buildEmbedFlight(capturedCS, seNow, fsNow ?? null, url) })
-            }
-          }
-
-          // Planespotters — always fires, sets initial photo
           fetch(`https://api.planespotters.net/pub/photos/reg/${encodeURIComponent(regDr)}`)
             .then(r => r.ok ? r.json() : null)
             .then(photoData => {
               const url: string | null = photoData?.photos?.[0]?.thumbnail_large?.src ?? photoData?.photos?.[0]?.thumbnail?.src ?? null
               photoCacheRef.current[regDr] = url
-              if (url) pushPhoto(url)
+              if (url && markersRef.current[capturedCS]) {
+                const fsNow = flightStatusRef.current[capturedCS]
+                markersRef.current[capturedCS].setPopupContent(
+                  buildPopup(capturedA, capturedLostAt > 0 ? capturedLostAt : undefined, false, fsNow, url)
+                )
+              }
+              if (url && selectedCSRef.current === capturedCS) {
+                const fsNow = flightStatusRef.current[capturedCS]
+                const seNow = scheduleRef.current.find(e => e.callsign === capturedCS) ?? null
+                rnPost({ type: 'SELECT', flight: buildEmbedFlight(capturedCS, seNow, fsNow ?? null, url) })
+              }
             })
             .catch(() => { photoCacheRef.current[regDr] = null })
-
-          // Wikimedia Commons — upgrades to higher-res if aircraft registration matches a file title
-          fetch(
-            `https://commons.wikimedia.org/w/api.php?action=query&list=search` +
-            `&srsearch=${encodeURIComponent(regDr + ' aircraft')}&srnamespace=6&srlimit=5&format=json&origin=*`
-          )
-            .then(r => r.ok ? r.json() : null)
-            .then(async (searchData: any) => {
-              const files: any[] = searchData?.query?.search ?? []
-              const hit = files.find((f: any) => f.title.toUpperCase().includes(regDr.toUpperCase()))
-              if (!hit) return
-              const imgRes = await fetch(
-                `https://commons.wikimedia.org/w/api.php?action=query&titles=${encodeURIComponent(hit.title)}` +
-                `&prop=imageinfo&iiprop=url&iiurlwidth=960&format=json&origin=*`
-              )
-              const imgData: any = imgRes.ok ? await imgRes.json() : null
-              const pages = imgData?.query?.pages ?? {}
-              const thumbUrl: string | null = (Object.values(pages)[0] as any)?.imageinfo?.[0]?.thumburl ?? null
-              if (thumbUrl) pushPhoto(thumbUrl)
-            })
-            .catch(() => {})
         }
 
         linesRef.current[cs]?.forEach((l: any) => l.remove())  // eslint-disable-line
