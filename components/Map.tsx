@@ -386,6 +386,7 @@ function buildPopup(
     : ''
 
   return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;width:280px">
+    ${photoHtml}
     <div style="display:flex;align-items:flex-start;gap:11px;padding:13px 13px 8px">
       ${logoHtml}
       <div style="flex:1;min-width:0">
@@ -394,7 +395,7 @@ function buildPopup(
       </div>
       <span style="background:${statusBg};color:${statusFg};font-size:10px;font-weight:600;padding:3px 8px;border-radius:99px;flex-shrink:0;margin-top:1px">${statusLabel}</span>
     </div>
-    ${progressHtml}${timesHtml}${lostLine}${drLine}${photoHtml}
+    ${progressHtml}${timesHtml}${lostLine}${drLine}
   </div>`
 }
 
@@ -491,6 +492,7 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
     : ''
 
   return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;width:280px">
+    ${photoHtml}
     <div style="display:flex;align-items:flex-start;gap:11px;padding:13px 13px 8px">
       ${logoHtml}
       <div style="flex:1;min-width:0">
@@ -499,7 +501,7 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
       </div>
       <span style="background:${statusBg};color:${statusFg};font-size:10px;font-weight:600;padding:3px 8px;border-radius:99px;flex-shrink:0;margin-top:1px">${statusLabel}</span>
     </div>
-    ${progressHtml}${timesHtml}${noteHtml}${photoHtml}
+    ${progressHtml}${timesHtml}${noteHtml}
   </div>`
 }
 
