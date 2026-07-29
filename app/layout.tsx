@@ -9,14 +9,12 @@ export const metadata: Metadata = {
     description: 'Live flight status for Damascus & Aleppo — real-time arrivals, departures and gate updates.',
     url: 'https://www.flysyria.app',
     siteName: 'FlySyria Tracker',
-    images: [{ url: 'https://www.flysyria.app/flysyria-og-image.png', width: 1200, height: 630 }],
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
     title: 'FlySyria Tracker',
     description: 'Live flight status for Damascus & Aleppo.',
-    images: ['https://www.flysyria.app/flysyria-og-image.png'],
   },
 }
 
