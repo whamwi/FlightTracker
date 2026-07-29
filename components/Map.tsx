@@ -1255,20 +1255,17 @@ export default function Map({ embed = false }: { embed?: boolean }) {
         }
 
         // Fetch aircraft photo once per registration.
-        // Runs two sources in parallel: Wikimedia Commons (high-res, selective coverage)
-        // and Planespotters (broad coverage, 421×280 max). Whichever resolves with a URL
-        // fires first; Wikimedia also upgrades the cache if it arrives later.
+        // Planespotters fires first (broad coverage, 421×280 max).
+        // Wikimedia Commons fires in parallel; if it finds a match it upgrades
+        // the photo to ~960px Retina-quality by re-firing SELECT.
         if (regDr && !photoRequestedRef.current.has(regDr)) {
           photoRequestedRef.current.add(regDr)
-          const capturedCS      = cs
-          const capturedA       = a
-          const capturedLostAt  = lostAt
+          const capturedCS     = cs
+          const capturedA      = a
+          const capturedLostAt = lostAt
 
-          const emitPhoto = (url: string) => {
-            // Only upgrade if this URL is better (Wikimedia) or cache is still null
-            if (!photoCacheRef.current[regDr] || url.includes('wikimedia')) {
-              photoCacheRef.current[regDr] = url
-            }
+          const pushPhoto = (url: string) => {
+            photoCacheRef.current[regDr] = url
             if (markersRef.current[capturedCS]) {
               const fsNow = flightStatusRef.current[capturedCS]
               markersRef.current[capturedCS].setPopupContent(
@@ -1282,34 +1279,34 @@ export default function Map({ embed = false }: { embed?: boolean }) {
             }
           }
 
-          // Planespotters — broad coverage, ~421×280px max
+          // Planespotters — always fires, sets initial photo
           fetch(`https://api.planespotters.net/pub/photos/reg/${encodeURIComponent(regDr)}`)
             .then(r => r.ok ? r.json() : null)
-            .then(d => {
-              const url: string | null = d?.photos?.[0]?.thumbnail_large?.src ?? d?.photos?.[0]?.thumbnail?.src ?? null
-              if (url && !photoCacheRef.current[regDr]) emitPhoto(url)
-              else if (!url) photoCacheRef.current[regDr] = null
+            .then(photoData => {
+              const url: string | null = photoData?.photos?.[0]?.thumbnail_large?.src ?? photoData?.photos?.[0]?.thumbnail?.src ?? null
+              photoCacheRef.current[regDr] = url
+              if (url) pushPhoto(url)
             })
-            .catch(() => { if (!photoCacheRef.current[regDr]) photoCacheRef.current[regDr] = null })
+            .catch(() => { photoCacheRef.current[regDr] = null })
 
-          // Wikimedia Commons — selective coverage, up to 960px wide (Retina-quality)
+          // Wikimedia Commons — upgrades to higher-res if aircraft registration matches a file title
           fetch(
             `https://commons.wikimedia.org/w/api.php?action=query&list=search` +
             `&srsearch=${encodeURIComponent(regDr + ' aircraft')}&srnamespace=6&srlimit=5&format=json&origin=*`
           )
             .then(r => r.ok ? r.json() : null)
-            .then(async searchData => {
+            .then(async (searchData: any) => {
               const files: any[] = searchData?.query?.search ?? []
-              const hit = files.find(f => f.title.toUpperCase().includes(regDr.toUpperCase()))
+              const hit = files.find((f: any) => f.title.toUpperCase().includes(regDr.toUpperCase()))
               if (!hit) return
               const imgRes = await fetch(
                 `https://commons.wikimedia.org/w/api.php?action=query&titles=${encodeURIComponent(hit.title)}` +
                 `&prop=imageinfo&iiprop=url&iiurlwidth=960&format=json&origin=*`
               )
-              const imgData = imgRes.ok ? await imgRes.json() : null
+              const imgData: any = imgRes.ok ? await imgRes.json() : null
               const pages = imgData?.query?.pages ?? {}
               const thumbUrl: string | null = (Object.values(pages)[0] as any)?.imageinfo?.[0]?.thumburl ?? null
-              if (thumbUrl) emitPhoto(thumbUrl)
+              if (thumbUrl) pushPhoto(thumbUrl)
             })
             .catch(() => {})
         }
