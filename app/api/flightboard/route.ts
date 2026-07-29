@@ -300,6 +300,54 @@ export async function GET(req: Request) {
     }
   }
 
+  // Fourth pass: destination airports of Syrian departures — fetch their arrivals
+  // to get precise landing timestamps for outbound flights (KK491 DAM→DUS etc.)
+  // instead of relying solely on the inferredArrived heuristic.
+  // Uses only unix timestamps (f.real_arr / f.est_arr) — avoids the Syria-UTC+3
+  // assumption baked into extractStatusUtc which would be wrong for DUS, DXB, etc.
+  {
+    const destSet = new Set<string>()
+    for (const entry of Object.values(flightMap)) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const arr = (entry as any).arr_iata as string
+      if (arr && !SYRIAN_AIRPORTS.has(arr)) destSet.add(arr)
+    }
+
+    if (destSet.size > 0) {
+      const destCodes = [...destSet].join(',')
+      const destRes = await fetch(
+        `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${date}&airport_iata=in.(${destCodes})&select=airport_iata,arrivals`,
+        { headers: HEADERS }
+      )
+      if (destRes.ok) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const destRows: any[] = await destRes.json()
+        for (const row of destRows) {
+          const ap = row.airport_iata as string
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          for (const f of (row.arrivals ?? [])) {
+            const num     = f.num      ?? ''
+            const depIata = f.dep_iata ?? ''
+            const arrIata = f.arr_iata || ap
+            const key     = `${num}|${depIata}|${arrIata}`
+            if (!flightMap[key]) continue
+
+            const actualArr  = f.real_arr ? new Date(f.real_arr * 1000).toISOString() : null
+            const revisedArr = f.est_arr  ? new Date(f.est_arr  * 1000).toISOString() : null
+
+            if (actualArr) {
+              flightMap[key].actual_arr_utc  = actualArr
+              flightMap[key].revised_arr_utc = actualArr
+              flightMap[key].status          = 'Arrived'
+            } else if (revisedArr && !flightMap[key].actual_arr_utc) {
+              flightMap[key].revised_arr_utc = revisedArr
+            }
+          }
+        }
+      }
+    }
+  }
+
   return NextResponse.json(
     { ok: true, date, flights: Object.values(flightMap).filter((f: any) => f.status !== 'Unknown') },
     { headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' } }
