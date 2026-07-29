@@ -305,7 +305,7 @@ function bestHeading(a: Aircraft): number {
 
 function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, stale: boolean, label?: string, alp = false, estimated = false) {
   const mobile  = typeof window !== 'undefined' && window.innerWidth < 768
-  const size    = syria ? (mobile ? 20 : 40) : (mobile ? 16 : 30)
+  const size    = syria ? (mobile ? 24 : 40) : (mobile ? 18 : 30)
   const color   = stale ? '#9ca3af' : alp ? '#f97316' : syria ? '#16a34a' : '#1d4ed8'
   const opacity = stale ? 0.5 : 1
   const shadow  = syria && !stale ? 'drop-shadow(0 5px 4px rgba(0,0,0,0.45))' : 'drop-shadow(0 1px 3px rgba(0,0,0,0.4))'
