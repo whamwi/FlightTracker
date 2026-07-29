@@ -392,6 +392,22 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
 
         <StatusBadge status={status} view={view} />
 
+        {/* Share icon — always visible, links to the flight share page */}
+        <Link href={`/flight/${encodeURIComponent(f.iata_number)}`} title="Share flight" style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          width: 30, height: 30, borderRadius: 9,
+          background: C.sunken, border: `1px solid ${C.border}`,
+          color: C.muted, flexShrink: 0, textDecoration: 'none',
+        }}>
+          <svg width={14} height={14} viewBox="0 0 16 16" fill="none">
+            <circle cx="12" cy="3"  r="1.8" stroke="currentColor" strokeWidth="1.5"/>
+            <circle cx="12" cy="13" r="1.8" stroke="currentColor" strokeWidth="1.5"/>
+            <circle cx="3"  cy="8"  r="1.8" stroke="currentColor" strokeWidth="1.5"/>
+            <line x1="10.3" y1="3.9" x2="4.7" y2="7.1" stroke="currentColor" strokeWidth="1.5"/>
+            <line x1="4.7"  y1="8.9" x2="10.3" y2="12.1" stroke="currentColor" strokeWidth="1.5"/>
+          </svg>
+        </Link>
+
         {showTrack && (
           <Link href="/" style={{
             display: 'flex', alignItems: 'center', gap: 6, padding: '7px 12px 7px 10px',
@@ -411,12 +427,6 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
             display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
           }}>
             <PinSVG />
-          </button>
-          <button title="Send on WhatsApp" style={{
-            width: 30, height: 30, borderRadius: 9, background: '#E9F5EC', border: '1px solid #C9E6D3',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-          }}>
-            <WhatsAppSVG />
           </button>
         </div>
       </div>
