@@ -15,8 +15,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ reg: st
     )
     if (res.ok) {
       const data = await res.json()
-      const url: string | null = data?.Images?.[0]?.Image ?? null
-      if (url) return NextResponse.json({ url })
+      const cdnUrl: string | null = data?.Images?.[0]?.Image ?? null
+      if (cdnUrl) return NextResponse.json({ url: `/api/photo-img?u=${encodeURIComponent(cdnUrl)}` })
     }
   } catch {}
 
