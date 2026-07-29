@@ -418,10 +418,14 @@ function buildPopup(
   </div>`
 }
 
-function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus | null, fraction?: number): string {
+function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus | null, fraction?: number, photoUrl?: string | null): string {
   const isSyria = AIRPORT_COORDS[e.arr_iata] != null
   const acType  = fs?.aircraft_type ?? null
   const aiata   = airlineIataFor(e.callsign, fs)
+
+  const photoHtml = photoUrl
+    ? `<img src="${photoUrl}" style="width:100%;height:110px;object-fit:cover;display:block;border-radius:4px 4px 0 0;margin:-9px -13px 8px;width:calc(100% + 26px)">`
+    : ''
 
   const logoHtml = aiata
     ? `<img src="https://www.gstatic.com/flights/airline_logos/70px/${aiata}.png" style="height:18px;width:auto;vertical-align:middle;margin-right:5px" onerror="this.style.display='none'">`
@@ -457,6 +461,7 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
   if (arrived && isSyria && e.arr_time_utc && e.arr_time_utc !== '—') {
     const localTime = bestArrISO ? toLocal(bestArrISO) : schedToLocal(e.arr_time_utc)
     return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:200px;padding:9px 13px 11px">
+      ${photoHtml}
       <div style="display:flex;align-items:center;margin-bottom:3px">
         ${logoHtml}<b style="font-size:14px">${e.callsign}</b>
         ${acType ? `<span style="margin-left:auto;color:#9ca3af;font-size:11px">${acType}</span>` : ''}
@@ -492,6 +497,7 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
     : ''
 
   return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:200px;padding:9px 13px 11px">
+    ${photoHtml}
     <div style="display:flex;align-items:center;margin-bottom:3px">
       ${logoHtml}<b style="font-size:14px">${e.callsign}</b>
       <span style="color:#f59e0b;font-size:10px;font-weight:400;margin-left:4px"> ~ est</span>
@@ -1486,7 +1492,9 @@ export default function Map({ embed = false }: { embed?: boolean }) {
         const label = arrived ? `${callsign}\nARRIVED` : callsign
         const isAlp = dep_iata === 'ALP' || arr_iata === 'ALP'
         const icon  = planeIcon(L, track, true, arrived, label, isAlp, !arrived)
-        const popup = buildSchedulePopup(entry, arrived, fs, fPos)
+        const schedReg   = fs?.aircraft_reg ?? null
+        const schedPhoto = schedReg ? photoCacheRef.current[schedReg] ?? null : null
+        const popup = buildSchedulePopup(entry, arrived, fs, fPos, schedPhoto)
 
         activeSchedKeys.add(callsign)
 
@@ -1520,6 +1528,26 @@ export default function Map({ embed = false }: { embed?: boolean }) {
             })
           } else {
             m.bindPopup(popup, { className: 'fp-popup' })
+            m.on('click', () => {
+              const fs  = flightStatusRef.current[callsign]
+              const reg = fs?.aircraft_reg ?? null
+              if (reg && !(reg in photoCacheRef.current) && !photoRequestedRef.current.has(reg)) {
+                photoRequestedRef.current.add(reg)
+                fetch(`/api/photo/${encodeURIComponent(reg)}`)
+                  .then(r => r.ok ? r.json() : null)
+                  .then(photoData => {
+                    const url: string | null = photoData?.url ?? null
+                    photoCacheRef.current[reg] = url
+                    if (url && schedMarkersRef.current[callsign]) {
+                      const fsNow = flightStatusRef.current[callsign]
+                      schedMarkersRef.current[callsign].setPopupContent(
+                        buildSchedulePopup(entry, arrived, fsNow, fPos, url)
+                      )
+                    }
+                  })
+                  .catch(() => { photoCacheRef.current[reg] = null })
+              }
+            })
           }
           schedMarkersRef.current[callsign] = m
         }
