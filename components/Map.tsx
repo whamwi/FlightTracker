@@ -321,7 +321,7 @@ function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, s
   if (label) {
     const textColor = stale ? '#9ca3af' : estimated ? '#fbbf24' : '#4ade80'
     const labelHtml = label.split('\n').map((line, i) =>
-      `<div style="font-size:${i>0?8:9}px;font-weight:bold;color:${i>0?'#fbbf24':textColor};
+      `<div style="font-size:${mobile ? 7 : (i>0?8:9)}px;font-weight:bold;color:${i>0?'#fbbf24':textColor};
         text-shadow:0 1px 3px rgba(0,0,0,1),0 0 6px rgba(0,0,0,0.9);letter-spacing:0.3px;
         line-height:1.2;white-space:nowrap">${line}</div>`
     ).join('')
