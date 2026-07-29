@@ -405,7 +405,7 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
           </Link>
         )}
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 12, marginLeft: 2, borderLeft: `1px solid ${C.trackEmpty}` }}>
+        <div className="ft-card-actions" style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 12, marginLeft: 2, borderLeft: `1px solid ${C.trackEmpty}` }}>
           <button title="Pin flight" style={{
             width: 30, height: 30, borderRadius: 9, background: C.sunken, border: `1px solid ${C.trackEmpty}`,
             display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
@@ -669,6 +669,7 @@ export default function BoardPage() {
         .ft-sidebar { display: none !important; }
         .ft-controls { gap: 8px !important; flex-wrap: wrap !important; }
         .ft-airport-btn { padding: 8px 14px !important; }
+        .ft-card-actions { display: none !important; }
         @media (min-width: 768px) {
           .ft-nav { padding: 0 28px !important; gap: 20px !important; height: 68px !important; }
           .ft-nav-tabs { display: flex !important; }
@@ -678,6 +679,7 @@ export default function BoardPage() {
           .ft-sidebar { display: flex !important; flex-direction: column; gap: 16px; width: 300px; flex-shrink: 0; }
           .ft-controls { gap: 12px !important; }
           .ft-airport-btn { padding: 8px 32px !important; }
+          .ft-card-actions { display: flex !important; }
         }
         @media (min-width: 1100px) {
           .ft-nav { padding: 0 40px !important; }
