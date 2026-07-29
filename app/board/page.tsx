@@ -1058,7 +1058,7 @@ export default function BoardPage() {
           {(() => {
             const freq = weeklyFreq ?? destFreq
             if (!freq.length) return null
-            const periodLabel = weeklyStats ? 'this week' : 'today'
+            const periodLabel = weeklyStats ? 'last 7 days' : 'today'
 
             const groups: Record<string, typeof freq> = {}
             for (const d of freq) {
