@@ -156,7 +156,7 @@ export default async function Image(
           {/* Logo — actual SVG + wordmark */}
           <div style={{ display: 'flex', alignItems: 'center' }}>
             {/* Inline globe+plane SVG from flysyria-globe-logo.svg (transparent bg) */}
-            <svg width="125" height="133" viewBox="6 2 84 90" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ marginRight: 18 }}>
+            <svg width="100" height="106" viewBox="6 2 84 90" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ marginRight: 16 }}>
               <circle cx="40" cy="58" r="32" stroke="#054239" strokeWidth="2.6" />
               <circle cx="40" cy="58" r="25" fill="#054239" stroke="#054239" strokeWidth="2.6" />
               <g transform="rotate(90 40 58)">
@@ -168,8 +168,8 @@ export default async function Image(
             </svg>
             {/* Wordmark: FlySyria dark green / Tracker light green */}
             <span style={{ display: 'flex', alignItems: 'baseline' }}>
-              <span style={{ fontSize: 28, fontWeight: 800, color: C.forest, letterSpacing: '-.4px', display: 'flex' }}>FlySyria</span>
-              <span style={{ fontSize: 28, fontWeight: 600, color: C.forestMid, letterSpacing: '-.2px', marginLeft: 6, display: 'flex' }}>Tracker</span>
+              <span style={{ fontSize: 36, fontWeight: 800, color: C.forest, letterSpacing: '-.4px', display: 'flex' }}>FlySyria</span>
+              <span style={{ fontSize: 36, fontWeight: 600, color: C.forestMid, letterSpacing: '-.2px', marginLeft: 8, display: 'flex' }}>Tracker</span>
             </span>
           </div>
 
