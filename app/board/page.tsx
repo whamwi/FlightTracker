@@ -527,6 +527,13 @@ export default function BoardPage() {
   const [loading, setLoading] = useState(true)
   const [date, setDate]       = useState('')
 
+  type WeeklyStats = {
+    from: string; to: string; days: number
+    arrivals: { iata: string; count: number }[]
+    departures: { iata: string; count: number }[]
+  }
+  const [weeklyStats, setWeeklyStats] = useState<WeeklyStats | null>(null)
+
   const loadVer = useRef(0)
 
   const load = useCallback(async (offsetDays: number, silent = false) => {
@@ -626,6 +633,13 @@ export default function BoardPage() {
     return () => clearTimeout(timer)
   }, [airport]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    fetch(`/api/weekly-stats?airport=${airport}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.ok) setWeeklyStats(data) })
+      .catch(() => {})
+  }, [airport])
+
   const byViewAndAirport = (() => {
     if (view === 'dep') return flights.filter(f => f.dep_iata === airport)
     return flights.filter(f => f.arr_iata === airport)
@@ -643,18 +657,24 @@ export default function BoardPage() {
   const firstEnRoute = sorted.find(f => ['En Route', 'Departed', 'Approaching'].includes(effectiveStatus(f))) ?? null
 
   const destFreq = (() => {
-    const map: Record<string, { flag: string; c: string; count: number }> = {}
+    const map: Record<string, { iata: string; flag: string; c: string; count: number }> = {}
     for (const f of sorted) {
       const iata = view === 'arr' ? f.dep_iata : f.arr_iata
       if (!iata || iata === airport) continue
       const c = city(iata)
       const flag = airportFlag(iata)
-      if (!map[iata]) map[iata] = { flag, c, count: 0 }
+      if (!map[iata]) map[iata] = { iata, flag, c, count: 0 }
       map[iata].count++
     }
     return Object.values(map).sort((a, b) => b.count - a.count).slice(0, 8)
   })()
   const maxFreq = destFreq[0]?.count ?? 1
+
+  const weeklyFreq = weeklyStats
+    ? (view === 'arr' ? weeklyStats.arrivals : weeklyStats.departures)
+        .map(d => ({ iata: d.iata, flag: airportFlag(d.iata), c: city(d.iata), count: d.count }))
+    : null
+  const weeklyMaxFreq = weeklyFreq?.[0]?.count ?? 1
 
   const nowSyriaHHMM = (() => {
     const d = new Date(Date.now() + 3 * 3_600_000)
@@ -980,22 +1000,24 @@ export default function BoardPage() {
             </div>
           </div>
 
-          {/* Top origins/destinations */}
-          {!loading && destFreq.length > 0 && (
+          {/* Top origins/destinations — 7-day frequency */}
+          {(weeklyFreq ?? destFreq).length > 0 && (
             <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 16, display: 'flex', flexDirection: 'column', gap: 12, boxShadow: '0 1px 2px rgba(22,22,22,.05)' }}>
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
                 <span style={{ font: `600 13.5px/1 'Instrument Sans', system-ui`, color: C.ink }}>
                   {view === 'arr' ? 'Origins' : 'Destinations'}
                 </span>
-                <span style={{ font: `500 11px/1 'Instrument Sans', system-ui`, color: C.muted }}>today</span>
+                <span style={{ font: `500 11px/1 'Instrument Sans', system-ui`, color: C.muted }}>
+                  {weeklyStats ? `${weeklyStats.days}d` : 'today'}
+                </span>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {destFreq.map(d => (
-                  <div key={d.c} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {(weeklyFreq ?? destFreq).map(d => (
+                  <div key={d.iata} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <span style={{ fontSize: 14 }}>{d.flag}</span>
                     <span style={{ font: `600 12.5px/1 'Instrument Sans', system-ui`, color: C.ink, width: 84, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.c}</span>
                     <div style={{ flex: 1, height: 6, borderRadius: 99, background: C.trackEmpty, position: 'relative' }}>
-                      <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${Math.round((d.count / maxFreq) * 100)}%`, background: d.count === maxFreq ? C.forest : C.forestMid, borderRadius: 99 }} />
+                      <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${Math.round((d.count / (weeklyFreq ? weeklyMaxFreq : maxFreq)) * 100)}%`, background: d.count === (weeklyFreq ? weeklyMaxFreq : maxFreq) ? C.forest : C.forestMid, borderRadius: 99 }} />
                     </div>
                     <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600, color: C.secondary, width: 20, textAlign: 'right' }}>{d.count}</span>
                   </div>
