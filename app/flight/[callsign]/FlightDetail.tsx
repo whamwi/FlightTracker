@@ -304,12 +304,12 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
             </span>
           </div>
 
-          {/* 3. Route + Times (unified) */}
+          {/* 3. Route progress */}
           <div style={{ padding: '2px 14px 14px' }}>
 
-            {/* Live elapsed/remaining for en-route */}
+            {/* Elapsed / remaining — above the bar, live */}
             {isEnRoute && elapsedMin != null && remainingMin != null && (
-              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                 <span style={{ fontSize: 11, fontWeight: 600, color: C.muted }}>{durationLabel(elapsedMin)} elapsed</span>
                 <span style={{ fontSize: 11, color: C.border }}>·</span>
                 <span style={{ fontSize: 11, fontWeight: 700, color: C.forest }}>{durationLabel(remainingMin)} left</span>
@@ -319,37 +319,34 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
               <div style={{ textAlign: 'center', color: C.muted, fontSize: 11, marginBottom: 6 }}>{durationLabel(flight.duration_min)} total</div>
             )}
 
-            {/* Times — on top of the bar */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
-                <span style={{ fontSize: 20, fontWeight: 700, color: isCancelled ? C.muted : C.ink, fontVariantNumeric: 'tabular-nums', textDecoration: isCancelled ? 'line-through' : 'none' }}>{depDisplay}</span>
-                {!isCancelled && <DelayBadge min={depDelay} />}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
-                {!isCancelled && <DelayBadge min={arrDelay} />}
-                <span style={{ fontSize: 20, fontWeight: 700, color: isCancelled ? C.muted : C.ink, fontVariantNumeric: 'tabular-nums', textDecoration: isCancelled ? 'line-through' : 'none' }}>{arrDisplay}</span>
-              </div>
-            </div>
-
-            {/* Bar row — gap ≥ circle radius so circle never touches city labels */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {/* DEP */}
               <div style={{ flexShrink: 0 }}>
-                <div style={{ fontSize: 11, color: C.mid, whiteSpace: 'nowrap' }}>{flagOf(flight.dep_iata)} {cityOf(flight.dep_iata)}</div>
+                <div style={{ fontSize: 12, color: C.mid, whiteSpace: 'nowrap' }}>{flagOf(flight.dep_iata)} {cityOf(flight.dep_iata)}</div>
                 <div style={{ fontSize: 10, color: C.muted, fontFamily: 'monospace' }}>{flight.dep_iata}</div>
               </div>
 
+              {/* Bar + plane */}
               <div style={{ flex: 1, position: 'relative', height: 1.5, background: C.track, borderRadius: 2 }}>
-                <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, borderRadius: 2, background: BLUE, width: isArrived ? '100%' : isEnRoute && progressPct != null ? `${progressPct}%` : '0%' }} />
+                {/* Blue fill */}
+                <div style={{
+                  position: 'absolute', left: 0, top: 0, bottom: 0, borderRadius: 2,
+                  background: BLUE,
+                  width: isArrived ? '100%' : isEnRoute && progressPct != null ? `${progressPct}%` : '0%',
+                }} />
+                {/* Scheduled/pre-departure: plane centered on bar left edge */}
                 {!isEnRoute && !isArrived && (
                   <div style={{ position: 'absolute', top: '50%', left: -9, transform: 'translateY(-50%)', zIndex: 2 }}>
                     <PlanePin />
                   </div>
                 )}
+                {/* En route: plane at progress position */}
                 {isEnRoute && progressPct != null && (
                   <div style={{ position: 'absolute', top: '50%', left: `${progressPct}%`, transform: 'translate(-50%, -50%)', zIndex: 2 }}>
                     <PlanePin />
                   </div>
                 )}
+                {/* Arrived: plane centered on bar right edge */}
                 {isArrived && (
                   <div style={{ position: 'absolute', top: '50%', right: -9, transform: 'translateY(-50%)', zIndex: 2 }}>
                     <PlanePin />
@@ -357,11 +354,36 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
                 )}
               </div>
 
+              {/* ARR */}
               <div style={{ flexShrink: 0, textAlign: 'right' }}>
-                <div style={{ fontSize: 11, color: C.mid, whiteSpace: 'nowrap' }}>{cityOf(flight.arr_iata)} {flagOf(flight.arr_iata)}</div>
+                <div style={{ fontSize: 12, color: C.mid, whiteSpace: 'nowrap' }}>{cityOf(flight.arr_iata)} {flagOf(flight.arr_iata)}</div>
                 <div style={{ fontSize: 10, color: C.muted, fontFamily: 'monospace' }}>{flight.arr_iata}</div>
               </div>
             </div>
+          </div>
+
+          {/* 4. Times — bordered frame */}
+          <div style={{ margin: '0 13px 12px', borderRadius: 10, border: `1px solid ${C.border}`, overflow: 'hidden' }}>
+          <div style={{ display: 'flex', background: C.times, padding: '11px 14px' }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 9, color: C.muted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 3 }}>Departure</div>
+              <div style={{ display: 'flex', alignItems: 'baseline' }}>
+                <span style={{ fontSize: 20, fontWeight: 700, color: isCancelled ? C.muted : C.ink, fontVariantNumeric: 'tabular-nums', textDecoration: isCancelled ? 'line-through' : 'none' }}>
+                  {depDisplay}
+                </span>
+                {!isCancelled && <DelayBadge min={depDelay} />}
+              </div>
+            </div>
+            <div style={{ flex: 1, textAlign: 'right' }}>
+              <div style={{ fontSize: 9, color: C.muted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 3 }}>Arrival</div>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end' }}>
+                {!isCancelled && <DelayBadge min={arrDelay} />}
+                <span style={{ fontSize: 20, fontWeight: 700, color: isCancelled ? C.muted : C.ink, fontVariantNumeric: 'tabular-nums', textDecoration: isCancelled ? 'line-through' : 'none' }}>
+                  {arrDisplay}
+                </span>
+              </div>
+            </div>
+          </div>
           </div>
 
           {/* 5. Actions */}
