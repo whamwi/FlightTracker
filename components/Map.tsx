@@ -296,10 +296,10 @@ function buildPopup(
   const flightNum = fs?.flight_number ?? callsign
 
   // Status badge
-  const [statusLabel, statusBg, statusFg] = projected
-    ? ['Projected', '#1f2937', '#9ca3af']
-    : lostAt
-      ? ['Signal Lost', '#7f1d1d', '#f87171']
+  const [statusLabel, statusBg, statusFg] = lostAt && !projected
+    ? ['Signal Lost', '#7f1d1d', '#f87171']
+    : projected
+      ? ['~ En Route', '#713f12', '#fbbf24']
       : ['En Route', '#166534', '#4ade80']
 
   // Airline logo
