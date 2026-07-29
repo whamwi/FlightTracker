@@ -1299,7 +1299,8 @@ export default function Map({ embed = false }: { embed?: boolean }) {
       }
 
       // ── 4. Schedule overlay (ESTIMATED / no signal) ───────────────────────
-      const activeSchedKeys = new Set<string>()
+      const activeSchedKeys    = new Set<string>()
+      const activeSchedEnRoute = new Set<string>()
 
       // When actual_dep_utc is known, a callsign may have multiple schedule entries
       // (different dep times for different days). Pre-compute the best-matching
@@ -1496,6 +1497,7 @@ export default function Map({ embed = false }: { embed?: boolean }) {
         const popup = buildSchedulePopup(entry, arrived, fs, fPos, schedPhoto)
 
         activeSchedKeys.add(callsign)
+        if (!arrived) activeSchedEnRoute.add(callsign)
 
         if (schedMarkersRef.current[callsign]) {
           schedMarkersRef.current[callsign].setLatLng([lat, lon])
@@ -1563,9 +1565,10 @@ export default function Map({ embed = false }: { embed?: boolean }) {
         }
       }
 
-      // Broadcast in-air count to React Native
+      // Broadcast in-air count to React Native — live ADS-B markers + schedule markers
+      // that are actively en route (excludes arrived and pre-departure markers)
       if (embed) {
-        const total = Object.keys(markersRef.current).length + Object.keys(schedMarkersRef.current).length
+        const total = Object.keys(markersRef.current).length + activeSchedEnRoute.size
         rnPost({ type: 'COUNT', count: total })
       }
     }
