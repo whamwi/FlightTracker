@@ -4,10 +4,11 @@ export const dynamic = 'force-dynamic'
 
 const UA = 'FlightTrackerSY/1.0 (+https://flighttracker-sy.vercel.app)'
 
-export async function GET(_req: Request, { params }: { params: Promise<{ reg: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ reg: string }> }) {
   const { reg } = await params
+  const origin = new URL(req.url).origin
 
-  // Primary: jetapi.dev — full-res JetPhotos CDN
+  // Primary: jetapi.dev — full-res JetPhotos CDN (proxied to bypass hotlink protection)
   try {
     const res = await fetch(
       `https://www.jetapi.dev/api?reg=${encodeURIComponent(reg)}&photos=1&only_jp=true`,
@@ -16,7 +17,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ reg: st
     if (res.ok) {
       const data = await res.json()
       const cdnUrl: string | null = data?.Images?.[0]?.Image ?? null
-      if (cdnUrl) return NextResponse.json({ url: `/api/photo-img?u=${encodeURIComponent(cdnUrl)}` })
+      if (cdnUrl) return NextResponse.json({ url: `${origin}/api/photo-img?u=${encodeURIComponent(cdnUrl)}` })
     }
   } catch {}
 
