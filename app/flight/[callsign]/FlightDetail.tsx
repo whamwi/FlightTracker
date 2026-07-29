@@ -127,8 +127,8 @@ function AirlineLogo({ iata, name }: { iata: string; name: string }) {
 
 function PlanePin() {
   return (
-    <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#fff', border: '1px solid #D8D3BF', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-      <svg width={18} height={18} viewBox="0 0 24 24" fill="none" style={{ display: 'block', pointerEvents: 'none' }}>
+    <div style={{ width: 22, height: 22, borderRadius: '50%', background: '#fff', border: '1px solid #D8D3BF', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <svg width={13} height={13} viewBox="0 0 24 24" fill="none" style={{ display: 'block', pointerEvents: 'none' }}>
         <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"
           fill="#054239" transform="rotate(90 12 12)" />
       </svg>
@@ -336,7 +336,7 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
                 }} />
                 {/* Scheduled/pre-departure: plane centered on bar left edge */}
                 {!isEnRoute && !isArrived && (
-                  <div style={{ position: 'absolute', top: '50%', left: -14, transform: 'translateY(-50%)', zIndex: 2 }}>
+                  <div style={{ position: 'absolute', top: '50%', left: -11, transform: 'translateY(-50%)', zIndex: 2 }}>
                     <PlanePin />
                   </div>
                 )}
@@ -348,7 +348,7 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
                 )}
                 {/* Arrived: plane centered on bar right edge */}
                 {isArrived && (
-                  <div style={{ position: 'absolute', top: '50%', right: -14, transform: 'translateY(-50%)', zIndex: 2 }}>
+                  <div style={{ position: 'absolute', top: '50%', right: -11, transform: 'translateY(-50%)', zIndex: 2 }}>
                     <PlanePin />
                   </div>
                 )}
