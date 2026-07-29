@@ -4,6 +4,7 @@ import 'leaflet/dist/leaflet.css'
 import { useEffect, useRef, useState } from 'react'
 import { FlightPredictor } from '@/lib/flight-predictor'
 import type { LivePosition as PredictorLivePos } from '@/lib/flight-predictor'
+import { airlineLogo, LOGO_WHITE_BG } from '@/lib/airlines'
 
 interface Aircraft {
   hex: string
@@ -303,9 +304,9 @@ function buildPopup(
 
   // Airline logo
   const logoHtml = aiata
-    ? `<img src="https://www.gstatic.com/flights/airline_logos/70px/${aiata}.png"
-        style="width:44px;height:44px;border-radius:10px;object-fit:contain;background:#fff;padding:4px;flex-shrink:0"
-        onerror="this.style.display='none'">`
+    ? `<img src="${airlineLogo(aiata)}"
+        style="width:44px;height:44px;border-radius:10px;object-fit:contain;${LOGO_WHITE_BG.has(aiata) ? 'background:#fff;' : ''}padding:4px;flex-shrink:0"
+        onerror="this.src='https://images.flightsfrom.com/airlines/100/${aiata}_100px.png';this.onerror=null">`
     : `<div style="width:44px;height:44px;border-radius:10px;background:#1f2937;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:22px">${_apFlag[dep ?? ''] || '✈'}</div>`
 
   // Route progress
@@ -413,9 +414,9 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
 
   // Airline logo
   const logoHtml = aiata
-    ? `<img src="https://www.gstatic.com/flights/airline_logos/70px/${aiata}.png"
-        style="width:44px;height:44px;border-radius:10px;object-fit:contain;background:#fff;padding:4px;flex-shrink:0"
-        onerror="this.style.display='none'">`
+    ? `<img src="${airlineLogo(aiata)}"
+        style="width:44px;height:44px;border-radius:10px;object-fit:contain;${LOGO_WHITE_BG.has(aiata) ? 'background:#fff;' : ''}padding:4px;flex-shrink:0"
+        onerror="this.src='https://images.flightsfrom.com/airlines/100/${aiata}_100px.png';this.onerror=null">`
     : `<div style="width:44px;height:44px;border-radius:10px;background:#1f2937;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:22px">${_apFlag[e.dep_iata] || '✈'}</div>`
 
   const depOffset = _apOffset[e.dep_iata] ?? 3
