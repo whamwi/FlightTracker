@@ -666,22 +666,24 @@ export default function BoardPage() {
         .ft-search { display: none !important; }
         .ft-body { padding: 16px 16px 32px !important; flex-direction: column !important; }
         .ft-title { font-size: 26px !important; }
+        .ft-content { flex-direction: column !important; }
         .ft-sidebar { display: none !important; }
         .ft-controls { gap: 8px !important; flex-wrap: wrap !important; }
         .ft-airport-btn { padding: 8px 14px !important; }
         .ft-card-actions { display: none !important; }
-        .ft-body { align-items: stretch !important; }
+        .ft-sort-btns { display: none !important; }
         @media (min-width: 768px) {
           .ft-nav { padding: 0 28px !important; gap: 20px !important; height: 68px !important; }
           .ft-nav-tabs { display: flex !important; }
           .ft-search { display: flex !important; }
-          .ft-body { padding: 26px 28px 40px !important; flex-direction: row !important; }
+          .ft-body { padding: 26px 28px 40px !important; }
           .ft-title { font-size: 34px !important; }
+          .ft-content { flex-direction: row !important; align-items: flex-start !important; }
           .ft-sidebar { display: flex !important; flex-direction: column; gap: 16px; width: 300px; flex-shrink: 0; }
           .ft-controls { gap: 12px !important; }
           .ft-airport-btn { padding: 8px 32px !important; }
           .ft-card-actions { display: flex !important; }
-          .ft-body { align-items: flex-start !important; }
+          .ft-sort-btns { display: flex !important; }
         }
         @media (min-width: 1100px) {
           .ft-nav { padding: 0 40px !important; }
@@ -749,10 +751,7 @@ export default function BoardPage() {
       </div>
 
       {/* ── Main body ── */}
-      <div className="ft-body" style={{ maxWidth: 1400, margin: '0 auto', display: 'flex', gap: 20, alignItems: 'flex-start' }}>
-
-        {/* ── Left: flight list ── */}
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div className="ft-body" style={{ maxWidth: 1400, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
           {/* Title + controls */}
           <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
@@ -823,7 +822,41 @@ export default function BoardPage() {
                 </button>
               ))}
             </div>
+
+            <div style={{ flex: 1 }} />
+
+            {/* Airline filter + Sort — desktop only */}
+            <div className="ft-sort-btns" style={{ gap: 8, alignItems: 'center' }}>
+              <button style={{
+                display: 'flex', alignItems: 'center', gap: 7, padding: '8px 13px', borderRadius: 10, cursor: 'pointer',
+                background: C.surface, border: `1px solid ${C.border}`, boxShadow: '0 1px 2px rgba(22,22,22,.06)',
+              }}>
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                  <line x1="2" y1="4" x2="14" y2="4" stroke={C.secondary} strokeWidth="1.5" strokeLinecap="round"/>
+                  <line x1="4" y1="8" x2="12" y2="8" stroke={C.secondary} strokeWidth="1.5" strokeLinecap="round"/>
+                  <line x1="6" y1="12" x2="10" y2="12" stroke={C.secondary} strokeWidth="1.5" strokeLinecap="round"/>
+                </svg>
+                <span style={{ font: `600 13px/1 'Instrument Sans', system-ui`, color: C.secondary }}>Airline</span>
+              </button>
+              <button style={{
+                display: 'flex', alignItems: 'center', gap: 7, padding: '8px 13px', borderRadius: 10, cursor: 'pointer',
+                background: C.surface, border: `1px solid ${C.border}`, boxShadow: '0 1px 2px rgba(22,22,22,.06)',
+              }}>
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                  <path d="M4 3v10M4 13l-2-2.5M4 13l2-2.5" stroke={C.secondary} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M12 13V3M12 3l-2 2.5M12 3l2 2.5" stroke={C.secondary} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  <line x1="8" y1="5" x2="14" y2="5" stroke={C.secondary} strokeWidth="1.5" strokeLinecap="round" opacity=".4"/>
+                  <line x1="8" y1="8" x2="14" y2="8" stroke={C.secondary} strokeWidth="1.5" strokeLinecap="round" opacity=".4"/>
+                  <line x1="8" y1="11" x2="14" y2="11" stroke={C.secondary} strokeWidth="1.5" strokeLinecap="round" opacity=".4"/>
+                </svg>
+                <span style={{ font: `600 13px/1 'Instrument Sans', system-ui`, color: C.secondary }}>Sort · Scheduled time</span>
+              </button>
+            </div>
           </div>
+
+          {/* ── Content: cards + sidebar ── */}
+          <div className="ft-content" style={{ display: 'flex', gap: 20 }}>
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
 
           {/* Loading */}
           {loading && (
@@ -886,10 +919,10 @@ export default function BoardPage() {
               Tomorrow's flights show scheduled times only · Live data arrives on the day
             </p>
           )}
-        </div>
+            </div>{/* end cards column */}
 
-        {/* ── Sidebar (desktop only) ── */}
-        <div className="ft-sidebar" style={{ width: 320, flexShrink: 0 }}>
+            {/* ── Sidebar (desktop only) ── */}
+            <div className="ft-sidebar" style={{ width: 320, flexShrink: 0 }}>
 
           {/* Live map card */}
           <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 2px rgba(22,22,22,.05)' }}>
@@ -962,8 +995,9 @@ export default function BoardPage() {
               </div>
             </div>
           </div>
-        </div>
-      </div>
+            </div>{/* end ft-sidebar */}
+          </div>{/* end ft-content */}
+      </div>{/* end ft-body */}
     </div>
   )
 }
