@@ -220,7 +220,7 @@ function FlightSheet({ f, photoUrl, depDelayMin, arrDelayMin, altitude }: {
         </View>
       </View>
 
-      {/* Aircraft photo — only when URL is available */}
+      {/* Aircraft photo */}
       {!!photoUrl && (
         <View style={{ height: 130, borderRadius: 14, overflow: 'hidden' }}>
           <Image source={{ uri: photoUrl }} style={{ width: '100%', height: 130 }} resizeMode="cover" />
