@@ -4,8 +4,8 @@ export const dynamic = 'force-dynamic'
 
 const UA = 'FlightTrackerSY/1.0 (+https://flighttracker-sy.vercel.app)'
 
-export async function GET(_req: Request, { params }: { params: { reg: string } }) {
-  const { reg } = params
+export async function GET(_req: Request, { params }: { params: Promise<{ reg: string }> }) {
+  const { reg } = await params
 
   // Primary: jetapi.dev — full-res JetPhotos CDN
   try {
