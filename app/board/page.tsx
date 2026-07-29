@@ -789,7 +789,7 @@ export default function BoardPage() {
             </div>
 
             {/* Arr / Dep + DAM / ALP */}
-            <div style={{ display: 'flex', padding: 3, background: C.bg, borderRadius: 11, gap: 3 }}>
+            <div style={{ display: 'flex', padding: 3, background: C.border, borderRadius: 11, gap: 3 }}>
               {(['arr', 'dep'] as View[]).map(v => (
                 <button key={v} onClick={() => setView(v)} style={{
                   display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 9, cursor: 'pointer',
@@ -809,7 +809,7 @@ export default function BoardPage() {
               ))}
             </div>
 
-            <div style={{ display: 'flex', padding: 3, background: C.bg, borderRadius: 11, gap: 3 }}>
+            <div style={{ display: 'flex', padding: 3, background: C.border, borderRadius: 11, gap: 3 }}>
               {(['DAM', 'ALP'] as Airport[]).map(ap => (
                 <button key={ap} onClick={() => setAirport(ap)} className="ft-airport-btn" style={{
                   padding: '8px 32px', borderRadius: 9, cursor: 'pointer',
