@@ -112,6 +112,16 @@ export async function GET(req: Request) {
       if (f.est_arr > schedArr && f.est_arr * 1000 >= dayEndMs) return
     }
 
+    // If the confirmed landing (real_arr unix, unambiguous UTC) falls outside today's Syria
+    // window, drop it. This catches flights stored in the wrong day's cache because their
+    // sched_arr was past midnight but actual landing was before midnight (or vice versa).
+    // Using real_arr directly avoids extractStatusUtc which anchors the time to operatingDate
+    // and would give the wrong day for cross-midnight flights.
+    if (arrIata && SYRIAN_AIRPORTS.has(arrIata) && f.real_arr) {
+      const actualMs = (f.real_arr as number) * 1000
+      if (actualMs < dayStartMs || actualMs >= dayEndMs) return
+    }
+
     const key    = keyOverride ?? `${num}|${depIata}|${arrIata}`
     const status = normaliseStatus(f.status)
 
@@ -223,12 +233,14 @@ export async function GET(req: Request) {
       addFlight({
         ...f,
         arr_iata:         f.arr_iata || ap,
-        fr24_actual_arr:  t.includes('landed') || t.includes('arrived')
-          ? extractStatusUtc(f.status, date)
-          : (f.real_arr ? new Date(f.real_arr * 1000).toISOString() : null),
-        fr24_revised_arr: t.startsWith('estimated') || t.startsWith('expect') || t.startsWith('delayed')
-          ? extractStatusUtc(f.status, date)
-          : (f.est_arr ? new Date(f.est_arr * 1000).toISOString() : null),
+        // Prefer unix timestamps (unambiguous UTC). extractStatusUtc anchors the parsed
+        // HH:MM to operatingDate and gives the wrong day for cross-midnight flights.
+        fr24_actual_arr:  f.real_arr
+          ? new Date(f.real_arr * 1000).toISOString()
+          : (t.includes('landed') || t.includes('arrived') ? extractStatusUtc(f.status, date) : null),
+        fr24_revised_arr: f.est_arr
+          ? new Date(f.est_arr * 1000).toISOString()
+          : (t.startsWith('estimated') || t.startsWith('expect') || t.startsWith('delayed') ? extractStatusUtc(f.status, date) : null),
         fr24_actual_dep:  f.real_dep ? new Date(f.real_dep * 1000).toISOString() : null,
         fr24_revised_dep: f.est_dep  ? new Date(f.est_dep  * 1000).toISOString() : null,
       })
@@ -276,6 +288,9 @@ export async function GET(req: Request) {
           if (!f.est_arr || !f.sched_arr || f.est_arr <= f.sched_arr) continue
           const estMs = (f.est_arr as number) * 1000
           if (estMs < dayStartMs || estMs >= dayEndMs) continue
+          // The estimate slipped past Syria midnight, but the plane actually landed before it.
+          // real_arr is ground truth — if it landed before today's Syria midnight, skip.
+          if (f.real_arr && (f.real_arr as number) * 1000 < dayStartMs) continue
           const arrIata = f.arr_iata || ap
           const key = `${f.num ?? ''}|${f.dep_iata ?? ''}|${arrIata}`
           const overflowArrUtc = unixToUtcHHMM(f.est_arr as number)
@@ -295,6 +310,45 @@ export async function GET(req: Request) {
             fr24_revised_arr: new Date(f.est_arr * 1000).toISOString(),
             fr24_actual_arr:  f.real_arr ? new Date(f.real_arr * 1000).toISOString() : null,
           }, useKey)
+        }
+      }
+    }
+  }
+
+  // "Early landing" reverse pass: flights scheduled past Syria midnight (stored in the
+  // NEXT day's cache) that actually landed within today's Syria window.
+  // Example: sched_arr = 00:10 Syria tomorrow, but real_arr = 23:44 Syria today.
+  // These are missed by Pass 1 (wrong flight_date) and Pass 3 (only looks backward).
+  {
+    const next = new Date(date + 'T12:00:00Z')
+    next.setUTCDate(next.getUTCDate() + 1)
+    const nextDate = next.toISOString().slice(0, 10)
+    const nextRes = await fetch(
+      `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${nextDate}&airport_iata=in.(${syriaCodes})&select=airport_iata,arrivals`,
+      { headers: HEADERS }
+    )
+    if (nextRes.ok) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const nextRows: any[] = await nextRes.json()
+      for (const row of nextRows) {
+        const ap = row.airport_iata as string
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        for (const f of (row.arrivals ?? [])) {
+          if (!f.real_arr) continue
+          const realMs = (f.real_arr as number) * 1000
+          if (realMs < dayStartMs || realMs >= dayEndMs) continue
+          const arrIata = f.arr_iata || ap
+          const key = `${f.num ?? ''}|${f.dep_iata ?? ''}|${arrIata}`
+          if (flightMap[key]) continue  // already captured by another pass
+          addFlight({
+            ...f,
+            sched_arr: f.real_arr,  // use actual landing for day-assignment and sorting
+            arr_iata: arrIata,
+            fr24_actual_arr:  new Date(f.real_arr * 1000).toISOString(),
+            fr24_actual_dep:  f.real_dep ? new Date(f.real_dep * 1000).toISOString() : null,
+            fr24_revised_dep: f.est_dep  ? new Date(f.est_dep  * 1000).toISOString() : null,
+            fr24_revised_arr: null,
+          })
         }
       }
     }

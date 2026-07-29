@@ -640,6 +640,22 @@ export default function BoardPage() {
   const cancelled = sorted.filter(f => effectiveStatus(f) === 'Cancelled').length
   const enroute   = sorted.filter(f => ['En Route', 'Departed', 'Approaching'].includes(effectiveStatus(f))).length
 
+  const firstEnRoute = sorted.find(f => ['En Route', 'Departed', 'Approaching'].includes(effectiveStatus(f))) ?? null
+
+  const destFreq = (() => {
+    const map: Record<string, { flag: string; c: string; count: number }> = {}
+    for (const f of sorted) {
+      const iata = view === 'arr' ? f.dep_iata : f.arr_iata
+      if (!iata || iata === airport) continue
+      const c = city(iata)
+      const flag = airportFlag(iata)
+      if (!map[iata]) map[iata] = { flag, c, count: 0 }
+      map[iata].count++
+    }
+    return Object.values(map).sort((a, b) => b.count - a.count).slice(0, 8)
+  })()
+  const maxFreq = destFreq[0]?.count ?? 1
+
   const nowSyriaHHMM = (() => {
     const d = new Date(Date.now() + 3 * 3_600_000)
     return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
@@ -679,7 +695,7 @@ export default function BoardPage() {
           .ft-body { padding: 26px 28px 40px !important; }
           .ft-title { font-size: 34px !important; }
           .ft-content { flex-direction: row !important; align-items: flex-start !important; }
-          .ft-sidebar { display: flex !important; flex-direction: column; gap: 16px; width: 300px; flex-shrink: 0; }
+          .ft-sidebar { display: flex !important; flex-direction: column; gap: 16px; width: 320px; flex-shrink: 0; }
           .ft-controls { gap: 12px !important; }
           .ft-airport-btn { padding: 8px 32px !important; }
           .ft-card-actions { display: flex !important; }
@@ -688,7 +704,7 @@ export default function BoardPage() {
         @media (min-width: 1100px) {
           .ft-nav { padding: 0 40px !important; }
           .ft-body { padding: 26px 40px 40px !important; }
-          .ft-sidebar { width: 320px; }
+          .ft-sidebar { width: 352px; }
         }
       `}</style>
 
@@ -840,16 +856,9 @@ export default function BoardPage() {
               </button>
               <button style={{
                 display: 'flex', alignItems: 'center', gap: 7, padding: '8px 13px', borderRadius: 10, cursor: 'pointer',
-                background: C.surface, border: `1px solid ${C.border}`, boxShadow: '0 1px 2px rgba(22,22,22,.06)',
+                background: C.surface, border: `1px solid ${C.border}`, lineHeight: '14px',
               }}>
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                  <path d="M4 3v10M4 13l-2-2.5M4 13l2-2.5" stroke={C.secondary} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                  <path d="M12 13V3M12 3l-2 2.5M12 3l2 2.5" stroke={C.secondary} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                  <line x1="8" y1="5" x2="14" y2="5" stroke={C.secondary} strokeWidth="1.5" strokeLinecap="round" opacity=".4"/>
-                  <line x1="8" y1="8" x2="14" y2="8" stroke={C.secondary} strokeWidth="1.5" strokeLinecap="round" opacity=".4"/>
-                  <line x1="8" y1="11" x2="14" y2="11" stroke={C.secondary} strokeWidth="1.5" strokeLinecap="round" opacity=".4"/>
-                </svg>
-                <span style={{ font: `600 13px/1 'Instrument Sans', system-ui`, color: C.secondary }}>Sort · Scheduled time</span>
+                <span style={{ font: `600 12.5px/14px 'Instrument Sans', system-ui`, color: C.secondary }}>Sort · Scheduled time</span>
               </button>
             </div>
           </div>
@@ -926,55 +935,72 @@ export default function BoardPage() {
 
           {/* Live map card */}
           <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 2px rgba(22,22,22,.05)' }}>
-            <div style={{ position: 'relative', height: 200, background: '#D8D3BF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, opacity: 0.5 }}>
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={C.secondary} strokeWidth="1.5">
-                  <g transform="translate(1.6 -1) scale(0.86)"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></g>
-                </svg>
-                <span style={{ font: `600 12px/1 'Instrument Sans', system-ui`, color: C.secondary }}>{enroute} flights in air</span>
+            <div style={{ position: 'relative', height: 236, background: C.bg, overflow: 'hidden' }}>
+              {/* Grid */}
+              <div style={{ position: 'absolute', inset: 0, backgroundImage: 'linear-gradient(rgba(22,22,22,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(22,22,22,.05) 1px,transparent 1px)', backgroundSize: '52px 52px' }} />
+              {/* Land blobs */}
+              <div style={{ position: 'absolute', left: -30, top: 24, width: 200, height: 140, background: '#D3DAD6', borderRadius: '48% 52% 60% 40%/55% 45% 55% 45%' }} />
+              <div style={{ position: 'absolute', right: -50, bottom: -40, width: 230, height: 200, background: '#D3DAD6', borderRadius: '52% 48% 40% 60%/45% 55% 45% 55%', opacity: 0.8 }} />
+              {/* Flight arc */}
+              <svg viewBox="0 0 352 236" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} fill="none">
+                <path d="M280 190 C240 160 180 130 122 112" stroke={C.forestMid} strokeWidth="2" strokeDasharray="1 6" strokeLinecap="round" opacity=".6"/>
+              </svg>
+              {/* DAM pin */}
+              <div style={{ position: 'absolute', left: 112, top: 104, width: 12, height: 12, borderRadius: 99, background: C.forest, border: '3px solid #fff', boxShadow: '0 2px 6px rgba(22,22,22,.3)' }} />
+              <div style={{ position: 'absolute', left: 84, top: 122, fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, fontWeight: 600, lineHeight: 1, color: C.forest, background: 'rgba(255,255,255,.92)', padding: '3px 5px', borderRadius: 4 }}>DAM</div>
+              {/* ALP pin */}
+              <div style={{ position: 'absolute', left: 158, top: 66, width: 9, height: 9, borderRadius: 99, background: C.wine, border: '2.5px solid #fff' }} />
+              <div style={{ position: 'absolute', left: 172, top: 62, fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, fontWeight: 600, lineHeight: 1, color: C.wine, background: 'rgba(255,255,255,.92)', padding: '3px 5px', borderRadius: 4 }}>ALP</div>
+              {/* Aircraft marker */}
+              <div style={{ position: 'absolute', left: 246, top: 162, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+                <span style={{ fontSize: 19, transform: 'rotate(-30deg)', filter: 'drop-shadow(0 2px 3px rgba(22,22,22,.3))', display: 'block' }}>✈️</span>
+                {firstEnRoute && (
+                  <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9, fontWeight: 700, lineHeight: 1, color: '#fff', background: C.forestMid, padding: '3px 5px', borderRadius: 4 }}>
+                    {firstEnRoute.iata_number}
+                  </span>
+                )}
               </div>
-              {enroute > 0 && (
-                <div style={{ position: 'absolute', top: 14, left: 14, display: 'flex', alignItems: 'center', gap: 7, padding: '7px 11px', borderRadius: 9, background: 'rgba(255,255,255,.94)', border: `1px solid ${C.border}` }}>
-                  <span style={{ width: 6, height: 6, borderRadius: 99, background: C.forestMid, display: 'block' }} />
-                  <span style={{ font: `600 11px/1 'Instrument Sans', system-ui`, color: C.ink }}>{enroute} flights in air</span>
-                </div>
-              )}
+              {/* In-air chip */}
+              <div style={{ position: 'absolute', left: 14, top: 14, display: 'flex', alignItems: 'center', gap: 7, padding: '7px 11px', borderRadius: 9, background: 'rgba(255,255,255,.94)', border: `1px solid ${C.border}`, boxShadow: '0 4px 12px -8px rgba(22,22,22,.4)' }}>
+                <span style={{ width: 6, height: 6, borderRadius: 99, background: C.forestMid, display: 'block' }} />
+                <span style={{ font: `600 11px/1 'Instrument Sans', system-ui`, color: C.ink }}>{enroute} flights in air</span>
+              </div>
             </div>
             <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: `1px solid ${C.trackEmpty}` }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 <span style={{ font: `600 13.5px/1 'Instrument Sans', system-ui`, color: C.ink }}>Live map</span>
-                <span style={{ font: `500 11px/1 'Instrument Sans', system-ui`, color: C.muted }}>Track flights in real-time</span>
+                <span style={{ font: `500 11px/1 'Instrument Sans', system-ui`, color: C.muted }}>Leaflet · light tiles</span>
               </div>
               <Link href="/" style={{
                 display: 'flex', alignItems: 'center', gap: 7, padding: '8px 13px', borderRadius: 9,
                 background: C.forest, textDecoration: 'none',
               }}>
-                <span style={{ font: `600 12px/1 'Instrument Sans', system-ui`, color: '#fff' }}>Open</span>
+                <span style={{ font: `600 12px/1 'Instrument Sans', system-ui`, color: '#fff' }}>Open Track</span>
               </Link>
             </div>
           </div>
 
-          {/* Stats card */}
-          {!loading && total > 0 && (
+          {/* Top origins/destinations */}
+          {!loading && destFreq.length > 0 && (
             <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 16, display: 'flex', flexDirection: 'column', gap: 12, boxShadow: '0 1px 2px rgba(22,22,22,.05)' }}>
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-                <span style={{ font: `600 13.5px/1 'Instrument Sans', system-ui`, color: C.ink }}>Today's summary</span>
-                <span style={{ font: `500 11px/1 'Instrument Sans', system-ui`, color: C.muted }}>{airport}</span>
+                <span style={{ font: `600 13.5px/1 'Instrument Sans', system-ui`, color: C.ink }}>
+                  {view === 'arr' ? 'Origins' : 'Destinations'}
+                </span>
+                <span style={{ font: `500 11px/1 'Instrument Sans', system-ui`, color: C.muted }}>today</span>
               </div>
-              {[
-                { label: 'Total flights', val: total, color: C.forest },
-                { label: view === 'arr' ? 'Arrived' : 'Departed', val: landed, color: C.forestMid },
-                { label: 'In the air', val: enroute, color: C.golden },
-                { label: 'Cancelled', val: cancelled, color: C.wine },
-              ].filter(r => r.val > 0).map(row => (
-                <div key={row.label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ font: `600 12.5px/1 'Instrument Sans', system-ui`, color: C.ink, width: 100 }}>{row.label}</span>
-                  <div style={{ flex: 1, height: 6, borderRadius: 99, background: C.trackEmpty, position: 'relative' }}>
-                    <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${Math.round((row.val / total) * 100)}%`, background: row.color, borderRadius: 99 }} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {destFreq.map(d => (
+                  <div key={d.c} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 14 }}>{d.flag}</span>
+                    <span style={{ font: `600 12.5px/1 'Instrument Sans', system-ui`, color: C.ink, width: 84, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.c}</span>
+                    <div style={{ flex: 1, height: 6, borderRadius: 99, background: C.trackEmpty, position: 'relative' }}>
+                      <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${Math.round((d.count / maxFreq) * 100)}%`, background: d.count === maxFreq ? C.forest : C.forestMid, borderRadius: 99 }} />
+                    </div>
+                    <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600, color: C.secondary, width: 20, textAlign: 'right' }}>{d.count}</span>
                   </div>
-                  <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600, color: C.secondary, width: 20, textAlign: 'right' }}>{row.val}</span>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           )}
 
@@ -997,6 +1023,15 @@ export default function BoardPage() {
           </div>
             </div>{/* end ft-sidebar */}
           </div>{/* end ft-content */}
+
+          {/* Footer */}
+          <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 18, display: 'flex', alignItems: 'center', gap: 22, flexWrap: 'wrap' }}>
+            <span style={{ font: `500 11.5px/1 'Instrument Sans', system-ui`, color: C.muted }}>© 2026 FlySyria Tracker</span>
+            <span style={{ font: `500 11.5px/1 'Instrument Sans', system-ui`, color: C.muted }}>Damascus · Aleppo</span>
+            <span style={{ font: `500 11.5px/1 'Instrument Sans', system-ui`, color: C.muted }}>Schedule data updated every 60s</span>
+            <div style={{ flex: 1 }} />
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, fontWeight: 500, color: '#A6A093' }}>العربية · English</span>
+          </div>
       </div>{/* end ft-body */}
     </div>
   )
