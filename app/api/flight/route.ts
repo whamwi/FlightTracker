@@ -71,9 +71,9 @@ function effectiveStatusFor(f: any): { status: string; rank: number } {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildFlight(f: any, num: string, status: string, airlineMap: Record<string, { name: string; flag: string }>, date: string) {
+function buildFlight(f: any, num: string, status: string, airlineMap: Record<string, { name: string; flag: string; icao: string }>, date: string) {
   const airlineIata = f.airline_iata || PREFIX_TO_IATA[num.slice(0, 3)] || ''
-  const al = airlineMap[airlineIata] ?? { name: f.airline ?? airlineIata, flag: '' }
+  const al = airlineMap[airlineIata] ?? { name: f.airline ?? airlineIata, flag: '', icao: '' }
   const actualDep = resolveActualDep(f)
   const revisedArr = f.fr24_revised_arr ?? null
   const dur = (() => {
@@ -87,6 +87,7 @@ function buildFlight(f: any, num: string, status: string, airlineMap: Record<str
     iata_number:     num,
     airline_name:    al.name,
     airline_iata:    airlineIata,
+    airline_icao:    al.icao,
     country_flag:    al.flag,
     dep_iata:        f.dep_iata  ?? '',
     arr_iata:        f.arr_iata  ?? '',
@@ -133,13 +134,13 @@ export async function GET(req: Request) {
     : [todayStr, new Date(syriaMs - 86_400_000).toISOString().slice(0, 10)]
 
   const alRes = await fetch(
-    `${SB_URL}/rest/v1/airlines?select=iata,name_en,country_flag`,
+    `${SB_URL}/rest/v1/airlines?select=iata,icao,name_en,country_flag`,
     { headers: HEADERS, next: { revalidate: 3600 } }
   )
-  const airlineMap: Record<string, { name: string; flag: string }> = {}
+  const airlineMap: Record<string, { name: string; flag: string; icao: string }> = {}
   if (alRes.ok) {
-    const rows: { iata: string; name_en: string; country_flag: string | null }[] = await alRes.json()
-    for (const r of rows) airlineMap[r.iata] = { name: r.name_en, flag: r.country_flag ?? '' }
+    const rows: { iata: string; icao: string | null; name_en: string; country_flag: string | null }[] = await alRes.json()
+    for (const r of rows) airlineMap[r.iata] = { name: r.name_en, flag: r.country_flag ?? '', icao: r.icao ?? '' }
   }
 
   for (const date of dates) {
