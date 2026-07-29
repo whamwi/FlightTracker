@@ -130,7 +130,7 @@ function PlanePin() {
   return (
     <div style={{
       width: 22, height: 22, borderRadius: '50%',
-      background: '#fff', border: `2px solid #054239`,
+      background: '#fff', border: `3px solid #054239`,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       boxShadow: '0 1px 5px rgba(0,0,0,.18)',
       flexShrink: 0, pointerEvents: 'none',
@@ -321,9 +321,9 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
                   background: BLUE,
                   width: isArrived ? '100%' : isEnRoute && progressPct != null ? `${progressPct}%` : '0%',
                 }} />
-                {/* Scheduled/pre-departure: plane sits at the start */}
+                {/* Scheduled/pre-departure: plane sits just inside the left edge */}
                 {!isEnRoute && !isArrived && (
-                  <div style={{ position: 'absolute', top: '50%', left: -11, transform: 'translateY(-50%)', zIndex: 2 }}>
+                  <div style={{ position: 'absolute', top: '50%', left: 2, transform: 'translateY(-50%)', zIndex: 2 }}>
                     <PlanePin />
                   </div>
                 )}
@@ -333,9 +333,9 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
                     <PlanePin />
                   </div>
                 )}
-                {/* Arrived: plane at far right */}
+                {/* Arrived: plane just inside the right edge */}
                 {isArrived && (
-                  <div style={{ position: 'absolute', top: '50%', right: -11, transform: 'translateY(-50%)', zIndex: 2 }}>
+                  <div style={{ position: 'absolute', top: '50%', right: 2, transform: 'translateY(-50%)', zIndex: 2 }}>
                     <PlanePin />
                   </div>
                 )}
