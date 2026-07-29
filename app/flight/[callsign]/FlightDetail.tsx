@@ -125,21 +125,13 @@ function AirlineLogo({ iata, name }: { iata: string; name: string }) {
   )
 }
 
-// Plane-in-circle marker for the route bar
+// Plane marker — sits directly on the route bar, no circle
 function PlanePin() {
   return (
-    <div style={{
-      width: 22, height: 22, borderRadius: '50%',
-      background: '#fff', border: `3px solid #054239`,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      boxShadow: '0 1px 5px rgba(0,0,0,.18)',
-      flexShrink: 0, pointerEvents: 'none',
-    }}>
-      <svg width={11} height={11} viewBox="0 0 24 24" fill="none">
-        <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"
-          fill="#054239" transform="rotate(90 12 12)" />
-      </svg>
-    </div>
+    <svg width={15} height={15} viewBox="0 0 24 24" fill="none" style={{ display: 'block', pointerEvents: 'none' }}>
+      <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"
+        fill="#054239" transform="rotate(90 12 12)" />
+    </svg>
   )
 }
 
@@ -321,9 +313,9 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
                   background: BLUE,
                   width: isArrived ? '100%' : isEnRoute && progressPct != null ? `${progressPct}%` : '0%',
                 }} />
-                {/* Scheduled/pre-departure: plane sits just inside the left edge */}
+                {/* Scheduled/pre-departure: plane centered on bar left edge */}
                 {!isEnRoute && !isArrived && (
-                  <div style={{ position: 'absolute', top: '50%', left: 2, transform: 'translateY(-50%)', zIndex: 2 }}>
+                  <div style={{ position: 'absolute', top: '50%', left: -7, transform: 'translateY(-50%)', zIndex: 2 }}>
                     <PlanePin />
                   </div>
                 )}
@@ -333,9 +325,9 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
                     <PlanePin />
                   </div>
                 )}
-                {/* Arrived: plane just inside the right edge */}
+                {/* Arrived: plane centered on bar right edge */}
                 {isArrived && (
-                  <div style={{ position: 'absolute', top: '50%', right: 2, transform: 'translateY(-50%)', zIndex: 2 }}>
+                  <div style={{ position: 'absolute', top: '50%', right: -7, transform: 'translateY(-50%)', zIndex: 2 }}>
                     <PlanePin />
                   </div>
                 )}
