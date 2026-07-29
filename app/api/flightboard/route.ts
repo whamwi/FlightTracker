@@ -16,7 +16,7 @@ const PREFIX_TO_IATA: Record<string, string> = {
 // Update here when a new carrier starts serving Syrian airports.
 const AIRLINE_MAP: Record<string, { name: string; flag: string }> = {
   '3L': { name: 'Air Arabia Abu Dhabi', flag: '🇦🇪' },
-  DN:   { name: 'Dan Air',              flag: '🇱🇹' },
+  DN:   { name: 'Dan Air',              flag: '🇷🇴' },
   EK:   { name: 'Emirates',             flag: '🇦🇪' },
   EY:   { name: 'Etihad Airways',       flag: '🇦🇪' },
   F3:   { name: 'Flyadeal',             flag: '🇸🇦' },
@@ -32,6 +32,8 @@ const AIRLINE_MAP: Record<string, { name: string; flag: string }> = {
   VF:   { name: 'Anadolujet',           flag: '🇹🇷' },
   XH:   { name: 'Fly Cham',             flag: '🇸🇾' },
   XY:   { name: 'Flynas',               flag: '🇸🇦' },
+  KK:   { name: 'LEAV Aviation',        flag: '🇩🇪' },
+  SR:   { name: 'Sundair',              flag: '🇩🇪' },
 }
 
 function unixToUtcHHMM(unix: number | null): string {

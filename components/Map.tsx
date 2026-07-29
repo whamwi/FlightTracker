@@ -102,6 +102,7 @@ const IATA_CITY: Record<string, string> = {
   MHD: 'Mashhad',  JED: 'Jeddah',     RUH: 'Riyadh',
   SVO: 'Moscow',   HRG: 'Hurghada',   TBS: 'Tbilisi',
   GYD: 'Baku',     KBP: 'Kyiv',       VIE: 'Vienna',
+  DUS: 'Düsseldorf',
 }
 function iataCity(code: string | null | undefined): string {
   return (code && IATA_CITY[code]) ? IATA_CITY[code] : (code ?? '—')
@@ -176,6 +177,7 @@ const ALL_AIRPORT_COORDS: Record<string, [number, number]> = {
   LHR: [51.4700, -0.4543],  // London Heathrow
   FRA: [50.0379,  8.5622],  // Frankfurt
   VIE: [48.1103, 16.5697],  // Vienna
+  DUS: [51.2895,  6.7668],  // Düsseldorf
   ADD: [ 8.9779, 38.7993],  // Addis Ababa
   NBO: [-1.3192, 36.9275],  // Nairobi
 }
