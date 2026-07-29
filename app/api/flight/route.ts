@@ -100,9 +100,9 @@ function buildFlight(f: any, num: string, status: string, airlineMap: Record<str
   }
 }
 
-async function fetchCaches(date: string): Promise<{ arrivals: unknown[]; departures: unknown[] }[]> {
+async function fetchCaches(date: string): Promise<{ airport_iata: string; arrivals: unknown[]; departures: unknown[] }[]> {
   const res = await fetch(
-    `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${date}&airport_iata=in.(DAM,ALP,LTK)&select=arrivals,departures`,
+    `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${date}&airport_iata=in.(DAM,ALP,LTK)&select=airport_iata,arrivals,departures`,
     { headers: HEADERS }
   )
   if (!res.ok) return []
@@ -138,11 +138,22 @@ export async function GET(req: Request) {
     let bestRank   = -1
 
     for (const row of rows) {
-      for (const list of [row.arrivals ?? [], row.departures ?? []]) {
+      const airport = row.airport_iata
+      const sides: [unknown[], 'arr' | 'dep'][] = [
+        [row.arrivals  ?? [], 'arr'],
+        [row.departures ?? [], 'dep'],
+      ]
+      for (const [list, side] of sides) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        for (const f of list as any[]) {
-          const fNum = (f.num ?? '').replace(/\s+/g, '').toUpperCase()
+        for (const raw of list as any[]) {
+          const fNum = (raw.num ?? '').replace(/\s+/g, '').toUpperCase()
           if (fNum !== num) continue
+          // arr_iata / dep_iata are often null in cache — infer from the row's airport
+          const f = {
+            ...raw,
+            arr_iata: raw.arr_iata ?? (side === 'arr' ? airport : null),
+            dep_iata: raw.dep_iata ?? (side === 'dep' ? airport : null),
+          }
           const { status, rank } = effectiveStatusFor(f)
           if (rank > bestRank) {
             bestFlight = buildFlight(f, num, status, airlineMap, date)
