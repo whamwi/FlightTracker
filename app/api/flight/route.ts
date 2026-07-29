@@ -36,26 +36,36 @@ function normaliseStatus(raw: string | null): string {
   return 'Unknown'
 }
 
+// Resolve actual times from either ISO-string fields (fr24_actual_*) or unix fields (real_*)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function resolveActualDep(f: any): string | null {
+  return f.fr24_actual_dep ?? (f.real_dep ? new Date((f.real_dep as number) * 1000).toISOString() : null)
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function resolveActualArr(f: any): string | null {
+  return f.fr24_actual_arr ?? (f.real_arr ? new Date((f.real_arr as number) * 1000).toISOString() : null)
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function effectiveStatusFor(f: any): { status: string; rank: number } {
-  const base = normaliseStatus(f.status)
+  const base       = normaliseStatus(f.status)
+  const actualDep  = resolveActualDep(f)
+  const actualArr  = resolveActualArr(f)
+  const revisedArr = f.fr24_revised_arr ?? null
   const dur = (() => {
-    if (f.fr24_actual_dep && f.fr24_revised_arr) {
-      const d = Math.round(
-        (new Date(f.fr24_revised_arr).getTime() - new Date(f.fr24_actual_dep).getTime()) / 60_000
-      )
+    if (actualDep && revisedArr) {
+      const d = Math.round((new Date(revisedArr).getTime() - new Date(actualDep).getTime()) / 60_000)
       if (d > 30) return d
     }
     return f.duration_min ?? 0
   })()
   const inferredArrived =
-    !f.fr24_actual_arr && !!f.fr24_actual_dep && dur > 0 &&
-    new Date(f.fr24_actual_dep).getTime() + dur * 60_000 < Date.now() - 15 * 60_000
+    !actualArr && !!actualDep && dur > 0 &&
+    new Date(actualDep).getTime() + dur * 60_000 < Date.now() - 15 * 60_000
 
-  const status = f.fr24_actual_arr ? 'Arrived'
+  const status = actualArr ? 'Arrived'
     : inferredArrived ? 'Arrived'
-    : (f.fr24_actual_dep && (STATUS_RANK[base] ?? 0) < STATUS_RANK['Departed']
-      ? 'Departed' : base)
+    : (actualDep && (STATUS_RANK[base] ?? 0) < STATUS_RANK['Departed'] ? 'Departed' : base)
 
   return { status, rank: STATUS_RANK[status] ?? 0 }
 }
@@ -64,11 +74,11 @@ function effectiveStatusFor(f: any): { status: string; rank: number } {
 function buildFlight(f: any, num: string, status: string, airlineMap: Record<string, { name: string; flag: string }>, date: string) {
   const airlineIata = f.airline_iata || PREFIX_TO_IATA[num.slice(0, 3)] || ''
   const al = airlineMap[airlineIata] ?? { name: f.airline ?? airlineIata, flag: '' }
+  const actualDep = resolveActualDep(f)
+  const revisedArr = f.fr24_revised_arr ?? null
   const dur = (() => {
-    if (f.fr24_actual_dep && f.fr24_revised_arr) {
-      const d = Math.round(
-        (new Date(f.fr24_revised_arr).getTime() - new Date(f.fr24_actual_dep).getTime()) / 60_000
-      )
+    if (actualDep && revisedArr) {
+      const d = Math.round((new Date(revisedArr).getTime() - new Date(actualDep).getTime()) / 60_000)
       if (d > 30) return d
     }
     return f.duration_min ?? 0
@@ -85,8 +95,8 @@ function buildFlight(f: any, num: string, status: string, airlineMap: Record<str
     sched_dep_unix:  f.sched_dep  ?? null,
     duration_min:    dur,
     status,
-    actual_dep_utc:  f.fr24_actual_dep  ?? null,
-    actual_arr_utc:  f.fr24_actual_arr  ?? null,
+    actual_dep_utc:  resolveActualDep(f),
+    actual_arr_utc:  resolveActualArr(f),
     revised_dep_utc: f.fr24_revised_dep ?? null,
     revised_arr_utc: f.fr24_revised_arr ?? null,
     aircraft_type:   f.aircraft_type    ?? null,
