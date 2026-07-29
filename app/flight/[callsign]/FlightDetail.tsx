@@ -130,15 +130,14 @@ function PlanePin() {
   return (
     <div style={{
       width: 22, height: 22, borderRadius: '50%',
-      background: BLUE, border: '2px solid #fff',
+      background: '#fff', border: `2px solid #054239`,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      boxShadow: '0 1px 5px rgba(0,0,0,.22)',
+      boxShadow: '0 1px 5px rgba(0,0,0,.18)',
       flexShrink: 0, pointerEvents: 'none',
     }}>
       <svg width={11} height={11} viewBox="0 0 24 24" fill="none">
-        {/* Plane pointing right */}
         <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"
-          fill="white" transform="rotate(90 12 12)" />
+          fill="#054239" transform="rotate(90 12 12)" />
       </svg>
     </div>
   )
@@ -307,11 +306,11 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
               <div style={{ textAlign: 'center', color: C.muted, fontSize: 11, marginBottom: 6 }}>{durationLabel(flight.duration_min)}</div>
             )}
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              {/* DEP — bordered frame */}
-              <div style={{ flexShrink: 0, border: `1px solid ${C.border}`, borderRadius: 8, padding: '6px 8px', background: C.bg, minWidth: 64 }}>
-                <div style={{ fontSize: 11, fontWeight: 600, color: C.mid, whiteSpace: 'nowrap' }}>{flagOf(flight.dep_iata)} {cityOf(flight.dep_iata)}</div>
-                <div style={{ fontSize: 10, color: C.muted, fontFamily: 'monospace', marginTop: 1 }}>{flight.dep_iata}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {/* DEP */}
+              <div style={{ flexShrink: 0 }}>
+                <div style={{ fontSize: 12, color: C.mid, whiteSpace: 'nowrap' }}>{flagOf(flight.dep_iata)} {cityOf(flight.dep_iata)}</div>
+                <div style={{ fontSize: 10, color: C.muted, fontFamily: 'monospace' }}>{flight.dep_iata}</div>
               </div>
 
               {/* Bar + plane */}
@@ -342,16 +341,17 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
                 )}
               </div>
 
-              {/* ARR — bordered frame */}
-              <div style={{ flexShrink: 0, border: `1px solid ${C.border}`, borderRadius: 8, padding: '6px 8px', background: C.bg, minWidth: 64, textAlign: 'right' }}>
-                <div style={{ fontSize: 11, fontWeight: 600, color: C.mid, whiteSpace: 'nowrap' }}>{cityOf(flight.arr_iata)} {flagOf(flight.arr_iata)}</div>
-                <div style={{ fontSize: 10, color: C.muted, fontFamily: 'monospace', marginTop: 1 }}>{flight.arr_iata}</div>
+              {/* ARR */}
+              <div style={{ flexShrink: 0, textAlign: 'right' }}>
+                <div style={{ fontSize: 12, color: C.mid, whiteSpace: 'nowrap' }}>{cityOf(flight.arr_iata)} {flagOf(flight.arr_iata)}</div>
+                <div style={{ fontSize: 10, color: C.muted, fontFamily: 'monospace' }}>{flight.arr_iata}</div>
               </div>
             </div>
           </div>
 
-          {/* 4. Times */}
-          <div style={{ display: 'flex', background: C.times, padding: '11px 14px', borderTop: `1px solid ${C.border}` }}>
+          {/* 4. Times — bordered frame */}
+          <div style={{ margin: '0 13px 12px', borderRadius: 10, border: `1px solid ${C.border}`, overflow: 'hidden' }}>
+          <div style={{ display: 'flex', background: C.times, padding: '11px 14px' }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 9, color: C.muted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 3 }}>Departure</div>
               <div style={{ display: 'flex', alignItems: 'baseline' }}>
@@ -370,6 +370,7 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
                 </span>
               </div>
             </div>
+          </div>
           </div>
 
           {/* 5. Actions */}
