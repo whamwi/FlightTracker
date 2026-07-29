@@ -1,11 +1,12 @@
 export const API_BASE = 'https://flighttracker-sy.vercel.app'
 
 export const AIRLINE_NAMES: Record<string, string> = {
-  XH: 'Flynas', FYC: 'Fly Cham', TK: 'Turkish Airlines', EY: 'Etihad Airways',
-  J9: 'Jazeera Airways', FZ: 'flydubai', G9: 'Air Arabia',
-  RJ: 'Royal Jordanian', RB: 'Syrian Air', QR: 'Qatar Airways',
-  PC: 'Pegasus Airlines', '3L': 'Air Arabia', ME: 'Middle East Airlines',
-  F3: 'Flydeal',
+  XH: 'Fly Cham', TK: 'Turkish Airlines', EY: 'Etihad Airways',
+  J9: 'Jazeera Airways', FZ: 'Flydubai', G9: 'Air Arabia',
+  RJ: 'Royal Jordanian', RB: 'Syrian Arab Airlines', QR: 'Qatar Airways',
+  PC: 'Pegasus Airlines', '3L': 'Air Arabia Abu Dhabi', ME: 'Middle East Airlines',
+  F3: 'Flyadeal', XY: 'Flynas', VF: 'Anadolujet', KU: 'Kuwait Airways',
+  DN: 'Dan Air', KK: 'LEAV Aviation', SR: 'Sundair', EK: 'Emirates',
 }
 
 const LOCAL_LOGOS: Record<string, string> = {
@@ -36,6 +37,7 @@ export const CITY: Record<string, string> = {
   AMS: 'Amsterdam', MED: 'Medina',    ESB: 'Ankara',
   GYD: 'Baku',      LED: 'St. Petersburg', SVO: 'Moscow',
   TAS: 'Tashkent',  ALA: 'Almaty',    EVN: 'Yerevan',
+  DUS: 'Düsseldorf',
 }
 
 export const AIRPORT_FLAG: Record<string, string> = {
@@ -47,7 +49,7 @@ export const AIRPORT_FLAG: Record<string, string> = {
   DOH: '🇶🇦', KWI: '🇰🇼',
   RUH: '🇸🇦', JED: '🇸🇦', DMM: '🇸🇦', MED: '🇸🇦',
   BGW: '🇮🇶', NJF: '🇮🇶', EBL: '🇮🇶',
-  OTP: '🇷🇴', GYD: '🇦🇿',
+  OTP: '🇷🇴', GYD: '🇦🇿', DUS: '🇩🇪',
   LED: '🇷🇺', SVO: '🇷🇺',
   TAS: '🇺🇿', ALA: '🇰🇿', EVN: '🇦🇲',
   MJI: '🇱🇾', AMS: '🇳🇱',
