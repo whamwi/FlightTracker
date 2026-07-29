@@ -71,7 +71,7 @@ interface FlightStatus {
 const ICAO_TO_IATA: Record<string, string> = {
   FDB: 'FZ', ABY: 'G9', THY: 'TK', RJA: 'RJ',
   QTR: 'QR', ETD: 'EY', PGT: 'PC', SYR: 'RB',
-  JZR: 'J9', ADY: 'TK', FYC: 'XH',
+  JZR: 'J9', ADY: 'TK', FYC: 'XH', DLD: 'F3',
 }
 
 // Airport IATA → city name for popup route line
