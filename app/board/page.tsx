@@ -751,7 +751,9 @@ export default function BoardPage() {
         .ft-nav { padding: 0 16px !important; gap: 12px !important; height: 56px !important; }
         .ft-nav-tabs { display: none !important; }
         .ft-search { display: none !important; }
-        .ft-mobile-tabs { display: flex !important; }
+        .ft-nav-tabs { display: flex !important; overflow-x: auto !important; gap: 0 !important; margin-left: 6px !important; scrollbar-width: none !important; }
+        .ft-nav-tabs::-webkit-scrollbar { display: none; }
+        .ft-nav-spacer { display: none !important; }
         .ft-body { padding: 16px 16px 32px !important; flex-direction: column !important; }
         .ft-title { font-size: 26px !important; }
         .ft-content { flex-direction: column !important; }
@@ -762,9 +764,9 @@ export default function BoardPage() {
         .ft-sort-btns { display: none !important; }
         @media (min-width: 768px) {
           .ft-nav { padding: 0 28px !important; gap: 20px !important; height: 68px !important; }
-          .ft-nav-tabs { display: flex !important; }
+          .ft-nav-tabs { overflow-x: visible !important; gap: 4px !important; margin-left: 14px !important; }
+          .ft-nav-spacer { display: block !important; flex: 1; }
           .ft-search { display: flex !important; }
-          .ft-mobile-tabs { display: none !important; }
           .ft-body { padding: 26px 28px 40px !important; }
           .ft-title { font-size: 34px !important; }
           .ft-content { flex-direction: row !important; align-items: flex-start !important; }
@@ -790,7 +792,7 @@ export default function BoardPage() {
             <LogoPlane />
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <span style={{ font: `700 16px/1 'Instrument Sans', system-ui`, color: C.ink, letterSpacing: '-.01em' }}>FlySyria Tracker</span>
+            <span style={{ font: `700 16px/1 'Instrument Sans', system-ui`, color: C.ink, letterSpacing: '-.01em', whiteSpace: 'nowrap' }}>FlySyria Tracker</span>
             <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: C.muted, letterSpacing: '.1em' }}>DAM · ALP</span>
           </div>
         </div>
@@ -815,7 +817,7 @@ export default function BoardPage() {
           ))}
         </div>
 
-        <div style={{ flex: 1 }} />
+        <div className="ft-nav-spacer" style={{ flex: 1 }} />
 
         {/* Search — desktop only */}
         <div className="ft-search" style={{
@@ -830,28 +832,6 @@ export default function BoardPage() {
           <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, fontWeight: 600, color: '#A6A093', background: C.bg, padding: '3px 5px', borderRadius: 4 }}>⌘K</span>
         </div>
 
-      </div>
-
-      {/* ── Mobile nav tabs ── */}
-      <div className="ft-mobile-tabs" style={{
-        background: C.surface, borderBottom: `1px solid ${C.border}`,
-        padding: '0 16px', gap: 0, overflowX: 'auto',
-      }}>
-        {[
-          { label: 'Flights', active: true },
-          { label: 'Track', active: false },
-          { label: 'Destinations', active: false },
-          { label: 'Airlines', active: false },
-        ].map(item => (
-          <div key={item.label} style={{
-            padding: '10px 14px', whiteSpace: 'nowrap', flexShrink: 0,
-            borderBottom: item.active ? `2px solid ${C.forest}` : '2px solid transparent',
-          }}>
-            <span style={{ font: `${item.active ? 700 : 600} 13px/1 'Instrument Sans', system-ui`, color: item.active ? C.forest : C.secondary }}>
-              {item.label}
-            </span>
-          </div>
-        ))}
       </div>
 
       {/* ── Main body ── */}
