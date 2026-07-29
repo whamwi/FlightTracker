@@ -1260,10 +1260,10 @@ export default function Map({ embed = false }: { embed?: boolean }) {
           const capturedCS     = cs
           const capturedA      = a
           const capturedLostAt = lostAt
-          fetch(`https://api.planespotters.net/pub/photos/reg/${encodeURIComponent(regDr)}`)
+          fetch(`/api/photo/${encodeURIComponent(regDr)}`)
             .then(r => r.ok ? r.json() : null)
             .then(photoData => {
-              const url: string | null = photoData?.photos?.[0]?.thumbnail_large?.src ?? photoData?.photos?.[0]?.thumbnail?.src ?? null
+              const url: string | null = photoData?.url ?? null
               photoCacheRef.current[regDr] = url
               if (url && markersRef.current[capturedCS]) {
                 const fsNow = flightStatusRef.current[capturedCS]
