@@ -67,7 +67,7 @@ interface FlightStatus {
   airline_iata:      string | null
 }
 
-import { airportCity as _apCity, airportCoords as _apCoords, airlineByIata as _alByIata, icaoToIata as _icaoToIata, loadGeoData } from '../lib/geo-data'
+import { airportCity as _apCity, airportFlag as _apFlag, airportCoords as _apCoords, airportOffset as _apOffset, airlineByIata as _alByIata, icaoToIata as _icaoToIata, loadGeoData } from '../lib/geo-data'
 
 function iataCity(code: string | null | undefined): string {
   return (code && _apCity[code]) ? _apCity[code] : (code ?? '—')
@@ -261,6 +261,24 @@ function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, s
   return L.divIcon({ className: '', html, iconSize: [size, size], iconAnchor: [size/2, size/2] })
 }
 
+// Convert UTC ISO timestamp to local "HH:MM" using airport UTC offset
+function popupToLocal(iso: string | null, offset: number): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const total = d.getUTCHours() * 60 + d.getUTCMinutes() + Math.round(offset * 60)
+  const h = Math.floor(((total % 1440) + 1440) % 1440 / 60)
+  const m = ((total % 1440) + 1440) % 1440 % 60
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`
+}
+// Convert UTC "HH:MM" schedule time to local using airport UTC offset
+function schedToLocal(hhmm: string, offset: number): string {
+  const [h, m] = hhmm.split(':').map(Number)
+  const total = h * 60 + m + Math.round(offset * 60)
+  const lh = Math.floor(((total % 1440) + 1440) % 1440 / 60)
+  const lm = ((total % 1440) + 1440) % 1440 % 60
+  return `${String(lh).padStart(2,'0')}:${String(lm).padStart(2,'0')}`
+}
+
 function buildPopup(
   a: Aircraft,
   lostAt?: number,
@@ -269,179 +287,219 @@ function buildPopup(
   photoUrl?: string | null,
 ): string {
   const callsign  = (a.flight ?? '').trim() || a.hex
-  const alt       = typeof a.alt_baro === 'number' ? `${Math.round(a.alt_baro).toLocaleString()} ft` : '—'
-  const spd       = a.gs ? `${Math.round(a.gs)} kts` : '—'
-  const arrSyria  = a.board_match && !!a.arr_iata && !!AIRPORT_COORDS[a.arr_iata]
-
+  const aiata     = airlineIataFor(callsign, fs)
+  const alName    = airlineNameFor(aiata) ?? (aiata ?? callsign)
   const acType    = fs?.aircraft_type ?? a.t ?? null
   const dep       = fs?.dep_iata ?? a.dep_iata ?? null
   const arr       = fs?.arr_iata ?? a.arr_iata ?? null
-  const aiata     = airlineIataFor(callsign, fs)
+  const flightNum = fs?.flight_number ?? callsign
 
-  // Distance + ETA to destination
-  const destCode  = fs?.arr_iata ?? a.arr_iata ?? null
-  const destCoord = destCode ? _apCoords[destCode] : null
-  let distLine = ''
-  if (destCoord && typeof a.lat === 'number' && typeof a.lon === 'number') {
-    const nm  = greatCircleKm(a.lat, a.lon, destCoord[0], destCoord[1]) / 1.852
-    const gs  = typeof a.gs === 'number' && a.gs > 50 ? a.gs : null
-    const eta = gs ? Math.round(nm / gs * 60) : null
-    const etaStr = eta != null
-      ? eta >= 60 ? `${Math.floor(eta / 60)}h ${eta % 60}m` : `${eta}m`
-      : null
-    distLine = `<div style="color:#3b82f6;font-size:11px;margin-top:4px">` +
-      `${Math.round(nm)} nm to ${iataCity(destCode)}${etaStr ? ` · ETA ${etaStr}` : ''}` +
-      `</div>`
+  // Status badge
+  const [statusLabel, statusBg, statusFg] = projected
+    ? ['Projected', '#1f2937', '#9ca3af']
+    : lostAt
+      ? ['Signal Lost', '#7f1d1d', '#f87171']
+      : ['En Route', '#166534', '#4ade80']
+
+  // Airline logo
+  const logoHtml = aiata
+    ? `<img src="https://www.gstatic.com/flights/airline_logos/70px/${aiata}.png"
+        style="width:44px;height:44px;border-radius:10px;object-fit:contain;background:#fff;padding:4px;flex-shrink:0"
+        onerror="this.style.display='none'">`
+    : `<div style="width:44px;height:44px;border-radius:10px;background:#1f2937;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:22px">${_apFlag[dep ?? ''] || '✈'}</div>`
+
+  // Route progress
+  const depCoord = dep ? _apCoords[dep] : null
+  const arrCoord = arr ? _apCoords[arr] : null
+  let fraction: number | null = null
+  if (depCoord && arrCoord && typeof a.lat === 'number' && typeof a.lon === 'number') {
+    const total = greatCircleKm(depCoord[0], depCoord[1], arrCoord[0], arrCoord[1])
+    const rem   = greatCircleKm(a.lat, a.lon, arrCoord[0], arrCoord[1])
+    fraction = total > 0 ? Math.max(0.02, Math.min(0.97, 1 - rem / total)) : null
   }
+
+  // ETA
+  let etaStr = ''
+  if (arrCoord && typeof a.lat === 'number' && typeof a.lon === 'number' && typeof a.gs === 'number' && a.gs > 50) {
+    const nm = greatCircleKm(a.lat, a.lon, arrCoord[0], arrCoord[1]) / 1.852
+    const eta = Math.round(nm / a.gs * 60)
+    etaStr = eta >= 60 ? `${Math.floor(eta/60)}h ${eta%60}m left` : `${eta}m left`
+  }
+
+  // Times (local at each airport)
+  const depOffset = _apOffset[dep ?? ''] ?? 3
+  const arrOffset = _apOffset[arr ?? ''] ?? 3
+  const depTimeLocal = popupToLocal(fs?.actual_dep_utc ?? fs?.revised_dep_utc ?? fs?.scheduled_dep_utc ?? null, depOffset)
+  const arrTimeLocal = popupToLocal(fs?.actual_arr_utc ?? fs?.revised_arr_utc ?? fs?.scheduled_arr_utc ?? null, arrOffset)
+
+  const delayBadge = (min: number | null | undefined) => min != null && Math.abs(min) >= 2
+    ? `<span style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;padding:2px 5px;border-radius:99px;margin-left:5px;line-height:1.4">${min > 0 ? '+' : ''}${min}m</span>`
+    : ''
+
+  const progressHtml = (dep && arr)
+    ? `<div style="padding:4px 14px 12px">
+        ${etaStr ? `<div style="text-align:center;color:#9ca3af;font-size:11px;margin-bottom:8px">${etaStr}</div>` : ''}
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="text-align:left">
+            <div style="font-size:12px;color:#d1d5db;white-space:nowrap">${_apFlag[dep] ?? ''} ${iataCity(dep)}</div>
+            <div style="font-size:10px;color:#6b7280;font-family:monospace">${dep}</div>
+          </div>
+          <div style="flex:1;position:relative;height:3px;background:#374151;border-radius:2px">
+            ${fraction != null ? `
+              <div style="width:${Math.round(fraction*100)}%;height:100%;background:#3b82f6;border-radius:2px"></div>
+              <span style="position:absolute;top:50%;transform:translateY(-50%) translateX(-50%);left:${Math.round(fraction*100)}%;color:#3b82f6;font-size:12px;line-height:1;pointer-events:none">✈</span>
+            ` : ''}
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:12px;color:#d1d5db;white-space:nowrap">${iataCity(arr)} ${_apFlag[arr] ?? ''}</div>
+            <div style="font-size:10px;color:#6b7280;font-family:monospace;text-align:right">${arr}</div>
+          </div>
+        </div>
+      </div>`
+    : ''
+
+  const timesHtml = (depTimeLocal || arrTimeLocal)
+    ? `<div style="display:flex;background:#1f2937;padding:11px 14px">
+        <div style="flex:1">
+          <div style="font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:3px">Departure</div>
+          <div style="display:flex;align-items:baseline">
+            <span style="font-size:20px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums">${depTimeLocal || '—'}</span>${delayBadge(fs?.dep_delay_min)}
+          </div>
+        </div>
+        <div style="flex:1;text-align:right">
+          <div style="font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:3px">Arrival</div>
+          <div style="display:flex;align-items:baseline;justify-content:flex-end">
+            ${delayBadge(fs?.arr_delay_min)}<span style="font-size:20px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums">${arrTimeLocal || '—'}</span>
+          </div>
+        </div>
+      </div>`
+    : ''
+
+  const lostLine = lostAt && !projected
+    ? `<div style="color:#ef4444;font-size:11px;padding:5px 14px">⚠ Signal lost ${new Date(lostAt).toLocaleTimeString()}</div>`
+    : ''
+  const drLine = projected && lostAt
+    ? `<div style="color:#9ca3af;font-size:10px;padding:2px 14px 6px">Dead reckoning from ${new Date(lostAt).toLocaleTimeString()}</div>`
+    : ''
+  const photoHtml = photoUrl
+    ? `<img src="${photoUrl}" style="width:100%;height:110px;object-fit:cover;display:block">`
+    : ''
+
+  return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;width:280px">
+    <div style="display:flex;align-items:flex-start;gap:11px;padding:13px 13px 8px">
+      ${logoHtml}
+      <div style="flex:1;min-width:0">
+        <div style="font-size:14px;font-weight:700;color:#f9fafb;line-height:1.25">${alName}</div>
+        <div style="font-size:12px;color:#9ca3af;margin-top:2px">${flightNum}${acType ? ` · ${acType}` : ''}</div>
+      </div>
+      <span style="background:${statusBg};color:${statusFg};font-size:10px;font-weight:600;padding:3px 8px;border-radius:99px;flex-shrink:0;margin-top:1px">${statusLabel}</span>
+    </div>
+    ${progressHtml}${timesHtml}${lostLine}${drLine}${photoHtml}
+  </div>`
+}
+
+function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus | null, fraction?: number, photoUrl?: string | null): string {
+  const acType  = fs?.aircraft_type ?? null
+  const aiata   = airlineIataFor(e.callsign, fs)
+  const alName  = airlineNameFor(aiata) ?? (aiata ?? e.callsign)
+
+  // Status badge
+  const [statusLabel, statusBg, statusFg] = arrived
+    ? ['Arrived', '#1e3a5f', '#60a5fa']
+    : fraction != null && fraction > 0.02
+      ? ['~ En Route', '#713f12', '#fbbf24']
+      : ['Scheduled', '#1c1917', '#a8a29e']
+
+  // Airline logo
+  const logoHtml = aiata
+    ? `<img src="https://www.gstatic.com/flights/airline_logos/70px/${aiata}.png"
+        style="width:44px;height:44px;border-radius:10px;object-fit:contain;background:#fff;padding:4px;flex-shrink:0"
+        onerror="this.style.display='none'">`
+    : `<div style="width:44px;height:44px;border-radius:10px;background:#1f2937;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:22px">${_apFlag[e.dep_iata] || '✈'}</div>`
+
+  const depOffset = _apOffset[e.dep_iata] ?? 3
+  const arrOffset = _apOffset[e.arr_iata] ?? 3
+
+  const depTimeLocal = schedToLocal(e.dep_time_utc, depOffset)
+  const bestArrISO   = fs?.actual_arr_utc ?? fs?.revised_arr_utc ?? null
+  const arrTimeLocal = bestArrISO
+    ? popupToLocal(bestArrISO, arrOffset)
+    : schedToLocal(e.arr_time_utc, arrOffset)
+
+  const arrDelayMin = fs?.arr_delay_min != null ? fs.arr_delay_min
+    : (fs?.revised_arr_utc && fs?.scheduled_arr_utc
+        ? Math.round((new Date(fs.revised_arr_utc).getTime() - new Date(fs.scheduled_arr_utc).getTime()) / 60_000)
+        : null)
+
+  const delayBadge = (min: number | null | undefined) => min != null && Math.abs(min) >= 2
+    ? `<span style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;padding:2px 5px;border-radius:99px;margin-left:5px;line-height:1.4">${min > 0 ? '+' : ''}${min}m</span>`
+    : ''
+
+  // Route progress bar
+  const pct = fraction != null && fraction > 0 && fraction < 1 && !arrived
+    ? Math.round(Math.min(fraction, 0.97) * 100)
+    : arrived ? 100 : null
+
+  // ETA from fraction + duration
+  let etaStr = ''
+  if (pct != null && pct < 100 && e.duration_min > 0) {
+    const remMin = Math.round(e.duration_min * (1 - (pct / 100)))
+    etaStr = remMin >= 60 ? `${Math.floor(remMin/60)}h ${remMin%60}m left` : `${remMin}m left`
+  }
+
+  const progressHtml = `<div style="padding:4px 14px 12px">
+    ${etaStr ? `<div style="text-align:center;color:#9ca3af;font-size:11px;margin-bottom:8px">${etaStr}</div>` : ''}
+    <div style="display:flex;align-items:center;gap:8px">
+      <div style="text-align:left">
+        <div style="font-size:12px;color:#d1d5db;white-space:nowrap">${_apFlag[e.dep_iata] ?? ''} ${iataCity(e.dep_iata)}</div>
+        <div style="font-size:10px;color:#6b7280;font-family:monospace">${e.dep_iata}</div>
+      </div>
+      <div style="flex:1;position:relative;height:3px;background:#374151;border-radius:2px">
+        ${pct != null ? `
+          <div style="width:${pct}%;height:100%;background:#3b82f6;border-radius:2px"></div>
+          ${pct < 100 ? `<span style="position:absolute;top:50%;transform:translateY(-50%) translateX(-50%);left:${pct}%;color:#3b82f6;font-size:12px;line-height:1;pointer-events:none">✈</span>` : ''}
+        ` : ''}
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:12px;color:#d1d5db;white-space:nowrap">${iataCity(e.arr_iata)} ${_apFlag[e.arr_iata] ?? ''}</div>
+        <div style="font-size:10px;color:#6b7280;font-family:monospace;text-align:right">${e.arr_iata}</div>
+      </div>
+    </div>
+  </div>`
+
+  const timesHtml = `<div style="display:flex;background:#1f2937;padding:11px 14px">
+    <div style="flex:1">
+      <div style="font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:3px">Departure</div>
+      <div style="display:flex;align-items:baseline">
+        <span style="font-size:20px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums">${depTimeLocal}</span>${delayBadge(fs?.dep_delay_min)}
+      </div>
+    </div>
+    <div style="flex:1;text-align:right">
+      <div style="font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:3px">Arrival</div>
+      <div style="display:flex;align-items:baseline;justify-content:flex-end">
+        ${delayBadge(arrDelayMin)}<span style="font-size:20px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums">${arrTimeLocal}</span>
+      </div>
+    </div>
+  </div>`
 
   const photoHtml = photoUrl
     ? `<img src="${photoUrl}" style="width:100%;height:110px;object-fit:cover;display:block">`
     : ''
 
-  const logoHtml = aiata
-    ? `<img src="https://www.gstatic.com/flights/airline_logos/70px/${aiata}.png" style="height:18px;width:auto;vertical-align:middle;margin-right:5px" onerror="this.style.display='none'">`
+  const noteHtml = !arrived
+    ? `<div style="color:#6b7280;font-size:10px;padding:4px 14px 5px">Schedule projection · no live signal</div>`
     : ''
 
-  const badge = projected
-    ? `<span style="color:#f59e0b;font-size:10px;font-weight:400"> ~ est</span>`
-    : lostAt ? `<span style="color:#9ca3af;font-size:10px"> (last known)</span>` : ''
-
-  const routeLine = (dep || arr)
-    ? `<div style="color:#374151;font-size:12px;margin-bottom:4px">${iataCity(dep)} to ${iataCity(arr)}</div>`
-    : ''
-
-  let syriaLine = ''
-  if (arrSyria && a.arr_time_utc) {
-    const [h, m] = a.arr_time_utc.split(':').map(Number)
-    const localH = (h + 3) % 24
-    const localTime = `${String(localH).padStart(2,'0')}:${String(m).padStart(2,'0')}`
-    const ap  = a.arr_iata ?? ''
-    const dur = a.duration_min
-      ? ` · ${Math.floor(a.duration_min/60)}h${a.duration_min%60>0?` ${a.duration_min%60}m`:''}`
-      : ''
-    syriaLine = `<div style="color:#16a34a;font-size:11px;margin-top:4px">→ ${ap}  ${localTime} local${dur}</div>`
-  }
-
-  const delayLine = fs?.dep_delay_min != null && Math.abs(fs.dep_delay_min) >= 2
-    ? `<div style="color:${fs.dep_delay_min > 0 ? '#f97316' : '#16a34a'};font-size:11px;margin-top:2px">${fs.dep_delay_min > 0 ? `+${fs.dep_delay_min}` : fs.dep_delay_min} min delay</div>`
-    : ''
-
-  const lostLine = lostAt && !projected
-    ? `<div style="color:#ef4444;font-size:11px;margin-top:3px">⚠ Signal lost ${new Date(lostAt).toLocaleTimeString()}</div>`
-    : ''
-
-  const drLine = projected && lostAt
-    ? `<div style="color:#9ca3af;font-size:10px;margin-top:2px">Dead reckoning from ${new Date(lostAt).toLocaleTimeString()}</div>`
-    : ''
-
-  return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:200px">
-    ${photoHtml}
-    <div style="padding:9px 13px 11px">
-      <div style="display:flex;align-items:center;margin-bottom:3px">
-        ${logoHtml}<b style="font-size:14px">${callsign}</b>${badge}
-        ${acType ? `<span style="margin-left:auto;color:#9ca3af;font-size:11px">${acType}</span>` : ''}
+  return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;width:280px">
+    <div style="display:flex;align-items:flex-start;gap:11px;padding:13px 13px 8px">
+      ${logoHtml}
+      <div style="flex:1;min-width:0">
+        <div style="font-size:14px;font-weight:700;color:#f9fafb;line-height:1.25">${alName}</div>
+        <div style="font-size:12px;color:#9ca3af;margin-top:2px">${e.callsign}${acType ? ` · ${acType}` : ''}</div>
       </div>
-      ${routeLine}
-      <div style="color:#6b7280;font-size:12px">${alt} · ${spd}</div>
-      ${distLine}${syriaLine}${delayLine}${lostLine}${drLine}
+      <span style="background:${statusBg};color:${statusFg};font-size:10px;font-weight:600;padding:3px 8px;border-radius:99px;flex-shrink:0;margin-top:1px">${statusLabel}</span>
     </div>
-  </div>`
-}
-
-function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus | null, fraction?: number, photoUrl?: string | null): string {
-  const isSyria = AIRPORT_COORDS[e.arr_iata] != null
-  const acType  = fs?.aircraft_type ?? null
-  const aiata   = airlineIataFor(e.callsign, fs)
-
-  const photoHtml = photoUrl
-    ? `<img src="${photoUrl}" style="width:100%;height:110px;object-fit:cover;display:block;border-radius:4px 4px 0 0">`
-    : ''
-
-  const logoHtml = aiata
-    ? `<img src="https://www.gstatic.com/flights/airline_logos/70px/${aiata}.png" style="height:18px;width:auto;vertical-align:middle;margin-right:5px" onerror="this.style.display='none'">`
-    : ''
-
-  // Delay lines
-  const depDelay = fs?.dep_delay_min != null && Math.abs(fs.dep_delay_min) >= 2
-    ? `<div style="color:${fs.dep_delay_min > 0 ? '#f97316' : '#16a34a'};font-size:11px;margin-top:2px">Dep ${fs.dep_delay_min > 0 ? `+${fs.dep_delay_min}` : fs.dep_delay_min} min</div>`
-    : ''
-  const arrDelayMin = fs?.arr_delay_min != null ? fs.arr_delay_min
-    : (fs?.revised_arr_utc && fs?.scheduled_arr_utc
-        ? Math.round((new Date(fs.revised_arr_utc).getTime() - new Date(fs.scheduled_arr_utc).getTime()) / 60_000)
-        : null)
-  const arrDelay = arrDelayMin != null && Math.abs(arrDelayMin) >= 2
-    ? `<div style="color:${arrDelayMin > 0 ? '#f97316' : '#16a34a'};font-size:11px;margin-top:2px">Arr ${arrDelayMin > 0 ? `+${arrDelayMin}` : arrDelayMin} min</div>`
-    : ''
-
-  const bestArrISO   = fs?.actual_arr_utc ?? fs?.revised_arr_utc ?? null
-  const bestArrLabel = fs?.actual_arr_utc ? 'Arrived' : fs?.revised_arr_utc ? 'Revised arr' : null
-
-  const toLocal = (iso: string) => {
-    const d = new Date(iso)
-    const h = (d.getUTCHours() + 3) % 24
-    return `${String(h).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`
-  }
-  const schedToLocal = (hhmm: string) => {
-    const [h, m] = hhmm.split(':').map(Number)
-    return `${String((h + 3) % 24).padStart(2,'0')}:${String(m).padStart(2,'0')}`
-  }
-
-  const routeLine = `<div style="color:#374151;font-size:12px;margin-bottom:4px">${iataCity(e.dep_iata)} to ${iataCity(e.arr_iata)}</div>`
-
-  if (arrived && isSyria && e.arr_time_utc && e.arr_time_utc !== '—') {
-    const localTime = bestArrISO ? toLocal(bestArrISO) : schedToLocal(e.arr_time_utc)
-    return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:200px">
-      ${photoHtml}
-      <div style="padding:9px 13px 11px">
-        <div style="display:flex;align-items:center;margin-bottom:3px">
-          ${logoHtml}<b style="font-size:14px">${e.callsign}</b>
-          ${acType ? `<span style="margin-left:auto;color:#9ca3af;font-size:11px">${acType}</span>` : ''}
-        </div>
-        ${routeLine}
-        <div style="color:#16a34a;font-size:11px">Arrived ${e.arr_iata} ~${localTime} local</div>
-        ${depDelay}${arrDelay}
-        <div style="color:#9ca3af;font-size:10px;margin-top:3px">Schedule-estimated · no live signal</div>
-      </div>
-    </div>`
-  }
-
-  let syriaLine = ''
-  if (isSyria && e.arr_time_utc && e.arr_time_utc !== '—') {
-    const schedLocal = schedToLocal(e.arr_time_utc)
-    const dur = e.duration_min
-      ? ` · ${Math.floor(e.duration_min/60)}h${e.duration_min%60>0?` ${e.duration_min%60}m`:''}`
-      : ''
-    syriaLine = `<div style="color:#16a34a;font-size:11px;margin-top:4px">→ ${e.arr_iata}  ${schedLocal} local${dur}</div>`
-    if (bestArrISO && bestArrLabel) {
-      syriaLine += `<div style="color:#f59e0b;font-size:11px;margin-top:1px">${bestArrLabel} ${toLocal(bestArrISO)} local</div>`
-    }
-  }
-
-  const pct = (fraction != null && fraction > 0 && fraction < 1 && !arrived)
-    ? Math.round(Math.min(fraction, 1) * 100)
-    : null
-  const progressHtml = pct != null
-    ? `<div style="margin-top:6px">
-        <div style="height:3px;background:#1f2937;border-radius:2px;overflow:hidden">
-          <div style="width:${pct}%;height:100%;background:linear-gradient(90deg,#0284c7,#06b6d4);border-radius:2px"></div>
-        </div>
-      </div>`
-    : ''
-
-  return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:200px">
-    ${photoHtml}
-    <div style="padding:9px 13px 11px">
-      <div style="display:flex;align-items:center;margin-bottom:3px">
-        ${logoHtml}<b style="font-size:14px">${e.callsign}</b>
-        <span style="color:#f59e0b;font-size:10px;font-weight:400;margin-left:4px"> ~ est</span>
-        ${acType ? `<span style="margin-left:auto;color:#9ca3af;font-size:11px">${acType}</span>` : ''}
-      </div>
-      ${routeLine}
-      ${syriaLine}
-      ${depDelay}${arrDelay}
-      ${progressHtml}
-      <div style="color:#9ca3af;font-size:10px;margin-top:3px">Schedule projection · no signal yet</div>
-    </div>
+    ${progressHtml}${timesHtml}${noteHtml}${photoHtml}
   </div>`
 }
 
@@ -1193,7 +1251,7 @@ export default function Map({ embed = false }: { embed?: boolean }) {
               rnPost({ type: 'SELECT', flight: buildEmbedFlight(cs, se ?? null, fs ?? null, ph) })
             })
           } else {
-            m.bindPopup(popup, { className: 'fp-popup', closeButton: false })
+            m.bindPopup(popup, { className: 'fp-popup', closeButton: false, maxWidth: 300 })
           }
           markersRef.current[cs] = m
         }
@@ -1471,7 +1529,7 @@ export default function Map({ embed = false }: { embed?: boolean }) {
               })
             })
           } else {
-            m.bindPopup(popup, { className: 'fp-popup', closeButton: false })
+            m.bindPopup(popup, { className: 'fp-popup', closeButton: false, maxWidth: 300 })
             m.on('click', () => {
               const fs  = flightStatusRef.current[callsign]
               const reg = fs?.aircraft_reg ?? null
