@@ -189,7 +189,7 @@ function NavBar() {
 function RouteMap({ dests }: { dests: Destination[] }) {
   const gulfDests  = dests.filter(d => d.region === 'gulf').slice(0, 3)
   const eurDests   = dests.filter(d => d.region === 'europe').slice(0, 3)
-  const caucDests  = dests.filter(d => d.region === 'caucasus').slice(0, 2)
+  const caucDests  = eurDests.slice(0, 0) // no caucasus region — kept for arc rendering
   return (
     <div style={{ position: 'relative', borderRadius: 16, overflow: 'hidden', background: C.surface, border: `1px solid ${C.border}`, boxShadow: `0 1px 2px rgba(22,22,22,.05)` }}>
       {/* Grid texture */}
