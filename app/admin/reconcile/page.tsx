@@ -297,8 +297,8 @@ export default function ReconcilePage() {
             {newGroups.map(g => (
               <React.Fragment key={g.key}>
                 <tr style={{ opacity: g.reviewed ? 0.45 : 1 }}>
-                  <td style={{ ...s.td, fontFamily: 'monospace', fontWeight: 600 }}>{g.iata_number}</td>
-                  <td style={s.td}>{g.dep_iata} → {g.arr_iata}</td>
+                  <td style={{ ...s.td, fontFamily: 'monospace', fontWeight: 600, color: '#fff' }}>{g.iata_number}</td>
+                  <td style={{ ...s.td, color: '#fff' }}>{g.dep_iata} → {g.arr_iata}</td>
                   <td style={s.td}>
                     <div style={{ display: 'flex', gap: 3 }}>
                       {DOW_ORDER_ALL.map(d => (
