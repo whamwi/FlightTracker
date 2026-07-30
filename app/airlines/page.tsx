@@ -248,9 +248,7 @@ function AirlineCard({ info, onView, imageUrl, onImageUploaded }: {
         {/* Airline name + logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-            <div style={{ width: 32, height: 32, borderRadius: 9, background: C.sunken, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <AirlineLogo prefix={info.prefix} name={info.name} size={26} />
-            </div>
+            <AirlineLogo prefix={info.prefix} name={info.name} size={32} />
             <span style={{ font: `700 15px/1.2 'Instrument Sans',system-ui`, color: C.ink, letterSpacing: '-.01em' }}>{info.name}</span>
           </div>
           {info.minDuration > 0 && <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: C.muted, flexShrink: 0 }}>{fmtDur(info.minDuration)}</span>}
