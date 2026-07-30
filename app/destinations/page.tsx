@@ -360,74 +360,80 @@ function BottomSheet({ dest, airport, onClose }: { dest: Destination | null; air
   useEffect(() => setDir('to'), [dest?.iata])
   const flights = dir === 'to' ? (dest?.flights ?? []) : (dest?.reverseFlights ?? [])
   const hasReverse = (dest?.reverseFlights.length ?? 0) > 0
+
+  const subtitle = dest ? [
+    dest.weeklyCount ? `${dest.weeklyCount} flights this week` : null,
+    dest.airlines.length ? `${dest.airlines.length} airline${dest.airlines.length > 1 ? 's' : ''}` : null,
+    dest.minDuration ? fmtDur(dest.minDuration) : null,
+  ].filter(Boolean).join(' · ') : ''
+
   return (
     <>
-      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(0,0,0,.55)', opacity: dest ? 1 : 0, pointerEvents: dest ? 'auto' : 'none', transition: 'opacity .25s' }} />
-      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 50, background: C.surface, borderRadius: '20px 20px 0 0', maxHeight: '82vh', display: 'flex', flexDirection: 'column', transform: dest ? 'translateY(0)' : 'translateY(100%)', transition: 'transform .3s ease-out', boxShadow: '0 -4px 24px rgba(22,22,22,.12)' }}>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(22,22,22,.45)', opacity: dest ? 1 : 0, pointerEvents: dest ? 'auto' : 'none', transition: 'opacity .25s' }} />
+      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 50, background: C.surface, borderRadius: '26px 26px 0 0', maxHeight: '82vh', display: 'flex', flexDirection: 'column', transform: dest ? 'translateY(0)' : 'translateY(100%)', transition: 'transform .3s ease-out', boxShadow: '0 -18px 40px -16px rgba(22,22,22,.5)' }}>
         {/* Handle */}
-        <div style={{ display: 'flex', justifyContent: 'center', padding: '12px 0 8px' }}>
-          <div style={{ width: 36, height: 4, borderRadius: 99, background: C.border }} />
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '8px 0 0' }}>
+          <div style={{ width: 38, height: 4, borderRadius: 99, background: '#CFC9B2' }} />
         </div>
         {dest && (
           <>
-            {/* Sheet header */}
-            <div style={{ padding: '4px 16px 14px', borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 24 }}>{apFlag(dest.iata)}</span>
-                  <div>
-                    <div style={{ font: `700 18px/1 'Instrument Sans',system-ui`, color: C.ink }}>{destName(dest.iata)}</div>
-                    <div style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted, marginTop: 3 }}>{dest.iata} · {fmtDur(dest.minDuration)}</div>
-                  </div>
+            {/* Header */}
+            <div style={{ padding: '12px 16px 0', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 22 }}>{apFlag(dest.iata)}</span>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
+                  <span style={{ font: `700 19px/1.1 'Instrument Sans',system-ui`, color: C.ink, letterSpacing: '-.015em' }}>{destName(dest.iata)}</span>
+                  <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, fontWeight: 600, color: C.muted, letterSpacing: '.06em' }}>{dest.iata}</span>
                 </div>
-                <button onClick={onClose} style={{ width: 32, height: 32, borderRadius: 8, background: C.sunken, border: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.secondary} strokeWidth="2" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
-                </button>
+                {subtitle && <span style={{ font: `500 11.5px/1 'Instrument Sans',system-ui`, color: C.muted }}>{subtitle}</span>}
               </div>
-              {/* From / To toggle */}
-              {hasReverse && (
-                <div style={{ display: 'flex', background: C.sunken, borderRadius: 10, padding: 3, gap: 3 }}>
+              <button onClick={onClose} style={{ width: 30, height: 30, borderRadius: 99, background: '#E4E1D2', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', font: `600 14px/1 'Instrument Sans',system-ui`, color: C.secondary, flexShrink: 0 }}>✕</button>
+            </div>
+            {/* Direction toggle */}
+            {hasReverse && (
+              <div style={{ padding: '12px 16px 0' }}>
+                <div style={{ display: 'flex', background: '#E4E1D2', borderRadius: 11, padding: 3, gap: 3 }}>
                   {(['to','from'] as const).map(d => (
-                    <button key={d} onClick={() => setDir(d)} style={{ flex: 1, padding: '7px 0', borderRadius: 8, border: 'none', cursor: 'pointer', font: `600 12.5px/1 'Instrument Sans',system-ui`, background: dir === d ? C.forest : 'transparent', color: dir === d ? '#fff' : C.secondary, transition: 'all .15s' }}>
+                    <button key={d} onClick={() => setDir(d)} style={{ flex: 1, padding: '8px 0', borderRadius: 9, border: 'none', cursor: 'pointer', font: `${dir === d ? 700 : 600} 12.5px/1 'Instrument Sans',system-ui`, background: dir === d ? C.ink : 'transparent', color: dir === d ? '#fff' : C.muted, transition: 'all .15s' }}>
                       {d === 'to' ? `${airport} → ${dest.iata}` : `${dest.iata} → ${airport}`}
                     </button>
                   ))}
                 </div>
-              )}
-            </div>
-            {/* Flight list */}
-            <div style={{ overflowY: 'auto', flex: 1 }}>
-              {flights.map((f, i) => (
-                <div key={i} style={{ padding: '13px 16px', borderBottom: `1px solid ${C.separator}` }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                    <AirlineLogo prefix={f.iata_number.slice(0, 2)} name={f.airline_name} size={28} />
-                    <span style={{ font: `600 13px/1 'Instrument Sans',system-ui`, color: C.ink }}>{f.airline_name}</span>
-                    <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: C.muted, marginLeft: 'auto' }}>{f.iata_number}</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                    <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 18, fontWeight: 700, color: C.ink }}>{f.dep_time}</span>
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, width: '100%' }}>
-                        <div style={{ flex: 1, height: 1, background: C.border }} />
-                        <span style={{ fontSize: 11, color: C.muted }}>✈</span>
-                        <div style={{ flex: 1, height: 1, background: C.border }} />
+              </div>
+            )}
+            {/* Flight cards */}
+            <div style={{ overflowY: 'auto', flex: 1, padding: '12px 16px 26px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {flights.map((f, i) => {
+                const prefix = f.iata_number.slice(0, 2)
+                const activeDays = new Set(f.days_of_week)
+                return (
+                  <div key={i} style={{ border: `1px solid ${C.border}`, borderRadius: 14, background: C.surface, overflow: 'hidden' }}>
+                    <div style={{ padding: '11px 13px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div style={{ width: 32, height: 32, borderRadius: 9, flexShrink: 0, overflow: 'hidden', background: C.sunken, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <AirlineLogo prefix={prefix} name={f.airline_name} size={32} />
                       </div>
-                      {f.duration_min > 0 && <span style={{ font: `500 10px/1 'Instrument Sans',system-ui`, color: C.muted }}>{fmtDur(f.duration_min)}</span>}
+                      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <span style={{ font: `600 13.5px/1.1 'Instrument Sans',system-ui`, color: C.ink }}>{f.airline_name}</span>
+                        <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, fontWeight: 500, color: C.muted, letterSpacing: '.06em' }}>{f.iata_number}</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                        <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 15, fontWeight: 600, color: C.ink }}>{f.dep_time}</span>
+                        <span style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>→</span>
+                        <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 15, fontWeight: 600, color: C.ink }}>{f.arr_time}</span>
+                      </div>
                     </div>
-                    <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 18, fontWeight: 700, color: C.ink }}>{f.arr_time}</span>
+                    <div style={{ borderTop: '1px dashed #CFC9B2', background: C.sunken, padding: '8px 13px', display: 'flex', alignItems: 'center', gap: 4 }}>
+                      {DOW_ORDER.map(d => (
+                        <div key={d} style={{ width: 20, height: 20, borderRadius: 6, flexShrink: 0, background: activeDays.has(d) ? C.forest : C.surface, border: activeDays.has(d) ? 'none' : `1px solid ${C.border}`, color: activeDays.has(d) ? '#fff' : '#B5AFA0', font: `600 9.5px/20px 'Instrument Sans',system-ui`, textAlign: 'center' }}>
+                          {DOW_LABEL[d]}
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  {/* Day dots */}
-                  <div style={{ display: 'flex', gap: 3 }}>
-                    {DOW_ORDER.map(d => (
-                      <span key={d} style={{ width: 22, height: 22, borderRadius: 99, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, background: f.days_of_week.includes(d) ? C.forest : '#E8E5DC', color: f.days_of_week.includes(d) ? '#fff' : C.muted }}>
-                        {DOW_LABEL[d]}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ))}
+                )
+              })}
               {flights.length === 0 && (
-                <div style={{ padding: '32px 16px', textAlign: 'center', color: C.muted, font: `500 13px/1.5 'Instrument Sans',system-ui` }}>No scheduled flights found</div>
+                <div style={{ padding: '32px 0', textAlign: 'center', color: C.muted, font: `500 13px/1.5 'Instrument Sans',system-ui` }}>No scheduled flights found</div>
               )}
             </div>
           </>
