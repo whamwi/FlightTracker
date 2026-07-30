@@ -354,6 +354,34 @@ export async function GET(req: Request) {
     }
   }
 
+  // Cross-midnight outbound pass: yesterday's Syrian departures whose scheduled arrival
+  // falls after Syria midnight (21:00 UTC) into today's window — departed Thursday, still
+  // en route (or just landed) after the Syria date rolled over to Friday.
+  {
+    const prevDep = new Date(date + 'T12:00:00Z')
+    prevDep.setUTCDate(prevDep.getUTCDate() - 1)
+    const prevDepDate = prevDep.toISOString().slice(0, 10)
+    const prevDepRes = await fetch(
+      `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${prevDepDate}&airport_iata=in.(${syriaCodes})&select=airport_iata,departures`,
+      { headers: HEADERS }
+    )
+    if (prevDepRes.ok) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const prevDepRows: any[] = await prevDepRes.json()
+      for (const row of prevDepRows) {
+        const ap = row.airport_iata as string
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        for (const f of (row.departures ?? [])) {
+          // Only cross-midnight flights: scheduled arrival after Syria midnight into today
+          if (!f.sched_arr || f.sched_arr * 1000 <= dayStartMs) continue
+          // Skip if flight already landed before today's Syria window began
+          if (f.real_arr && f.real_arr * 1000 < dayStartMs) continue
+          processDeparture(f, ap, prevDepDate)
+        }
+      }
+    }
+  }
+
   // Fourth pass: destination airports of Syrian departures — fetch their arrivals
   // to get precise landing timestamps for outbound flights (KK491 DAM→DUS etc.)
   // instead of relying solely on the inferredArrived heuristic.
