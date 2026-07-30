@@ -334,9 +334,7 @@ function AirlineSheet({ info, airport, onClose }: { info: AirlineInfo | null; ai
           <>
             {/* Header */}
             <div style={{ padding: '20px 16px 0', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-              <div style={{ width: 44, height: 44, borderRadius: 12, background: airlineBg(info.prefix), display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <AirlineLogo prefix={info.prefix} name={info.name} size={36} />
-              </div>
+              <AirlineLogo prefix={info.prefix} name={info.name} size={44} />
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 3 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
                   <span style={{ font: `700 19px/1.1 'Instrument Sans',system-ui`, color: C.ink, letterSpacing: '-.015em' }}>{info.name}</span>
