@@ -809,7 +809,8 @@ export default function BoardPage() {
           .ft-body { padding: 26px 28px 40px !important; }
           .ft-title { font-size: 34px !important; }
           .ft-content { flex-direction: row !important; align-items: flex-start !important; }
-          .ft-sidebar { display: flex !important; flex-direction: column; gap: 16px; width: 320px; flex-shrink: 0; }
+          .ft-sidebar { display: flex !important; flex-direction: column; gap: 16px; width: 320px; flex-shrink: 0; position: sticky !important; top: 136px !important; align-self: flex-start !important; max-height: calc(100vh - 148px); overflow-y: auto; }
+          .ft-controls-wrap { position: sticky; top: 68px; z-index: 10; background: #EDEBE0; padding: 10px 0; margin: -10px 0; }
           .ft-controls { gap: 12px !important; }
           .ft-airport-btn { padding: 8px 32px !important; }
           .ft-sort-btns { display: flex !important; }
@@ -892,6 +893,7 @@ export default function BoardPage() {
           </div>
 
           {/* Controls row */}
+          <div className="ft-controls-wrap">
           <div className="ft-controls" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             {/* Date tabs */}
             <div style={{ display: 'flex', gap: 6 }}>
@@ -974,6 +976,7 @@ export default function BoardPage() {
               </button>
             </div>
           </div>
+          </div>{/* end ft-controls-wrap */}
 
           {/* ── Content: cards + sidebar ── */}
           <div className="ft-content" style={{ display: 'flex', gap: 20 }}>
