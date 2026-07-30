@@ -260,18 +260,19 @@ function DestCardDesktop({ dest, onView, weeklyCount, imageUrl }: {
       </div>
       {/* Info */}
       <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 9, flex: 1 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-          <span style={{ font: `700 16px/1.1 'Instrument Sans',system-ui`, color: C.ink, letterSpacing: '-.01em' }}>{destName(dest.iata)}</span>
-          {dest.minDuration > 0 && <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: C.muted }}>{fmtDur(dest.minDuration)}</span>}
-        </div>
-        {/* Flag + weekly count */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: -4 }}>
-          <span style={{ fontSize: 18 }}>{apFlag(dest.iata)}</span>
-          <div style={{ padding: '4px 9px', borderRadius: 999, background: badge }}>
+        {/* Row 1: Flag + City | Weekly badge */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 22 }}>{apFlag(dest.iata)}</span>
+            <span style={{ font: `700 16px/1.1 'Instrument Sans',system-ui`, color: C.ink, letterSpacing: '-.01em' }}>{destName(dest.iata)}</span>
+          </div>
+          <div style={{ padding: '4px 9px', borderRadius: 999, background: badge, flexShrink: 0 }}>
             <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: '#fff' }}>{weeklyCount} / wk</span>
           </div>
         </div>
-        {/* Airline chips */}
+        {/* Row 2: Duration */}
+        {dest.minDuration > 0 && <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: C.muted }}>{fmtDur(dest.minDuration)}</span>}
+        {/* Row 3: Airline chips */}
         <div style={{ display: 'flex', gap: 5 }}>
           {dest.airlines.slice(0, 4).map(a => (
             <AirlineLogo key={a.prefix} prefix={a.prefix} name={a.name} size={22} />
