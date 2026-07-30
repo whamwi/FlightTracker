@@ -567,10 +567,14 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
   const targetFlightRef   = useRef(targetFlight)
   targetFlightRef.current = targetFlight
   const highlightedCSRef  = useRef<string | null>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fetchUpdateRef    = useRef<(() => Promise<void>) | null>(null)
 
   useEffect(() => {
     autoOpenDoneRef.current = false
     highlightedCSRef.current = null
+    // Immediately re-run the poll so the new target opens without waiting 10 s
+    fetchUpdateRef.current?.()
   }, [targetFlight])
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const trackLinesRef     = useRef<any[]>([])
@@ -1679,9 +1683,10 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
       }
     }
 
+    fetchUpdateRef.current = fetchAndUpdate
     fetchAndUpdate()
     const interval = setInterval(fetchAndUpdate, 10_000)
-    return () => clearInterval(interval)
+    return () => { clearInterval(interval); fetchUpdateRef.current = null }
   }, [])
 
   return (
