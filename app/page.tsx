@@ -308,13 +308,15 @@ function InAirPanel() {
   // ── Open: side panel ─────────────────────────────────────────────────────
   return (
     <div style={{
-      position: 'absolute', left: 0, top: 0, bottom: 0, zIndex: 999,
-      width: 'min(320px, 88vw)',
+      position: 'absolute', left: 12, top: 12, bottom: 12, zIndex: 999,
+      width: 'min(308px, calc(88vw - 12px))',
       display: 'flex', flexDirection: 'column',
-      background: 'rgba(255,255,255,0.96)',
+      background: 'rgba(255,255,255,0.97)',
       backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-      borderRight: `1px solid ${C.border}`,
-      boxShadow: '4px 0 28px rgba(0,0,0,.10)',
+      border: `1px solid ${C.border}`,
+      borderRadius: 16,
+      boxShadow: '0 4px 28px rgba(0,0,0,.13)',
+      overflow: 'hidden',
     }}>
       {/* Panel header */}
       <div style={{ padding: '14px 14px 11px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'flex-start', gap: 10, flexShrink: 0 }}>

@@ -567,6 +567,11 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
   const targetFlightRef   = useRef(targetFlight)
   targetFlightRef.current = targetFlight
   const highlightedCSRef  = useRef<string | null>(null)
+
+  useEffect(() => {
+    autoOpenDoneRef.current = false
+    highlightedCSRef.current = null
+  }, [targetFlight])
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const trackLinesRef     = useRef<any[]>([])
   // Last confirmed ADS-B lat/lon per callsign — kept alive through stale hand-off
@@ -606,8 +611,11 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
       const map = L.map(mapRef.current!, {
         center: [33.0, 40.0], zoom: 6,
         maxBoundsViscosity: 0,
-        zoomControl: !embed && window.innerWidth >= 768,
+        zoomControl: false,
       })
+      if (!embed && window.innerWidth >= 768) {
+        L.control.zoom({ position: 'topright' }).addTo(map)
+      }
       if (embed) {
         map.fitBounds([[22, 26], [43, 62]])
       }
