@@ -576,7 +576,9 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
   // One FlightPredictor per callsign — handles hybrid DR + smooth recovery for ADS-B entries.
   const predictorRef      = useRef<Record<string, FlightPredictor>>({})
 
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError]     = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const firstLoadDoneRef      = useRef(false)
 
   // ── Map init ────────────────────────────────────────────────────────────────
   useEffect(() => { loadGeoData() }, [])
@@ -1269,6 +1271,7 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
           // Auto-pan + open popup for deep-linked flight (new marker)
           if (!embed && targetFlightRef.current && !autoOpenDoneRef.current && a.iata_number === targetFlightRef.current) {
             autoOpenDoneRef.current = true
+            setLoading(false)
             setTimeout(() => {
               const mk = markersRef.current[cs]
               const mi = mapInstanceRef.current
@@ -1280,6 +1283,7 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
         // Auto-open for existing live marker
         if (!embed && targetFlightRef.current && !autoOpenDoneRef.current && a.iata_number === targetFlightRef.current && markersRef.current[cs]) {
           autoOpenDoneRef.current = true
+          setLoading(false)
           const mk = markersRef.current[cs]
           const mi = mapInstanceRef.current
           if (mk && mi) { mi.setView(mk.getLatLng(), Math.max(mi.getZoom(), 8)); mk.openPopup() }
@@ -1582,6 +1586,7 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
           const fNum = flightStatusRef.current[callsign]?.flight_number ?? null
           if (!embed && targetFlightRef.current && !autoOpenDoneRef.current && fNum === targetFlightRef.current) {
             autoOpenDoneRef.current = true
+            setLoading(false)
             setTimeout(() => {
               const mk = schedMarkersRef.current[callsign]
               const mi = mapInstanceRef.current
@@ -1594,6 +1599,7 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
         const fNumEx = flightStatusRef.current[callsign]?.flight_number ?? null
         if (!embed && targetFlightRef.current && !autoOpenDoneRef.current && fNumEx === targetFlightRef.current && schedMarkersRef.current[callsign]) {
           autoOpenDoneRef.current = true
+          setLoading(false)
           const mk = schedMarkersRef.current[callsign]
           const mi = mapInstanceRef.current
           if (mk && mi) { mi.setView(mk.getLatLng(), Math.max(mi.getZoom(), 8)); mk.openPopup() }
@@ -1608,6 +1614,17 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
         if (!activeSchedKeys.has(cs)) {
           schedMarkersRef.current[cs].remove(); delete schedMarkersRef.current[cs]
           schedLinesRef.current[cs]?.forEach((l: any) => l.remove()); delete schedLinesRef.current[cs]  // eslint-disable-line
+        }
+      }
+
+      // Dismiss loading spinner after first data load
+      if (!firstLoadDoneRef.current) {
+        firstLoadDoneRef.current = true
+        if (!targetFlightRef.current) {
+          setLoading(false)
+        } else {
+          // Flight found → auto-open already called setLoading(false); fallback if not found
+          setTimeout(() => setLoading(false), 5000)
         }
       }
 
@@ -1626,7 +1643,24 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
 
   return (
     <div className="relative w-full h-full">
+      <style>{`@keyframes ft-spin{to{transform:rotate(360deg)}}`}</style>
       <div ref={mapRef} className="w-full h-full" />
+      {loading && !embed && (
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 2000,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(237,235,224,0.88)', backdropFilter: 'blur(6px)',
+        }}>
+          <div style={{
+            width: 48, height: 48, borderRadius: '50%',
+            border: '4px solid #D8D3BF', borderTopColor: '#054239',
+            animation: 'ft-spin 0.85s linear infinite',
+          }} />
+          <div style={{ marginTop: 14, fontSize: 13, fontWeight: 600, color: '#054239', fontFamily: "'Instrument Sans', system-ui", letterSpacing: '-.01em' }}>
+            {targetFlightRef.current ? `Finding ${targetFlightRef.current}…` : 'Loading map…'}
+          </div>
+        </div>
+      )}
       {error && (
         <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000] bg-gray-900/90 backdrop-blur px-4 py-2 rounded-full text-sm border border-gray-700">
           <span className="text-red-400">{error}</span>
