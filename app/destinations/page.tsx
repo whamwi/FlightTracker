@@ -373,7 +373,7 @@ function BottomSheet({ dest, airport, onClose, imageUrl }: { dest: Destination |
 
   const panelStyle: React.CSSProperties = isMobile ? {
     position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 50,
-    maxHeight: '90vh', background: C.surface, borderRadius: '20px 20px 0 0',
+    maxHeight: 'min(82dvh, 82vh)', background: C.surface, borderRadius: '20px 20px 0 0',
     display: 'flex', flexDirection: 'column',
     transform: dest ? 'translateY(0)' : 'translateY(100%)',
     transition: 'transform .3s ease-out',
