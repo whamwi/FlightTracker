@@ -59,6 +59,12 @@ const AIRLINE_BG: Record<string, string> = {
 }
 const airlineBg = (prefix: string) => AIRLINE_BG[prefix] ?? 'linear-gradient(140deg,#607080 0%,#303840 100%)'
 
+const AIRLINE_REGION: Record<string, 'gulf' | 'europe'> = {
+  '3L':'gulf', EK:'gulf', EY:'gulf', F3:'gulf', FZ:'gulf', G9:'gulf',
+  J9:'gulf',  KU:'gulf', QR:'gulf', RB:'gulf', RJ:'gulf', XH:'gulf', XY:'gulf',
+  DN:'europe', KK:'europe', PC:'europe', SR:'europe', TK:'europe', VF:'europe',
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface ScheduleRow {
   dep_iata: string; arr_iata: string; dep_time: string; arr_time: string
@@ -67,7 +73,7 @@ interface ScheduleRow {
 }
 interface DestChip { iata: string; name: string; flag: string }
 interface AirlineInfo {
-  prefix: string; name: string; flag: string
+  prefix: string; name: string; flag: string; region: 'gulf' | 'europe'
   routes: ScheduleRow[]
   reverseRoutes: ScheduleRow[]
   dests: DestChip[]
@@ -436,7 +442,7 @@ export default function AirlinesPage() {
     for (const r of rows) {
       const prefix = r.airline_iata || r.iata_number.slice(0, 2)
       if (!map.has(prefix)) {
-        map.set(prefix, { prefix, name: r.airline_name, flag: r.country_flag, routes: [], reverseRoutes: [], dests: [], weeklyCount: 0, activeDays: new Set(), minDuration: 0 })
+        map.set(prefix, { prefix, name: r.airline_name, flag: r.country_flag, region: AIRLINE_REGION[prefix] ?? 'gulf', routes: [], reverseRoutes: [], dests: [], weeklyCount: 0, activeDays: new Set(), minDuration: 0 })
       }
       const info = map.get(prefix)!
       if (r.dep_iata === airport) {
@@ -521,11 +527,27 @@ export default function AirlinesPage() {
         ) : airlines.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '60px 0', color: C.muted, font: `500 14px/1 'Instrument Sans',system-ui` }}>No airlines found</div>
         ) : (
-          <div className="al-grid">
-            {airlines.map(a => (
-              <AirlineCard key={a.prefix} info={a} onView={() => setSelected(a)} imageUrl={airlineImages[a.prefix]} onImageUploaded={handleImageUploaded} />
-            ))}
-          </div>
+          <>
+            {(['gulf', 'europe'] as const).map(region => {
+              const group = airlines.filter(a => a.region === region)
+              if (!group.length) return null
+              const label = region === 'gulf' ? 'Middle East & Gulf' : 'Europe & Turkey'
+              return (
+                <div key={region} style={{ marginBottom: 36 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                    <span style={{ font: `700 13px/1 'Instrument Sans',system-ui`, color: C.muted, letterSpacing: '.06em', textTransform: 'uppercase' }}>{label}</span>
+                    <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: C.muted, opacity: .6 }}>{group.length}</span>
+                    <div style={{ flex: 1, height: 1, background: C.separator }} />
+                  </div>
+                  <div className="al-grid">
+                    {group.map(a => (
+                      <AirlineCard key={a.prefix} info={a} onView={() => setSelected(a)} imageUrl={airlineImages[a.prefix]} onImageUploaded={handleImageUploaded} />
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+          </>
         )}
       </div>
 
