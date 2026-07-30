@@ -75,6 +75,7 @@ export default function ReconcilePage() {
   const [tab, setTab]             = useState<'time_drift' | 'new_route'>('time_drift')
   const [hideReviewed, setHide]   = useState(true)
   const [saving, setSaving]       = useState<number | null>(null)
+  const [sortDir, setSortDir]     = useState<'asc' | 'desc' | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -103,6 +104,13 @@ export default function ReconcilePage() {
   const newRows     = rows.filter(r => r.reason === 'new_route')
   const displayed   = (tab === 'time_drift' ? driftRows : newRows)
     .filter(r => hideReviewed ? !r.reviewed : true)
+    .sort((a, b) => {
+      if (!sortDir) return 0
+      const cmp = a.iata_number.localeCompare(b.iata_number)
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+
+  const toggleSort = () => setSortDir(d => d === 'asc' ? 'desc' : d === 'desc' ? null : 'asc')
 
   const pendingDrift = driftRows.filter(r => !r.reviewed).length
   const pendingNew   = newRows.filter(r => !r.reviewed).length
@@ -169,7 +177,9 @@ export default function ReconcilePage() {
           <thead>
             <tr>
               <th style={s.th}>Date</th>
-              <th style={s.th}>Flight</th>
+              <th style={{ ...s.th, cursor: 'pointer', userSelect: 'none' }} onClick={toggleSort}>
+                Flight {sortDir === 'asc' ? '↑' : sortDir === 'desc' ? '↓' : '↕'}
+              </th>
               <th style={s.th}>Route</th>
               <th style={s.th}>Day</th>
               <th style={s.th}>Cache (local)</th>
@@ -211,7 +221,9 @@ export default function ReconcilePage() {
           <thead>
             <tr>
               <th style={s.th}>Date</th>
-              <th style={s.th}>Flight</th>
+              <th style={{ ...s.th, cursor: 'pointer', userSelect: 'none' }} onClick={toggleSort}>
+                Flight {sortDir === 'asc' ? '↑' : sortDir === 'desc' ? '↓' : '↕'}
+              </th>
               <th style={s.th}>Route</th>
               <th style={s.th}>Day</th>
               <th style={s.th}>Dep (local)</th>
