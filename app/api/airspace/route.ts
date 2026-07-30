@@ -538,11 +538,28 @@ export async function GET() {
     // arrival-airport row, which stays "Estimated" until landing), we synthesize
     // actual_dep_utc from sched_dep so the ESTIMATED ghost marker still appears.
     const NOW_MS = Date.now()
+    // Syria midnight = start of today's Syria date in UTC (e.g. 21:00 UTC yesterday)
+    const syriaToday       = new Date(NOW_MS + 3 * 3_600_000).toISOString().slice(0, 10)
+    const syriaMidnightMs  = new Date(syriaToday + 'T00:00:00+03:00').getTime()
     const boardDeparted = resolvedBoard
       .filter(f => {
         if (!f.dep_iata || !f.arr_iata || !f.duration_min) return false
         if (seenCallsigns.has(f.callsign)) return false
-        if (f.actual_dep_utc) return true
+        if (f.actual_dep_utc) {
+          const depMs = new Date(f.actual_dep_utc).getTime()
+          // Detect yesterday's flights: scheduled (or actual) departure is before Syria midnight
+          const fromYesterday = f.sched_dep
+            ? f.sched_dep * 1000 < syriaMidnightMs
+            : depMs < syriaMidnightMs
+          if (fromYesterday) {
+            const estArrMs = depMs + f.duration_min * 60_000
+            // Exclude flights that landed before Syria midnight (not cross-midnight)
+            if (estArrMs <= syriaMidnightMs) return false
+            // Exclude flights past their estimated arrival + 30-min buffer
+            if (NOW_MS > estArrMs + 30 * 60_000) return false
+          }
+          return true
+        }
         // Already landed without a departure record — still show ARRIVED for 4 h
         if (f.actual_arr_utc && NOW_MS - new Date(f.actual_arr_utc).getTime() < 4 * 3_600_000) return true
         return false
