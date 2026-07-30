@@ -269,14 +269,12 @@ function DestCardDesktop({ dest, onView, weeklyCount, imageUrl }: {
           {dest.minDuration > 0 && <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: C.muted, flexShrink: 0 }}>{fmtDur(dest.minDuration)}</span>}
         </div>
         {/* Row 2: Airline chips | Weekly badge */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', gap: 5 }}>
-            {dest.airlines.slice(0, 4).map(a => (
-              <AirlineLogo key={a.prefix} prefix={a.prefix} name={a.name} size={22} />
-            ))}
-            {dest.airlines.length > 4 && <span style={{ fontSize: 10, color: C.muted, alignSelf: 'center' }}>+{dest.airlines.length - 4}</span>}
-          </div>
-          <div style={{ padding: '4px 9px', borderRadius: 999, background: badge, flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {dest.airlines.slice(0, 4).map(a => (
+            <AirlineLogo key={a.prefix} prefix={a.prefix} name={a.name} size={22} />
+          ))}
+          {dest.airlines.length > 4 && <span style={{ fontSize: 10, color: C.muted, alignSelf: 'center' }}>+{dest.airlines.length - 4}</span>}
+          <div style={{ padding: '4px 9px', borderRadius: 999, background: badge, marginLeft: 'auto' }}>
             <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: '#fff' }}>{weeklyCount} / wk</span>
           </div>
         </div>
