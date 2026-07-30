@@ -22,11 +22,14 @@ const C = {
 }
 
 // ── Nav icons ────────────────────────────────────────────────────────────────
-const LogoPlane = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#EDEBE0" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M2 22h20"/>
-    <path d="M6.36 17.4 4 17l-2-4 1.1-.55a2 2 0 0 1 1.8 0l.7.35 1.7-3.4 1.9-.95a2 2 0 0 1 1.8 0l.7.35"/>
-    <path d="m14.5 12.5 2.5-5.5a2 2 0 0 1 1.5-1.1l2.9-.5a1 1 0 0 1 1.1 1.3l-1.1 3a2 2 0 0 1-1.1 1.2L6.4 17.4"/>
+const FlySyriaLogo = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 100 100" fill="none">
+    <circle cx="40" cy="58" r="32" stroke="#054239" strokeWidth="2.6"/>
+    <circle cx="40" cy="58" r="25" fill="#054239" stroke="#054239" strokeWidth="2.6"/>
+    <g transform="rotate(90 40 58)"><path d="M40 33v50M20 38c7 8 7 32 0 40M60 38c-7 8-7 32 0 40M11 58h58" stroke="#EDEBE0" strokeWidth="2.2" strokeLinecap="round"/></g>
+    <g transform="translate(58 4) rotate(-12) scale(1.7)">
+      <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" fill="#B9A779" stroke="#054239" strokeWidth="1.1" strokeLinejoin="round" strokeLinecap="round"/>
+    </g>
   </svg>
 )
 const IconFlights = ({ color }: { color: string }) => (
@@ -412,10 +415,8 @@ function HomeInner() {
 
       {/* Top nav */}
       <nav className="map-top-nav">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 9, background: C.forest, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <LogoPlane />
-          </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <FlySyriaLogo />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <span style={{ font: `700 16px/1 'Instrument Sans', system-ui`, color: C.ink, letterSpacing: '-.01em', whiteSpace: 'nowrap' }}>FlySyria Tracker</span>
             <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: C.muted, letterSpacing: '.1em' }}>DAM · ALP</span>
