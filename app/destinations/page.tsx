@@ -23,6 +23,13 @@ const C = {
 const city = (iata: string) => airportCity[iata] ?? iata
 const apFlag = (iata: string) => _apFlag[iata] ?? ''
 
+// Override display names where multiple airports share a city name
+const DEST_NAME: Record<string, string> = {
+  IST: 'Istanbul Airport',
+  SAW: 'Istanbul Sabiha',
+}
+const destName = (iata: string) => DEST_NAME[iata] ?? city(iata)
+
 // ── Region classification ─────────────────────────────────────────────────────
 type RegionId = 'all' | 'gulf' | 'europe'
 const REGION_MAP: Record<string, RegionId> = {
@@ -227,8 +234,8 @@ function RouteMap({ dests }: { dests: Destination[] }) {
           return (
             <g key={d.iata}>
               <circle cx={cx} cy={cy} r="5" fill={C.forestMid} stroke="#fff" strokeWidth="2"/>
-              <rect x={cx + 8} y={cy - 6} width={Math.max(city(d.iata).length * 6.5, 30)} height="13" rx="3" fill="rgba(255,255,255,.9)"/>
-              <text x={cx + 8 + Math.max(city(d.iata).length * 6.5, 30) / 2} y={cy + 4} textAnchor="middle" fontFamily="'Instrument Sans',system-ui" fontSize="9.5" fontWeight="600" fill={C.ink}>{city(d.iata)}</text>
+              <rect x={cx + 8} y={cy - 6} width={Math.max(destName(d.iata).length * 6.5, 30)} height="13" rx="3" fill="rgba(255,255,255,.9)"/>
+              <text x={cx + 8 + Math.max(destName(d.iata).length * 6.5, 30) / 2} y={cy + 4} textAnchor="middle" fontFamily="'Instrument Sans',system-ui" fontSize="9.5" fontWeight="600" fill={C.ink}>{destName(d.iata)}</text>
             </g>
           )
         })}
@@ -238,8 +245,8 @@ function RouteMap({ dests }: { dests: Destination[] }) {
           return (
             <g key={d.iata}>
               <circle cx={cx} cy={cy} r="4.5" fill={C.gold} stroke="#fff" strokeWidth="2"/>
-              <rect x={cx + 7} y={cy - 6} width={Math.max(city(d.iata).length * 6, 28)} height="13" rx="3" fill="rgba(255,255,255,.9)"/>
-              <text x={cx + 7 + Math.max(city(d.iata).length * 6, 28) / 2} y={cy + 4} textAnchor="middle" fontFamily="'Instrument Sans',system-ui" fontSize="9.5" fontWeight="600" fill="#6E5F3C">{city(d.iata)}</text>
+              <rect x={cx + 7} y={cy - 6} width={Math.max(destName(d.iata).length * 6, 28)} height="13" rx="3" fill="rgba(255,255,255,.9)"/>
+              <text x={cx + 7 + Math.max(destName(d.iata).length * 6, 28) / 2} y={cy + 4} textAnchor="middle" fontFamily="'Instrument Sans',system-ui" fontSize="9.5" fontWeight="600" fill="#6E5F3C">{destName(d.iata)}</text>
             </g>
           )
         })}
@@ -270,7 +277,7 @@ function DestCardDesktop({ dest, onView, weeklyCount, imageUrl, onUpload }: {
       {/* Photo area */}
       <div style={{ position: 'relative', height: 160, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
         {showImg
-          ? <img src={imageUrl} alt={city(dest.iata)} onError={() => setImgFailed(true)} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+          ? <img src={imageUrl} alt={destName(dest.iata)} onError={() => setImgFailed(true)} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
           : <span style={{ fontSize: 40, opacity: .35 }}>{apFlag(dest.iata)}</span>
         }
         <div style={{ position: 'absolute', left: 12, top: 12, display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 999, background: 'rgba(255,255,255,.92)' }}>
@@ -300,7 +307,7 @@ function DestCardDesktop({ dest, onView, weeklyCount, imageUrl, onUpload }: {
       {/* Info */}
       <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 9, flex: 1 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-          <span style={{ font: `700 16px/1.1 'Instrument Sans',system-ui`, color: C.ink, letterSpacing: '-.01em' }}>{city(dest.iata)}</span>
+          <span style={{ font: `700 16px/1.1 'Instrument Sans',system-ui`, color: C.ink, letterSpacing: '-.01em' }}>{destName(dest.iata)}</span>
           {dest.minDuration > 0 && <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: C.muted }}>{fmtDur(dest.minDuration)}</span>}
         </div>
         {/* Airline chips */}
@@ -331,7 +338,7 @@ function DestRowMobile({ dest, onView, weeklyCount }: { dest: Destination; onVie
       {/* Info */}
       <div style={{ flex: 1, minWidth: 0, padding: '11px 12px', display: 'flex', flexDirection: 'column', gap: 5 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-          <span style={{ font: `700 14px/1 'Instrument Sans',system-ui`, color: C.ink }}>{city(dest.iata)}</span>
+          <span style={{ font: `700 14px/1 'Instrument Sans',system-ui`, color: C.ink }}>{destName(dest.iata)}</span>
           {dest.minDuration > 0 && <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: C.muted }}>{fmtDur(dest.minDuration)}</span>}
         </div>
         <span style={{ font: `500 10.5px/1 'Instrument Sans',system-ui`, color: C.muted }}>
@@ -376,7 +383,7 @@ function BottomSheet({ dest, airport, onClose }: { dest: Destination | null; air
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontSize: 24 }}>{apFlag(dest.iata)}</span>
                   <div>
-                    <div style={{ font: `700 18px/1 'Instrument Sans',system-ui`, color: C.ink }}>{city(dest.iata)}</div>
+                    <div style={{ font: `700 18px/1 'Instrument Sans',system-ui`, color: C.ink }}>{destName(dest.iata)}</div>
                     <div style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted, marginTop: 3 }}>{dest.iata} · {fmtDur(dest.minDuration)}</div>
                   </div>
                 </div>
