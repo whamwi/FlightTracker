@@ -566,6 +566,8 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
   const photoRequestedRef = useRef<Set<string>>(new Set())
   const selectedCSRef     = useRef<string | null>(null)  // track which callsign is open in native
   const autoOpenDoneRef   = useRef(false)
+  const targetFlightRef   = useRef(targetFlight)
+  targetFlightRef.current = targetFlight
   // Last confirmed ADS-B lat/lon per callsign — kept alive through stale hand-off
   // so the schedule overlay GPS floor still works after trackedRef is cleared.
   const lastADSBPosRef    = useRef<Record<string, { lat: number; lon: number; lostAt: number }>>({})
@@ -1264,19 +1266,19 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
           }
           markersRef.current[cs] = m
 
-          // Auto-pan + open popup for deep-linked flight
-          if (!embed && targetFlight && !autoOpenDoneRef.current && a.iata_number === targetFlight) {
+          // Auto-pan + open popup for deep-linked flight (new marker)
+          if (!embed && targetFlightRef.current && !autoOpenDoneRef.current && a.iata_number === targetFlightRef.current) {
             autoOpenDoneRef.current = true
             setTimeout(() => {
               const mk = markersRef.current[cs]
               const mi = mapInstanceRef.current
               if (mk && mi) { mi.setView(mk.getLatLng(), Math.max(mi.getZoom(), 8)); mk.openPopup() }
-            }, 200)
+            }, 300)
           }
         }
 
-        // Auto-open for existing marker (subsequent ticks before autoOpen fired)
-        if (!embed && targetFlight && !autoOpenDoneRef.current && a.iata_number === targetFlight && markersRef.current[cs]) {
+        // Auto-open for existing live marker
+        if (!embed && targetFlightRef.current && !autoOpenDoneRef.current && a.iata_number === targetFlightRef.current && markersRef.current[cs]) {
           autoOpenDoneRef.current = true
           const mk = markersRef.current[cs]
           const mi = mapInstanceRef.current
@@ -1575,6 +1577,26 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
             })
           }
           schedMarkersRef.current[callsign] = m
+
+          // Auto-pan + open popup for deep-linked flight (new schedule marker)
+          const fNum = flightStatusRef.current[callsign]?.flight_number ?? null
+          if (!embed && targetFlightRef.current && !autoOpenDoneRef.current && fNum === targetFlightRef.current) {
+            autoOpenDoneRef.current = true
+            setTimeout(() => {
+              const mk = schedMarkersRef.current[callsign]
+              const mi = mapInstanceRef.current
+              if (mk && mi) { mi.setView(mk.getLatLng(), Math.max(mi.getZoom(), 8)); mk.openPopup() }
+            }, 300)
+          }
+        }
+
+        // Auto-open for existing schedule marker
+        const fNumEx = flightStatusRef.current[callsign]?.flight_number ?? null
+        if (!embed && targetFlightRef.current && !autoOpenDoneRef.current && fNumEx === targetFlightRef.current && schedMarkersRef.current[callsign]) {
+          autoOpenDoneRef.current = true
+          const mk = schedMarkersRef.current[callsign]
+          const mi = mapInstanceRef.current
+          if (mk && mi) { mi.setView(mk.getLatLng(), Math.max(mi.getZoom(), 8)); mk.openPopup() }
         }
 
         schedLinesRef.current[callsign]?.forEach((l: any) => l.remove())  // eslint-disable-line
