@@ -2,13 +2,17 @@
 
 import dynamic from 'next/dynamic'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
+import { Suspense } from 'react'
 
 const Map = dynamic(() => import('@/components/Map'), { ssr: false })
 
-export default function Home() {
+function HomeInner() {
+  const searchParams = useSearchParams()
+  const flight = searchParams.get('flight') ?? undefined
   return (
     <main className="w-screen h-screen relative">
-      <Map />
+      <Map targetFlight={flight} />
       <div className="absolute top-3 right-4 z-[1000] flex gap-2">
         <Link
           href="/destinations"
@@ -26,5 +30,13 @@ export default function Home() {
         </Link>
       </div>
     </main>
+  )
+}
+
+export default function Home() {
+  return (
+    <Suspense>
+      <HomeInner />
+    </Suspense>
   )
 }

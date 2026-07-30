@@ -541,7 +541,7 @@ function buildEmbedFlight(callsign: string, se: ScheduleEntry | null, fs: Flight
   }
 }
 
-export default function Map({ embed = false }: { embed?: boolean }) {
+export default function Map({ embed = false, targetFlight }: { embed?: boolean; targetFlight?: string }) {
   const mapRef          = useRef<HTMLDivElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapInstanceRef  = useRef<any>(null)
@@ -565,6 +565,7 @@ export default function Map({ embed = false }: { embed?: boolean }) {
   const photoCacheRef     = useRef<Record<string, string | null>>({})
   const photoRequestedRef = useRef<Set<string>>(new Set())
   const selectedCSRef     = useRef<string | null>(null)  // track which callsign is open in native
+  const autoOpenDoneRef   = useRef(false)
   // Last confirmed ADS-B lat/lon per callsign — kept alive through stale hand-off
   // so the schedule overlay GPS floor still works after trackedRef is cleared.
   const lastADSBPosRef    = useRef<Record<string, { lat: number; lon: number; lostAt: number }>>({})
@@ -1257,6 +1258,24 @@ export default function Map({ embed = false }: { embed?: boolean }) {
             m.bindPopup(popup, { className: 'fp-popup', closeButton: false, maxWidth: 300 })
           }
           markersRef.current[cs] = m
+
+          // Auto-pan + open popup for deep-linked flight
+          if (!embed && targetFlight && !autoOpenDoneRef.current && a.iata_number === targetFlight) {
+            autoOpenDoneRef.current = true
+            setTimeout(() => {
+              const mk = markersRef.current[cs]
+              const mi = mapInstanceRef.current
+              if (mk && mi) { mi.setView(mk.getLatLng(), Math.max(mi.getZoom(), 8)); mk.openPopup() }
+            }, 200)
+          }
+        }
+
+        // Auto-open for existing marker (subsequent ticks before autoOpen fired)
+        if (!embed && targetFlight && !autoOpenDoneRef.current && a.iata_number === targetFlight && markersRef.current[cs]) {
+          autoOpenDoneRef.current = true
+          const mk = markersRef.current[cs]
+          const mi = mapInstanceRef.current
+          if (mk && mi) { mi.setView(mk.getLatLng(), Math.max(mi.getZoom(), 8)); mk.openPopup() }
         }
 
         // Fetch aircraft photo once per registration
