@@ -458,7 +458,7 @@ export default function AirlinesPage() {
       }
     }
     return Array.from(map.values())
-      .filter(a => a.routes.length > 0)
+      .filter(a => a.routes.length > 0 && a.prefix !== 'RJ')
       .sort((a, b) => b.weeklyCount - a.weeklyCount || a.name.localeCompare(b.name))
   }, [rows, airport])
 
