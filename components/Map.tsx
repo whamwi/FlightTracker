@@ -420,7 +420,9 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
   const depOffset = _apOffset[e.dep_iata] ?? 3
   const arrOffset = _apOffset[e.arr_iata] ?? 3
 
-  const depTimeLocal = schedToLocal(e.dep_time_utc, depOffset)
+  const depTimeLocal = fs?.actual_dep_utc
+    ? popupToLocal(fs.actual_dep_utc, depOffset)
+    : schedToLocal(e.dep_time_utc, depOffset)
   const bestArrISO   = fs?.actual_arr_utc ?? fs?.revised_arr_utc ?? null
   const arrTimeLocal = bestArrISO
     ? popupToLocal(bestArrISO, arrOffset)
@@ -539,7 +541,7 @@ function buildEmbedFlight(callsign: string, se: ScheduleEntry | null, fs: Flight
   }
 }
 
-export default function Map({ embed = false, targetFlight }: { embed?: boolean; targetFlight?: string }) {
+export default function Map({ embed = false, targetFlight, panelOpen }: { embed?: boolean; targetFlight?: string; panelOpen?: boolean }) {
   const mapRef          = useRef<HTMLDivElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapInstanceRef  = useRef<any>(null)
@@ -569,6 +571,10 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
   const highlightedCSRef  = useRef<string | null>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fetchUpdateRef    = useRef<(() => Promise<void>) | null>(null)
+  const autoCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isAutoOpenRef     = useRef(false)
+  const panelOpenRef      = useRef(panelOpen ?? true)
+  panelOpenRef.current    = panelOpen ?? true
 
   useEffect(() => {
     if (!targetFlight) return
@@ -632,6 +638,18 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
         maxZoom: 19,
       }).addTo(map)
       mapInstanceRef.current = map
+
+      if (!embed) {
+        map.on('popupopen', () => {
+          if (isAutoOpenRef.current) {
+            isAutoOpenRef.current = false
+            if (autoCloseTimerRef.current) clearTimeout(autoCloseTimerRef.current)
+            autoCloseTimerRef.current = setTimeout(() => map.closePopup(), 10_000)
+          } else {
+            if (autoCloseTimerRef.current) { clearTimeout(autoCloseTimerRef.current); autoCloseTimerRef.current = null }
+          }
+        })
+      }
 
       if (embed) {
         map.on('click', () => {
@@ -1321,7 +1339,7 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
             const capTrack = dispTrack; const capLabel = staleLabel; const capAlp = isAlp; const capEst = isEstimated
             setTimeout(() => {
               const mk = markersRef.current[capCs]; const mi = mapInstanceRef.current
-              if (mk && mi) { mk.setIcon(planeIcon(L, capTrack, true, false, capLabel, capAlp, capEst, '#ef4444')); mi.setView(mk.getLatLng(), Math.max(mi.getZoom(), 8)); mk.openPopup(); drawTrackRoute(mk, capDep, capArr) }
+              if (mk && mi) { mk.setIcon(planeIcon(L, capTrack, true, false, capLabel, capAlp, capEst, '#ef4444')); ((_z) => { const _w = mi.getSize().x; const _off = panelOpenRef.current && _w >= 480 ? Math.min(160, (_w - 320) / 2) : 0; const _p = mi.project(mk.getLatLng(), _z); mi.setView(mi.unproject(_p.subtract(L.point(_off, 0)), _z), _z) })(Math.max(mi.getZoom(), 8)); isAutoOpenRef.current = true; mk.openPopup(); drawTrackRoute(mk, capDep, capArr) }
             }, 300)
           }
         }
@@ -1334,7 +1352,7 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
           const mk = markersRef.current[cs]; const mi = mapInstanceRef.current
           const dep = a.dep_iata ?? flightStatusRef.current[cs]?.dep_iata ?? null; const arr = a.arr_iata ?? flightStatusRef.current[cs]?.arr_iata ?? null
           mk.setIcon(planeIcon(L, dispTrack, true, false, staleLabel, isAlp, isEstimated, '#ef4444'))
-          if (mk && mi) { mi.setView(mk.getLatLng(), Math.max(mi.getZoom(), 8)); mk.openPopup(); drawTrackRoute(mk, dep, arr) }
+          if (mk && mi) { ((_z) => { const _w = mi.getSize().x; const _off = panelOpenRef.current && _w >= 480 ? Math.min(160, (_w - 320) / 2) : 0; const _p = mi.project(mk.getLatLng(), _z); mi.setView(mi.unproject(_p.subtract(L.point(_off, 0)), _z), _z) })(Math.max(mi.getZoom(), 8)); isAutoOpenRef.current = true; mk.openPopup(); drawTrackRoute(mk, dep, arr) }
         }
 
         // Fetch aircraft photo once per registration
@@ -1640,7 +1658,7 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
             const capCs2 = callsign; const capTrack2 = track; const capLabel2 = label; const capAlp2 = isAlp
             setTimeout(() => {
               const mk = schedMarkersRef.current[capCs2]; const mi = mapInstanceRef.current
-              if (mk && mi) { mk.setIcon(planeIcon(L, capTrack2, true, false, capLabel2, capAlp2, false, '#ef4444')); mi.setView(mk.getLatLng(), Math.max(mi.getZoom(), 8)); mk.openPopup(); drawTrackRoute(mk, dep_iata, arr_iata) }
+              if (mk && mi) { mk.setIcon(planeIcon(L, capTrack2, true, false, capLabel2, capAlp2, false, '#ef4444')); ((_z) => { const _w = mi.getSize().x; const _off = panelOpenRef.current && _w >= 480 ? Math.min(160, (_w - 320) / 2) : 0; const _p = mi.project(mk.getLatLng(), _z); mi.setView(mi.unproject(_p.subtract(L.point(_off, 0)), _z), _z) })(Math.max(mi.getZoom(), 8)); isAutoOpenRef.current = true; mk.openPopup(); drawTrackRoute(mk, dep_iata, arr_iata) }
             }, 300)
           }
         }
@@ -1653,7 +1671,7 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
           setLoading(false)
           const mk = schedMarkersRef.current[callsign]; const mi = mapInstanceRef.current
           mk.setIcon(planeIcon(L, track, true, false, label, isAlp, false, '#ef4444'))
-          if (mk && mi) { mi.setView(mk.getLatLng(), Math.max(mi.getZoom(), 8)); mk.openPopup(); drawTrackRoute(mk, dep_iata, arr_iata) }
+          if (mk && mi) { ((_z) => { const _w = mi.getSize().x; const _off = panelOpenRef.current && _w >= 480 ? Math.min(160, (_w - 320) / 2) : 0; const _p = mi.project(mk.getLatLng(), _z); mi.setView(mi.unproject(_p.subtract(L.point(_off, 0)), _z), _z) })(Math.max(mi.getZoom(), 8)); isAutoOpenRef.current = true; mk.openPopup(); drawTrackRoute(mk, dep_iata, arr_iata) }
         }
 
         schedLinesRef.current[callsign]?.forEach((l: any) => l.remove())  // eslint-disable-line
