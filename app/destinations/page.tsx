@@ -251,25 +251,25 @@ function DestCardDesktop({ dest, onView, weeklyCount, imageUrl }: {
   const showImg = imageUrl && !imgFailed
   return (
     <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, overflow: 'hidden', boxShadow: `0 1px 2px rgba(22,22,22,.05),0 12px 26px -22px rgba(22,22,22,.5)`, display: 'flex', flexDirection: 'column' }}>
-      {/* Photo area */}
+      {/* Photo area — no overlays */}
       <div style={{ position: 'relative', height: 160, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
         {showImg
           ? <img src={imageUrl} alt={destName(dest.iata)} onError={() => setImgFailed(true)} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
           : <span style={{ fontSize: 40, opacity: .35 }}>{apFlag(dest.iata)}</span>
         }
-        <div style={{ position: 'absolute', left: 12, top: 12, display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 999, background: 'rgba(255,255,255,.92)' }}>
-          <span style={{ fontSize: 13 }}>{apFlag(dest.iata)}</span>
-          <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: C.secondary, letterSpacing: '.05em' }}>{dest.iata}</span>
-        </div>
-        <div style={{ position: 'absolute', right: 12, top: 12, padding: '5px 10px', borderRadius: 999, background: badge }}>
-          <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: '#fff' }}>{weeklyCount} / wk</span>
-        </div>
       </div>
       {/* Info */}
       <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 9, flex: 1 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
           <span style={{ font: `700 16px/1.1 'Instrument Sans',system-ui`, color: C.ink, letterSpacing: '-.01em' }}>{destName(dest.iata)}</span>
           {dest.minDuration > 0 && <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: C.muted }}>{fmtDur(dest.minDuration)}</span>}
+        </div>
+        {/* Flag + weekly count */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: -4 }}>
+          <span style={{ fontSize: 18 }}>{apFlag(dest.iata)}</span>
+          <div style={{ padding: '4px 9px', borderRadius: 999, background: badge }}>
+            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: '#fff' }}>{weeklyCount} / wk</span>
+          </div>
         </div>
         {/* Airline chips */}
         <div style={{ display: 'flex', gap: 5 }}>
