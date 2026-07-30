@@ -264,15 +264,12 @@ function RouteMap({ dests }: { dests: Destination[] }) {
 }
 
 // ── Destination card — desktop ────────────────────────────────────────────────
-function DestCardDesktop({ dest, onView, weeklyCount, imageUrl, onUpload }: {
-  dest: Destination; onView: () => void; weeklyCount: number
-  imageUrl?: string; onUpload?: (iata: string, file: File) => void
+function DestCardDesktop({ dest, onView, weeklyCount, imageUrl }: {
+  dest: Destination; onView: () => void; weeklyCount: number; imageUrl?: string
 }) {
   const bg = destBg(dest.iata)
   const badge = weeklyCount >= 14 ? C.forest : C.gold
   const [imgFailed, setImgFailed] = useState(false)
-  const [hovering, setHovering] = useState(false)
-  // Reset failed flag whenever a new URL arrives (e.g. just uploaded)
   useEffect(() => { setImgFailed(false) }, [imageUrl])
   const showImg = imageUrl && !imgFailed
   return (
@@ -290,22 +287,6 @@ function DestCardDesktop({ dest, onView, weeklyCount, imageUrl, onUpload }: {
         <div style={{ position: 'absolute', right: 12, top: 12, padding: '5px 10px', borderRadius: 999, background: badge }}>
           <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: '#fff' }}>{weeklyCount} / wk</span>
         </div>
-        {/* Upload overlay — label always in DOM so the file input survives the dialog open/close cycle */}
-        {onUpload && (
-          <label
-            onMouseEnter={() => setHovering(true)}
-            onMouseLeave={() => setHovering(false)}
-            style={{ position: 'absolute', inset: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: hovering ? 'rgba(0,0,0,.45)' : 'transparent', transition: 'background .15s' }}
-          >
-            {hovering && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 16px', borderRadius: 10, background: 'rgba(255,255,255,.95)', border: '1px solid rgba(0,0,0,.1)', pointerEvents: 'none' }}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.ink} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                <span style={{ font: `600 12px/1 'Instrument Sans',system-ui`, color: C.ink }}>{showImg ? 'Change photo' : 'Upload photo'}</span>
-              </div>
-            )}
-            <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) onUpload(dest.iata, f); e.target.value = '' }} />
-          </label>
-        )}
       </div>
       {/* Info */}
       <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 9, flex: 1 }}>
@@ -465,8 +446,6 @@ export default function DestinationsPage() {
   const [selected, setSelected] = useState<Destination|null>(null)
   const [weeklyCounts, setWeeklyCounts] = useState<Record<string,number>>({})
   const [destImages, setDestImages] = useState<Record<string,string>>({})
-  const [uploading, setUploading] = useState<string|null>(null)
-  const [uploadError, setUploadError] = useState<string|null>(null)
 
   useEffect(() => { loadGeoData() }, [])
 
@@ -474,26 +453,6 @@ export default function DestinationsPage() {
     fetch('/api/dest-images').then(r => r.ok ? r.json() : null).then(d => { if (d?.images) setDestImages(d.images) }).catch(() => {})
   }, [])
 
-  const handleUpload = useCallback(async (iata: string, file: File) => {
-    setUploading(iata)
-    setUploadError(null)
-    try {
-      const form = new FormData()
-      form.append('iata', iata)
-      form.append('file', file)
-      const res = await fetch('/api/dest-images', { method: 'POST', body: form })
-      const d = await res.json()
-      if (d.url) {
-        setDestImages(prev => ({ ...prev, [iata]: d.url + '?t=' + Date.now() }))
-      } else {
-        setUploadError(d.error ?? 'Upload failed')
-      }
-    } catch (e) {
-      setUploadError(String(e))
-    } finally {
-      setUploading(null)
-    }
-  }, [])
 
   useEffect(() => {
     setLoading(true)
@@ -570,23 +529,6 @@ export default function DestinationsPage() {
           }
         `}</style>
 
-        {/* Upload toast */}
-        {(uploading || uploadError) && (
-          <div style={{ position: 'fixed', top: 82, right: 20, zIndex: 99, padding: '10px 16px', borderRadius: 10, background: uploadError ? '#7A1F1F' : C.ink, display: 'flex', alignItems: 'center', gap: 10, maxWidth: 320 }}>
-            {uploading && (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#EDEBE0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite', flexShrink: 0 }}>
-                <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
-              </svg>
-            )}
-            <span style={{ font: `500 12px/1.4 'Instrument Sans',system-ui`, color: '#EDEBE0' }}>
-              {uploading ? `Uploading ${uploading} photo…` : uploadError}
-            </span>
-            {uploadError && (
-              <button onClick={() => setUploadError(null)} style={{ marginLeft: 4, background: 'none', border: 'none', color: '#EDEBE0', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>×</button>
-            )}
-          </div>
-        )}
-        <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
 
         {/* Title + stats */}
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
@@ -661,7 +603,7 @@ export default function DestinationsPage() {
                   {/* Desktop grid */}
                   <div className="dst-grid">
                     {dests.map(d => (
-                      <DestCardDesktop key={d.iata} dest={d} weeklyCount={weeklyCounts[d.iata]??0} onView={() => setSelected(d)} imageUrl={destImages[d.iata]} onUpload={handleUpload} />
+                      <DestCardDesktop key={d.iata} dest={d} weeklyCount={weeklyCounts[d.iata]??0} onView={() => setSelected(d)} imageUrl={destImages[d.iata]} />
                     ))}
                   </div>
                   {/* Mobile list */}
