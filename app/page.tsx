@@ -35,7 +35,7 @@ function HomeInner() {
   const searchParams = useSearchParams()
   const flight = searchParams.get('flight') ?? undefined
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+    <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column' }}>
       <style>{`
         .map-mobile-nav { display: flex; align-items: center; padding: env(safe-area-inset-top) 16px 0; gap: 12px; height: calc(56px + env(safe-area-inset-top)); background: ${C.surface}; border-bottom: 1px solid ${C.border}; flex-shrink: 0; }
         .map-mobile-tabs { display: flex; overflow-x: auto; scrollbar-width: none; flex: 1; }
