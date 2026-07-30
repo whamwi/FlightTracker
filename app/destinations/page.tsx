@@ -576,22 +576,18 @@ export default function DestinationsPage() {
           </div>
         </div>
 
-        {/* Region filter — desktop only */}
-        <div className="dst-region-filter" style={{ display: 'flex', gap: 6, marginBottom: 20, overflowX: 'auto' }}>
-          <div style={{ display: 'flex', padding: 3, background: '#E4E1D2', borderRadius: 11, gap: 3, flexShrink: 0 }}>
-            {REGION_FILTERS.map(r => {
-              const count = r.id === 'all' ? destinations.length : destinations.filter(d => d.region === r.id).length
-              const active = region === r.id
-              return (
-                <button key={r.id} onClick={() => setRegion(r.id)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 14px', borderRadius: 9, border: 'none', cursor: 'pointer', background: active ? C.ink : 'transparent', transition: 'all .15s' }}>
-                  <span style={{ font: `${active?700:600} 12.5px/1 'Instrument Sans',system-ui`, color: active ? '#fff' : C.muted, whiteSpace: 'nowrap' }}>{r.label}</span>
-                  {count > 0 && (
-                    <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, fontWeight: 700, color: active ? 'rgba(255,255,255,.75)' : C.gold, lineHeight: 1, minWidth: 14 }}>{count}</span>
-                  )}
-                </button>
-              )
-            })}
-          </div>
+        {/* Region filter */}
+        <div style={{ display: 'flex', gap: 6, marginBottom: 20, flexWrap: 'wrap' as const }}>
+          {REGION_FILTERS.map(r => {
+            const count = r.id === 'all' ? destinations.length : destinations.filter(d => d.region === r.id).length
+            const active = region === r.id
+            return (
+              <button key={r.id} onClick={() => setRegion(r.id)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 14px', borderRadius: 99, border: 'none', cursor: 'pointer', background: active ? C.ink : C.surface, color: active ? '#fff' : C.muted, boxShadow: active ? 'none' : `0 0 0 1px ${C.border}`, transition: 'all .15s', font: `${active ? 700 : 500} 12px/1 'Instrument Sans',system-ui`, whiteSpace: 'nowrap' as const }}>
+                {r.label}
+                <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, opacity: active ? .75 : .6 }}>{count}</span>
+              </button>
+            )
+          })}
         </div>
 
         {/* Airport hero */}
