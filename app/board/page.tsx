@@ -391,44 +391,6 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
         </div>
 
         <StatusBadge status={status} view={view} />
-
-        {/* Share icon — always visible, links to the flight share page */}
-        <Link href={`/flight/${encodeURIComponent(f.iata_number)}`} title="Share flight" style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          width: 30, height: 30, borderRadius: 9,
-          background: C.sunken, border: `1px solid ${C.border}`,
-          color: C.muted, flexShrink: 0, textDecoration: 'none',
-        }}>
-          <svg width={14} height={14} viewBox="0 0 16 16" fill="none">
-            <circle cx="12" cy="3"  r="1.8" stroke="currentColor" strokeWidth="1.5"/>
-            <circle cx="12" cy="13" r="1.8" stroke="currentColor" strokeWidth="1.5"/>
-            <circle cx="3"  cy="8"  r="1.8" stroke="currentColor" strokeWidth="1.5"/>
-            <line x1="10.3" y1="3.9" x2="4.7" y2="7.1" stroke="currentColor" strokeWidth="1.5"/>
-            <line x1="4.7"  y1="8.9" x2="10.3" y2="12.1" stroke="currentColor" strokeWidth="1.5"/>
-          </svg>
-        </Link>
-
-        {showTrack && (
-          <Link href="/" style={{
-            display: 'flex', alignItems: 'center', gap: 6, padding: '7px 12px 7px 10px',
-            borderRadius: 9, background: C.forest, textDecoration: 'none',
-          }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-              <g transform="translate(1.6 -1) scale(0.86)"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></g>
-              <path d="M2.2 21.6c1.6-1.7 3.4-3.2 5.5-4.4" strokeDasharray="2.3 2.5"/>
-            </svg>
-            <span style={{ font: `600 12px/1 'Instrument Sans', system-ui`, color: '#fff' }}>Track</span>
-          </Link>
-        )}
-
-        <div className="ft-card-actions" style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 12, marginLeft: 2, borderLeft: `1px solid ${C.trackEmpty}` }}>
-          <button title="Pin flight" style={{
-            width: 30, height: 30, borderRadius: 9, background: C.sunken, border: `1px solid ${C.trackEmpty}`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-          }}>
-            <PinSVG />
-          </button>
-        </div>
       </div>
 
       {/* Footer */}
@@ -505,6 +467,34 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
             </span>
           </div>
         </div>
+      </div>
+
+      {/* Action strip */}
+      <div style={{ borderTop: `1px solid ${C.trackEmpty}`, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 7 }}>
+        <a
+          href={`https://www.flightradar24.com/${f.iata_number}`}
+          target="_blank" rel="noopener noreferrer"
+          style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 11px', borderRadius: 99, background: C.forest, color: '#fff', fontSize: 11, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap', fontFamily: "'Instrument Sans', system-ui" }}
+        >
+          <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/>
+          </svg>
+          Track
+        </a>
+        <Link href={`/flight/${encodeURIComponent(f.iata_number)}`} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: 99, background: C.sunken, border: `1px solid ${C.border}`, color: C.secondary, fontSize: 11, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap', fontFamily: "'Instrument Sans', system-ui" }}>
+          <svg width={12} height={12} viewBox="0 0 16 16" fill="none">
+            <circle cx="12" cy="3" r="1.8" stroke="currentColor" strokeWidth="1.5"/>
+            <circle cx="12" cy="13" r="1.8" stroke="currentColor" strokeWidth="1.5"/>
+            <circle cx="3" cy="8" r="1.8" stroke="currentColor" strokeWidth="1.5"/>
+            <line x1="10.3" y1="3.9" x2="4.7" y2="7.1" stroke="currentColor" strokeWidth="1.5"/>
+            <line x1="4.7" y1="8.9" x2="10.3" y2="12.1" stroke="currentColor" strokeWidth="1.5"/>
+          </svg>
+          Share
+        </Link>
+        <button style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: 99, background: C.sunken, border: `1px solid ${C.border}`, color: C.secondary, fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: "'Instrument Sans', system-ui", whiteSpace: 'nowrap' }}>
+          <PinSVG />
+          Pin
+        </button>
       </div>
     </div>
   )
@@ -772,7 +762,6 @@ export default function BoardPage() {
         .ft-sidebar { display: none !important; }
         .ft-controls { gap: 8px !important; flex-wrap: wrap !important; }
         .ft-airport-btn { padding: 8px 14px !important; }
-        .ft-card-actions { display: none !important; }
         .ft-sort-btns { display: none !important; }
         @media (min-width: 768px) {
           .ft-nav { padding: 0 28px !important; gap: 20px !important; height: 68px !important; }
@@ -785,7 +774,6 @@ export default function BoardPage() {
           .ft-sidebar { display: flex !important; flex-direction: column; gap: 16px; width: 320px; flex-shrink: 0; }
           .ft-controls { gap: 12px !important; }
           .ft-airport-btn { padding: 8px 32px !important; }
-          .ft-card-actions { display: flex !important; }
           .ft-sort-btns { display: flex !important; }
         }
         @media (min-width: 1100px) {
