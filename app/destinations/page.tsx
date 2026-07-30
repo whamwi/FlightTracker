@@ -352,7 +352,7 @@ function DestRowMobile({ dest, onView, weeklyCount }: { dest: Destination; onVie
   )
 }
 
-// ── Bottom sheet ──────────────────────────────────────────────────────────────
+// ── Side drawer ───────────────────────────────────────────────────────────────
 
 function BottomSheet({ dest, airport, onClose }: { dest: Destination | null; airport: string; onClose: () => void }) {
   const [dir, setDir] = useState<'to'|'from'>('to')
@@ -367,18 +367,16 @@ function BottomSheet({ dest, airport, onClose }: { dest: Destination | null; air
     dest.minDuration ? fmtDur(dest.minDuration) : null,
   ].filter(Boolean).join(' · ') : ''
 
+  const airportName = city(airport)
+
   return (
     <>
       <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(22,22,22,.45)', opacity: dest ? 1 : 0, pointerEvents: dest ? 'auto' : 'none', transition: 'opacity .25s' }} />
-      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 50, background: C.surface, borderRadius: '26px 26px 0 0', maxHeight: '82vh', display: 'flex', flexDirection: 'column', transform: dest ? 'translateY(0)' : 'translateY(100%)', transition: 'transform .3s ease-out', boxShadow: '0 -18px 40px -16px rgba(22,22,22,.5)' }}>
-        {/* Handle */}
-        <div style={{ display: 'flex', justifyContent: 'center', padding: '8px 0 0' }}>
-          <div style={{ width: 38, height: 4, borderRadius: 99, background: '#CFC9B2' }} />
-        </div>
+      <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, zIndex: 50, width: 'min(440px, 100vw)', background: C.surface, borderRadius: '20px 0 0 20px', display: 'flex', flexDirection: 'column', transform: dest ? 'translateX(0)' : 'translateX(100%)', transition: 'transform .3s ease-out', boxShadow: '-20px 0 48px -12px rgba(22,22,22,.28)' }}>
         {dest && (
           <>
             {/* Header */}
-            <div style={{ padding: '12px 16px 0', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ padding: '20px 16px 0', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
               <span style={{ fontSize: 22 }}>{apFlag(dest.iata)}</span>
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 3 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
@@ -391,11 +389,11 @@ function BottomSheet({ dest, airport, onClose }: { dest: Destination | null; air
             </div>
             {/* Direction toggle */}
             {hasReverse && (
-              <div style={{ padding: '12px 16px 0' }}>
+              <div style={{ padding: '12px 16px 0', flexShrink: 0 }}>
                 <div style={{ display: 'flex', background: '#E4E1D2', borderRadius: 11, padding: 3, gap: 3 }}>
                   {(['to','from'] as const).map(d => (
-                    <button key={d} onClick={() => setDir(d)} style={{ flex: 1, padding: '8px 0', borderRadius: 9, border: 'none', cursor: 'pointer', font: `${dir === d ? 700 : 600} 12.5px/1 'Instrument Sans',system-ui`, background: dir === d ? C.ink : 'transparent', color: dir === d ? '#fff' : C.muted, transition: 'all .15s' }}>
-                      {d === 'to' ? `${airport} → ${dest.iata}` : `${dest.iata} → ${airport}`}
+                    <button key={d} onClick={() => setDir(d)} style={{ flex: 1, padding: '8px 6px', borderRadius: 9, border: 'none', cursor: 'pointer', font: `${dir === d ? 700 : 600} 12px/1.2 'Instrument Sans',system-ui`, background: dir === d ? C.ink : 'transparent', color: dir === d ? '#fff' : C.muted, transition: 'all .15s' }}>
+                      {d === 'to' ? `${airportName} → ${destName(dest.iata)}` : `${destName(dest.iata)} → ${airportName}`}
                     </button>
                   ))}
                 </div>
