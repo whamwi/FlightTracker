@@ -288,7 +288,7 @@ function AirlineCard({ info, onView, imageUrl, onImageUploaded }: {
 }
 
 // ── Detail panel ──────────────────────────────────────────────────────────────
-function AirlineSheet({ info, airport, onClose }: { info: AirlineInfo | null; airport: string; onClose: () => void }) {
+function AirlineSheet({ info, airport, onClose, imageUrl }: { info: AirlineInfo | null; airport: string; onClose: () => void; imageUrl?: string }) {
   const [dir, setDir] = useState<'from'|'to'>('from')
   const [isMobile, setIsMobile] = useState(false)
   useEffect(() => {
@@ -330,19 +330,23 @@ function AirlineSheet({ info, airport, onClose }: { info: AirlineInfo | null; ai
       <div style={panelStyle}>
         {info && (
           <>
-            {/* Header */}
-            <div style={{ padding: '20px 16px 0', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-              <AirlineLogo prefix={info.prefix} name={info.name} size={44} />
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 3 }}>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
-                  <span style={{ font: `700 19px/1.1 'Instrument Sans',system-ui`, color: C.ink, letterSpacing: '-.015em' }}>{info.name}</span>
-                  <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, fontWeight: 600, color: C.muted, letterSpacing: '.06em' }}>{info.prefix}</span>
+            {/* Photo hero */}
+            <div style={{ position: 'relative', height: 180, background: airlineBg(info.prefix), flexShrink: 0, overflow: 'hidden' }}>
+              {imageUrl && <img src={imageUrl} alt={info.name} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />}
+              <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,.65) 0%, rgba(0,0,0,.1) 55%, transparent 100%)' }} />
+              <button onClick={onClose} style={{ position: 'absolute', right: 12, top: 12, width: 32, height: 32, borderRadius: 99, background: 'rgba(0,0,0,.35)', backdropFilter: 'blur(8px)', border: '1px solid rgba(255,255,255,.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#fff', font: `600 15px/1 'Instrument Sans',system-ui` }}>✕</button>
+              <div style={{ position: 'absolute', left: 16, bottom: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <AirlineLogo prefix={info.prefix} name={info.name} size={44} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
+                    <span style={{ font: `700 19px/1.1 'Instrument Sans',system-ui`, color: '#fff', letterSpacing: '-.015em', textShadow: '0 1px 6px rgba(0,0,0,.4)' }}>{info.name}</span>
+                    <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,.65)', letterSpacing: '.06em' }}>{info.prefix}</span>
+                  </div>
+                  <span style={{ font: `500 11.5px/1 'Instrument Sans',system-ui`, color: 'rgba(255,255,255,.75)' }}>
+                    {info.weeklyCount} flights/week · {info.dests.length} destination{info.dests.length !== 1 ? 's' : ''}
+                  </span>
                 </div>
-                <span style={{ font: `500 11.5px/1 'Instrument Sans',system-ui`, color: C.muted }}>
-                  {info.weeklyCount} flights/week · {info.dests.length} destination{info.dests.length !== 1 ? 's' : ''}
-                </span>
               </div>
-              <button onClick={onClose} style={{ width: 30, height: 30, borderRadius: 99, background: '#E4E1D2', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', font: `600 14px/1 'Instrument Sans',system-ui`, color: C.secondary, flexShrink: 0 }}>✕</button>
             </div>
 
             {/* Direction toggle */}
@@ -529,7 +533,7 @@ export default function AirlinesPage() {
         )}
       </div>
 
-      <AirlineSheet info={selected} airport={airport} onClose={handleClose} />
+      <AirlineSheet info={selected} airport={airport} onClose={handleClose} imageUrl={selected ? airlineImages[selected.prefix] : undefined} />
     </div>
   )
 }
