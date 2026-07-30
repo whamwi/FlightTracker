@@ -552,6 +552,7 @@ export default function DestinationsPage() {
             .dst-body { padding: 16px 14px 32px !important; }
             .dst-map { height: 200px; overflow: hidden; }
             .dst-grid { grid-template-columns: 1fr; gap: 14px; }
+            .dst-region-filter { display: none !important; }
           }
           @media (min-width: 768px) and (max-width: 1099px) {
             .dst-body { padding: 22px 28px 40px !important; }
@@ -591,8 +592,8 @@ export default function DestinationsPage() {
           </div>
         </div>
 
-        {/* Region filter */}
-        <div style={{ display: 'flex', gap: 6, marginBottom: 20, overflowX: 'auto' }}>
+        {/* Region filter — desktop only */}
+        <div className="dst-region-filter" style={{ display: 'flex', gap: 6, marginBottom: 20, overflowX: 'auto' }}>
           <div style={{ display: 'flex', padding: 3, background: '#E4E1D2', borderRadius: 11, gap: 3, flexShrink: 0 }}>
             {REGION_FILTERS.map(r => {
               const count = r.id === 'all' ? destinations.length : destinations.filter(d => d.region === r.id).length
