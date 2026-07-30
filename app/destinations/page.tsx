@@ -86,6 +86,9 @@ const DEST_BG: Record<string, string> = {
 }
 const destBg = (iata: string) => DEST_BG[iata] ?? 'linear-gradient(140deg,#A8A090 0%,#686050 100%)'
 
+const DOW_ORDER = ['sun','mon','tue','wed','thu','fri','sat'] as const
+const DOW_LABEL: Record<string,string> = { sun:'S', mon:'M', tue:'T', wed:'W', thu:'T', fri:'F', sat:'S' }
+
 function fmtDur(min: number) {
   if (!min) return ''
   const h = Math.floor(min / 60), m = min % 60
@@ -317,7 +320,18 @@ function DestCardDesktop({ dest, onView, weeklyCount, imageUrl, onUpload }: {
           ))}
           {dest.airlines.length > 4 && <span style={{ fontSize: 10, color: C.muted, alignSelf: 'center' }}>+{dest.airlines.length - 4}</span>}
         </div>
-        <div style={{ borderTop: `1px dashed ${C.separator}`, paddingTop: 11, display: 'flex', justifyContent: 'flex-end' }}>
+        <div style={{ borderTop: `1px dashed ${C.separator}`, paddingTop: 11, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          {/* Day-of-week dots */}
+          <div style={{ display: 'flex', gap: 3 }}>
+            {(() => {
+              const active = new Set(dest.flights.flatMap(f => f.days_of_week))
+              return DOW_ORDER.map(d => (
+                <span key={d} style={{ width: 20, height: 20, borderRadius: 99, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700, background: active.has(d) ? C.forest : '#E8E5DC', color: active.has(d) ? '#fff' : C.muted }}>
+                  {DOW_LABEL[d]}
+                </span>
+              ))
+            })()}
+          </div>
           <button onClick={onView} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 13px', borderRadius: 9, background: C.forest, cursor: 'pointer', border: 'none' }}>
             <span style={{ font: `600 12px/1 'Instrument Sans',system-ui`, color: '#fff' }}>View flights</span>
           </button>
@@ -358,8 +372,6 @@ function DestRowMobile({ dest, onView, weeklyCount }: { dest: Destination; onVie
 }
 
 // ── Bottom sheet ──────────────────────────────────────────────────────────────
-const DOW_ORDER = ['sun','mon','tue','wed','thu','fri','sat'] as const
-const DOW_LABEL: Record<string,string> = {sun:'S',mon:'M',tue:'T',wed:'W',thu:'T',fri:'F',sat:'S'}
 
 function BottomSheet({ dest, airport, onClose }: { dest: Destination | null; airport: string; onClose: () => void }) {
   const [dir, setDir] = useState<'to'|'from'>('to')
