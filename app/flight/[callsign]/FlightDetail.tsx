@@ -399,18 +399,6 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
               </svg>
               Share
             </button>
-            {/* Track → FR24 live map */}
-            <a
-              href={`https://www.flightradar24.com/${flight.iata_number}`}
-              target="_blank" rel="noopener noreferrer"
-              style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#EBF3EF', color: C.forest, border: `1px solid #B8D8CC`, borderRadius: 10, padding: '10px 8px', fontSize: 12, fontWeight: 600, textDecoration: 'none' }}
-            >
-              <svg width={12} height={12} viewBox="0 0 16 16" fill="none">
-                <circle cx="8" cy="6.5" r="3" stroke="currentColor" strokeWidth="1.5"/>
-                <path d="M8 15C8 15 2.5 10 2.5 6.5a5.5 5.5 0 0 1 11 0C13.5 10 8 15 8 15z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
-              </svg>
-              Track
-            </a>
             {/* Airport board */}
             <Link href="/board" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: '#F7F5EC', color: C.ink, border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 8px', fontSize: 12, fontWeight: 600, textDecoration: 'none' }}>
               {boardAirport}
