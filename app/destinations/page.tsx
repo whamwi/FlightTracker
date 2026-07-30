@@ -554,23 +554,23 @@ export default function DestinationsPage() {
             <span style={{ font: `500 12px/1 'Instrument Sans',system-ui`, color: C.muted, letterSpacing: '.02em' }}>From Damascus &amp; Aleppo</span>
             <h1 style={{ margin: 0, font: `700 34px/1 'Instrument Sans',system-ui`, color: C.ink, letterSpacing: '-.025em' }}>Destinations</h1>
           </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             {/* Airport toggle */}
-            <div style={{ display: 'flex', padding: 3, background: '#E4E1D2', borderRadius: 10, gap: 3 }}>
+            <div style={{ display: 'flex', padding: 3, background: '#E4E1D2', borderRadius: 9, gap: 2 }}>
               {(['DAM','ALP'] as const).map(a => (
-                <button key={a} onClick={() => setAirport(a)} style={{ padding: '7px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', font: `${airport===a?700:600} 12px/1 'IBM Plex Mono',monospace`, background: airport===a ? C.forest : 'transparent', color: airport===a ? '#fff' : C.muted, transition: 'all .15s' }}>{a}</button>
+                <button key={a} onClick={() => setAirport(a)} style={{ padding: '6px 12px', borderRadius: 7, border: 'none', cursor: 'pointer', font: `${airport===a?700:600} 12px/1 'IBM Plex Mono',monospace`, background: airport===a ? C.forest : 'transparent', color: airport===a ? '#fff' : C.muted, transition: 'all .15s' }}>{a}</button>
               ))}
             </div>
             {totalDests > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, padding: '10px 16px', borderRadius: 12, background: C.surface, border: `1px solid ${C.border}` }}>
-                <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 18, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{totalDests}</span>
-                <span style={{ font: `500 10.5px/1 'Instrument Sans',system-ui`, color: C.muted }}>destinations</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 9, background: C.surface, border: `1px solid ${C.border}` }}>
+                <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{totalDests}</span>
+                <span style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>destinations</span>
               </div>
             )}
             {totalFlights > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, padding: '10px 16px', borderRadius: 12, background: C.surface, border: `1px solid ${C.border}` }}>
-                <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 18, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{totalFlights}</span>
-                <span style={{ font: `500 10.5px/1 'Instrument Sans',system-ui`, color: C.muted }}>flights / week</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 9, background: C.surface, border: `1px solid ${C.border}` }}>
+                <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{totalFlights}</span>
+                <span style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>flights / week</span>
               </div>
             )}
           </div>
