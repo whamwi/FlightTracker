@@ -310,8 +310,9 @@ function InAirPanel() {
   // ── Open: side panel ─────────────────────────────────────────────────────
   return (
     <div style={{
-      position: 'absolute', left: 12, top: 12, bottom: 12, zIndex: 999,
+      position: 'absolute', left: 12, top: 12, zIndex: 999,
       width: 'min(308px, calc(88vw - 12px))',
+      maxHeight: 'calc(100% - 24px)',
       display: 'flex', flexDirection: 'column',
       background: 'rgba(237,235,224,0.97)',
       backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
@@ -340,7 +341,7 @@ function InAirPanel() {
       </div>
 
       {/* Card list */}
-      <div style={{ flex: 1, overflowY: 'auto', overscrollBehavior: 'contain', padding: '10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ overflowY: 'auto', overscrollBehavior: 'contain', padding: '10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
         {loading && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '48px 0', gap: 10 }}>
             <div style={{ width: 24, height: 24, border: `2px solid ${C.forestMid}`, borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin .8s linear infinite' }} />
