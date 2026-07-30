@@ -204,18 +204,9 @@ const AIRPORT_HERO: Record<string, { src: string; fallback: string; label: strin
 function AirportHero({ airport, totalDests, totalFlights }: { airport: string; totalDests: number; totalFlights: number }) {
   const cfg = AIRPORT_HERO[airport] ?? AIRPORT_HERO.DAM
   const [imgFailed, setImgFailed] = useState(false)
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-  const fileRef = useRef<HTMLInputElement>(null)
-  useEffect(() => { setImgFailed(false); setPreviewUrl(null) }, [airport])
+  useEffect(() => { setImgFailed(false) }, [airport])
 
-  const effectiveSrc = previewUrl ?? (!imgFailed ? cfg.src : null)
-
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0]
-    if (!f) return
-    setPreviewUrl(URL.createObjectURL(f))
-    e.target.value = ''
-  }
+  const effectiveSrc = !imgFailed ? cfg.src : null
 
   return (
     <div style={{ position: 'relative', borderRadius: 16, overflow: 'hidden', background: cfg.fallback, height: '100%' }}>
@@ -224,7 +215,7 @@ function AirportHero({ airport, totalDests, totalFlights }: { airport: string; t
           key={effectiveSrc}
           src={effectiveSrc}
           alt={cfg.label}
-          onError={() => { if (!previewUrl) setImgFailed(true) }}
+          onError={() => setImgFailed(true)}
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center' }}
         />
       )}
@@ -238,20 +229,12 @@ function AirportHero({ airport, totalDests, totalFlights }: { airport: string; t
           {totalFlights > 0 && <span style={{ font: `600 12px/1 'Instrument Sans',system-ui`, color: 'rgba(255,255,255,.6)' }}>· {totalFlights} flights/week</span>}
         </div>
       </div>
-      {/* Top-right: IATA badge + upload button */}
-      <div style={{ position: 'absolute', right: 14, top: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
-        <button
-          onClick={() => fileRef.current?.click()}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 11px', borderRadius: 8, background: 'rgba(0,0,0,.38)', backdropFilter: 'blur(8px)', border: '1px solid rgba(255,255,255,.18)', cursor: 'pointer', color: '#fff', font: `600 12px/1 'Instrument Sans',system-ui`, whiteSpace: 'nowrap' }}
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
-          Try a photo
-        </button>
+      {/* Top-right: IATA badge */}
+      <div style={{ position: 'absolute', right: 14, top: 14 }}>
         <div style={{ padding: '5px 10px', borderRadius: 8, background: 'rgba(0,0,0,.35)', backdropFilter: 'blur(6px)' }}>
           <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, fontWeight: 700, color: '#fff', letterSpacing: '.08em' }}>{airport}</span>
         </div>
       </div>
-      <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleFile} />
     </div>
   )
 }
