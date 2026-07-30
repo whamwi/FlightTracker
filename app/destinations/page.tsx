@@ -354,10 +354,11 @@ function DestRowMobile({ dest, onView, weeklyCount }: { dest: Destination; onVie
 
 // ── Side drawer ───────────────────────────────────────────────────────────────
 
-function BottomSheet({ dest, airport, onClose }: { dest: Destination | null; airport: string; onClose: () => void }) {
+function BottomSheet({ dest, airport, onClose, imageUrl }: { dest: Destination | null; airport: string; onClose: () => void; imageUrl?: string }) {
   const [dir, setDir] = useState<'to'|'from'>('to')
+  const [imgFailed, setImgFailed] = useState(false)
   useEffect(() => { if (dest) document.body.style.overflow = 'hidden'; else document.body.style.overflow = ''; return () => { document.body.style.overflow = '' } }, [dest])
-  useEffect(() => setDir('to'), [dest?.iata])
+  useEffect(() => { setDir('to'); setImgFailed(false) }, [dest?.iata])
   const flights = dir === 'to' ? (dest?.flights ?? []) : (dest?.reverseFlights ?? [])
   const hasReverse = (dest?.reverseFlights.length ?? 0) > 0
 
@@ -368,6 +369,7 @@ function BottomSheet({ dest, airport, onClose }: { dest: Destination | null; air
   ].filter(Boolean).join(' · ') : ''
 
   const airportName = city(airport)
+  const showImg = imageUrl && !imgFailed
 
   return (
     <>
@@ -386,6 +388,13 @@ function BottomSheet({ dest, airport, onClose }: { dest: Destination | null; air
                 {subtitle && <span style={{ font: `500 11.5px/1 'Instrument Sans',system-ui`, color: C.muted }}>{subtitle}</span>}
               </div>
               <button onClick={onClose} style={{ width: 30, height: 30, borderRadius: 99, background: '#E4E1D2', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', font: `600 14px/1 'Instrument Sans',system-ui`, color: C.secondary, flexShrink: 0 }}>✕</button>
+            </div>
+            {/* Destination image */}
+            <div style={{ margin: '12px 16px 0', borderRadius: 12, overflow: 'hidden', height: 160, flexShrink: 0, position: 'relative', background: destBg(dest.iata) }}>
+              {showImg
+                ? <img src={imageUrl} alt={destName(dest.iata)} onError={() => setImgFailed(true)} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+                : <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 48, opacity: .3 }}>{apFlag(dest.iata)}</span>
+              }
             </div>
             {/* Direction toggle */}
             {hasReverse && (
@@ -630,7 +639,7 @@ export default function DestinationsPage() {
         </div>
       </div>
 
-      <BottomSheet dest={selected} airport={airport} onClose={handleClose} />
+      <BottomSheet dest={selected} airport={airport} onClose={handleClose} imageUrl={selected ? destImages[selected.iata] : undefined} />
     </div>
   )
 }
