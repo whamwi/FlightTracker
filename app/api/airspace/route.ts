@@ -590,6 +590,9 @@ export async function GET() {
         for (const rm of rmRows) {
           const fl = rm.flight_lookup
           if (!fl?.iata_number) continue
+          // Only fill ghosts for outbound Syrian flights — inbound routes are
+          // covered by the arrival-airport cache or live ADS-B near the destination.
+          if (!SYRIAN_AIRPORTS_SET.has(rm.dep_iata)) continue
           const callsign = (fl.broadcast_callsign || fl.iata_number) as string
           if (boardCallsigns.has(callsign)) continue
           const [dh, dm] = ((rm.dep_time_utc ?? '00:00') as string).slice(0, 5).split(':').map(Number)
