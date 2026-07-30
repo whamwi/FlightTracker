@@ -838,21 +838,21 @@ export default function BoardPage() {
         {/* Nav tabs — desktop only */}
         <div className="ft-nav-tabs" style={{ alignItems: 'center', gap: 4, marginLeft: 14 }}>
           {[
-            { label: 'Flights', active: true },
-            { label: 'Track',   active: false },
-            { label: 'Destinations', active: false },
-            { label: 'Airlines', active: false },
-          ].map(item => (
-            <div key={item.label} style={{
-              display: 'flex', alignItems: 'center', gap: 7,
-              padding: '9px 14px', borderRadius: 10,
-              background: item.active ? C.sunken : 'transparent',
-            }}>
+            { label: 'Flights', active: true,  href: null },
+            { label: 'Track',   active: false, href: '/' },
+            { label: 'Destinations', active: false, href: null },
+            { label: 'Airlines',     active: false, href: null },
+          ].map(item => {
+            const inner = (
               <span style={{ font: `${item.active ? 700 : 600} 13.5px/1 'Instrument Sans', system-ui`, color: item.active ? C.forest : C.secondary }}>
                 {item.label}
               </span>
-            </div>
-          ))}
+            )
+            const sharedStyle = { display: 'flex', alignItems: 'center', gap: 7, padding: '9px 14px', borderRadius: 10, background: item.active ? C.sunken : 'transparent' }
+            return item.href
+              ? <Link key={item.label} href={item.href} style={{ ...sharedStyle, textDecoration: 'none' }}>{inner}</Link>
+              : <div key={item.label} style={sharedStyle}>{inner}</div>
+          })}
         </div>
 
         <div className="ft-nav-spacer" style={{ flex: 1 }} />
