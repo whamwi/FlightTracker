@@ -175,7 +175,7 @@ function MiniProgress({ depUtc, durationMin, approaching }: { depUtc: string; du
 }
 
 // ── Compact flight card for the panel ───────────────────────────────────────
-function MiniFlightCard({ f }: { f: InAirFlight }) {
+function MiniFlightCard({ f, isSelected }: { f: InAirFlight; isSelected?: boolean }) {
   const status = panelEffectiveStatus(f)
   const approaching = status === 'Approaching'
   const railColor = approaching ? C.forest : C.forestMid
@@ -189,12 +189,10 @@ function MiniFlightCard({ f }: { f: InAirFlight }) {
   const depFlag  = apFlag[f.dep_iata] ?? ''
   const arrFlag  = apFlag[f.arr_iata] ?? ''
 
-  const cardBg = f.arr_iata === 'DAM' ? '#EEF6EE' : f.arr_iata === 'ALP' ? '#FFF4EC' : C.surface
-
   return (
     <Link
       href={`/?flight=${encodeURIComponent(f.iata_number)}`}
-      style={{ display: 'block', textDecoration: 'none', background: cardBg, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,.06)', position: 'relative' }}
+      style={{ display: 'block', textDecoration: 'none', background: isSelected ? '#EAF3EA' : C.surface, border: `1.5px solid ${isSelected ? C.forest : C.border}`, borderRadius: 12, overflow: 'hidden', boxShadow: isSelected ? `0 0 0 3px ${C.forestLight}40` : '0 1px 4px rgba(0,0,0,.06)', position: 'relative' }}
     >
       {/* Status rail (top) */}
       <div style={{ height: 3, background: railColor }} />
@@ -254,7 +252,7 @@ function MiniFlightCard({ f }: { f: InAirFlight }) {
 }
 
 // ── In-air side panel ────────────────────────────────────────────────────────
-function InAirPanel() {
+function InAirPanel({ selectedFlight }: { selectedFlight?: string }) {
   const [open, setOpen]       = useState(true)
   const [flights, setFlights] = useState<InAirFlight[]>([])
   const [loading, setLoading] = useState(true)
@@ -358,7 +356,7 @@ function InAirPanel() {
           </div>
         )}
         {!loading && flights.map(f => (
-          <MiniFlightCard key={`${f.iata_number}-${f.dep_iata}-${f.arr_iata}`} f={f} />
+          <MiniFlightCard key={`${f.iata_number}-${f.dep_iata}-${f.arr_iata}`} f={f} isSelected={f.iata_number === selectedFlight} />
         ))}
       </div>
     </div>
@@ -442,7 +440,7 @@ function HomeInner() {
         <Map targetFlight={flight} />
 
         {/* In-air side panel */}
-        <InAirPanel />
+        <InAirPanel selectedFlight={flight} />
 
         {/* Legend (bottom-right, above bottom nav on mobile) */}
         <div className="map-legend" style={{ position: 'absolute', zIndex: 1000, background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(6px)', borderRadius: 10, padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 5, boxShadow: '0 1px 4px rgba(0,0,0,0.12)' }}>
