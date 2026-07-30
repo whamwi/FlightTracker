@@ -525,9 +525,8 @@ export default function DestinationsPage() {
           .dst-mobile-row { display: none; }
           @media (max-width: 767px) {
             .dst-body { padding: 16px 14px 32px !important; }
-            .dst-map { height: 160px; overflow: hidden; }
-            .dst-grid { display: none; }
-            .dst-mobile-row { display: flex; flex-direction: column; gap: 10px; }
+            .dst-map { height: 200px; overflow: hidden; }
+            .dst-grid { grid-template-columns: 1fr; gap: 14px; }
           }
           @media (min-width: 768px) and (max-width: 1099px) {
             .dst-body { padding: 22px 28px 40px !important; }
