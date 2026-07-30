@@ -470,31 +470,35 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
       </div>
 
       {/* Action strip */}
-      <div style={{ borderTop: `1px solid ${C.trackEmpty}`, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 7 }}>
-        <a
-          href={`https://www.flightradar24.com/${f.iata_number}`}
-          target="_blank" rel="noopener noreferrer"
-          style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 11px', borderRadius: 99, background: C.forest, color: '#fff', fontSize: 11, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap', fontFamily: "'Instrument Sans', system-ui" }}
-        >
-          <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/>
-          </svg>
-          Track
-        </a>
-        <Link href={`/flight/${encodeURIComponent(f.iata_number)}`} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: 99, background: C.sunken, border: `1px solid ${C.border}`, color: C.secondary, fontSize: 11, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap', fontFamily: "'Instrument Sans', system-ui" }}>
-          <svg width={12} height={12} viewBox="0 0 16 16" fill="none">
-            <circle cx="12" cy="3" r="1.8" stroke="currentColor" strokeWidth="1.5"/>
-            <circle cx="12" cy="13" r="1.8" stroke="currentColor" strokeWidth="1.5"/>
-            <circle cx="3" cy="8" r="1.8" stroke="currentColor" strokeWidth="1.5"/>
-            <line x1="10.3" y1="3.9" x2="4.7" y2="7.1" stroke="currentColor" strokeWidth="1.5"/>
-            <line x1="4.7" y1="8.9" x2="10.3" y2="12.1" stroke="currentColor" strokeWidth="1.5"/>
-          </svg>
-          Share
-        </Link>
-        <button style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: 99, background: C.sunken, border: `1px solid ${C.border}`, color: C.secondary, fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: "'Instrument Sans', system-ui", whiteSpace: 'nowrap' }}>
-          <PinSVG />
-          Pin
-        </button>
+      <div style={{ borderTop: `1px solid ${C.trackEmpty}`, padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <Link href={`/flight/${encodeURIComponent(f.iata_number)}`} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: 99, background: C.sunken, border: `1px solid ${C.border}`, color: C.secondary, fontSize: 11, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap', fontFamily: "'Instrument Sans', system-ui" }}>
+            <svg width={12} height={12} viewBox="0 0 16 16" fill="none">
+              <circle cx="12" cy="3" r="1.8" stroke="currentColor" strokeWidth="1.5"/>
+              <circle cx="12" cy="13" r="1.8" stroke="currentColor" strokeWidth="1.5"/>
+              <circle cx="3" cy="8" r="1.8" stroke="currentColor" strokeWidth="1.5"/>
+              <line x1="10.3" y1="3.9" x2="4.7" y2="7.1" stroke="currentColor" strokeWidth="1.5"/>
+              <line x1="4.7" y1="8.9" x2="10.3" y2="12.1" stroke="currentColor" strokeWidth="1.5"/>
+            </svg>
+            Share
+          </Link>
+          <button style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: 99, background: C.sunken, border: `1px solid ${C.border}`, color: C.secondary, fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: "'Instrument Sans', system-ui", whiteSpace: 'nowrap' }}>
+            <PinSVG />
+            Pin
+          </button>
+        </div>
+        {showTrack && (
+          <a
+            href={`https://www.flightradar24.com/${f.iata_number}`}
+            target="_blank" rel="noopener noreferrer"
+            style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 11px', borderRadius: 99, background: C.forest, color: '#fff', fontSize: 11, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap', fontFamily: "'Instrument Sans', system-ui" }}
+          >
+            <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/>
+            </svg>
+            Track
+          </a>
+        )}
       </div>
     </div>
   )
