@@ -249,7 +249,7 @@ function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, s
 
   let html = svg
   if (label) {
-    const textColor = stale ? '#9ca3af' : estimated ? '#fbbf24' : '#4ade80'
+    const textColor = stale ? '#6b7280' : estimated ? '#d97706' : '#166534'
     const labelHtml = label.split('\n').map((line, i) =>
       `<div style="font-size:${mobile ? 8 : (i>0?8:9)}px;font-weight:bold;color:${i>0?'#fbbf24':textColor};letter-spacing:0.3px;line-height:1.2;white-space:nowrap">${line}</div>`
     ).join('')
