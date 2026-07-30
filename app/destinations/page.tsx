@@ -5,285 +5,405 @@ import Link from 'next/link'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { airportCity, airportFlag as _apFlag, loadGeoData } from '@/lib/geo-data'
 
-const cityName = (iata: string) => airportCity[iata] ?? iata
+// ── Palette ───────────────────────────────────────────────────────────────────
+const C = {
+  bg:        '#EDEBE0',
+  surface:   '#FFFFFF',
+  border:    '#D8D3BF',
+  ink:       '#161616',
+  muted:     '#8A8578',
+  secondary: '#3D3A3B',
+  forest:    '#054239',
+  forestMid: '#428177',
+  gold:      '#988561',
+  sunken:    '#F7F5EC',
+  separator: '#E0DCCB',
+}
 
-// ── Day display: Sun-first order matching airport FIDS convention ─────────────
-const DOW_ORDER = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
-const DOW_LABEL: Record<string, string> = {
-  sun: 'S', mon: 'M', tue: 'T', wed: 'W', thu: 'T', fri: 'F', sat: 'S',
-}
-const DOW_FULL: Record<string, string> = {
-  sun: 'Sun', mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat',
-}
+const city = (iata: string) => airportCity[iata] ?? iata
+const apFlag = (iata: string) => _apFlag[iata] ?? ''
 
-function sortDays(days: string[]): string[] {
-  return [...days].sort((a, b) => DOW_ORDER.indexOf(a as typeof DOW_ORDER[number]) - DOW_ORDER.indexOf(b as typeof DOW_ORDER[number]))
+// ── Region classification ─────────────────────────────────────────────────────
+type RegionId = 'all' | 'gulf' | 'europe' | 'caucasus'
+const REGION_MAP: Record<string, RegionId> = {
+  DXB: 'gulf', DWC: 'gulf', SHJ: 'gulf', AUH: 'gulf', DOH: 'gulf',
+  KWI: 'gulf', MCT: 'gulf', RUH: 'gulf', JED: 'gulf', DMM: 'gulf', MED: 'gulf',
+  AMM: 'gulf', BEY: 'gulf', BGW: 'gulf', EBL: 'gulf', NJF: 'gulf', BSR: 'gulf',
+  CAI: 'gulf', SSH: 'gulf',
+  IST: 'europe', SAW: 'europe', ESB: 'europe', ADB: 'europe', AYT: 'europe',
+  ATH: 'europe', OTP: 'europe', VIE: 'europe', FRA: 'europe', CDG: 'europe',
+  LHR: 'europe', AMS: 'europe', MXP: 'europe', FCO: 'europe', WAW: 'europe',
+  BER: 'europe', MUC: 'europe', BCN: 'europe', MAD: 'europe', ZRH: 'europe',
+  GYD: 'caucasus', TBS: 'caucasus', EVN: 'caucasus',
+  SVO: 'caucasus', THR: 'caucasus', IKA: 'caucasus',
 }
+const REGION_FILTERS: { id: RegionId; label: string }[] = [
+  { id: 'all',      label: 'All regions' },
+  { id: 'gulf',     label: 'Middle East & Gulf' },
+  { id: 'europe',   label: 'Europe & Turkey' },
+  { id: 'caucasus', label: 'Caucasus & CIS' },
+]
+const REGION_SECTIONS: { id: RegionId; label: string }[] = [
+  { id: 'gulf',     label: 'Middle East & Gulf' },
+  { id: 'europe',   label: 'Europe & Turkey' },
+  { id: 'caucasus', label: 'Caucasus & CIS' },
+]
+
+// ── Destination photo gradients ───────────────────────────────────────────────
+const DEST_BG: Record<string, string> = {
+  DXB: 'linear-gradient(140deg,#C8A06A 0%,#7A5020 100%)',
+  SHJ: 'linear-gradient(140deg,#C4A560 0%,#8B6518 100%)',
+  AUH: 'linear-gradient(140deg,#BCA070 0%,#705428 100%)',
+  DOH: 'linear-gradient(140deg,#C0AA80 0%,#786430 100%)',
+  KWI: 'linear-gradient(140deg,#CCAA78 0%,#8A6830 100%)',
+  AMM: 'linear-gradient(140deg,#C8B0A0 0%,#806050 100%)',
+  BEY: 'linear-gradient(140deg,#8AAAC0 0%,#486882 100%)',
+  BGW: 'linear-gradient(140deg,#C8A870 0%,#806030 100%)',
+  EBL: 'linear-gradient(140deg,#C0A870 0%,#786228 100%)',
+  NJF: 'linear-gradient(140deg,#C4B090 0%,#826848 100%)',
+  BSR: 'linear-gradient(140deg,#C8AA78 0%,#806038 100%)',
+  CAI: 'linear-gradient(140deg,#D0B880 0%,#907840 100%)',
+  IST: 'linear-gradient(140deg,#7A8CAA 0%,#3A4E6A 100%)',
+  SAW: 'linear-gradient(140deg,#7A90A8 0%,#3A5068 100%)',
+  ATH: 'linear-gradient(140deg,#9A9888 0%,#5A5848 100%)',
+  BER: 'linear-gradient(140deg,#7A8898 0%,#3A4858 100%)',
+  AMS: 'linear-gradient(140deg,#688098 0%,#304858 100%)',
+  FRA: 'linear-gradient(140deg,#8A7A98 0%,#4A3A58 100%)',
+  VIE: 'linear-gradient(140deg,#88909A 0%,#485058 100%)',
+  OTP: 'linear-gradient(140deg,#809098 0%,#405058 100%)',
+  WAW: 'linear-gradient(140deg,#8090A0 0%,#405060 100%)',
+  CDG: 'linear-gradient(140deg,#8888A0 0%,#484860 100%)',
+  LHR: 'linear-gradient(140deg,#7888A0 0%,#384860 100%)',
+  GYD: 'linear-gradient(140deg,#689880 0%,#285840 100%)',
+  TBS: 'linear-gradient(140deg,#809878 0%,#405838 100%)',
+  EVN: 'linear-gradient(140deg,#A08878 0%,#604838 100%)',
+  SVO: 'linear-gradient(140deg,#909898 0%,#505858 100%)',
+}
+const destBg = (iata: string) => DEST_BG[iata] ?? 'linear-gradient(140deg,#A8A090 0%,#686050 100%)'
 
 function fmtDur(min: number) {
   if (!min) return ''
-  const h = Math.floor(min / 60)
-  const m = min % 60
-  return m > 0 ? `${h}h ${m}m` : `${h}h`
+  const h = Math.floor(min / 60), m = min % 60
+  return m ? `${h}h ${m}m` : `${h}h`
 }
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 interface ScheduleRow {
-  id: number
-  dep_iata: string
-  arr_iata: string
-  dep_time: string
-  arr_time: string
-  duration_min: number
-  days_of_week: string[]
-  iata_number: string
-  broadcast_callsign: string
-  airline_name: string
-  country_flag: string
-  codeshare_iata: string | null
+  dep_iata: string; arr_iata: string; dep_time: string; arr_time: string
+  duration_min: number; days_of_week: string[]; iata_number: string
+  airline_name: string; country_flag: string
 }
-
-interface AirlineEntry {
-  flag: string
-  name: string
-  prefix: string
-}
-
+interface AirlineChip { prefix: string; name: string; flag: string }
 interface Destination {
-  iata: string
-  allDays: string[]
-  airlines: AirlineEntry[]
-  flights: ScheduleRow[]         // dep=home → arr=dest
-  reverseFlights: ScheduleRow[]  // dep=dest → arr=home
-  minDuration: number
+  iata: string; region: RegionId; airlines: AirlineChip[]
+  flights: ScheduleRow[]; reverseFlights: ScheduleRow[]
+  minDuration: number; weeklyCount: number
 }
 
-// ── Day bubbles ───────────────────────────────────────────────────────────────
-function DayBubbles({ days, size = 'md', color = '#2563eb' }: { days: string[]; size?: 'sm' | 'md'; color?: string }) {
-  const cls = size === 'md'
-    ? 'w-7 h-7 text-[11px]'
-    : 'w-6 h-6 text-[10px]'
-  return (
-    <div className="flex gap-0.5">
-      {DOW_ORDER.map(d => (
-        <span
-          key={d}
-          title={DOW_FULL[d]}
-          className={`${cls} rounded-full font-bold flex items-center justify-center leading-none select-none`}
-          style={days.includes(d)
-            ? { backgroundColor: color, color: '#fff' }
-            : { backgroundColor: '#1f2937', color: '#4b5563' }}
-        >
-          {DOW_LABEL[d]}
-        </span>
-      ))}
-    </div>
-  )
-}
-
-// ── Airline logo — local override → FlightsFrom CDN → emoji flag ─────────────
-const LOCAL_LOGOS = AIRLINE_LOGOS
-
-function AirlineLogo({ prefix, flag, name, size = 28 }: { prefix: string; flag: string; name: string; size?: number }) {
-  const [src, setSrc] = useState(LOCAL_LOGOS[prefix] ?? `https://images.flightsfrom.com/airlines/100/${prefix}_100px.png`)
+// ── Airline logo ──────────────────────────────────────────────────────────────
+function AirlineLogo({ prefix, name, size = 22 }: { prefix: string; name: string; size?: number }) {
+  const [src, setSrc] = useState(AIRLINE_LOGOS[prefix] ?? `https://images.flightsfrom.com/airlines/100/${prefix}_100px.png`)
   const [failed, setFailed] = useState(false)
-
-  const handleError = () => {
-    if (LOCAL_LOGOS[prefix] && src === LOCAL_LOGOS[prefix]) {
-      setSrc(`https://images.flightsfrom.com/airlines/100/${prefix}_100px.png`)
-    } else {
-      setFailed(true)
-    }
-  }
-
-  if (failed) {
-    return <span className="text-lg leading-none" title={name}>{flag}</span>
-  }
+  if (failed) return <span style={{ fontSize: 13, lineHeight: 1 }} title={name}>✈</span>
   return (
-    <img
-      src={src}
-      alt={name}
-      title={name}
-      width={size}
-      height={size}
-      className={`rounded-lg object-cover${LOGO_WHITE_BG.has(prefix) ? ' bg-white p-0.5' : ''}`}
-      onError={handleError}
+    <img src={src} alt={name} title={name} width={size} height={size}
+      style={{ borderRadius: 5, objectFit: 'cover', background: LOGO_WHITE_BG.has(prefix) ? '#fff' : undefined }}
+      onError={() => { if (AIRLINE_LOGOS[prefix] && src === AIRLINE_LOGOS[prefix]) setSrc(`https://images.flightsfrom.com/airlines/100/${prefix}_100px.png`); else setFailed(true) }}
     />
   )
 }
 
-function AirlineLogos({ airlines }: { airlines: AirlineEntry[] }) {
-  const MAX = 3
-  const shown = airlines.slice(0, MAX)
-  const extra = airlines.length - MAX
+// ── Nav bar ───────────────────────────────────────────────────────────────────
+const LogoPlane = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#EDEBE0" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2 22h20"/><path d="M6.36 17.4 4 17l-2-4 1.1-.55a2 2 0 0 1 1.8 0l.7.35 1.7-3.4 1.9-.95a2 2 0 0 1 1.8 0l.7.35"/>
+    <path d="m14.5 12.5 2.5-5.5a2 2 0 0 1 1.5-1.1l2.9-.5a1 1 0 0 1 1.1 1.3l-1.1 3a2 2 0 0 1-1.1 1.2L6.4 17.4"/>
+  </svg>
+)
+const DestIcon = ({ color = C.forest }: { color?: string }) => (
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.85" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M6 22V4a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v18"/>
+    <path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/>
+    <path d="M16 9h4a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-4"/>
+    <path d="M10 6.5h2M10 10.5h2M10 14.5h2M10 18.5h2"/>
+  </svg>
+)
+
+function NavBar() {
+  const tabs = [
+    { label: 'Flights',      href: '/board',        active: false },
+    { label: 'Track',        href: '/',             active: false },
+    { label: 'Destinations', href: '/destinations', active: true  },
+    { label: 'Airlines',     href: '/airlines',     active: false },
+  ]
   return (
-    <div className="flex items-center gap-1">
-      {shown.map(a => (
-        <AirlineLogo key={a.prefix} prefix={a.prefix} flag={a.flag} name={a.name} />
-      ))}
-      {extra > 0 && (
-        <span className="text-xs text-gray-500 font-medium">+{extra}</span>
-      )}
+    <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', position: 'sticky', top: 0, zIndex: 20 }}>
+      <style>{`
+        .dst-nav { padding: 0 40px; height: 68px; gap: 28px; }
+        .dst-tabs { display: flex; align-items: center; gap: 4px; margin-left: 14px; }
+        .dst-search { display: flex; }
+        .dst-spacer { display: block; flex: 1; }
+        @media (max-width: 767px) {
+          .dst-nav { padding: 0 14px; height: auto; flex-direction: column; gap: 10px; padding-top: 10px; }
+          .dst-tabs { overflow-x: auto; margin-left: 0; gap: 0; scrollbar-width: none; padding-bottom: 8px; }
+          .dst-tabs::-webkit-scrollbar { display: none; }
+          .dst-search { display: none; }
+          .dst-spacer { display: none; }
+        }
+      `}</style>
+      <div className="dst-nav" style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+        {/* Logo */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 11, flexShrink: 0 }}>
+          <div style={{ width: 32, height: 32, borderRadius: 9, background: C.forest, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <LogoPlane />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ font: `700 16px/1 'Instrument Sans',system-ui`, color: C.ink, letterSpacing: '-.01em', whiteSpace: 'nowrap' }}>FlySyria Tracker</span>
+            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: C.muted, letterSpacing: '.1em' }}>DAM · ALP</span>
+          </div>
+        </div>
+        {/* Tabs */}
+        <div className="dst-tabs">
+          {tabs.map(t => (
+            <Link key={t.label} href={t.href} style={{
+              display: 'flex', alignItems: 'center', gap: 7, padding: '9px 14px', borderRadius: 10, textDecoration: 'none',
+              background: t.active ? C.sunken : 'transparent',
+            }}>
+              {t.label === 'Destinations' && <DestIcon color={t.active ? C.forest : C.muted} />}
+              <span style={{ font: `${t.active ? 700 : 600} 13.5px/1 'Instrument Sans',system-ui`, color: t.active ? C.forest : C.secondary, whiteSpace: 'nowrap' }}>
+                {t.label}
+              </span>
+            </Link>
+          ))}
+        </div>
+        <div className="dst-spacer" />
+        {/* Search */}
+        <div className="dst-search" style={{ width: 260, height: 38, borderRadius: 10, background: C.sunken, border: `1px solid ${C.border}`, alignItems: 'center', gap: 9, padding: '0 12px' }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth="1.9" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4.3-4.3"/></svg>
+          <span style={{ font: `500 12.5px/1 'Instrument Sans',system-ui`, color: C.muted }}>Search a city or country</span>
+        </div>
+      </div>
     </div>
   )
 }
 
-// ── Destination card ──────────────────────────────────────────────────────────
-function DestCard({ dest, onClick, color }: { dest: Destination; onClick: () => void; color: string }) {
+// ── Route map SVG ─────────────────────────────────────────────────────────────
+function RouteMap({ dests }: { dests: Destination[] }) {
+  const gulfDests  = dests.filter(d => d.region === 'gulf').slice(0, 3)
+  const eurDests   = dests.filter(d => d.region === 'europe').slice(0, 3)
+  const caucDests  = dests.filter(d => d.region === 'caucasus').slice(0, 2)
   return (
-    <button
-      onClick={onClick}
-      className="w-full text-left border-b border-gray-800/60 px-4 py-4 active:bg-gray-800/40 transition-colors"
-    >
-      {/* Row 1: city + IATA + airline flags */}
-      <div className="flex items-start justify-between gap-3 mb-2.5">
-        <div className="flex items-baseline gap-2 min-w-0">
-          {_apFlag[dest.iata] && (
-            <span className="text-base leading-none shrink-0">{_apFlag[dest.iata]}</span>
-          )}
-          <span className="text-white font-semibold text-base leading-tight truncate">
-            {cityName(dest.iata)}
-          </span>
-          <span className="text-gray-500 font-mono text-sm shrink-0">{dest.iata}</span>
-        </div>
-        <AirlineLogos airlines={dest.airlines} />
+    <div style={{ position: 'relative', borderRadius: 16, overflow: 'hidden', background: C.surface, border: `1px solid ${C.border}`, boxShadow: `0 1px 2px rgba(22,22,22,.05)` }}>
+      {/* Grid texture */}
+      <div style={{ position: 'absolute', inset: 0, backgroundImage: `linear-gradient(rgba(22,22,22,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(22,22,22,.04) 1px,transparent 1px)`, backgroundSize: '52px 52px' }} />
+      {/* Blob bg */}
+      <div style={{ position: 'absolute', left: -60, top: -40, width: 420, height: 320, background: '#D3DAD6', borderRadius: '48% 52% 60% 40%/55% 45% 55% 45%', opacity: .85 }} />
+      <div style={{ position: 'absolute', right: -80, bottom: -80, width: 440, height: 360, background: '#D3DAD6', borderRadius: '52% 48% 40% 60%/45% 55% 45% 55%', opacity: .55 }} />
+      {/* SVG arcs */}
+      <svg viewBox="0 0 900 230" style={{ position: 'relative', display: 'block', width: '100%' }} fill="none">
+        {/* Gulf arc — right */}
+        <path d="M300 130 C380 110 500 75 660 55"  stroke={C.forestMid} strokeWidth="1.5" strokeDasharray="1 6" strokeLinecap="round" opacity=".6"/>
+        {/* Levant/Egypt arc — right-down */}
+        <path d="M300 130 C360 155 460 180 580 200" stroke={C.forestMid} strokeWidth="1.5" strokeDasharray="1 6" strokeLinecap="round" opacity=".55"/>
+        {/* Iraq arc — right-down-2 */}
+        <path d="M300 130 C380 140 480 155 600 165" stroke={C.forestMid} strokeWidth="1.5" strokeDasharray="1 6" strokeLinecap="round" opacity=".5"/>
+        {/* Europe arc — top-left */}
+        <path d="M300 130 C260 95 190 60 90 30"    stroke={C.gold}      strokeWidth="1.5" strokeDasharray="1 6" strokeLinecap="round" opacity=".6"/>
+        {/* Turkey arc — upper-right */}
+        <path d="M300 130 C340 100 430 65 540 40"  stroke={C.gold}      strokeWidth="1.5" strokeDasharray="1 6" strokeLinecap="round" opacity=".5"/>
+        {/* Caucasus arc — top */}
+        <path d="M300 130 C320 85 380 45 480 20"   stroke="#9A8060"     strokeWidth="1.4" strokeDasharray="1 6" strokeLinecap="round" opacity=".45"/>
+        {/* DAM dot */}
+        <circle cx="295" cy="128" r="6" fill={C.forest} stroke="#fff" strokeWidth="3"/>
+        {/* ALP dot */}
+        <circle cx="272" cy="148" r="4.5" fill="#8B1A2C" stroke="#fff" strokeWidth="2.5"/>
+        {/* DAM label */}
+        <rect x="250" y="112" width="36" height="13" rx="3" fill="rgba(255,255,255,.92)"/>
+        <text x="268" y="122" textAnchor="middle" fontFamily="'IBM Plex Mono',monospace" fontSize="9" fontWeight="600" fill={C.forest}>DAM</text>
+        {/* ALP label */}
+        <rect x="287" y="156" width="33" height="13" rx="3" fill="rgba(255,255,255,.92)"/>
+        <text x="303" y="166" textAnchor="middle" fontFamily="'IBM Plex Mono',monospace" fontSize="9" fontWeight="600" fill="#8B1A2C">ALP</text>
+        {/* Gulf dest dots */}
+        {gulfDests.map((d, i) => {
+          const cx = 650 + i * 40, cy = 55 + i * 80
+          return (
+            <g key={d.iata}>
+              <circle cx={cx} cy={cy} r="5" fill={C.forestMid} stroke="#fff" strokeWidth="2"/>
+              <rect x={cx + 8} y={cy - 6} width={Math.max(city(d.iata).length * 6.5, 30)} height="13" rx="3" fill="rgba(255,255,255,.9)"/>
+              <text x={cx + 8 + Math.max(city(d.iata).length * 6.5, 30) / 2} y={cy + 4} textAnchor="middle" fontFamily="'Instrument Sans',system-ui" fontSize="9.5" fontWeight="600" fill={C.ink}>{city(d.iata)}</text>
+            </g>
+          )
+        })}
+        {/* Europe dest dots */}
+        {eurDests.slice(0, 2).map((d, i) => {
+          const cx = 90 + i * 220, cy = 28 + i * 18
+          return (
+            <g key={d.iata}>
+              <circle cx={cx} cy={cy} r="4.5" fill={C.gold} stroke="#fff" strokeWidth="2"/>
+              <rect x={cx + 7} y={cy - 6} width={Math.max(city(d.iata).length * 6, 28)} height="13" rx="3" fill="rgba(255,255,255,.9)"/>
+              <text x={cx + 7 + Math.max(city(d.iata).length * 6, 28) / 2} y={cy + 4} textAnchor="middle" fontFamily="'Instrument Sans',system-ui" fontSize="9.5" fontWeight="600" fill="#6E5F3C">{city(d.iata)}</text>
+            </g>
+          )
+        })}
+      </svg>
+      {/* Legend badge */}
+      <div style={{ position: 'absolute', left: 14, bottom: 14, display: 'flex', alignItems: 'center', gap: 7, padding: '7px 11px', borderRadius: 9, background: 'rgba(255,255,255,.94)', border: `1px solid ${C.border}`, boxShadow: '0 4px 12px -8px rgba(22,22,22,.4)' }}>
+        <span style={{ width: 6, height: 6, borderRadius: 99, background: C.forestMid, display: 'block' }} />
+        <span style={{ font: `600 11px/1 'Instrument Sans',system-ui`, color: C.ink }}>Every destination, one map</span>
       </div>
+    </div>
+  )
+}
 
-      {/* Row 2: day bubbles + duration */}
-      <div className="flex items-center justify-between gap-3">
-        <DayBubbles days={dest.allDays} size="md" color={color} />
-        {dest.minDuration > 0 && (
-          <span className="text-gray-400 text-sm font-medium shrink-0">{fmtDur(dest.minDuration)}</span>
-        )}
+// ── Destination card — desktop ────────────────────────────────────────────────
+function DestCardDesktop({ dest, onView, weeklyCount }: { dest: Destination; onView: () => void; weeklyCount: number }) {
+  const bg = destBg(dest.iata)
+  const badge = weeklyCount >= 14 ? C.forest : C.gold
+  return (
+    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, overflow: 'hidden', boxShadow: `0 1px 2px rgba(22,22,22,.05),0 12px 26px -22px rgba(22,22,22,.5)`, display: 'flex', flexDirection: 'column' }}>
+      {/* Photo area */}
+      <div style={{ position: 'relative', height: 160, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span style={{ fontSize: 40, opacity: .35 }}>{apFlag(dest.iata)}</span>
+        <div style={{ position: 'absolute', left: 12, top: 12, display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 999, background: 'rgba(255,255,255,.92)' }}>
+          <span style={{ fontSize: 13 }}>{apFlag(dest.iata)}</span>
+          <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: C.secondary, letterSpacing: '.05em' }}>{dest.iata}</span>
+        </div>
+        <div style={{ position: 'absolute', right: 12, top: 12, padding: '5px 10px', borderRadius: 999, background: badge }}>
+          <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: '#fff' }}>{weeklyCount} / wk</span>
+        </div>
+      </div>
+      {/* Info */}
+      <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 9, flex: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+          <span style={{ font: `700 16px/1.1 'Instrument Sans',system-ui`, color: C.ink, letterSpacing: '-.01em' }}>{city(dest.iata)}</span>
+          {dest.minDuration > 0 && <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: C.muted }}>{fmtDur(dest.minDuration)}</span>}
+        </div>
+        {/* Airline chips */}
+        <div style={{ display: 'flex', gap: 5 }}>
+          {dest.airlines.slice(0, 4).map(a => (
+            <AirlineLogo key={a.prefix} prefix={a.prefix} name={a.name} size={22} />
+          ))}
+          {dest.airlines.length > 4 && <span style={{ fontSize: 10, color: C.muted, alignSelf: 'center' }}>+{dest.airlines.length - 4}</span>}
+        </div>
+        <div style={{ borderTop: `1px dashed ${C.separator}`, paddingTop: 11, display: 'flex', justifyContent: 'flex-end' }}>
+          <button onClick={onView} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 13px', borderRadius: 9, background: C.forest, cursor: 'pointer', border: 'none' }}>
+            <span style={{ font: `600 12px/1 'Instrument Sans',system-ui`, color: '#fff' }}>View flights</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Destination row — mobile ──────────────────────────────────────────────────
+function DestRowMobile({ dest, onView, weeklyCount }: { dest: Destination; onView: () => void; weeklyCount: number }) {
+  return (
+    <button onClick={onView} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 14, overflow: 'hidden', display: 'flex', width: '100%', textAlign: 'left', cursor: 'pointer' }}>
+      {/* Thumbnail */}
+      <div style={{ width: 100, flexShrink: 0, background: destBg(dest.iata), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span style={{ fontSize: 30, opacity: .4 }}>{apFlag(dest.iata)}</span>
+      </div>
+      {/* Info */}
+      <div style={{ flex: 1, minWidth: 0, padding: '11px 12px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+          <span style={{ font: `700 14px/1 'Instrument Sans',system-ui`, color: C.ink }}>{city(dest.iata)}</span>
+          {dest.minDuration > 0 && <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: C.muted }}>{fmtDur(dest.minDuration)}</span>}
+        </div>
+        <span style={{ font: `500 10.5px/1 'Instrument Sans',system-ui`, color: C.muted }}>
+          {apFlag(dest.iata)} {weeklyCount > 0 ? `${weeklyCount} flights/wk` : ''}
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', gap: 3 }}>
+            {dest.airlines.slice(0, 3).map(a => (
+              <AirlineLogo key={a.prefix} prefix={a.prefix} name={a.name} size={18} />
+            ))}
+          </div>
+          <span style={{ font: `600 11px/1 'Instrument Sans',system-ui`, color: C.forest }}>View →</span>
+        </div>
       </div>
     </button>
   )
 }
 
-// ── Flight row (inside bottom sheet) ─────────────────────────────────────────
-function FlightRow({ f, color }: { f: ScheduleRow; color: string }) {
-  return (
-    <div className="px-4 py-3.5 border-b border-gray-800/60">
-      {/* Airline + flight number */}
-      <div className="flex items-center gap-2 mb-3">
-        <AirlineLogo prefix={f.iata_number.slice(0, 2)} flag={f.country_flag} name={f.airline_name} size={32} />
-        <span className="text-white font-medium text-sm">{f.airline_name}</span>
-        <span className="text-gray-400 font-mono text-xs ml-auto">{f.iata_number}</span>
-      </div>
-      {/* Times with duration centred on the arrow */}
-      <div className="flex items-center gap-3 mb-3">
-        <span className="font-mono text-white font-semibold text-lg">{f.dep_time}</span>
-        <div className="flex-1 flex flex-col items-center gap-0.5">
-          <div className="flex items-center gap-1 w-full">
-            <div className="h-px flex-1 bg-gray-700" />
-            <span className="text-gray-600 text-xs">✈</span>
-            <div className="h-px flex-1 bg-gray-700" />
-          </div>
-          {f.duration_min > 0 && (
-            <span className="text-gray-400 text-xs font-medium">{fmtDur(f.duration_min)}</span>
-          )}
-        </div>
-        <span className="font-mono text-white font-semibold text-lg">{f.arr_time}</span>
-      </div>
-      {/* Days */}
-      <DayBubbles days={f.days_of_week} size="sm" color={color} />
-    </div>
-  )
-}
-
 // ── Bottom sheet ──────────────────────────────────────────────────────────────
-function BottomSheet({ dest, airport, onClose }: {
-  dest: Destination | null
-  airport: string
-  onClose: () => void
-}) {
-  const [dir, setDir] = useState<'to' | 'from'>('to')
-  const airportColor = airport === 'ALP' ? '#f97316' : '#16a34a'
+const DOW_ORDER = ['sun','mon','tue','wed','thu','fri','sat'] as const
+const DOW_LABEL: Record<string,string> = {sun:'S',mon:'M',tue:'T',wed:'W',thu:'T',fri:'F',sat:'S'}
 
-  // Reset direction when a new destination opens
-  useEffect(() => { setDir('to') }, [dest?.iata])
-
-  useEffect(() => {
-    if (dest) document.body.style.overflow = 'hidden'
-    else document.body.style.overflow = ''
-    return () => { document.body.style.overflow = '' }
-  }, [dest])
-
+function BottomSheet({ dest, airport, onClose }: { dest: Destination | null; airport: string; onClose: () => void }) {
+  const [dir, setDir] = useState<'to'|'from'>('to')
+  useEffect(() => { if (dest) document.body.style.overflow = 'hidden'; else document.body.style.overflow = ''; return () => { document.body.style.overflow = '' } }, [dest])
+  useEffect(() => setDir('to'), [dest?.iata])
   const flights = dir === 'to' ? (dest?.flights ?? []) : (dest?.reverseFlights ?? [])
   const hasReverse = (dest?.reverseFlights.length ?? 0) > 0
-
   return (
     <>
-      {/* Backdrop */}
-      <div
-        onClick={onClose}
-        className={`fixed inset-0 z-40 bg-black/60 transition-opacity duration-300
-          ${dest ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
-      />
-
-      {/* Sheet */}
-      <div
-        className={`fixed bottom-0 left-0 right-0 z-50 bg-gray-900 rounded-t-2xl
-          max-h-[82vh] flex flex-col
-          transition-transform duration-300 ease-out
-          ${dest ? 'translate-y-0' : 'translate-y-full'}`}
-      >
-        {/* Drag handle */}
-        <div className="flex justify-center pt-3 pb-1 shrink-0">
-          <div className="w-10 h-1 rounded-full bg-gray-700" />
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(0,0,0,.55)', opacity: dest ? 1 : 0, pointerEvents: dest ? 'auto' : 'none', transition: 'opacity .25s' }} />
+      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 50, background: C.surface, borderRadius: '20px 20px 0 0', maxHeight: '82vh', display: 'flex', flexDirection: 'column', transform: dest ? 'translateY(0)' : 'translateY(100%)', transition: 'transform .3s ease-out', boxShadow: '0 -4px 24px rgba(22,22,22,.12)' }}>
+        {/* Handle */}
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '12px 0 8px' }}>
+          <div style={{ width: 36, height: 4, borderRadius: 99, background: C.border }} />
         </div>
-
         {dest && (
           <>
             {/* Sheet header */}
-            <div className="px-4 pt-2 pb-3 border-b border-gray-800 shrink-0">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <p className="text-white font-bold text-lg leading-tight">
-                    {cityName(dest.iata)}
-                    <span className="text-gray-500 font-mono font-normal text-base ml-2">{dest.iata}</span>
-                  </p>
-                  <p className="text-gray-500 text-xs mt-0.5">
-                    {flights.length} {flights.length === 1 ? 'flight' : 'flights'}
-                    {dest.minDuration > 0 && ` · ${fmtDur(dest.minDuration)}`}
-                  </p>
+            <div style={{ padding: '4px 16px 14px', borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 24 }}>{apFlag(dest.iata)}</span>
+                  <div>
+                    <div style={{ font: `700 18px/1 'Instrument Sans',system-ui`, color: C.ink }}>{city(dest.iata)}</div>
+                    <div style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted, marginTop: 3 }}>{dest.iata} · {fmtDur(dest.minDuration)}</div>
+                  </div>
                 </div>
-                <button
-                  onClick={onClose}
-                  className="w-8 h-8 rounded-full bg-gray-800 flex items-center justify-center text-gray-400 hover:text-white text-lg leading-none"
-                >
-                  ×
+                <button onClick={onClose} style={{ width: 32, height: 32, borderRadius: 8, background: C.sunken, border: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.secondary} strokeWidth="2" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
                 </button>
               </div>
-
-              {/* To / From toggle — only shown when return flights exist */}
+              {/* From / To toggle */}
               {hasReverse && (
-                <div className="flex bg-gray-800 rounded-xl p-1 gap-1">
-                  <button
-                    onClick={() => setDir('to')}
-                    className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors
-                      ${dir === 'to' ? 'bg-white text-gray-900' : 'text-gray-400 hover:text-white'}`}
-                  >
-                    To {cityName(dest.iata)}
-                  </button>
-                  <button
-                    onClick={() => setDir('from')}
-                    className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors
-                      ${dir === 'from' ? 'bg-white text-gray-900' : 'text-gray-400 hover:text-white'}`}
-                  >
-                    From {cityName(dest.iata)}
-                  </button>
+                <div style={{ display: 'flex', background: C.sunken, borderRadius: 10, padding: 3, gap: 3 }}>
+                  {(['to','from'] as const).map(d => (
+                    <button key={d} onClick={() => setDir(d)} style={{ flex: 1, padding: '7px 0', borderRadius: 8, border: 'none', cursor: 'pointer', font: `600 12.5px/1 'Instrument Sans',system-ui`, background: dir === d ? C.forest : 'transparent', color: dir === d ? '#fff' : C.secondary, transition: 'all .15s' }}>
+                      {d === 'to' ? `${airport} → ${dest.iata}` : `${dest.iata} → ${airport}`}
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
-
             {/* Flight list */}
-            <div className="overflow-y-auto flex-1">
-              {flights.map(f => <FlightRow key={f.id} f={f} color={airportColor} />)}
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {flights.map((f, i) => (
+                <div key={i} style={{ padding: '13px 16px', borderBottom: `1px solid ${C.separator}` }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                    <AirlineLogo prefix={f.iata_number.slice(0, 2)} name={f.airline_name} size={28} />
+                    <span style={{ font: `600 13px/1 'Instrument Sans',system-ui`, color: C.ink }}>{f.airline_name}</span>
+                    <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: C.muted, marginLeft: 'auto' }}>{f.iata_number}</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                    <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 18, fontWeight: 700, color: C.ink }}>{f.dep_time}</span>
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, width: '100%' }}>
+                        <div style={{ flex: 1, height: 1, background: C.border }} />
+                        <span style={{ fontSize: 11, color: C.muted }}>✈</span>
+                        <div style={{ flex: 1, height: 1, background: C.border }} />
+                      </div>
+                      {f.duration_min > 0 && <span style={{ font: `500 10px/1 'Instrument Sans',system-ui`, color: C.muted }}>{fmtDur(f.duration_min)}</span>}
+                    </div>
+                    <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 18, fontWeight: 700, color: C.ink }}>{f.arr_time}</span>
+                  </div>
+                  {/* Day dots */}
+                  <div style={{ display: 'flex', gap: 3 }}>
+                    {DOW_ORDER.map(d => (
+                      <span key={d} style={{ width: 22, height: 22, borderRadius: 99, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, background: f.days_of_week.includes(d) ? C.forest : '#E8E5DC', color: f.days_of_week.includes(d) ? '#fff' : C.muted }}>
+                        {DOW_LABEL[d]}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
               {flights.length === 0 && (
-                <p className="text-center text-gray-600 text-sm py-12">No scheduled flights</p>
+                <div style={{ padding: '32px 16px', textAlign: 'center', color: C.muted, font: `500 13px/1.5 'Instrument Sans',system-ui` }}>No scheduled flights found</div>
               )}
-              <div className="h-8" />
             </div>
           </>
         )}
@@ -292,149 +412,185 @@ function BottomSheet({ dest, airport, onClose }: {
   )
 }
 
-// ── Toggle button ─────────────────────────────────────────────────────────────
-function Toggle<T extends string>({
-  options, value, onChange,
-}: { options: { val: T; label: string }[]; value: T; onChange: (v: T) => void }) {
-  return (
-    <div className="flex bg-gray-800 rounded-xl p-1 gap-1">
-      {options.map(o => (
-        <button
-          key={o.val}
-          onClick={() => onChange(o.val)}
-          className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-colors
-            ${value === o.val ? 'bg-white text-gray-900' : 'text-gray-400 hover:text-white'}`}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  )
-}
-
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function DestinationsPage() {
-  const [rows, setRows]     = useState<ScheduleRow[]>([])
+  const [rows, setRows]       = useState<ScheduleRow[]>([])
   const [loading, setLoading] = useState(true)
-  const [airport, setAirport] = useState<'DAM' | 'ALP'>('DAM')
-  const [selected, setSelected] = useState<Destination | null>(null)
+  const [airport, setAirport] = useState<'DAM'|'ALP'>('DAM')
+  const [region, setRegion]   = useState<RegionId>('all')
+  const [selected, setSelected] = useState<Destination|null>(null)
+  const [weeklyCounts, setWeeklyCounts] = useState<Record<string,number>>({})
 
   useEffect(() => { loadGeoData() }, [])
 
   useEffect(() => {
+    setLoading(true)
     fetch('/api/schedule')
       .then(r => r.json())
       .then(d => { if (d.ok) setRows(d.rows) })
       .finally(() => setLoading(false))
   }, [])
 
-  const destinations = useMemo((): Destination[] => {
-    const relevant = rows.filter(r => r.dep_iata === airport)
-    const grouped = new Map<string, ScheduleRow[]>()
-    for (const r of relevant) {
-      const key = r.arr_iata
-      if (!grouped.has(key)) grouped.set(key, [])
-      grouped.get(key)!.push(r)
-    }
-    // Build reverse map: flights FROM each destination BACK to the home airport
-    const reverseGrouped = new Map<string, ScheduleRow[]>()
-    for (const r of rows.filter(r => r.arr_iata === airport)) {
-      const key = r.dep_iata
-      if (!reverseGrouped.has(key)) reverseGrouped.set(key, [])
-      reverseGrouped.get(key)!.push(r)
-    }
-    return Array.from(grouped.entries())
-      .map(([iata, flights]) => {
-        const allDays = sortDays([...new Set(flights.flatMap(f => f.days_of_week))])
-        const seen = new Set<string>()
-        const airlines: AirlineEntry[] = []
-        for (const f of flights) {
-          const prefix = f.iata_number.slice(0, 2)
-          if (!seen.has(prefix)) {
-            seen.add(prefix)
-            airlines.push({ flag: f.country_flag, name: f.airline_name, prefix })
-          }
-        }
-        const durations = flights.map(f => f.duration_min).filter(Boolean)
-        const minDuration = durations.length ? Math.min(...durations) : 0
-        const sorted = [...flights].sort((a, b) => a.dep_time.localeCompare(b.dep_time))
-        const reverseFlights = [...(reverseGrouped.get(iata) ?? [])].sort((a, b) => a.dep_time.localeCompare(b.dep_time))
-        return { iata, allDays, airlines, flights: sorted, reverseFlights, minDuration }
+  useEffect(() => {
+    fetch(`/api/weekly-stats?airport=${airport}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (!d?.ok) return
+        const map: Record<string,number> = {}
+        const src = airport === 'DAM' ? d.departures : d.arrivals
+        for (const { iata, count } of (src ?? [])) map[iata] = count
+        setWeeklyCounts(map)
       })
-      .sort((a, b) => cityName(a.iata).localeCompare(cityName(b.iata)))
-  }, [rows, airport])
+      .catch(() => {})
+  }, [airport])
+
+  const destinations = useMemo((): Destination[] => {
+    const fwd = rows.filter(r => r.dep_iata === airport)
+    const rev = rows.filter(r => r.arr_iata === airport)
+    const grouped = new Map<string, ScheduleRow[]>()
+    for (const r of fwd) { if (!grouped.has(r.arr_iata)) grouped.set(r.arr_iata, []); grouped.get(r.arr_iata)!.push(r) }
+    const revGrouped = new Map<string, ScheduleRow[]>()
+    for (const r of rev) { if (!revGrouped.has(r.dep_iata)) revGrouped.set(r.dep_iata, []); revGrouped.get(r.dep_iata)!.push(r) }
+    return Array.from(grouped.entries()).map(([iata, flights]) => {
+      const seen = new Set<string>(); const airlines: AirlineChip[] = []
+      for (const f of flights) {
+        const p = f.iata_number.slice(0, 2)
+        if (!seen.has(p)) { seen.add(p); airlines.push({ prefix: p, name: f.airline_name, flag: f.country_flag }) }
+      }
+      const durations = flights.map(f => f.duration_min).filter(Boolean)
+      return {
+        iata, region: REGION_MAP[iata] ?? 'gulf',
+        airlines,
+        flights: [...flights].sort((a,b) => a.dep_time.localeCompare(b.dep_time)),
+        reverseFlights: [...(revGrouped.get(iata) ?? [])].sort((a,b) => a.dep_time.localeCompare(b.dep_time)),
+        minDuration: durations.length ? Math.min(...durations) : 0,
+        weeklyCount: weeklyCounts[iata] ?? 0,
+      }
+    }).sort((a,b) => (b.weeklyCount - a.weeklyCount) || city(a.iata).localeCompare(city(b.iata)))
+  }, [rows, airport, weeklyCounts])
+
+  const filtered = useMemo(() => region === 'all' ? destinations : destinations.filter(d => d.region === region), [destinations, region])
+
+  const totalDests  = destinations.length
+  const totalFlights = Object.values(weeklyCounts).reduce((s,v) => s+v, 0)
+  const mostFlown   = destinations[0]
 
   const handleClose = useCallback(() => setSelected(null), [])
 
-  const airportLabel = { DAM: 'Damascus · DAM', ALP: 'Aleppo · ALP' }
-
   return (
-    <div className="min-h-screen bg-gray-950 text-white">
+    <div style={{ minHeight: '100vh', background: C.bg, fontFamily: "'Instrument Sans',system-ui,sans-serif" }}>
+      <NavBar />
 
-      {/* ── Header ── */}
-      <div className="sticky top-0 z-30 bg-gray-950/95 backdrop-blur border-b border-gray-800">
-        <div className="max-w-2xl mx-auto px-4 pt-4 pb-3 space-y-3">
-          <div className="flex items-center justify-between">
-            <Link href="/" className="text-gray-400 hover:text-white text-sm transition-colors">
-              ← Map
-            </Link>
-            <h1 className="font-bold text-base">{airportLabel[airport]}</h1>
-            <Link href="/board" className="text-gray-400 hover:text-white text-sm transition-colors">
-              Board →
-            </Link>
+      <div style={{ maxWidth: 1400, margin: '0 auto', padding: '26px 40px 48px' }}>
+        <style>{`
+          .dst-body { padding: 26px 40px 48px !important; }
+          .dst-map { height: 260px; }
+          .dst-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 20px; }
+          .dst-mobile-row { display: none; }
+          @media (max-width: 767px) {
+            .dst-body { padding: 16px 14px 32px !important; }
+            .dst-map { height: 170px; }
+            .dst-grid { display: none; }
+            .dst-mobile-row { display: flex; flex-direction: column; gap: 10px; }
+          }
+          @media (min-width: 768px) and (max-width: 1099px) {
+            .dst-body { padding: 22px 28px 40px !important; }
+            .dst-grid { grid-template-columns: repeat(2,1fr); }
+          }
+        `}</style>
+
+        {/* Title + stats */}
+        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span style={{ font: `500 12px/1 'Instrument Sans',system-ui`, color: C.muted, letterSpacing: '.02em' }}>From Damascus &amp; Aleppo</span>
+            <h1 style={{ margin: 0, font: `700 34px/1 'Instrument Sans',system-ui`, color: C.ink, letterSpacing: '-.025em' }}>Destinations</h1>
           </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {/* Airport toggle */}
+            <div style={{ display: 'flex', padding: 3, background: '#E4E1D2', borderRadius: 10, gap: 3 }}>
+              {(['DAM','ALP'] as const).map(a => (
+                <button key={a} onClick={() => setAirport(a)} style={{ padding: '7px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', font: `${airport===a?700:600} 12px/1 'IBM Plex Mono',monospace`, background: airport===a ? C.forest : 'transparent', color: airport===a ? '#fff' : C.muted, transition: 'all .15s' }}>{a}</button>
+              ))}
+            </div>
+            {totalDests > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, padding: '10px 16px', borderRadius: 12, background: C.surface, border: `1px solid ${C.border}` }}>
+                <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 18, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{totalDests}</span>
+                <span style={{ font: `500 10.5px/1 'Instrument Sans',system-ui`, color: C.muted }}>destinations</span>
+              </div>
+            )}
+            {totalFlights > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, padding: '10px 16px', borderRadius: 12, background: C.surface, border: `1px solid ${C.border}` }}>
+                <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 18, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{totalFlights}</span>
+                <span style={{ font: `500 10.5px/1 'Instrument Sans',system-ui`, color: C.muted }}>flights / week</span>
+              </div>
+            )}
+            {mostFlown && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, padding: '10px 16px', borderRadius: 12, background: C.forest }}>
+                <span style={{ font: `700 15px/1.2 'Instrument Sans',system-ui`, color: '#fff' }}>{city(mostFlown.iata)}</span>
+                <span style={{ font: `500 10.5px/1 'Instrument Sans',system-ui`, color: 'rgba(237,235,224,.7)' }}>most flown</span>
+              </div>
+            )}
+          </div>
+        </div>
 
-          {/* Airport toggle */}
-          <Toggle
-            options={[
-              { val: 'DAM', label: 'Damascus' },
-              { val: 'ALP', label: 'Aleppo' },
-            ]}
-            value={airport}
-            onChange={v => setAirport(v)}
-          />
+        {/* Region filter */}
+        <div style={{ display: 'flex', gap: 6, marginBottom: 20, overflowX: 'auto' }}>
+          <div style={{ display: 'flex', padding: 3, background: '#E4E1D2', borderRadius: 11, gap: 3, flexShrink: 0 }}>
+            {REGION_FILTERS.map(r => (
+              <button key={r.id} onClick={() => setRegion(r.id)} style={{ padding: '9px 16px', borderRadius: 9, border: 'none', cursor: 'pointer', font: `${region===r.id?700:600} 12.5px/1 'Instrument Sans',system-ui`, background: region===r.id ? C.ink : 'transparent', color: region===r.id ? '#fff' : C.muted, whiteSpace: 'nowrap', transition: 'all .15s' }}>
+                {r.label}
+              </button>
+            ))}
+          </div>
+        </div>
 
+        {/* Route map */}
+        <div className="dst-map" style={{ marginBottom: 28 }}>
+          {!loading && <RouteMap dests={destinations} />}
+        </div>
+
+        {/* Cards */}
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '60px 0', color: C.muted, font: `500 14px/1 'Instrument Sans',system-ui` }}>Loading destinations…</div>
+        ) : (
+          REGION_SECTIONS
+            .filter(s => region === 'all' || region === s.id)
+            .map(s => {
+              const dests = filtered.filter(d => d.region === s.id)
+              if (dests.length === 0) return null
+              const weekTotal = dests.reduce((sum,d) => sum + (weeklyCounts[d.iata]??0), 0)
+              return (
+                <div key={s.id} style={{ marginBottom: 36 }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 16 }}>
+                    <h2 style={{ margin: 0, font: `700 19px/1 'Instrument Sans',system-ui`, color: C.ink, letterSpacing: '-.01em' }}>{s.label}</h2>
+                    <span style={{ font: `500 12px/1 'Instrument Sans',system-ui`, color: C.muted }}>{dests.length} routes{weekTotal>0?` · ${weekTotal} flights this week`:''}</span>
+                  </div>
+                  {/* Desktop grid */}
+                  <div className="dst-grid">
+                    {dests.map(d => (
+                      <DestCardDesktop key={d.iata} dest={d} weeklyCount={weeklyCounts[d.iata]??0} onView={() => setSelected(d)} />
+                    ))}
+                  </div>
+                  {/* Mobile list */}
+                  <div className="dst-mobile-row">
+                    {dests.map(d => (
+                      <DestRowMobile key={d.iata} dest={d} weeklyCount={weeklyCounts[d.iata]??0} onView={() => setSelected(d)} />
+                    ))}
+                  </div>
+                </div>
+              )
+            })
+        )}
+
+        {/* Footer */}
+        <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 18, display: 'flex', alignItems: 'center', gap: 22, flexWrap: 'wrap' }}>
+          <span style={{ font: `500 11.5px/1 'Instrument Sans',system-ui`, color: C.muted }}>© 2026 FlySyria Tracker</span>
+          <span style={{ font: `500 11.5px/1 'Instrument Sans',system-ui`, color: C.muted }}>Damascus · Aleppo</span>
+          <div style={{ flex: 1 }} />
+          <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11.5, color: '#A6A093' }}>العربية · English</span>
         </div>
       </div>
 
-      {/* ── Body ── */}
-      <div className="max-w-2xl mx-auto">
-
-        {/* Count strip */}
-        {!loading && (
-          <p className="px-4 py-3 text-xs text-gray-500">
-            {destinations.length === 0
-              ? 'No routes found'
-              : `${destinations.length} destination${destinations.length === 1 ? '' : 's'} from ${airport}`}
-          </p>
-        )}
-
-        {/* Loading */}
-        {loading && (
-          <div className="flex flex-col items-center justify-center py-24 gap-3">
-            <div className="w-7 h-7 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-            <p className="text-gray-500 text-sm">Loading routes…</p>
-          </div>
-        )}
-
-        {/* Destination list */}
-        {!loading && destinations.map(d => (
-          <DestCard key={d.iata} dest={d} onClick={() => setSelected(d)} color={airport === 'ALP' ? '#f97316' : '#16a34a'} />
-        ))}
-
-        {/* Empty */}
-        {!loading && destinations.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-24 gap-2 text-center px-6">
-            <span className="text-4xl">✈</span>
-            <p className="text-gray-400 font-medium">No routes found</p>
-            <p className="text-gray-600 text-sm">Try switching airport or direction</p>
-          </div>
-        )}
-
-        <div className="h-16" />
-      </div>
-
-      {/* ── Bottom sheet ── */}
       <BottomSheet dest={selected} airport={airport} onClose={handleClose} />
     </div>
   )
