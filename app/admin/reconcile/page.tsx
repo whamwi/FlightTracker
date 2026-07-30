@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback } from 'react'
 
 interface UnfiledRow {
   id:              number
@@ -69,6 +69,38 @@ const s: Record<string, React.CSSProperties> = {
   chip:    { display: 'inline-block', borderRadius: 4, padding: '2px 7px', fontSize: 11, fontWeight: 600 },
 }
 
+interface RouteGroup {
+  key: string
+  iata_number: string
+  dep_iata: string
+  arr_iata: string
+  dep_utc: string
+  arr_utc: string
+  duration_min: number | null
+  days: string[]
+  ids: number[]
+  reviewed: boolean
+}
+
+function groupNewRoutes(rows: UnfiledRow[]): RouteGroup[] {
+  const map = new Map<string, RouteGroup>()
+  for (const r of rows) {
+    const key = `${r.iata_number}|${r.dep_iata}|${r.arr_iata}|${r.sched_dep_utc}`
+    if (!map.has(key)) {
+      map.set(key, { key, iata_number: r.iata_number, dep_iata: r.dep_iata, arr_iata: r.arr_iata,
+        dep_utc: r.sched_dep_utc ?? '', arr_utc: r.sched_arr_utc ?? '',
+        duration_min: r.duration_min, days: [], ids: [], reviewed: true })
+    }
+    const g = map.get(key)!
+    if (r.day_of_week && !g.days.includes(r.day_of_week)) g.days.push(r.day_of_week)
+    g.ids.push(r.id)
+    if (!r.reviewed) g.reviewed = false
+  }
+  return Array.from(map.values())
+}
+
+const DOW_ORDER_ALL = ['mon','tue','wed','thu','fri','sat','sun']
+
 export default function ReconcilePage() {
   const [rows, setRows]           = useState<UnfiledRow[]>([])
   const [loading, setLoading]     = useState(true)
@@ -76,6 +108,8 @@ export default function ReconcilePage() {
   const [hideReviewed, setHide]   = useState(true)
   const [saving, setSaving]       = useState<number | null>(null)
   const [sortDir, setSortDir]     = useState<'asc' | 'desc' | null>(null)
+  const [inserting, setInserting] = useState<string | null>(null)
+  const [insertErr, setInsertErr] = useState<Record<string, string>>({})
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -100,10 +134,38 @@ export default function ReconcilePage() {
     setSaving(null)
   }
 
+  async function addRoute(g: RouteGroup) {
+    setInserting(g.key)
+    setInsertErr(prev => { const n = { ...prev }; delete n[g.key]; return n })
+    const res = await fetch('/api/admin/insert-route', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        iata_number: g.iata_number, dep_iata: g.dep_iata, arr_iata: g.arr_iata,
+        dep_time_utc: g.dep_utc, arr_time_utc: g.arr_utc,
+        duration_min: g.duration_min, days: g.days, unfiled_ids: g.ids,
+      }),
+    })
+    const data = await res.json()
+    if (data.ok) {
+      setRows(prev => prev.map(r => g.ids.includes(r.id) ? { ...r, reviewed: true } : r))
+    } else {
+      setInsertErr(prev => ({ ...prev, [g.key]: data.message ?? data.error }))
+    }
+    setInserting(null)
+  }
+
   const driftRows   = rows.filter(r => r.reason === 'time_drift')
   const newRows     = rows.filter(r => r.reason === 'new_route')
   const displayed   = (tab === 'time_drift' ? driftRows : newRows)
     .filter(r => hideReviewed ? !r.reviewed : true)
+    .sort((a, b) => {
+      if (!sortDir) return 0
+      const cmp = a.iata_number.localeCompare(b.iata_number)
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+
+  const newGroups = groupNewRoutes(newRows).filter(g => hideReviewed ? !g.reviewed : true)
     .sort((a, b) => {
       if (!sortDir) return 0
       const cmp = a.iata_number.localeCompare(b.iata_number)
@@ -160,7 +222,7 @@ export default function ReconcilePage() {
           Hide reviewed
         </label>
         <span style={{ color: '#999', fontSize: 13 }}>
-          {displayed.length} row{displayed.length !== 1 ? 's' : ''}
+          {tab === 'new_route' ? newGroups.length : displayed.length} {tab === 'new_route' ? 'route' : 'row'}{(tab === 'new_route' ? newGroups.length : displayed.length) !== 1 ? 's' : ''}
         </span>
         <button style={{ ...s.btn, marginLeft: 'auto' }} onClick={load}>↻ Refresh</button>
       </div>
@@ -220,12 +282,11 @@ export default function ReconcilePage() {
         <table style={s.table}>
           <thead>
             <tr>
-              <th style={s.th}>Date</th>
               <th style={{ ...s.th, cursor: 'pointer', userSelect: 'none' }} onClick={toggleSort}>
                 Flight {sortDir === 'asc' ? '↑' : sortDir === 'desc' ? '↓' : '↕'}
               </th>
               <th style={s.th}>Route</th>
-              <th style={s.th}>Day</th>
+              <th style={s.th}>Days</th>
               <th style={s.th}>Dep (local)</th>
               <th style={s.th}>Arr (local)</th>
               <th style={s.th}>Duration</th>
@@ -233,24 +294,41 @@ export default function ReconcilePage() {
             </tr>
           </thead>
           <tbody>
-            {displayed.map(r => (
-              <tr key={r.id} style={{ opacity: r.reviewed ? 0.45 : 1 }}>
-                <td style={s.tdDim}>{r.flight_date}</td>
-                <td style={{ ...s.td, fontFamily: 'monospace', fontWeight: 600, color: '#fff' }}>{r.iata_number}</td>
-                <td style={{ ...s.td, color: '#fff' }}>{r.dep_iata} → {r.arr_iata}</td>
-                <td style={s.tdDim}>{DOW[r.day_of_week ?? ''] ?? r.day_of_week}</td>
-                <td style={{ ...s.td, color: '#2563eb', fontWeight: 600 }}>{localTime(r.sched_dep_utc)}</td>
-                <td style={{ ...s.td, color: '#2563eb', fontWeight: 600 }}>{localTime(r.sched_arr_utc)}</td>
-                <td style={s.tdDim}>{r.duration_min ? `${Math.floor(r.duration_min / 60)}h ${r.duration_min % 60}m` : '—'}</td>
-                <td style={s.td}>
-                  {r.reviewed
-                    ? <span style={s.btnDone}>✓ Reviewed</span>
-                    : <button style={s.btn} disabled={saving === r.id} onClick={() => markReviewed(r.id)}>
-                        {saving === r.id ? '…' : 'Mark reviewed'}
-                      </button>
-                  }
-                </td>
-              </tr>
+            {newGroups.map(g => (
+              <React.Fragment key={g.key}>
+                <tr style={{ opacity: g.reviewed ? 0.45 : 1 }}>
+                  <td style={{ ...s.td, fontFamily: 'monospace', fontWeight: 600 }}>{g.iata_number}</td>
+                  <td style={s.td}>{g.dep_iata} → {g.arr_iata}</td>
+                  <td style={s.td}>
+                    <div style={{ display: 'flex', gap: 3 }}>
+                      {DOW_ORDER_ALL.map(d => (
+                        <span key={d} style={{ width: 22, height: 22, borderRadius: 4, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, background: g.days.includes(d) ? '#1d4ed8' : '#e5e7eb', color: g.days.includes(d) ? '#fff' : '#9ca3af' }}>
+                          {d[0].toUpperCase()}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td style={{ ...s.td, color: '#2563eb', fontWeight: 600 }}>{localTime(g.dep_utc)}</td>
+                  <td style={{ ...s.td, color: '#2563eb', fontWeight: 600 }}>{localTime(g.arr_utc)}</td>
+                  <td style={s.tdDim}>{g.duration_min ? `${Math.floor(g.duration_min / 60)}h ${g.duration_min % 60}m` : '—'}</td>
+                  <td style={s.td}>
+                    {g.reviewed
+                      ? <span style={s.btnDone}>✓ Added</span>
+                      : <button style={{ ...s.btn, background: '#1d4ed8', color: '#fff', border: 'none', padding: '5px 12px' }}
+                          disabled={inserting === g.key} onClick={() => addRoute(g)}>
+                          {inserting === g.key ? '…' : '+ Add Route'}
+                        </button>
+                    }
+                  </td>
+                </tr>
+                {insertErr[g.key] && (
+                  <tr>
+                    <td colSpan={7} style={{ padding: '4px 10px 10px', color: '#dc2626', fontSize: 12 }}>
+                      ⚠ {insertErr[g.key]}
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
             ))}
           </tbody>
         </table>
