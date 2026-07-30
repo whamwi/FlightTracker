@@ -568,6 +568,8 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
   const autoOpenDoneRef   = useRef(false)
   const targetFlightRef   = useRef(targetFlight)
   targetFlightRef.current = targetFlight
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const trackLinesRef     = useRef<any[]>([])
   // Last confirmed ADS-B lat/lon per callsign — kept alive through stale hand-off
   // so the schedule overlay GPS floor still works after trackedRef is cleared.
   const lastADSBPosRef    = useRef<Record<string, { lat: number; lon: number; lostAt: number }>>({})
@@ -692,6 +694,34 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
       if (!map) return
 
       const now = Date.now()
+
+      // Draw completed + remaining route lines for the tracked flight
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const drawTrackRoute = (marker: any, depIata: string | null, arrIata: string | null) => {
+        trackLinesRef.current.forEach(l => l.remove())
+        trackLinesRef.current = []
+        const pos      = marker.getLatLng()
+        const depCoord = depIata ? _apCoords[depIata] : null
+        const arrCoord = arrIata ? _apCoords[arrIata] : null
+        if (depCoord) {
+          trackLinesRef.current.push(
+            L.polyline([[depCoord[0], depCoord[1]], [pos.lat, pos.lng]], {
+              color: '#054239', weight: 2.5, opacity: 0.75,
+            }).addTo(map)
+          )
+        }
+        if (arrCoord) {
+          trackLinesRef.current.push(
+            L.polyline([[pos.lat, pos.lng], [arrCoord[0], arrCoord[1]]], {
+              color: '#054239', weight: 1.5, opacity: 0.55, dashArray: '6 9',
+            }).addTo(map)
+          )
+        }
+        marker.on('popupclose', () => {
+          trackLinesRef.current.forEach(l => l.remove())
+          trackLinesRef.current = []
+        })
+      }
 
       // ── 1. Fetch feed + update trackedRef (keyed by callsign) ─────────────
       const freshCallsigns = new Set<string>()  // callsigns in THIS cycle's live feed
@@ -1279,10 +1309,13 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
           if (!embed && targetFlightRef.current && !autoOpenDoneRef.current && a.iata_number === targetFlightRef.current) {
             autoOpenDoneRef.current = true
             setLoading(false)
+            const capCs = cs
+            const capDep = a.dep_iata ?? flightStatusRef.current[cs]?.dep_iata ?? null
+            const capArr = a.arr_iata ?? flightStatusRef.current[cs]?.arr_iata ?? null
             setTimeout(() => {
-              const mk = markersRef.current[cs]
+              const mk = markersRef.current[capCs]
               const mi = mapInstanceRef.current
-              if (mk && mi) { mi.setView(mk.getLatLng(), Math.max(mi.getZoom(), 8)); mk.openPopup() }
+              if (mk && mi) { mi.setView(mk.getLatLng(), Math.max(mi.getZoom(), 8)); mk.openPopup(); drawTrackRoute(mk, capDep, capArr) }
             }, 300)
           }
         }
@@ -1293,7 +1326,9 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
           setLoading(false)
           const mk = markersRef.current[cs]
           const mi = mapInstanceRef.current
-          if (mk && mi) { mi.setView(mk.getLatLng(), Math.max(mi.getZoom(), 8)); mk.openPopup() }
+          const dep = a.dep_iata ?? flightStatusRef.current[cs]?.dep_iata ?? null
+          const arr = a.arr_iata ?? flightStatusRef.current[cs]?.arr_iata ?? null
+          if (mk && mi) { mi.setView(mk.getLatLng(), Math.max(mi.getZoom(), 8)); mk.openPopup(); drawTrackRoute(mk, dep, arr) }
         }
 
         // Fetch aircraft photo once per registration
@@ -1594,10 +1629,11 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
           if (!embed && targetFlightRef.current && !autoOpenDoneRef.current && fNum === targetFlightRef.current) {
             autoOpenDoneRef.current = true
             setLoading(false)
+            const capCs2 = callsign
             setTimeout(() => {
-              const mk = schedMarkersRef.current[callsign]
+              const mk = schedMarkersRef.current[capCs2]
               const mi = mapInstanceRef.current
-              if (mk && mi) { mi.setView(mk.getLatLng(), Math.max(mi.getZoom(), 8)); mk.openPopup() }
+              if (mk && mi) { mi.setView(mk.getLatLng(), Math.max(mi.getZoom(), 8)); mk.openPopup(); drawTrackRoute(mk, dep_iata, arr_iata) }
             }, 300)
           }
         }
@@ -1609,7 +1645,7 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
           setLoading(false)
           const mk = schedMarkersRef.current[callsign]
           const mi = mapInstanceRef.current
-          if (mk && mi) { mi.setView(mk.getLatLng(), Math.max(mi.getZoom(), 8)); mk.openPopup() }
+          if (mk && mi) { mi.setView(mk.getLatLng(), Math.max(mi.getZoom(), 8)); mk.openPopup(); drawTrackRoute(mk, dep_iata, arr_iata) }
         }
 
         schedLinesRef.current[callsign]?.forEach((l: any) => l.remove())  // eslint-disable-line
