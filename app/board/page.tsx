@@ -742,6 +742,13 @@ export default function BoardPage() {
     ? sorted.findIndex(f => effectiveLocalMin(f, view) >= nowSyriaMin)
     : -1
 
+  const prevNowRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!loading && nowIdx >= 1 && prevNowRef.current) {
+      prevNowRef.current.scrollIntoView({ behavior: 'instant', block: 'start' })
+    }
+  }, [loading, tab, view, airport])
+
   const dateLabel = date
     ? new Date(date + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
     : ''
@@ -994,7 +1001,9 @@ export default function BoardPage() {
                       <div style={{ flex: 1, height: 1, background: C.separator }} />
                     </div>
                   )}
-                  <FlightCard f={f} view={view} />
+                  <div ref={i === nowIdx - 1 ? prevNowRef : undefined} style={i === nowIdx - 1 ? { scrollMarginTop: 80 } : undefined}>
+                    <FlightCard f={f} view={view} />
+                  </div>
                 </Fragment>
               ))}
             </div>
