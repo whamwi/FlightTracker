@@ -612,7 +612,9 @@ export default function BoardPage() {
     } catch {
       if (!silent && ver === loadVer.current) setFlights([])
     } finally {
-      if (!silent && ver === loadVer.current) setLoading(false)
+      // Don't gate on ver — always clear loading for non-silent calls.
+      // setFlights is already guarded above; stale loads can still clear the spinner safely.
+      if (!silent) setLoading(false)
     }
   }, [])
 

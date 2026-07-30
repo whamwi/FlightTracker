@@ -24,7 +24,7 @@ const city = (iata: string) => airportCity[iata] ?? iata
 const apFlag = (iata: string) => _apFlag[iata] ?? ''
 
 // ── Region classification ─────────────────────────────────────────────────────
-type RegionId = 'all' | 'gulf' | 'europe' | 'caucasus'
+type RegionId = 'all' | 'gulf' | 'europe'
 const REGION_MAP: Record<string, RegionId> = {
   DXB: 'gulf', DWC: 'gulf', SHJ: 'gulf', AUH: 'gulf', DOH: 'gulf',
   KWI: 'gulf', MCT: 'gulf', RUH: 'gulf', JED: 'gulf', DMM: 'gulf', MED: 'gulf',
@@ -34,19 +34,17 @@ const REGION_MAP: Record<string, RegionId> = {
   ATH: 'europe', OTP: 'europe', VIE: 'europe', FRA: 'europe', CDG: 'europe',
   LHR: 'europe', AMS: 'europe', MXP: 'europe', FCO: 'europe', WAW: 'europe',
   BER: 'europe', MUC: 'europe', BCN: 'europe', MAD: 'europe', ZRH: 'europe',
-  GYD: 'caucasus', TBS: 'caucasus', EVN: 'caucasus',
-  SVO: 'caucasus', THR: 'caucasus', IKA: 'caucasus',
+  GYD: 'europe', TBS: 'europe', EVN: 'europe',
+  SVO: 'europe', THR: 'europe', IKA: 'europe',
 }
 const REGION_FILTERS: { id: RegionId; label: string }[] = [
-  { id: 'all',      label: 'All regions' },
-  { id: 'gulf',     label: 'Middle East & Gulf' },
-  { id: 'europe',   label: 'Europe & Turkey' },
-  { id: 'caucasus', label: 'Caucasus & CIS' },
+  { id: 'all',    label: 'All regions' },
+  { id: 'gulf',   label: 'Middle East & Gulf' },
+  { id: 'europe', label: 'Europe & Turkey' },
 ]
 const REGION_SECTIONS: { id: RegionId; label: string }[] = [
-  { id: 'gulf',     label: 'Middle East & Gulf' },
-  { id: 'europe',   label: 'Europe & Turkey' },
-  { id: 'caucasus', label: 'Caucasus & CIS' },
+  { id: 'gulf',   label: 'Middle East & Gulf' },
+  { id: 'europe', label: 'Europe & Turkey' },
 ]
 
 // ── Destination photo gradients ───────────────────────────────────────────────
@@ -256,14 +254,27 @@ function RouteMap({ dests }: { dests: Destination[] }) {
 }
 
 // ── Destination card — desktop ────────────────────────────────────────────────
-function DestCardDesktop({ dest, onView, weeklyCount }: { dest: Destination; onView: () => void; weeklyCount: number }) {
+function DestCardDesktop({ dest, onView, weeklyCount, imageUrl, onUpload }: {
+  dest: Destination; onView: () => void; weeklyCount: number
+  imageUrl?: string; onUpload?: (iata: string, file: File) => void
+}) {
   const bg = destBg(dest.iata)
   const badge = weeklyCount >= 14 ? C.forest : C.gold
+  const [imgFailed, setImgFailed] = useState(false)
+  const [hovering, setHovering] = useState(false)
+  const showImg = imageUrl && !imgFailed
   return (
     <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, overflow: 'hidden', boxShadow: `0 1px 2px rgba(22,22,22,.05),0 12px 26px -22px rgba(22,22,22,.5)`, display: 'flex', flexDirection: 'column' }}>
       {/* Photo area */}
-      <div style={{ position: 'relative', height: 160, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <span style={{ fontSize: 40, opacity: .35 }}>{apFlag(dest.iata)}</span>
+      <div
+        onMouseEnter={() => setHovering(true)}
+        onMouseLeave={() => setHovering(false)}
+        style={{ position: 'relative', height: 160, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
+      >
+        {showImg
+          ? <img src={imageUrl} alt={city(dest.iata)} onError={() => setImgFailed(true)} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+          : <span style={{ fontSize: 40, opacity: .35 }}>{apFlag(dest.iata)}</span>
+        }
         <div style={{ position: 'absolute', left: 12, top: 12, display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 999, background: 'rgba(255,255,255,.92)' }}>
           <span style={{ fontSize: 13 }}>{apFlag(dest.iata)}</span>
           <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: C.secondary, letterSpacing: '.05em' }}>{dest.iata}</span>
@@ -271,6 +282,16 @@ function DestCardDesktop({ dest, onView, weeklyCount }: { dest: Destination; onV
         <div style={{ position: 'absolute', right: 12, top: 12, padding: '5px 10px', borderRadius: 999, background: badge }}>
           <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: '#fff' }}>{weeklyCount} / wk</span>
         </div>
+        {/* Upload overlay */}
+        {onUpload && hovering && (
+          <label style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.45)', cursor: 'pointer' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 16px', borderRadius: 10, background: 'rgba(255,255,255,.95)', border: '1px solid rgba(0,0,0,.1)' }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.ink} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              <span style={{ font: `600 12px/1 'Instrument Sans',system-ui`, color: C.ink }}>{showImg ? 'Change photo' : 'Upload photo'}</span>
+            </div>
+            <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) onUpload(dest.iata, f); e.target.value = '' }} />
+          </label>
+        )}
       </div>
       {/* Info */}
       <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 9, flex: 1 }}>
@@ -420,8 +441,26 @@ export default function DestinationsPage() {
   const [region, setRegion]   = useState<RegionId>('all')
   const [selected, setSelected] = useState<Destination|null>(null)
   const [weeklyCounts, setWeeklyCounts] = useState<Record<string,number>>({})
+  const [destImages, setDestImages] = useState<Record<string,string>>({})
+  const [uploading, setUploading] = useState<string|null>(null)
 
   useEffect(() => { loadGeoData() }, [])
+
+  useEffect(() => {
+    fetch('/api/dest-images').then(r => r.ok ? r.json() : null).then(d => { if (d?.images) setDestImages(d.images) }).catch(() => {})
+  }, [])
+
+  const handleUpload = useCallback(async (iata: string, file: File) => {
+    setUploading(iata)
+    try {
+      const form = new FormData()
+      form.append('iata', iata)
+      form.append('file', file)
+      const res = await fetch('/api/dest-images', { method: 'POST', body: form })
+      const d = await res.json()
+      if (d.url) setDestImages(prev => ({ ...prev, [iata]: d.url }))
+    } catch { /* silent */ } finally { setUploading(null) }
+  }, [])
 
   useEffect(() => {
     setLoading(true)
@@ -473,7 +512,6 @@ export default function DestinationsPage() {
 
   const totalDests  = destinations.length
   const totalFlights = Object.values(weeklyCounts).reduce((s,v) => s+v, 0)
-  const mostFlown   = destinations[0]
 
   const handleClose = useCallback(() => setSelected(null), [])
 
@@ -484,12 +522,12 @@ export default function DestinationsPage() {
       <div style={{ maxWidth: 1400, margin: '0 auto', padding: '26px 40px 48px' }}>
         <style>{`
           .dst-body { padding: 26px 40px 48px !important; }
-          .dst-map { height: 260px; }
+          .dst-map { height: 240px; overflow: hidden; }
           .dst-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 20px; }
           .dst-mobile-row { display: none; }
           @media (max-width: 767px) {
             .dst-body { padding: 16px 14px 32px !important; }
-            .dst-map { height: 170px; }
+            .dst-map { height: 160px; overflow: hidden; }
             .dst-grid { display: none; }
             .dst-mobile-row { display: flex; flex-direction: column; gap: 10px; }
           }
@@ -498,6 +536,17 @@ export default function DestinationsPage() {
             .dst-grid { grid-template-columns: repeat(2,1fr); }
           }
         `}</style>
+
+        {/* Upload toast */}
+        {uploading && (
+          <div style={{ position: 'fixed', top: 82, right: 20, zIndex: 99, padding: '10px 16px', borderRadius: 10, background: C.ink, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#EDEBE0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}>
+              <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+            </svg>
+            <span style={{ font: `500 12px/1 'Instrument Sans',system-ui`, color: '#EDEBE0' }}>Uploading {uploading} photo…</span>
+          </div>
+        )}
+        <style>{`.dst-spin { animation: spin 1s linear infinite } @keyframes spin { to { transform: rotate(360deg) } }`}</style>
 
         {/* Title + stats */}
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
@@ -524,23 +573,24 @@ export default function DestinationsPage() {
                 <span style={{ font: `500 10.5px/1 'Instrument Sans',system-ui`, color: C.muted }}>flights / week</span>
               </div>
             )}
-            {mostFlown && (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, padding: '10px 16px', borderRadius: 12, background: C.forest }}>
-                <span style={{ font: `700 15px/1.2 'Instrument Sans',system-ui`, color: '#fff' }}>{city(mostFlown.iata)}</span>
-                <span style={{ font: `500 10.5px/1 'Instrument Sans',system-ui`, color: 'rgba(237,235,224,.7)' }}>most flown</span>
-              </div>
-            )}
           </div>
         </div>
 
         {/* Region filter */}
         <div style={{ display: 'flex', gap: 6, marginBottom: 20, overflowX: 'auto' }}>
           <div style={{ display: 'flex', padding: 3, background: '#E4E1D2', borderRadius: 11, gap: 3, flexShrink: 0 }}>
-            {REGION_FILTERS.map(r => (
-              <button key={r.id} onClick={() => setRegion(r.id)} style={{ padding: '9px 16px', borderRadius: 9, border: 'none', cursor: 'pointer', font: `${region===r.id?700:600} 12.5px/1 'Instrument Sans',system-ui`, background: region===r.id ? C.ink : 'transparent', color: region===r.id ? '#fff' : C.muted, whiteSpace: 'nowrap', transition: 'all .15s' }}>
-                {r.label}
-              </button>
-            ))}
+            {REGION_FILTERS.map(r => {
+              const count = r.id === 'all' ? destinations.length : destinations.filter(d => d.region === r.id).length
+              const active = region === r.id
+              return (
+                <button key={r.id} onClick={() => setRegion(r.id)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 14px', borderRadius: 9, border: 'none', cursor: 'pointer', background: active ? C.ink : 'transparent', transition: 'all .15s' }}>
+                  <span style={{ font: `${active?700:600} 12.5px/1 'Instrument Sans',system-ui`, color: active ? '#fff' : C.muted, whiteSpace: 'nowrap' }}>{r.label}</span>
+                  {count > 0 && (
+                    <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, fontWeight: 700, color: active ? 'rgba(255,255,255,.75)' : C.gold, lineHeight: 1, minWidth: 14 }}>{count}</span>
+                  )}
+                </button>
+              )
+            })}
           </div>
         </div>
 
@@ -568,7 +618,7 @@ export default function DestinationsPage() {
                   {/* Desktop grid */}
                   <div className="dst-grid">
                     {dests.map(d => (
-                      <DestCardDesktop key={d.iata} dest={d} weeklyCount={weeklyCounts[d.iata]??0} onView={() => setSelected(d)} />
+                      <DestCardDesktop key={d.iata} dest={d} weeklyCount={weeklyCounts[d.iata]??0} onView={() => setSelected(d)} imageUrl={destImages[d.iata]} onUpload={handleUpload} />
                     ))}
                   </div>
                   {/* Mobile list */}
