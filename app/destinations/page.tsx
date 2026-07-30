@@ -41,8 +41,9 @@ const REGION_MAP: Record<string, RegionId> = {
   ATH: 'europe', OTP: 'europe', VIE: 'europe', FRA: 'europe', CDG: 'europe',
   LHR: 'europe', AMS: 'europe', MXP: 'europe', FCO: 'europe', WAW: 'europe',
   BER: 'europe', MUC: 'europe', BCN: 'europe', MAD: 'europe', ZRH: 'europe',
-  GYD: 'europe', TBS: 'europe', EVN: 'europe',
+  GYD: 'europe', TBS: 'europe', EVN: 'europe', DUS: 'europe',
   SVO: 'europe', THR: 'europe', IKA: 'europe',
+  MJI: 'gulf',
 }
 const REGION_FILTERS: { id: RegionId; label: string }[] = [
   { id: 'all',    label: 'All regions' },
