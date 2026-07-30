@@ -608,7 +608,7 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
       const map = L.map(mapRef.current!, {
         center: [33.0, 40.0], zoom: 6,
         maxBoundsViscosity: 0,
-        zoomControl: !embed,
+        zoomControl: !embed && window.innerWidth >= 768,
       })
       if (embed) {
         map.fitBounds([[22, 26], [43, 62]])
