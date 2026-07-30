@@ -840,7 +840,7 @@ export default function BoardPage() {
           {[
             { label: 'Flights', active: true,  href: null },
             { label: 'Track',   active: false, href: '/' },
-            { label: 'Destinations', active: false, href: null },
+            { label: 'Destinations', active: false, href: '/destinations' },
             { label: 'Airlines',     active: false, href: null },
           ].map(item => {
             const inner = (
