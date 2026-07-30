@@ -37,7 +37,7 @@ function HomeInner() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <style>{`
-        .map-mobile-nav { display: flex; align-items: center; padding: 0 16px; gap: 12px; height: 56px; background: ${C.surface}; border-bottom: 1px solid ${C.border}; flex-shrink: 0; }
+        .map-mobile-nav { display: flex; align-items: center; padding: env(safe-area-inset-top) 16px 0; gap: 12px; height: calc(56px + env(safe-area-inset-top)); background: ${C.surface}; border-bottom: 1px solid ${C.border}; flex-shrink: 0; }
         .map-mobile-tabs { display: flex; overflow-x: auto; scrollbar-width: none; flex: 1; }
         .map-mobile-tabs::-webkit-scrollbar { display: none; }
         .map-desktop-nav { display: none; }
