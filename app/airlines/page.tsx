@@ -413,6 +413,7 @@ export default function AirlinesPage() {
   const [rows, setRows]             = useState<ScheduleRow[]>([])
   const [loading, setLoading]       = useState(true)
   const [airport, setAirport]       = useState<'DAM'|'ALP'>('DAM')
+  const [region, setRegion]         = useState<'all'|'gulf'|'europe'>('all')
   const [selected, setSelected]     = useState<AirlineInfo|null>(null)
   const [airlineImages, setAirlineImages] = useState<Record<string,string>>({})
 
@@ -521,6 +522,23 @@ export default function AirlinesPage() {
           <AirportHero airport={airport} totalAirlines={airlines.length} totalFlights={totalFlights} />
         </div>
 
+        {/* Region filter tabs */}
+        <div style={{ display: 'flex', gap: 6, marginBottom: 24, flexWrap: 'wrap' as const }}>
+          {([
+            { id: 'all',    label: 'All regions',      count: airlines.length },
+            { id: 'gulf',   label: 'Middle East & Gulf', count: airlines.filter(a => a.region === 'gulf').length },
+            { id: 'europe', label: 'Europe & Turkey',  count: airlines.filter(a => a.region === 'europe').length },
+          ] as const).map(tab => {
+            const active = region === tab.id
+            return (
+              <button key={tab.id} onClick={() => setRegion(tab.id)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 14px', borderRadius: 99, border: 'none', cursor: 'pointer', background: active ? C.ink : C.surface, color: active ? '#fff' : C.muted, boxShadow: active ? 'none' : `0 0 0 1px ${C.border}`, transition: 'all .15s', font: `${active ? 700 : 500} 12px/1 'Instrument Sans',system-ui` }}>
+                {tab.label}
+                <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, opacity: active ? .75 : .6 }}>{tab.count}</span>
+              </button>
+            )
+          })}
+        </div>
+
         {/* Airline cards */}
         {loading ? (
           <div style={{ textAlign: 'center', padding: '60px 0', color: C.muted, font: `500 14px/1 'Instrument Sans',system-ui` }}>Loading airlines…</div>
@@ -528,12 +546,13 @@ export default function AirlinesPage() {
           <div style={{ textAlign: 'center', padding: '60px 0', color: C.muted, font: `500 14px/1 'Instrument Sans',system-ui` }}>No airlines found</div>
         ) : (
           <>
-            {(['gulf', 'europe'] as const).map(region => {
-              const group = airlines.filter(a => a.region === region)
+            {(['gulf', 'europe'] as const).map(r => {
+              if (region !== 'all' && region !== r) return null
+              const group = airlines.filter(a => a.region === r)
               if (!group.length) return null
-              const label = region === 'gulf' ? 'Middle East & Gulf' : 'Europe & Turkey'
+              const label = r === 'gulf' ? 'Middle East & Gulf' : 'Europe & Turkey'
               return (
-                <div key={region} style={{ marginBottom: 36 }}>
+                <div key={r} style={{ marginBottom: 36 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
                     <span style={{ font: `700 13px/1 'Instrument Sans',system-ui`, color: C.muted, letterSpacing: '.06em', textTransform: 'uppercase' }}>{label}</span>
                     <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: C.muted, opacity: .6 }}>{group.length}</span>
