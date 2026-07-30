@@ -62,7 +62,7 @@ const airlineBg = (prefix: string) => AIRLINE_BG[prefix] ?? 'linear-gradient(140
 const AIRLINE_REGION: Record<string, 'gulf' | 'europe'> = {
   '3L':'gulf', EK:'gulf', EY:'gulf', F3:'gulf', FZ:'gulf', G9:'gulf',
   J9:'gulf',  KU:'gulf', QR:'gulf', RB:'gulf', RJ:'gulf', XH:'gulf', XY:'gulf',
-  DN:'europe', KK:'europe', PC:'europe', SR:'europe', TK:'europe', VF:'europe',
+  DN:'europe', KK:'europe', PC:'europe', SR:'europe', TK:'europe', VF:'europe', '42':'europe',
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
