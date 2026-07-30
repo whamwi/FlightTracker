@@ -253,22 +253,18 @@ function AirlineCard({ info, onView, imageUrl, onImageUploaded }: {
           </div>
           {info.minDuration > 0 && <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: C.muted, flexShrink: 0 }}>{fmtDur(info.minDuration)}</span>}
         </div>
-        {/* Flag + weekly count */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: -2 }}>
-          <span style={{ fontSize: 18 }}>{info.flag}</span>
-          <div style={{ padding: '4px 9px', borderRadius: 999, background: badge }}>
-            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: '#fff' }}>{info.weeklyCount} / wk</span>
-          </div>
-        </div>
-        {/* Destination chips */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-          {info.dests.slice(0, 6).map(d => (
+        {/* Destination chips + weekly badge */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+          {info.dests.slice(0, 5).map(d => (
             <div key={d.iata} style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '3px 7px', borderRadius: 6, background: C.sunken, border: `1px solid ${C.border}` }}>
               <span style={{ fontSize: 11 }}>{d.flag}</span>
               <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 9.5, color: C.secondary, letterSpacing: '.04em' }}>{d.iata}</span>
             </div>
           ))}
-          {info.dests.length > 6 && <span style={{ fontSize: 10, color: C.muted, alignSelf: 'center' }}>+{info.dests.length - 6}</span>}
+          {info.dests.length > 5 && <span style={{ fontSize: 10, color: C.muted, alignSelf: 'center' }}>+{info.dests.length - 5}</span>}
+          <div style={{ padding: '4px 9px', borderRadius: 999, background: badge, marginLeft: 'auto' }}>
+            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: '#fff' }}>{info.weeklyCount} / wk</span>
+          </div>
         </div>
         <div style={{ borderTop: `1px dashed ${C.separator}`, paddingTop: 11, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', gap: 3 }}>
