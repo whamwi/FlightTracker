@@ -345,11 +345,18 @@ function DestRowMobile({ dest, onView, weeklyCount }: { dest: Destination; onVie
   )
 }
 
-// ── Side drawer ───────────────────────────────────────────────────────────────
+// ── Detail panel (bottom sheet on mobile, side drawer on desktop) ─────────────
 
 function BottomSheet({ dest, airport, onClose, imageUrl }: { dest: Destination | null; airport: string; onClose: () => void; imageUrl?: string }) {
   const [dir, setDir] = useState<'to'|'from'>('to')
   const [imgFailed, setImgFailed] = useState(false)
+  const [isMobile, setIsMobile] = useState(false)
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768)
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
   useEffect(() => { if (dest) document.body.style.overflow = 'hidden'; else document.body.style.overflow = ''; return () => { document.body.style.overflow = '' } }, [dest])
   useEffect(() => { setDir('to'); setImgFailed(false) }, [dest?.iata])
   const flights = dir === 'to' ? (dest?.flights ?? []) : (dest?.reverseFlights ?? [])
@@ -364,10 +371,26 @@ function BottomSheet({ dest, airport, onClose, imageUrl }: { dest: Destination |
   const airportName = city(airport)
   const showImg = imageUrl && !imgFailed
 
+  const panelStyle: React.CSSProperties = isMobile ? {
+    position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 50,
+    maxHeight: '90vh', background: C.surface, borderRadius: '20px 20px 0 0',
+    display: 'flex', flexDirection: 'column',
+    transform: dest ? 'translateY(0)' : 'translateY(100%)',
+    transition: 'transform .3s ease-out',
+    boxShadow: '0 -20px 48px -12px rgba(22,22,22,.28)',
+  } : {
+    position: 'fixed', top: 0, right: 0, bottom: 0, zIndex: 50,
+    width: 'min(440px, 100vw)', background: C.surface, borderRadius: '20px 0 0 20px',
+    display: 'flex', flexDirection: 'column',
+    transform: dest ? 'translateX(0)' : 'translateX(100%)',
+    transition: 'transform .3s ease-out',
+    boxShadow: '-20px 0 48px -12px rgba(22,22,22,.28)',
+  }
+
   return (
     <>
       <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(22,22,22,.45)', opacity: dest ? 1 : 0, pointerEvents: dest ? 'auto' : 'none', transition: 'opacity .25s' }} />
-      <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, zIndex: 50, width: 'min(440px, 100vw)', background: C.surface, borderRadius: '20px 0 0 20px', display: 'flex', flexDirection: 'column', transform: dest ? 'translateX(0)' : 'translateX(100%)', transition: 'transform .3s ease-out', boxShadow: '-20px 0 48px -12px rgba(22,22,22,.28)' }}>
+      <div style={panelStyle}>
         {dest && (
           <>
             {/* Header */}
