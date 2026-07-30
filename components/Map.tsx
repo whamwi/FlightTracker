@@ -769,6 +769,11 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
                     actual_dep_utc, actual_arr_utc, revised_arr_utc, iata_number, dep_delay_min, airline_iata } = bd
             if (!cs || !dep_iata || !arr_iata) continue
             const existing = flightStatusRef.current[cs]
+            // Synthesize estimated arrival from actual_dep + duration when no explicit revised/actual arr
+            const effectiveDep = actual_dep_utc ?? existing?.actual_dep_utc ?? null
+            const estimatedArr = !actual_arr_utc && !revised_arr_utc && effectiveDep && duration_min > 0
+              ? new Date(new Date(effectiveDep).getTime() + duration_min * 60_000).toISOString()
+              : null
             flightStatusRef.current[cs] = {
               callsign:          cs,
               status:            actual_arr_utc ? 'Arrived' : 'Departed',
@@ -777,7 +782,7 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
               scheduled_dep_utc: existing?.scheduled_dep_utc ?? null,
               scheduled_arr_utc: existing?.scheduled_arr_utc ?? null,
               revised_dep_utc:   existing?.revised_dep_utc   ?? null,
-              revised_arr_utc:   revised_arr_utc ?? existing?.revised_arr_utc ?? null,
+              revised_arr_utc:   revised_arr_utc ?? estimatedArr ?? existing?.revised_arr_utc ?? null,
               dep_delay_min:     dep_delay_min ?? existing?.dep_delay_min ?? null,
               arr_delay_min:     existing?.arr_delay_min ?? null,
               aircraft_reg:      existing?.aircraft_reg  ?? null,
