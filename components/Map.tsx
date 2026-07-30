@@ -571,10 +571,14 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
   const fetchUpdateRef    = useRef<(() => Promise<void>) | null>(null)
 
   useEffect(() => {
+    if (!targetFlight) return
     autoOpenDoneRef.current = false
     highlightedCSRef.current = null
-    // Immediately re-run the poll so the new target opens without waiting 10 s
+    setLoading(true)
     fetchUpdateRef.current?.()
+    // Fallback: clear spinner after 3s if flight isn't found in the feed
+    const t = setTimeout(() => setLoading(false), 3000)
+    return () => clearTimeout(t)
   }, [targetFlight])
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const trackLinesRef     = useRef<any[]>([])
