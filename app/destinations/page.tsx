@@ -195,69 +195,40 @@ function NavBar() {
   )
 }
 
-// ── Route map SVG ─────────────────────────────────────────────────────────────
-function RouteMap({ dests }: { dests: Destination[] }) {
-  const gulfDests  = dests.filter(d => d.region === 'gulf').slice(0, 3)
-  const eurDests   = dests.filter(d => d.region === 'europe').slice(0, 3)
-  const caucDests  = eurDests.slice(0, 0) // no caucasus region — kept for arc rendering
+// ── Airport hero image ────────────────────────────────────────────────────────
+const AIRPORT_HERO: Record<string, { src: string; fallback: string; label: string }> = {
+  DAM: { src: '/dam-hero.jpg', fallback: 'linear-gradient(135deg,#2E4A3E 0%,#1A2E28 100%)', label: 'Damascus' },
+  ALP: { src: '/alp-hero.jpg', fallback: 'linear-gradient(135deg,#4A3828 0%,#2C2018 100%)', label: 'Aleppo'   },
+}
+
+function AirportHero({ airport, totalDests, totalFlights }: { airport: string; totalDests: number; totalFlights: number }) {
+  const cfg = AIRPORT_HERO[airport] ?? AIRPORT_HERO.DAM
+  const [imgFailed, setImgFailed] = useState(false)
+  useEffect(() => setImgFailed(false), [airport])
   return (
-    <div style={{ position: 'relative', borderRadius: 16, overflow: 'hidden', background: C.surface, border: `1px solid ${C.border}`, boxShadow: `0 1px 2px rgba(22,22,22,.05)` }}>
-      {/* Grid texture */}
-      <div style={{ position: 'absolute', inset: 0, backgroundImage: `linear-gradient(rgba(22,22,22,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(22,22,22,.04) 1px,transparent 1px)`, backgroundSize: '52px 52px' }} />
-      {/* Blob bg */}
-      <div style={{ position: 'absolute', left: -60, top: -40, width: 420, height: 320, background: '#D3DAD6', borderRadius: '48% 52% 60% 40%/55% 45% 55% 45%', opacity: .85 }} />
-      <div style={{ position: 'absolute', right: -80, bottom: -80, width: 440, height: 360, background: '#D3DAD6', borderRadius: '52% 48% 40% 60%/45% 55% 45% 55%', opacity: .55 }} />
-      {/* SVG arcs */}
-      <svg viewBox="0 0 900 230" style={{ position: 'relative', display: 'block', width: '100%' }} fill="none">
-        {/* Gulf arc — right */}
-        <path d="M300 130 C380 110 500 75 660 55"  stroke={C.forestMid} strokeWidth="1.5" strokeDasharray="1 6" strokeLinecap="round" opacity=".6"/>
-        {/* Levant/Egypt arc — right-down */}
-        <path d="M300 130 C360 155 460 180 580 200" stroke={C.forestMid} strokeWidth="1.5" strokeDasharray="1 6" strokeLinecap="round" opacity=".55"/>
-        {/* Iraq arc — right-down-2 */}
-        <path d="M300 130 C380 140 480 155 600 165" stroke={C.forestMid} strokeWidth="1.5" strokeDasharray="1 6" strokeLinecap="round" opacity=".5"/>
-        {/* Europe arc — top-left */}
-        <path d="M300 130 C260 95 190 60 90 30"    stroke={C.gold}      strokeWidth="1.5" strokeDasharray="1 6" strokeLinecap="round" opacity=".6"/>
-        {/* Turkey arc — upper-right */}
-        <path d="M300 130 C340 100 430 65 540 40"  stroke={C.gold}      strokeWidth="1.5" strokeDasharray="1 6" strokeLinecap="round" opacity=".5"/>
-        {/* Caucasus arc — top */}
-        <path d="M300 130 C320 85 380 45 480 20"   stroke="#9A8060"     strokeWidth="1.4" strokeDasharray="1 6" strokeLinecap="round" opacity=".45"/>
-        {/* DAM dot */}
-        <circle cx="295" cy="128" r="6" fill={C.forest} stroke="#fff" strokeWidth="3"/>
-        {/* ALP dot */}
-        <circle cx="272" cy="148" r="4.5" fill="#8B1A2C" stroke="#fff" strokeWidth="2.5"/>
-        {/* DAM label */}
-        <rect x="250" y="112" width="36" height="13" rx="3" fill="rgba(255,255,255,.92)"/>
-        <text x="268" y="122" textAnchor="middle" fontFamily="'IBM Plex Mono',monospace" fontSize="9" fontWeight="600" fill={C.forest}>DAM</text>
-        {/* ALP label */}
-        <rect x="287" y="156" width="33" height="13" rx="3" fill="rgba(255,255,255,.92)"/>
-        <text x="303" y="166" textAnchor="middle" fontFamily="'IBM Plex Mono',monospace" fontSize="9" fontWeight="600" fill="#8B1A2C">ALP</text>
-        {/* Gulf dest dots */}
-        {gulfDests.map((d, i) => {
-          const cx = 650 + i * 40, cy = 55 + i * 80
-          return (
-            <g key={d.iata}>
-              <circle cx={cx} cy={cy} r="5" fill={C.forestMid} stroke="#fff" strokeWidth="2"/>
-              <rect x={cx + 8} y={cy - 6} width={Math.max(destName(d.iata).length * 6.5, 30)} height="13" rx="3" fill="rgba(255,255,255,.9)"/>
-              <text x={cx + 8 + Math.max(destName(d.iata).length * 6.5, 30) / 2} y={cy + 4} textAnchor="middle" fontFamily="'Instrument Sans',system-ui" fontSize="9.5" fontWeight="600" fill={C.ink}>{destName(d.iata)}</text>
-            </g>
-          )
-        })}
-        {/* Europe dest dots */}
-        {eurDests.slice(0, 2).map((d, i) => {
-          const cx = 90 + i * 220, cy = 28 + i * 18
-          return (
-            <g key={d.iata}>
-              <circle cx={cx} cy={cy} r="4.5" fill={C.gold} stroke="#fff" strokeWidth="2"/>
-              <rect x={cx + 7} y={cy - 6} width={Math.max(destName(d.iata).length * 6, 28)} height="13" rx="3" fill="rgba(255,255,255,.9)"/>
-              <text x={cx + 7 + Math.max(destName(d.iata).length * 6, 28) / 2} y={cy + 4} textAnchor="middle" fontFamily="'Instrument Sans',system-ui" fontSize="9.5" fontWeight="600" fill="#6E5F3C">{destName(d.iata)}</text>
-            </g>
-          )
-        })}
-      </svg>
-      {/* Legend badge */}
-      <div style={{ position: 'absolute', left: 14, bottom: 14, display: 'flex', alignItems: 'center', gap: 7, padding: '7px 11px', borderRadius: 9, background: 'rgba(255,255,255,.94)', border: `1px solid ${C.border}`, boxShadow: '0 4px 12px -8px rgba(22,22,22,.4)' }}>
-        <span style={{ width: 6, height: 6, borderRadius: 99, background: C.forestMid, display: 'block' }} />
-        <span style={{ font: `600 11px/1 'Instrument Sans',system-ui`, color: C.ink }}>Every destination, one map</span>
+    <div style={{ position: 'relative', borderRadius: 16, overflow: 'hidden', background: cfg.fallback, height: '100%' }}>
+      {!imgFailed && (
+        <img
+          key={cfg.src}
+          src={cfg.src}
+          alt={cfg.label}
+          onError={() => setImgFailed(true)}
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center' }}
+        />
+      )}
+      {/* Dark gradient overlay at bottom */}
+      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,.55) 0%, rgba(0,0,0,.1) 50%, transparent 100%)' }} />
+      {/* Bottom label */}
+      <div style={{ position: 'absolute', left: 18, bottom: 16, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <span style={{ font: `700 22px/1 'Instrument Sans',system-ui`, color: '#fff', letterSpacing: '-.02em', textShadow: '0 1px 8px rgba(0,0,0,.4)' }}>{cfg.label}</span>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {totalDests > 0 && <span style={{ font: `600 12px/1 'Instrument Sans',system-ui`, color: 'rgba(255,255,255,.85)' }}>{totalDests} destinations</span>}
+          {totalFlights > 0 && <span style={{ font: `600 12px/1 'Instrument Sans',system-ui`, color: 'rgba(255,255,255,.6)' }}>· {totalFlights} flights/week</span>}
+        </div>
+      </div>
+      {/* IATA badge top-right */}
+      <div style={{ position: 'absolute', right: 14, top: 14, padding: '5px 10px', borderRadius: 8, background: 'rgba(0,0,0,.35)', backdropFilter: 'blur(6px)' }}>
+        <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, fontWeight: 700, color: '#fff', letterSpacing: '.08em' }}>{airport}</span>
       </div>
     </div>
   )
@@ -592,9 +563,9 @@ export default function DestinationsPage() {
           </div>
         </div>
 
-        {/* Route map */}
+        {/* Airport hero */}
         <div className="dst-map" style={{ marginBottom: 28 }}>
-          {!loading && <RouteMap dests={destinations} />}
+          <AirportHero airport={airport} totalDests={totalDests} totalFlights={totalFlights} />
         </div>
 
         {/* Cards */}
