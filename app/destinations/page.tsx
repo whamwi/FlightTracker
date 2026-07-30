@@ -100,7 +100,7 @@ function fmtDur(min: number) {
 interface ScheduleRow {
   dep_iata: string; arr_iata: string; dep_time: string; arr_time: string
   duration_min: number; days_of_week: string[]; iata_number: string
-  airline_name: string; country_flag: string
+  airline_iata: string; airline_name: string; country_flag: string
 }
 interface AirlineChip { prefix: string; name: string; flag: string }
 interface Destination {
@@ -411,7 +411,7 @@ function BottomSheet({ dest, airport, onClose, imageUrl }: { dest: Destination |
             {/* Flight cards */}
             <div style={{ overflowY: 'auto', flex: 1, padding: '12px 16px 26px' }}>
               {flights.map((f, i) => {
-                const prefix = f.iata_number.slice(0, 2)
+                const prefix = f.airline_iata || f.iata_number.slice(0, 2)
                 const activeDays = new Set(f.days_of_week)
                 return (
                   <div key={i} style={{ border: `1px solid ${C.border}`, borderRadius: 14, background: C.surface, marginBottom: 8 }}>
@@ -500,7 +500,7 @@ export default function DestinationsPage() {
     return Array.from(grouped.entries()).map(([iata, flights]) => {
       const seen = new Set<string>(); const airlines: AirlineChip[] = []
       for (const f of flights) {
-        const p = f.iata_number.slice(0, 2)
+        const p = f.airline_iata || f.iata_number.slice(0, 2)
         if (!seen.has(p)) { seen.add(p); airlines.push({ prefix: p, name: f.airline_name, flag: f.country_flag }) }
       }
       const durations = flights.map(f => f.duration_min).filter(Boolean)
