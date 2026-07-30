@@ -430,24 +430,24 @@ function BottomSheet({ dest, airport, onClose, imageUrl }: { dest: Destination |
                 const prefix = f.iata_number.slice(0, 2)
                 const activeDays = new Set(f.days_of_week)
                 return (
-                  <div key={i} style={{ border: `1px solid ${C.border}`, borderRadius: 14, background: C.surface, overflow: 'hidden' }}>
-                    <div style={{ padding: '11px 13px', display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <div style={{ width: 32, height: 32, borderRadius: 9, flexShrink: 0, overflow: 'hidden', background: C.sunken, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <AirlineLogo prefix={prefix} name={f.airline_name} size={32} />
+                  <div key={i} style={{ border: `1px solid ${C.border}`, borderRadius: 14, background: C.surface }}>
+                    <div style={{ padding: '14px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0, background: C.sunken, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <AirlineLogo prefix={prefix} name={f.airline_name} size={36} />
                       </div>
-                      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        <span style={{ font: `600 13.5px/1.1 'Instrument Sans',system-ui`, color: C.ink }}>{f.airline_name}</span>
-                        <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, fontWeight: 500, color: C.muted, letterSpacing: '.06em' }}>{f.iata_number}</span>
+                      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                        <span style={{ font: `600 14px/1.2 'Instrument Sans',system-ui`, color: C.ink }}>{f.airline_name}</span>
+                        <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, fontWeight: 500, color: C.muted, letterSpacing: '.06em' }}>{f.iata_number}</span>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                        <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 15, fontWeight: 600, color: C.ink }}>{f.dep_time}</span>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, flexShrink: 0 }}>
+                        <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 15, fontWeight: 700, color: C.ink }}>{f.dep_time}</span>
                         <span style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>→</span>
-                        <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 15, fontWeight: 600, color: C.ink }}>{f.arr_time}</span>
+                        <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 15, fontWeight: 700, color: C.ink }}>{f.arr_time}</span>
                       </div>
                     </div>
-                    <div style={{ borderTop: '1px dashed #CFC9B2', background: C.sunken, padding: '8px 13px', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <div style={{ borderTop: '1px dashed #CFC9B2', background: C.sunken, borderRadius: '0 0 14px 14px', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 5 }}>
                       {DOW_ORDER.map(d => (
-                        <div key={d} style={{ width: 20, height: 20, borderRadius: 6, flexShrink: 0, background: activeDays.has(d) ? C.forest : C.surface, border: activeDays.has(d) ? 'none' : `1px solid ${C.border}`, color: activeDays.has(d) ? '#fff' : '#B5AFA0', font: `600 9.5px/20px 'Instrument Sans',system-ui`, textAlign: 'center' }}>
+                        <div key={d} style={{ flex: 1, height: 24, borderRadius: 7, flexShrink: 0, background: activeDays.has(d) ? C.forest : C.surface, border: activeDays.has(d) ? 'none' : `1px solid ${C.border}`, color: activeDays.has(d) ? '#fff' : '#B5AFA0', font: `700 10px/24px 'Instrument Sans',system-ui`, textAlign: 'center' }}>
                           {DOW_LABEL[d]}
                         </div>
                       ))}
