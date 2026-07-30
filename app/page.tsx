@@ -186,10 +186,12 @@ function MiniFlightCard({ f }: { f: InAirFlight }) {
   const depFlag  = apFlag[f.dep_iata] ?? ''
   const arrFlag  = apFlag[f.arr_iata] ?? ''
 
+  const cardBg = f.arr_iata === 'DAM' ? '#EEF6EE' : f.arr_iata === 'ALP' ? '#FFF4EC' : C.surface
+
   return (
     <Link
       href={`/?flight=${encodeURIComponent(f.iata_number)}`}
-      style={{ display: 'block', textDecoration: 'none', background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,.06)', position: 'relative' }}
+      style={{ display: 'block', textDecoration: 'none', background: cardBg, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,.06)', position: 'relative' }}
     >
       {/* Status rail (top) */}
       <div style={{ height: 3, background: railColor }} />
@@ -311,7 +313,7 @@ function InAirPanel() {
       position: 'absolute', left: 12, top: 12, bottom: 12, zIndex: 999,
       width: 'min(308px, calc(88vw - 12px))',
       display: 'flex', flexDirection: 'column',
-      background: 'rgba(255,255,255,0.97)',
+      background: 'rgba(237,235,224,0.97)',
       backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
       border: `1px solid ${C.border}`,
       borderRadius: 16,
