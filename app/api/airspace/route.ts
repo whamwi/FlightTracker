@@ -112,6 +112,8 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<Bo
   // Also pull yesterday's Syria date so flights that departed before midnight
   // but are still airborne after midnight continue to show as ghost markers.
   const yesterday = new Date(Date.now() + 3 * 3_600_000 - 86_400_000).toISOString().slice(0, 10)
+  // Syria midnight in UTC = start of today's Syria date (e.g. 21:00 UTC yesterday).
+  const syriaMidnightMs = new Date(date + 'T00:00:00+03:00').getTime()
 
   const res = await fetch(
     `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=in.(${yesterday},${date})&airport_iata=in.(DAM,ALP,LTK)&select=airport_iata,flight_date,departures,arrivals`,
@@ -135,21 +137,27 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<Bo
 
   for (const row of rows) {
     const ap = (row.airport_iata as string) || ''
+    // Use the row's own flight_date for status string parsing so that "Departed HH:MM"
+    // on yesterday's row is stamped on yesterday's date, not today's.
+    const rowDate = (row.flight_date as string) || date
     for (const section of ['departures', 'arrivals'] as const) {
       for (const f of (row[section] ?? [])) {
         const num = (f.num ?? '').toString()
         if (!num) continue
+        // Yesterday's rows: skip any flight whose scheduled arrival is before Syria midnight
+        // (it landed before the date rolled over and is not a cross-midnight ghost candidate).
+        if (row.flight_date !== date && f.sched_arr && f.sched_arr * 1000 <= syriaMidnightMs) continue
         const key = `${num}|${f.sched_dep ?? ''}`
         if (seen.has(key)) continue
         seen.add(key)
         const status         = (f.status ?? '').toLowerCase()
         const actual_dep_utc = f.real_dep
           ? new Date(f.real_dep * 1000).toISOString()
-          : extractActualDepUtc(status, date)
+          : extractActualDepUtc(status, rowDate)
         const raw_actual_arr_utc = f.real_arr
           ? new Date(f.real_arr * 1000).toISOString()
-          : extractActualArrUtc(status, date)
-        const revised_arr_utc = extractRevisedArrUtc(status, date)
+          : extractActualArrUtc(status, rowDate)
+        const revised_arr_utc = extractRevisedArrUtc(status, rowDate)
           ?? (f.est_arr ? new Date(f.est_arr * 1000).toISOString() : null)
         // Prefer computed duration (actual_dep → revised_arr) over stale scheduled block time.
         const effectiveDurationMin = (() => {
