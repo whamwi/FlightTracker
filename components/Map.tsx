@@ -578,7 +578,14 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
 
   const [error, setError]     = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadMs, setLoadMs]   = useState(0)
   const firstLoadDoneRef      = useRef(false)
+
+  useEffect(() => {
+    if (!loading) return
+    const t = setInterval(() => setLoadMs(ms => ms + 100), 100)
+    return () => clearInterval(t)
+  }, [loading])
 
   // ── Map init ────────────────────────────────────────────────────────────────
   useEffect(() => { loadGeoData() }, [])
@@ -1658,6 +1665,9 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
           }} />
           <div style={{ marginTop: 14, fontSize: 13, fontWeight: 600, color: '#054239', fontFamily: "'Instrument Sans', system-ui", letterSpacing: '-.01em' }}>
             {targetFlightRef.current ? `Finding ${targetFlightRef.current}…` : 'Loading map…'}
+          </div>
+          <div style={{ marginTop: 6, fontSize: 12, fontWeight: 500, color: '#556A4E', fontFamily: 'monospace', letterSpacing: '.04em' }}>
+            {(loadMs / 1000).toFixed(1)}s
           </div>
         </div>
       )}
