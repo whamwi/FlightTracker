@@ -233,10 +233,10 @@ function bestHeading(a: Aircraft): number {
 
 // ── Icon & popup ──────────────────────────────────────────────────────────────
 
-function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, stale: boolean, label?: string, alp = false, estimated = false) {
+function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, stale: boolean, label?: string, alp = false, estimated = false, colorOverride?: string) {
   const mobile  = typeof window !== 'undefined' && window.innerWidth < 768
   const size    = syria ? (mobile ? 36 : 40) : (mobile ? 26 : 30)
-  const color   = stale ? '#9ca3af' : alp ? '#f97316' : syria ? '#16a34a' : '#1d4ed8'
+  const color   = colorOverride ?? (stale ? '#9ca3af' : alp ? '#f97316' : syria ? '#16a34a' : '#1d4ed8')
   const opacity = stale ? 0.5 : 1
   const shadow  = syria && !stale ? 'drop-shadow(0 5px 4px rgba(0,0,0,0.45))' : 'drop-shadow(0 1px 3px rgba(0,0,0,0.4))'
   const strokeW = syria && !stale ? 0.4 : 0.6
@@ -568,6 +568,7 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
   const autoOpenDoneRef   = useRef(false)
   const targetFlightRef   = useRef(targetFlight)
   targetFlightRef.current = targetFlight
+  const highlightedCSRef  = useRef<string | null>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const trackLinesRef     = useRef<any[]>([])
   // Last confirmed ADS-B lat/lon per callsign — kept alive through stale hand-off
@@ -703,13 +704,6 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
         const pos      = marker.getLatLng()
         const depCoord = depIata ? _apCoords[depIata] : null
         const arrCoord = arrIata ? _apCoords[arrIata] : null
-        if (depCoord) {
-          trackLinesRef.current.push(
-            L.polyline([[depCoord[0], depCoord[1]], [pos.lat, pos.lng]], {
-              color: '#054239', weight: 1.5, opacity: 0.65,
-            }).addTo(map)
-          )
-        }
         if (arrCoord) {
           trackLinesRef.current.push(
             L.polyline([[pos.lat, pos.lng], [arrCoord[0], arrCoord[1]]], {
@@ -1267,7 +1261,8 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
 
         const staleLabel    = arrSnapped ? `${cs}\nARRIVED` : cs
         const isEstimated   = projected && !arrSnapped
-        const icon    = planeIcon(L, dispTrack, true, arrSnapped, staleLabel, isAlp, isEstimated)
+        const isHighlighted = highlightedCSRef.current === cs
+        const icon    = planeIcon(L, dispTrack, true, arrSnapped, staleLabel, isAlp, isEstimated, isHighlighted ? '#ef4444' : undefined)
         const fsDr    = flightStatusRef.current[cs]
         const regDr   = fsDr?.aircraft_reg ?? a.r ?? null
         const photoDr = regDr ? photoCacheRef.current[regDr] ?? null : null
@@ -1304,14 +1299,13 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
           // Auto-pan + open popup for deep-linked flight (new marker)
           if (!embed && targetFlightRef.current && !autoOpenDoneRef.current && a.iata_number === targetFlightRef.current) {
             autoOpenDoneRef.current = true
+            highlightedCSRef.current = cs
             setLoading(false)
-            const capCs = cs
-            const capDep = a.dep_iata ?? flightStatusRef.current[cs]?.dep_iata ?? null
-            const capArr = a.arr_iata ?? flightStatusRef.current[cs]?.arr_iata ?? null
+            const capCs = cs; const capDep = a.dep_iata ?? flightStatusRef.current[cs]?.dep_iata ?? null; const capArr = a.arr_iata ?? flightStatusRef.current[cs]?.arr_iata ?? null
+            const capTrack = dispTrack; const capLabel = staleLabel; const capAlp = isAlp; const capEst = isEstimated
             setTimeout(() => {
-              const mk = markersRef.current[capCs]
-              const mi = mapInstanceRef.current
-              if (mk && mi) { mi.setView(mk.getLatLng(), Math.max(mi.getZoom(), 8)); mk.openPopup(); drawTrackRoute(mk, capDep, capArr) }
+              const mk = markersRef.current[capCs]; const mi = mapInstanceRef.current
+              if (mk && mi) { mk.setIcon(planeIcon(L, capTrack, true, false, capLabel, capAlp, capEst, '#ef4444')); mi.setView(mk.getLatLng(), Math.max(mi.getZoom(), 8)); mk.openPopup(); drawTrackRoute(mk, capDep, capArr) }
             }, 300)
           }
         }
@@ -1319,11 +1313,11 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
         // Auto-open for existing live marker
         if (!embed && targetFlightRef.current && !autoOpenDoneRef.current && a.iata_number === targetFlightRef.current && markersRef.current[cs]) {
           autoOpenDoneRef.current = true
+          highlightedCSRef.current = cs
           setLoading(false)
-          const mk = markersRef.current[cs]
-          const mi = mapInstanceRef.current
-          const dep = a.dep_iata ?? flightStatusRef.current[cs]?.dep_iata ?? null
-          const arr = a.arr_iata ?? flightStatusRef.current[cs]?.arr_iata ?? null
+          const mk = markersRef.current[cs]; const mi = mapInstanceRef.current
+          const dep = a.dep_iata ?? flightStatusRef.current[cs]?.dep_iata ?? null; const arr = a.arr_iata ?? flightStatusRef.current[cs]?.arr_iata ?? null
+          mk.setIcon(planeIcon(L, dispTrack, true, false, staleLabel, isAlp, isEstimated, '#ef4444'))
           if (mk && mi) { mi.setView(mk.getLatLng(), Math.max(mi.getZoom(), 8)); mk.openPopup(); drawTrackRoute(mk, dep, arr) }
         }
 
@@ -1559,7 +1553,8 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
           : bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], fPos)
         const label = arrived ? `${callsign}\nARRIVED` : callsign
         const isAlp = dep_iata === 'ALP' || arr_iata === 'ALP'
-        const icon  = planeIcon(L, track, true, arrived, label, isAlp, !arrived)
+        const isSchedHighlighted = highlightedCSRef.current === callsign
+        const icon  = planeIcon(L, track, true, arrived, label, isAlp, !arrived, isSchedHighlighted ? '#ef4444' : undefined)
         const schedReg   = fs?.aircraft_reg ?? null
         const schedPhoto = (schedReg ? photoCacheRef.current[schedReg] : null) ?? photoCacheRef.current[`cs:${callsign}`] ?? null
         const popup = buildSchedulePopup(entry, arrived, fs, fPos, schedPhoto)
@@ -1624,12 +1619,12 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
           const fNum = flightStatusRef.current[callsign]?.flight_number ?? null
           if (!embed && targetFlightRef.current && !autoOpenDoneRef.current && fNum === targetFlightRef.current) {
             autoOpenDoneRef.current = true
+            highlightedCSRef.current = callsign
             setLoading(false)
-            const capCs2 = callsign
+            const capCs2 = callsign; const capTrack2 = track; const capLabel2 = label; const capAlp2 = isAlp
             setTimeout(() => {
-              const mk = schedMarkersRef.current[capCs2]
-              const mi = mapInstanceRef.current
-              if (mk && mi) { mi.setView(mk.getLatLng(), Math.max(mi.getZoom(), 8)); mk.openPopup(); drawTrackRoute(mk, dep_iata, arr_iata) }
+              const mk = schedMarkersRef.current[capCs2]; const mi = mapInstanceRef.current
+              if (mk && mi) { mk.setIcon(planeIcon(L, capTrack2, true, false, capLabel2, capAlp2, false, '#ef4444')); mi.setView(mk.getLatLng(), Math.max(mi.getZoom(), 8)); mk.openPopup(); drawTrackRoute(mk, dep_iata, arr_iata) }
             }, 300)
           }
         }
@@ -1638,9 +1633,10 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
         const fNumEx = flightStatusRef.current[callsign]?.flight_number ?? null
         if (!embed && targetFlightRef.current && !autoOpenDoneRef.current && fNumEx === targetFlightRef.current && schedMarkersRef.current[callsign]) {
           autoOpenDoneRef.current = true
+          highlightedCSRef.current = callsign
           setLoading(false)
-          const mk = schedMarkersRef.current[callsign]
-          const mi = mapInstanceRef.current
+          const mk = schedMarkersRef.current[callsign]; const mi = mapInstanceRef.current
+          mk.setIcon(planeIcon(L, track, true, false, label, isAlp, false, '#ef4444'))
           if (mk && mi) { mi.setView(mk.getLatLng(), Math.max(mi.getZoom(), 8)); mk.openPopup(); drawTrackRoute(mk, dep_iata, arr_iata) }
         }
 
