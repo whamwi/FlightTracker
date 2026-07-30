@@ -706,7 +706,7 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
         if (depCoord) {
           trackLinesRef.current.push(
             L.polyline([[depCoord[0], depCoord[1]], [pos.lat, pos.lng]], {
-              color: '#054239', weight: 2.5, opacity: 0.75,
+              color: '#054239', weight: 1.5, opacity: 0.65,
             }).addTo(map)
           )
         }
@@ -717,10 +717,6 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
             }).addTo(map)
           )
         }
-        marker.on('popupclose', () => {
-          trackLinesRef.current.forEach(l => l.remove())
-          trackLinesRef.current = []
-        })
       }
 
       // ── 1. Fetch feed + update trackedRef (keyed by callsign) ─────────────
