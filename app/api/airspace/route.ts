@@ -109,13 +109,22 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<Bo
   if (boardCache && boardCache.date === date && Date.now() - boardCache.ts < 60_000)
     return boardCache.flights
 
+  // Also pull yesterday's Syria date so flights that departed before midnight
+  // but are still airborne after midnight continue to show as ghost markers.
+  const yesterday = new Date(Date.now() + 3 * 3_600_000 - 86_400_000).toISOString().slice(0, 10)
+
   const res = await fetch(
-    `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${date}&airport_iata=in.(DAM,ALP,LTK)&select=airport_iata,departures,arrivals`,
+    `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=in.(${yesterday},${date})&airport_iata=in.(DAM,ALP,LTK)&select=airport_iata,flight_date,departures,arrivals`,
     { headers: SB_HEADERS },
   )
   if (!res.ok) return boardCache?.flights ?? []
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows: any[] = await res.json()
+
+  // Today's rows first — ensures today's version of a flight wins the seen-set dedup
+  // and yesterday's identical entry (same num|sched_dep) is skipped.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  rows.sort((a: any, b: any) => (a.flight_date === date ? -1 : 0) - (b.flight_date === date ? -1 : 0))
 
   // Reverse map: ICAO prefix → IATA (e.g. FYC→XH, THY→TK, FDB→FZ)
   const icaoToIata: Record<string, string> = {}
