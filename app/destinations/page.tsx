@@ -260,24 +260,25 @@ function DestCardDesktop({ dest, onView, weeklyCount, imageUrl }: {
       </div>
       {/* Info */}
       <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 9, flex: 1 }}>
-        {/* Row 1: Flag + City | Weekly badge */}
+        {/* Row 1: Flag + City | Duration */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 22 }}>{apFlag(dest.iata)}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <span style={{ fontSize: 20 }}>{apFlag(dest.iata)}</span>
             <span style={{ font: `700 16px/1.1 'Instrument Sans',system-ui`, color: C.ink, letterSpacing: '-.01em' }}>{destName(dest.iata)}</span>
+          </div>
+          {dest.minDuration > 0 && <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: C.muted, flexShrink: 0 }}>{fmtDur(dest.minDuration)}</span>}
+        </div>
+        {/* Row 2: Airline chips | Weekly badge */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', gap: 5 }}>
+            {dest.airlines.slice(0, 4).map(a => (
+              <AirlineLogo key={a.prefix} prefix={a.prefix} name={a.name} size={22} />
+            ))}
+            {dest.airlines.length > 4 && <span style={{ fontSize: 10, color: C.muted, alignSelf: 'center' }}>+{dest.airlines.length - 4}</span>}
           </div>
           <div style={{ padding: '4px 9px', borderRadius: 999, background: badge, flexShrink: 0 }}>
             <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: '#fff' }}>{weeklyCount} / wk</span>
           </div>
-        </div>
-        {/* Row 2: Duration */}
-        {dest.minDuration > 0 && <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: C.muted }}>{fmtDur(dest.minDuration)}</span>}
-        {/* Row 3: Airline chips */}
-        <div style={{ display: 'flex', gap: 5 }}>
-          {dest.airlines.slice(0, 4).map(a => (
-            <AirlineLogo key={a.prefix} prefix={a.prefix} name={a.name} size={22} />
-          ))}
-          {dest.airlines.length > 4 && <span style={{ fontSize: 10, color: C.muted, alignSelf: 'center' }}>+{dest.airlines.length - 4}</span>}
         </div>
         <div style={{ borderTop: `1px dashed ${C.separator}`, paddingTop: 11, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           {/* Day-of-week dots */}
