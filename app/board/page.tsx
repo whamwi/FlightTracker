@@ -329,7 +329,7 @@ const PinSVG = () => (
 )
 
 // ── Flight card ───────────────────────────────────────────────────────────────
-function FlightCard({ f, view }: { f: Flight; view: View }) {
+function FlightCard({ f, view, isPinned, onTogglePin }: { f: Flight; view: View; isPinned: boolean; onTogglePin: () => void }) {
   const isArr   = view === 'arr'
   const status  = effectiveStatus(f)
   const cfg     = STATUS[status] ?? STATUS.Unknown
@@ -486,9 +486,9 @@ function FlightCard({ f, view }: { f: Flight; view: View }) {
             </svg>
             Share
           </Link>
-          <button style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: 99, background: C.sunken, border: `1px solid ${C.border}`, color: C.secondary, fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: "'Instrument Sans', system-ui", whiteSpace: 'nowrap' }}>
+          <button onClick={onTogglePin} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: 99, background: isPinned ? C.forest : C.sunken, border: `1px solid ${isPinned ? C.forest : C.border}`, color: isPinned ? '#fff' : C.secondary, fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: "'Instrument Sans', system-ui", whiteSpace: 'nowrap' }}>
             <PinSVG />
-            Pin
+            {isPinned ? 'Pinned' : 'Pin'}
           </button>
         </div>
         {showTrack && (
@@ -581,6 +581,22 @@ export default function BoardPage() {
     departures: { iata: string; count: number }[]
   }
   const [weeklyStats, setWeeklyStats] = useState<WeeklyStats | null>(null)
+
+  const [pins, setPins] = useState<Set<string>>(() => {
+    try {
+      const stored = typeof window !== 'undefined' ? localStorage.getItem('flysyria_pins') : null
+      return new Set(stored ? JSON.parse(stored) : [])
+    } catch { return new Set() }
+  })
+
+  const togglePin = (num: string) => {
+    setPins(prev => {
+      const next = new Set(prev)
+      next.has(num) ? next.delete(num) : next.add(num)
+      try { localStorage.setItem('flysyria_pins', JSON.stringify([...next])) } catch {}
+      return next
+    })
+  }
 
   const loadVer = useRef(0)
 
@@ -699,6 +715,19 @@ export default function BoardPage() {
     .filter(f => effectiveStatus(f) !== 'Unknown')
     .sort((a, b) => effectiveLocalMin(a, view) - effectiveLocalMin(b, view))
 
+  const nowSyriaMinRaw = Math.floor((Date.now() + 3 * 3_600_000) / 60_000) % 1440
+
+  // Build pin-aware display order
+  const pinnedSet   = pins
+  const isPast      = (f: Flight) => effectiveStatus(f) === 'Arrived'
+  const nonPinned   = sorted.filter(f => !pinnedSet.has(f.iata_number))
+  const pinnedArr   = sorted.filter(f => pinnedSet.has(f.iata_number) && isPast(f))
+  const pinnedFwd   = sorted.filter(f => pinnedSet.has(f.iata_number) && !isPast(f))
+  const nonPinnedBefore = nonPinned.filter(f => effectiveLocalMin(f, view) < nowSyriaMinRaw)
+  const nonPinnedAfter  = nonPinned.filter(f => effectiveLocalMin(f, view) >= nowSyriaMinRaw)
+  const displayed   = [...nonPinnedBefore, ...pinnedArr, ...pinnedFwd, ...nonPinnedAfter]
+  const nowDisplayIdx = tab === 0 ? nonPinnedBefore.length + pinnedArr.length : -1
+
   const total     = sorted.length
   const landed    = sorted.filter(f => ['Arrived', 'Landed'].includes(effectiveStatus(f))).length
   const cancelled = sorted.filter(f => effectiveStatus(f) === 'Cancelled').length
@@ -741,14 +770,9 @@ export default function BoardPage() {
     return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
   })()
 
-  const nowSyriaMin = Math.floor((Date.now() + 3 * 3_600_000) / 60_000) % 1440
-  const nowIdx = tab === 0
-    ? sorted.findIndex(f => effectiveLocalMin(f, view) >= nowSyriaMin)
-    : -1
-
   const prevNowRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (!loading && nowIdx >= 1 && prevNowRef.current) {
+    if (!loading && nowDisplayIdx >= 1 && prevNowRef.current) {
       prevNowRef.current.scrollIntoView({ behavior: 'instant', block: 'start' })
     }
   }, [loading, tab, view, airport])
@@ -976,9 +1000,9 @@ export default function BoardPage() {
           {/* Flight cards */}
           {!loading && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {sorted.map((f, i) => (
+              {displayed.map((f, i) => (
                 <Fragment key={`${f.iata_number}-${f.dep_iata}-${f.arr_iata}-${f.dep_time_utc}-${f.arr_time_utc}`}>
-                  {i === nowIdx && (
+                  {i === nowDisplayIdx && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '2px 0' }}>
                       <div style={{ flex: 1, height: 1, background: C.separator }} />
                       {landed > 0 && (
@@ -1005,8 +1029,8 @@ export default function BoardPage() {
                       <div style={{ flex: 1, height: 1, background: C.separator }} />
                     </div>
                   )}
-                  <div ref={i === nowIdx - 1 ? prevNowRef : undefined} style={i === nowIdx - 1 ? { scrollMarginTop: 80 } : undefined}>
-                    <FlightCard f={f} view={view} />
+                  <div ref={i === nowDisplayIdx - 1 ? prevNowRef : undefined} style={i === nowDisplayIdx - 1 ? { scrollMarginTop: 80 } : undefined}>
+                    <FlightCard f={f} view={view} isPinned={pins.has(f.iata_number)} onTogglePin={() => togglePin(f.iata_number)} />
                   </div>
                 </Fragment>
               ))}
