@@ -63,7 +63,7 @@ const airlineBg = (prefix: string) => AIRLINE_BG[prefix] ?? 'linear-gradient(140
 interface ScheduleRow {
   dep_iata: string; arr_iata: string; dep_time: string; arr_time: string
   duration_min: number; days_of_week: string[]; iata_number: string
-  airline_name: string; country_flag: string
+  airline_iata: string; airline_name: string; country_flag: string
 }
 interface DestChip { iata: string; name: string; flag: string }
 interface AirlineInfo {
@@ -438,7 +438,7 @@ export default function AirlinesPage() {
   const airlines = useMemo((): AirlineInfo[] => {
     const map = new Map<string, AirlineInfo>()
     for (const r of rows) {
-      const prefix = r.iata_number.slice(0, 2)
+      const prefix = r.airline_iata || r.iata_number.slice(0, 2)
       if (!map.has(prefix)) {
         map.set(prefix, { prefix, name: r.airline_name, flag: r.country_flag, routes: [], reverseRoutes: [], dests: [], weeklyCount: 0, activeDays: new Set(), minDuration: 0 })
       }

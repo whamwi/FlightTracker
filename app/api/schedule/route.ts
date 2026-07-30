@@ -13,7 +13,7 @@ export async function GET() {
     'dep_time_utc', 'arr_time_utc',
     'duration_min',
     'days_of_week',
-    'flight_lookup(iata_number,broadcast_callsign,airlines(name_en,country_flag,website_url,facebook_url,instagram_url))',
+    'flight_lookup(iata_number,broadcast_callsign,airlines(iata,name_en,country_flag,website_url,facebook_url,instagram_url))',
   ].join(',')
 
   const res = await fetch(
@@ -38,6 +38,7 @@ export async function GET() {
     days_of_week:      r.days_of_week ?? [],
     iata_number:       r.flight_lookup?.iata_number ?? '—',
     broadcast_callsign: r.flight_lookup?.broadcast_callsign ?? '—',
+    airline_iata:      r.flight_lookup?.airlines?.iata ?? '',
     airline_name:      r.flight_lookup?.airlines?.name_en ?? '—',
     country_flag:      r.flight_lookup?.airlines?.country_flag ?? '',
     website_url:       r.flight_lookup?.airlines?.website_url ?? null,
