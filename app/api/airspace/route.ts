@@ -572,8 +572,9 @@ export async function GET() {
       const DOW       = ['sun','mon','tue','wed','thu','fri','sat']
       const todayDow  = DOW[todaySy.getUTCDay()]
       const yestDow   = DOW[yestSy.getUTCDay()]
-      // UTC ms of Syria midnight (00:00 +03:00) for each day
-      const todayBase = Date.UTC(todaySy.getUTCFullYear(), todaySy.getUTCMonth(), todaySy.getUTCDate()) - SYRIA_OFF
+      // UTC midnight for the Syria calendar date — dep_time_utc is genuine UTC
+      // so we add it directly to midnight UTC (NOT Syria local midnight).
+      const todayBase = Date.UTC(todaySy.getUTCFullYear(), todaySy.getUTCMonth(), todaySy.getUTCDate())
       const yestBase  = todayBase - 86_400_000
 
       const rmSel = 'dep_time_utc,duration_min,dep_iata,arr_iata,days_of_week,flight_lookup(iata_number,broadcast_callsign,airlines(iata))'
