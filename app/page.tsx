@@ -93,6 +93,21 @@ function HomeInner() {
             Board →
           </Link>
         </div>
+
+        {/* Legend */}
+        <div style={{ position: 'absolute', bottom: 24, left: 12, zIndex: 1000, background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(6px)', borderRadius: 10, padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 5, boxShadow: '0 1px 4px rgba(0,0,0,0.12)' }}>
+          {[
+            { color: '#16a34a', label: 'Damascus (DAM)' },
+            { color: '#f97316', label: 'Aleppo (ALP)'   },
+          ].map(({ color, label }) => (
+            <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill={color}>
+                <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
+              </svg>
+              <span style={{ fontSize: 11, fontWeight: 600, color: '#374151', fontFamily: "'Instrument Sans', system-ui", whiteSpace: 'nowrap' }}>{label}</span>
+            </div>
+          ))}
+        </div>
       </main>
     </div>
   )
