@@ -653,6 +653,8 @@ export default function Map({ embed = false, targetFlight }: { embed?: boolean; 
         [24.9578, 46.6989], // RUH
         [40.8986, 29.3092], // SAW
         [25.3285, 55.5172], // SHJ
+        [51.2895,  6.7668], // DUS
+        [52.3667, 13.5033], // BER
       ]
       for (const coords of SERVICED) {
         L.circle(coords, {
