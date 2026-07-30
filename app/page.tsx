@@ -192,7 +192,7 @@ function MiniFlightCard({ f, isSelected }: { f: InAirFlight; isSelected?: boolea
   return (
     <Link
       href={`/?flight=${encodeURIComponent(f.iata_number)}`}
-      style={{ display: 'block', textDecoration: 'none', background: isSelected ? '#EAF3EA' : C.surface, border: `1.5px solid ${isSelected ? C.forest : C.border}`, borderRadius: 12, overflow: 'hidden', boxShadow: isSelected ? `0 0 0 3px ${C.forestLight}40` : '0 1px 4px rgba(0,0,0,.06)', position: 'relative' }}
+      style={{ display: 'block', textDecoration: 'none', background: isSelected ? '#D4EBD4' : C.surface, border: `${isSelected ? 2 : 1}px solid ${isSelected ? C.forest : C.border}`, borderRadius: 12, overflow: 'hidden', boxShadow: isSelected ? '0 6px 20px rgba(5,66,57,0.22), 0 1px 4px rgba(5,66,57,0.12)' : '0 1px 4px rgba(0,0,0,.06)', position: 'relative', transform: isSelected ? 'translateY(-1px)' : 'none', transition: 'box-shadow .2s, transform .2s, background .2s' }}
     >
       {/* Status rail (top) */}
       <div style={{ height: 3, background: railColor }} />
