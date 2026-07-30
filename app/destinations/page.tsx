@@ -262,15 +262,13 @@ function DestCardDesktop({ dest, onView, weeklyCount, imageUrl, onUpload }: {
   const badge = weeklyCount >= 14 ? C.forest : C.gold
   const [imgFailed, setImgFailed] = useState(false)
   const [hovering, setHovering] = useState(false)
+  // Reset failed flag whenever a new URL arrives (e.g. just uploaded)
+  useEffect(() => { setImgFailed(false) }, [imageUrl])
   const showImg = imageUrl && !imgFailed
   return (
     <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, overflow: 'hidden', boxShadow: `0 1px 2px rgba(22,22,22,.05),0 12px 26px -22px rgba(22,22,22,.5)`, display: 'flex', flexDirection: 'column' }}>
       {/* Photo area */}
-      <div
-        onMouseEnter={() => setHovering(true)}
-        onMouseLeave={() => setHovering(false)}
-        style={{ position: 'relative', height: 160, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
-      >
+      <div style={{ position: 'relative', height: 160, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
         {showImg
           ? <img src={imageUrl} alt={city(dest.iata)} onError={() => setImgFailed(true)} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
           : <span style={{ fontSize: 40, opacity: .35 }}>{apFlag(dest.iata)}</span>
@@ -282,13 +280,19 @@ function DestCardDesktop({ dest, onView, weeklyCount, imageUrl, onUpload }: {
         <div style={{ position: 'absolute', right: 12, top: 12, padding: '5px 10px', borderRadius: 999, background: badge }}>
           <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: '#fff' }}>{weeklyCount} / wk</span>
         </div>
-        {/* Upload overlay */}
-        {onUpload && hovering && (
-          <label style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.45)', cursor: 'pointer' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 16px', borderRadius: 10, background: 'rgba(255,255,255,.95)', border: '1px solid rgba(0,0,0,.1)' }}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.ink} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-              <span style={{ font: `600 12px/1 'Instrument Sans',system-ui`, color: C.ink }}>{showImg ? 'Change photo' : 'Upload photo'}</span>
-            </div>
+        {/* Upload overlay — label always in DOM so the file input survives the dialog open/close cycle */}
+        {onUpload && (
+          <label
+            onMouseEnter={() => setHovering(true)}
+            onMouseLeave={() => setHovering(false)}
+            style={{ position: 'absolute', inset: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: hovering ? 'rgba(0,0,0,.45)' : 'transparent', transition: 'background .15s' }}
+          >
+            {hovering && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 16px', borderRadius: 10, background: 'rgba(255,255,255,.95)', border: '1px solid rgba(0,0,0,.1)', pointerEvents: 'none' }}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.ink} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <span style={{ font: `600 12px/1 'Instrument Sans',system-ui`, color: C.ink }}>{showImg ? 'Change photo' : 'Upload photo'}</span>
+              </div>
+            )}
             <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) onUpload(dest.iata, f); e.target.value = '' }} />
           </label>
         )}
@@ -443,6 +447,7 @@ export default function DestinationsPage() {
   const [weeklyCounts, setWeeklyCounts] = useState<Record<string,number>>({})
   const [destImages, setDestImages] = useState<Record<string,string>>({})
   const [uploading, setUploading] = useState<string|null>(null)
+  const [uploadError, setUploadError] = useState<string|null>(null)
 
   useEffect(() => { loadGeoData() }, [])
 
@@ -452,14 +457,23 @@ export default function DestinationsPage() {
 
   const handleUpload = useCallback(async (iata: string, file: File) => {
     setUploading(iata)
+    setUploadError(null)
     try {
       const form = new FormData()
       form.append('iata', iata)
       form.append('file', file)
       const res = await fetch('/api/dest-images', { method: 'POST', body: form })
       const d = await res.json()
-      if (d.url) setDestImages(prev => ({ ...prev, [iata]: d.url }))
-    } catch { /* silent */ } finally { setUploading(null) }
+      if (d.url) {
+        setDestImages(prev => ({ ...prev, [iata]: d.url + '?t=' + Date.now() }))
+      } else {
+        setUploadError(d.error ?? 'Upload failed')
+      }
+    } catch (e) {
+      setUploadError(String(e))
+    } finally {
+      setUploading(null)
+    }
   }, [])
 
   useEffect(() => {
@@ -538,15 +552,22 @@ export default function DestinationsPage() {
         `}</style>
 
         {/* Upload toast */}
-        {uploading && (
-          <div style={{ position: 'fixed', top: 82, right: 20, zIndex: 99, padding: '10px 16px', borderRadius: 10, background: C.ink, display: 'flex', alignItems: 'center', gap: 10 }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#EDEBE0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}>
-              <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
-            </svg>
-            <span style={{ font: `500 12px/1 'Instrument Sans',system-ui`, color: '#EDEBE0' }}>Uploading {uploading} photo…</span>
+        {(uploading || uploadError) && (
+          <div style={{ position: 'fixed', top: 82, right: 20, zIndex: 99, padding: '10px 16px', borderRadius: 10, background: uploadError ? '#7A1F1F' : C.ink, display: 'flex', alignItems: 'center', gap: 10, maxWidth: 320 }}>
+            {uploading && (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#EDEBE0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite', flexShrink: 0 }}>
+                <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+              </svg>
+            )}
+            <span style={{ font: `500 12px/1.4 'Instrument Sans',system-ui`, color: '#EDEBE0' }}>
+              {uploading ? `Uploading ${uploading} photo…` : uploadError}
+            </span>
+            {uploadError && (
+              <button onClick={() => setUploadError(null)} style={{ marginLeft: 4, background: 'none', border: 'none', color: '#EDEBE0', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>×</button>
+            )}
           </div>
         )}
-        <style>{`.dst-spin { animation: spin 1s linear infinite } @keyframes spin { to { transform: rotate(360deg) } }`}</style>
+        <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
 
         {/* Title + stats */}
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
@@ -557,8 +578,11 @@ export default function DestinationsPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             {/* Airport toggle */}
             <div style={{ display: 'flex', padding: 3, background: '#E4E1D2', borderRadius: 9, gap: 2 }}>
-              {(['DAM','ALP'] as const).map(a => (
-                <button key={a} onClick={() => setAirport(a)} style={{ padding: '6px 12px', borderRadius: 7, border: 'none', cursor: 'pointer', font: `${airport===a?700:600} 12px/1 'IBM Plex Mono',monospace`, background: airport===a ? C.forest : 'transparent', color: airport===a ? '#fff' : C.muted, transition: 'all .15s' }}>{a}</button>
+              {([['DAM','Damascus'],['ALP','Aleppo']] as const).map(([code, label]) => (
+                <button key={code} onClick={() => setAirport(code)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 7, border: 'none', cursor: 'pointer', background: airport===code ? C.forest : 'transparent', color: airport===code ? '#fff' : C.muted, transition: 'all .15s' }}>
+                  <span style={{ font: `${airport===code?700:600} 12px/1 'Instrument Sans',system-ui` }}>{label}</span>
+                  <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 9.5, opacity: .7, lineHeight: 1 }}>{code}</span>
+                </button>
               ))}
             </div>
             {totalDests > 0 && (
