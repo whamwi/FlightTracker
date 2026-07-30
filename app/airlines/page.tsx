@@ -235,15 +235,6 @@ function AirlineCard({ info, onView, imageUrl, onImageUploaded }: {
           </div>
         )}
         {showPhoto && <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,.45) 0%, transparent 60%)' }} />}
-        {/* IATA badge top-left */}
-        <div style={{ position: 'absolute', left: 12, top: 12, display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 999, background: 'rgba(255,255,255,.92)' }}>
-          <span style={{ fontSize: 13 }}>{info.flag}</span>
-          <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: C.secondary, letterSpacing: '.05em' }}>{info.prefix}</span>
-        </div>
-        {/* Weekly count badge top-right */}
-        <div style={{ position: 'absolute', right: 12, top: 12, padding: '5px 10px', borderRadius: 999, background: badge }}>
-          <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: '#fff' }}>{info.weeklyCount} / wk</span>
-        </div>
         {/* Upload button bottom-right */}
         <button onClick={() => fileRef.current?.click()} disabled={uploading}
           style={{ position: 'absolute', right: 10, bottom: 10, display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 8, background: 'rgba(0,0,0,.38)', backdropFilter: 'blur(8px)', border: '1px solid rgba(255,255,255,.18)', cursor: 'pointer', color: '#fff', font: `600 11px/1 'Instrument Sans',system-ui`, opacity: uploading ? .6 : 1 }}>
@@ -263,6 +254,13 @@ function AirlineCard({ info, onView, imageUrl, onImageUploaded }: {
             <span style={{ font: `700 15px/1.2 'Instrument Sans',system-ui`, color: C.ink, letterSpacing: '-.01em' }}>{info.name}</span>
           </div>
           {info.minDuration > 0 && <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: C.muted, flexShrink: 0 }}>{fmtDur(info.minDuration)}</span>}
+        </div>
+        {/* Flag + weekly count */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: -2 }}>
+          <span style={{ fontSize: 18 }}>{info.flag}</span>
+          <div style={{ padding: '4px 9px', borderRadius: 999, background: badge }}>
+            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: '#fff' }}>{info.weeklyCount} / wk</span>
+          </div>
         </div>
         {/* Destination chips */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
