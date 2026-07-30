@@ -554,6 +554,73 @@ export async function GET() {
         }
       })
 
+    // ── Schedule-based ghost fill ───────────────────────────────────────────────
+    // fr24_daily_cache is populated at 02:00 UTC for the PREVIOUS day, so same-day
+    // outbound flights are never cached until the following morning.  For any active
+    // route whose scheduled window covers NOW, inject a synthetic ghost entry so the
+    // map shows the flight enroute.  We check both today and yesterday's Syria date
+    // so midnight-crossing flights (e.g. DAM→MCT 18:30 UTC → arr 23:00 UTC) stay
+    // visible after the aircraft leaves Syrian ADS-B range.
+    {
+      const boardCallsigns = new Set<string>([
+        ...boardDeparted.map(f => f.callsign),
+        ...Array.from(seenCallsigns),
+      ])
+      const SYRIA_OFF = 3 * 3_600_000
+      const todaySy   = new Date(NOW_MS + SYRIA_OFF)
+      const yestSy    = new Date(NOW_MS + SYRIA_OFF - 86_400_000)
+      const DOW       = ['sun','mon','tue','wed','thu','fri','sat']
+      const todayDow  = DOW[todaySy.getUTCDay()]
+      const yestDow   = DOW[yestSy.getUTCDay()]
+      // UTC ms of Syria midnight (00:00 +03:00) for each day
+      const todayBase = Date.UTC(todaySy.getUTCFullYear(), todaySy.getUTCMonth(), todaySy.getUTCDate()) - SYRIA_OFF
+      const yestBase  = todayBase - 86_400_000
+
+      const rmSel = 'dep_time_utc,duration_min,dep_iata,arr_iata,days_of_week,flight_lookup(iata_number,broadcast_callsign,airlines(iata))'
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rmRes = await fetch(
+        `${SB_URL}/rest/v1/route_master?select=${encodeURIComponent(rmSel)}&active=eq.true`,
+        { headers: SB_HEADERS },
+      )
+      if (rmRes.ok) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const rmRows: any[] = await rmRes.json()
+        const GRACE_AFTER_MS = 90 * 60_000
+        const windows: [string, number][] = [[todayDow, todayBase], [yestDow, yestBase]]
+        for (const rm of rmRows) {
+          const fl = rm.flight_lookup
+          if (!fl?.iata_number) continue
+          const callsign = (fl.broadcast_callsign || fl.iata_number) as string
+          if (boardCallsigns.has(callsign)) continue
+          const [dh, dm] = ((rm.dep_time_utc ?? '00:00') as string).slice(0, 5).split(':').map(Number)
+          const depOffMs = (dh * 60 + dm) * 60_000
+          const durMs    = ((rm.duration_min ?? 0) as number) * 60_000
+          for (const [dow, utcBase] of windows) {
+            if (!rm.days_of_week?.includes(dow)) continue
+            const depMs = utcBase + depOffMs
+            const arrMs = depMs + durMs
+            if (NOW_MS >= depMs && NOW_MS <= arrMs + GRACE_AFTER_MS) {
+              boardDeparted.push({
+                callsign,
+                dep_iata:        rm.dep_iata,
+                arr_iata:        rm.arr_iata,
+                duration_min:    rm.duration_min,
+                actual_dep_utc:  new Date(depMs).toISOString(),
+                actual_arr_utc:  null,
+                revised_arr_utc: null,
+                iata_number:     fl.iata_number as string,
+                dep_delay_min:   null,
+                airline_iata:    (fl.airlines?.iata ?? null) as string | null,
+              })
+              boardCallsigns.add(callsign)
+              break
+            }
+          }
+        }
+      }
+    }
+    // ── End schedule-based ghost fill ──────────────────────────────────────────
+
     return NextResponse.json({
       ok:           true,
       aircraft:     [...annotated, ...trackedExtra],
