@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { airportCity, airportFlag as _apFlag, loadGeoData } from '@/lib/geo-data'
@@ -194,15 +194,47 @@ function AirportHero({ airport, totalAirlines, totalFlights }: { airport: string
 }
 
 // ── Airline card ──────────────────────────────────────────────────────────────
-function AirlineCard({ info, onView }: { info: AirlineInfo; onView: () => void }) {
+function AirlineCard({ info, onView, imageUrl, onImageUploaded }: {
+  info: AirlineInfo; onView: () => void; imageUrl?: string; onImageUploaded: (prefix: string, url: string) => void
+}) {
   const badge = info.weeklyCount >= 14 ? C.forest : C.gold
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)
+  const [imgFailed, setImgFailed] = useState(false)
+  useEffect(() => { setImgFailed(false) }, [imageUrl])
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    setUploading(true)
+    try {
+      const form = new FormData()
+      form.append('prefix', info.prefix)
+      form.append('file', file)
+      const res = await fetch('/api/airline-images', { method: 'POST', body: form })
+      const data = await res.json()
+      if (data.ok) onImageUploaded(info.prefix, data.url)
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const showPhoto = imageUrl && !imgFailed
+
   return (
     <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 2px rgba(22,22,22,.05),0 12px 26px -22px rgba(22,22,22,.5)', display: 'flex', flexDirection: 'column' }}>
-      {/* Logo area */}
+      {/* Photo / logo area */}
       <div style={{ position: 'relative', height: 160, background: airlineBg(info.prefix), display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-        <div style={{ width: 88, height: 88, borderRadius: 20, background: 'rgba(255,255,255,.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)' }}>
-          <AirlineLogo prefix={info.prefix} name={info.name} size={68} />
-        </div>
+        {showPhoto ? (
+          <img src={imageUrl} alt={info.name} onError={() => setImgFailed(true)}
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+        ) : (
+          <div style={{ width: 88, height: 88, borderRadius: 20, background: 'rgba(255,255,255,.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)' }}>
+            <AirlineLogo prefix={info.prefix} name={info.name} size={68} />
+          </div>
+        )}
+        {showPhoto && <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,.45) 0%, transparent 60%)' }} />}
         {/* IATA badge top-left */}
         <div style={{ position: 'absolute', left: 12, top: 12, display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 999, background: 'rgba(255,255,255,.92)' }}>
           <span style={{ fontSize: 13 }}>{info.flag}</span>
@@ -212,11 +244,24 @@ function AirlineCard({ info, onView }: { info: AirlineInfo; onView: () => void }
         <div style={{ position: 'absolute', right: 12, top: 12, padding: '5px 10px', borderRadius: 999, background: badge }}>
           <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: '#fff' }}>{info.weeklyCount} / wk</span>
         </div>
+        {/* Upload button bottom-right */}
+        <button onClick={() => fileRef.current?.click()} disabled={uploading}
+          style={{ position: 'absolute', right: 10, bottom: 10, display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 8, background: 'rgba(0,0,0,.38)', backdropFilter: 'blur(8px)', border: '1px solid rgba(255,255,255,.18)', cursor: 'pointer', color: '#fff', font: `600 11px/1 'Instrument Sans',system-ui`, opacity: uploading ? .6 : 1 }}>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          {uploading ? 'Uploading…' : 'Photo'}
+        </button>
+        <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleFile} />
       </div>
       {/* Info */}
       <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 9, flex: 1 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
-          <span style={{ font: `700 16px/1.2 'Instrument Sans',system-ui`, color: C.ink, letterSpacing: '-.01em' }}>{info.name}</span>
+        {/* Airline name + logo */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            <div style={{ width: 32, height: 32, borderRadius: 9, background: C.sunken, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <AirlineLogo prefix={info.prefix} name={info.name} size={26} />
+            </div>
+            <span style={{ font: `700 15px/1.2 'Instrument Sans',system-ui`, color: C.ink, letterSpacing: '-.01em' }}>{info.name}</span>
+          </div>
           {info.minDuration > 0 && <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: C.muted, flexShrink: 0 }}>{fmtDur(info.minDuration)}</span>}
         </div>
         {/* Destination chips */}
@@ -365,12 +410,24 @@ function AirlineSheet({ info, airport, onClose }: { info: AirlineInfo | null; ai
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function AirlinesPage() {
-  const [rows, setRows]       = useState<ScheduleRow[]>([])
-  const [loading, setLoading] = useState(true)
-  const [airport, setAirport] = useState<'DAM'|'ALP'>('DAM')
-  const [selected, setSelected] = useState<AirlineInfo|null>(null)
+  const [rows, setRows]             = useState<ScheduleRow[]>([])
+  const [loading, setLoading]       = useState(true)
+  const [airport, setAirport]       = useState<'DAM'|'ALP'>('DAM')
+  const [selected, setSelected]     = useState<AirlineInfo|null>(null)
+  const [airlineImages, setAirlineImages] = useState<Record<string,string>>({})
 
   useEffect(() => { loadGeoData() }, [])
+
+  useEffect(() => {
+    fetch('/api/airline-images')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.images) setAirlineImages(d.images) })
+      .catch(() => {})
+  }, [])
+
+  const handleImageUploaded = useCallback((prefix: string, url: string) => {
+    setAirlineImages(prev => ({ ...prev, [prefix]: url }))
+  }, [])
 
   useEffect(() => {
     setLoading(true)
@@ -472,7 +529,7 @@ export default function AirlinesPage() {
         ) : (
           <div className="al-grid">
             {airlines.map(a => (
-              <AirlineCard key={a.prefix} info={a} onView={() => setSelected(a)} />
+              <AirlineCard key={a.prefix} info={a} onView={() => setSelected(a)} imageUrl={airlineImages[a.prefix]} onImageUploaded={handleImageUploaded} />
             ))}
           </div>
         )}
