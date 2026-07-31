@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { Suspense, useState, useEffect, useCallback } from 'react'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
-import { airportCity, airportFlag as apFlag, loadGeoData } from '@/lib/geo-data'
+import { airportCity, airportFlag as apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
 
 const Map = dynamic(() => import('@/components/Map'), { ssr: false })
 
@@ -108,16 +108,22 @@ function durationLabel(min: number) {
   return `${Math.floor(min / 60)}h ${min % 60}m`
 }
 
-function fmtISOtoSyria(iso: string): string {
-  const ms = new Date(iso).getTime() + 3 * 3_600_000
-  const d = new Date(ms)
-  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
+function tzOffset(iata: string): number { return airportOffset[iata] ?? 3 }
+
+function utcHHMMtoLocal(hhmm: string, offsetH: number): string {
+  const [h, m] = hhmm.slice(0, 5).split(':').map(Number)
+  const total = ((h * 60 + m + Math.round(offsetH * 60)) % 1440 + 1440) % 1440
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
 }
 
-function fmtUtcHHMM(hhmm: string): string {
-  const [h, m] = hhmm.slice(0, 5).split(':').map(Number)
-  const total = (h * 60 + m + 3 * 60 + 1440) % 1440
-  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+function fmtLocal(raw: string | null | undefined, offsetH: number): string {
+  if (!raw) return '—'
+  if (raw.includes('T')) {
+    const ms = new Date(raw).getTime() + Math.round(offsetH * 3_600_000)
+    const d = new Date(ms)
+    return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
+  }
+  return utcHHMMtoLocal(raw, offsetH)
 }
 
 // ── Airline logo (compact) ───────────────────────────────────────────────────
@@ -160,16 +166,18 @@ function MiniProgress({ depUtc, durationMin, approaching }: { depUtc: string; du
 
   return (
     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-      <div style={{ width: '100%', display: 'flex', alignItems: 'center', height: 16 }}>
-        <div style={{ flex: fill, height: 3, borderRadius: 99, background: dotColor }} />
-        <div style={{ width: 14, height: 14, borderRadius: 7, background: C.surface, border: `1.5px solid ${dotColor}`, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <svg width="6" height="6" viewBox="0 0 10 10" fill={dotColor}><path d="M.7 1.1 9.3 5 .7 8.9 2.5 5z"/></svg>
-        </div>
-        <div style={{ flex: empty, height: 3, borderRadius: 99, background: C.trackEmpty }} />
-      </div>
       <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 9.5, color: C.muted, whiteSpace: 'nowrap' }}>
         {rem > 0 ? `${durationLabel(rem)} left` : 'Arriving soon'}
       </span>
+      <div style={{ width: '100%', display: 'flex', alignItems: 'center', height: 16 }}>
+        <div style={{ flex: fill, height: 3, borderRadius: 99, background: dotColor }} />
+        <div style={{ width: 14, height: 14, borderRadius: 7, background: C.surface, border: `1.5px solid ${dotColor}`, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <svg width="8" height="8" viewBox="0 0 24 24" fill={dotColor} style={{ transform: 'rotate(90deg)' }}>
+            <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
+          </svg>
+        </div>
+        <div style={{ flex: empty, height: 3, borderRadius: 99, background: C.trackEmpty }} />
+      </div>
     </div>
   )
 }
@@ -180,9 +188,11 @@ function MiniFlightCard({ f, isSelected }: { f: InAirFlight; isSelected?: boolea
   const approaching = status === 'Approaching'
   const railColor = approaching ? C.forest : C.forestMid
 
-  const depTime = f.actual_dep_utc ? fmtISOtoSyria(f.actual_dep_utc) : fmtUtcHHMM(f.dep_time_utc)
+  const depOff  = tzOffset(f.dep_iata)
+  const arrOff  = tzOffset(f.arr_iata)
+  const depTime = fmtLocal(f.actual_dep_utc ?? f.revised_dep_utc ?? f.dep_time_utc, depOff)
   const arrMs   = etaMs(f)
-  const arrTime = arrMs ? fmtISOtoSyria(new Date(arrMs).toISOString()) : fmtUtcHHMM(f.arr_time_utc)
+  const arrTime = arrMs ? fmtLocal(new Date(arrMs).toISOString(), arrOff) : fmtLocal(f.arr_time_utc, arrOff)
 
   const depCity  = airportCity[f.dep_iata] ?? f.dep_iata
   const arrCity  = airportCity[f.arr_iata] ?? f.arr_iata
@@ -341,7 +351,7 @@ function InAirPanel({ selectedFlight, open, setOpen }: { selectedFlight?: string
       </div>
 
       {/* Card list */}
-      <div style={{ overflowY: 'auto', overscrollBehavior: 'contain', padding: '10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ overflowY: 'auto', overscrollBehavior: 'contain', padding: '10px', display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minHeight: 0 }}>
         {loading && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '48px 0', gap: 10 }}>
             <div style={{ width: 24, height: 24, border: `2px solid ${C.forestMid}`, borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin .8s linear infinite' }} />
