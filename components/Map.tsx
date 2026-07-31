@@ -1816,34 +1816,42 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
             const spdDisp = a.gs ? Math.round(a.gs).toString() : '—'
             const acType  = a.t ?? null
             const reg     = a.r ?? null
-            const subLine = [acType, reg].filter(Boolean).join(' · ') || 'Overflight'
-            const popup = `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;width:230px">
-              <div style="display:flex;align-items:flex-start;gap:10px;padding:13px 13px 10px">
-                <div style="width:42px;height:42px;border-radius:10px;background:#1e293b;flex-shrink:0;display:flex;align-items:center;justify-content:center">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="#64748b" style="transform:rotate(${trackDeg}deg)"><path d="M21 16v-2l-8-5V3.5C13 2.67 12.33 2 11.5 2S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>
-                </div>
-                <div style="flex:1;min-width:0">
-                  <div style="font-size:15px;font-weight:700;color:#f9fafb;line-height:1.2;letter-spacing:-.01em">${cs}</div>
-                  <div style="font-size:11px;color:#6b7280;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${subLine}</div>
-                </div>
-                <span style="background:#0f172a;border:1px solid #334155;color:#94a3b8;font-size:9px;font-weight:700;padding:3px 7px;border-radius:99px;flex-shrink:0;letter-spacing:.04em;white-space:nowrap;margin-top:1px">OVERFLIGHT</span>
+            const aiata   = airlineIataFor(cs)
+            const alName  = airlineNameFor(aiata)
+            const logoUrl = aiata ? airlineLogo(aiata) : null
+            const logoWhiteBg = aiata ? LOGO_WHITE_BG.has(aiata) : false
+            // Header left: airline logo when known, else a rotated plane icon
+            const logoHtml = logoUrl
+              ? `<img src="${logoUrl}" style="width:46px;height:46px;border-radius:10px;object-fit:contain;${logoWhiteBg ? 'background:#fff;' : 'background:#1e293b;'}padding:4px;flex-shrink:0" onerror="this.src='https://images.flightsfrom.com/airlines/100/${aiata}_100px.png';this.onerror=null">`
+              : `<div style="width:46px;height:46px;border-radius:10px;background:#1e293b;flex-shrink:0;display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="#64748b" style="transform:rotate(${trackDeg}deg)"><path d="M21 16v-2l-8-5V3.5C13 2.67 12.33 2 11.5 2S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg></div>`
+            // Primary line: airline name when known, else callsign
+            const primaryLine = alName
+              ? `<div style="font-size:14px;font-weight:700;color:#f9fafb;line-height:1.2;letter-spacing:-.01em">${alName}</div>
+                 <div style="font-size:11.5px;color:#9ca3af;margin-top:3px;font-variant-numeric:tabular-nums">${cs}${acType ? ' · ' + acType : ''}</div>`
+              : `<div style="font-size:15px;font-weight:700;color:#f9fafb;line-height:1.2;letter-spacing:-.01em;font-variant-numeric:tabular-nums">${cs}</div>
+                 <div style="font-size:11px;color:#6b7280;margin-top:3px">${[acType, reg].filter(Boolean).join(' · ') || 'Unknown airline'}</div>`
+            const popup = `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;width:260px">
+              <div style="display:flex;align-items:flex-start;gap:11px;padding:14px 14px 11px">
+                ${logoHtml}
+                <div style="flex:1;min-width:0">${primaryLine}</div>
+                <span style="background:#0f172a;border:1px solid #334155;color:#94a3b8;font-size:9px;font-weight:700;padding:3px 8px;border-radius:99px;flex-shrink:0;letter-spacing:.04em;white-space:nowrap;margin-top:1px">OVERFLIGHT</span>
               </div>
               <div style="display:grid;grid-template-columns:1fr 1px 1fr;background:#1f2937;border-radius:0 0 14px 14px">
-                <div style="text-align:center;padding:12px 8px">
-                  <div style="font-size:9px;color:#4b5563;font-weight:700;text-transform:uppercase;letter-spacing:.7px;margin-bottom:5px">Altitude</div>
-                  <div style="font-size:20px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums;line-height:1">${altDisp}</div>
-                  <div style="font-size:9.5px;color:#6b7280;margin-top:3px">ft</div>
+                <div style="text-align:center;padding:14px 8px">
+                  <div style="font-size:9px;color:#4b5563;font-weight:700;text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px">Altitude</div>
+                  <div style="font-size:22px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums;line-height:1">${altDisp}</div>
+                  <div style="font-size:10px;color:#6b7280;margin-top:4px">ft</div>
                 </div>
                 <div style="background:#374151"></div>
-                <div style="text-align:center;padding:12px 8px">
-                  <div style="font-size:9px;color:#4b5563;font-weight:700;text-transform:uppercase;letter-spacing:.7px;margin-bottom:5px">Speed</div>
-                  <div style="font-size:20px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums;line-height:1">${spdDisp}</div>
-                  <div style="font-size:9.5px;color:#6b7280;margin-top:3px">kt</div>
+                <div style="text-align:center;padding:14px 8px">
+                  <div style="font-size:9px;color:#4b5563;font-weight:700;text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px">Speed</div>
+                  <div style="font-size:22px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums;line-height:1">${spdDisp}</div>
+                  <div style="font-size:10px;color:#6b7280;margin-top:4px">kt</div>
                 </div>
               </div>
             </div>`
             const mk = L.marker([a.lat, a.lon], { icon, zIndexOffset: -200 })
-            mk.bindPopup(popup, { className: 'fp-popup', closeButton: false, maxWidth: 260 })
+            mk.bindPopup(popup, { className: 'fp-popup', closeButton: false, maxWidth: 280 })
             mk.addTo(map)
             overSyriaMarkersRef.current[cs] = mk
           }
