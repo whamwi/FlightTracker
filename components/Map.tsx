@@ -702,6 +702,23 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           interactive: false,
         }).addTo(map)
       }
+
+      // Syria boundary overlay
+      fetch('/syria_adm0.geojson')
+        .then(r => r.json())
+        .then(geo => {
+          L.geoJSON(geo, {
+            style: {
+              color:       '#3d7a5e',
+              weight:      1.5,
+              opacity:     0.5,
+              fillColor:   '#3d7a5e',
+              fillOpacity: 0.04,
+              interactive: false,
+            },
+          }).addTo(map)
+        })
+        .catch(() => {})
     })
     return () => { mapInstanceRef.current?.remove(); mapInstanceRef.current = null }
   }, [])
