@@ -1324,6 +1324,10 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           markersRef.current[cs].setLatLng([dispLat, dispLon])
           markersRef.current[cs].setIcon(icon)
           if (!embed) markersRef.current[cs].setPopupContent(popup)
+          if (cs === selectedCSRef.current) {
+            const se_ = scheduleRef.current.find(e => e.callsign === cs)
+            drawTrackRoute(markersRef.current[cs], se_?.dep_iata ?? a.dep_iata ?? null, se_?.arr_iata ?? a.arr_iata ?? null)
+          }
         } else {
           const m = L.marker([dispLat, dispLon], { icon }).addTo(map)
           if (embed) {
@@ -1610,6 +1614,9 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           schedMarkersRef.current[callsign].setLatLng([lat, lon])
           schedMarkersRef.current[callsign].setIcon(icon)
           if (!embed) schedMarkersRef.current[callsign].setPopupContent(popup)
+          if (callsign === selectedCSRef.current) {
+            drawTrackRoute(schedMarkersRef.current[callsign], dep_iata, arr_iata)
+          }
         } else {
           const m = L.marker([lat, lon], { icon }).addTo(map)
           const fetchSchedPhoto = (cacheKey: string, apiUrl: string, onLoad: (url: string) => void) => {
