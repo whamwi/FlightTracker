@@ -376,6 +376,13 @@ export async function GET(req: Request) {
           if (!f.sched_arr || f.sched_arr * 1000 <= dayStartMs) continue
           // Skip if flight already landed before today's Syria window began
           if (f.real_arr && f.real_arr * 1000 < dayStartMs) continue
+          // Skip if the plane has inferably landed already (real_dep + block time > 30 min past).
+          // Purpose of this pass is MAP tracking while airborne — once down, keep it on
+          // yesterday's board only; don't duplicate onto today's.
+          if (f.real_dep && f.sched_dep && f.sched_arr) {
+            const blockMs = (f.sched_arr - f.sched_dep) * 1000
+            if (f.real_dep * 1000 + blockMs < Date.now() - 30 * 60_000) continue
+          }
           processDeparture(f, ap, prevDepDate)
         }
       }
