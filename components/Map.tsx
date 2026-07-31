@@ -709,11 +709,11 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         .then(geo => {
           L.geoJSON(geo, {
             style: {
-              color:       '#3d7a5e',
+              color:       '#4a7a30',
               weight:      1.5,
-              opacity:     0.5,
-              fillColor:   '#3d7a5e',
-              fillOpacity: 0.04,
+              opacity:     0.6,
+              fillColor:   '#4a7a30',
+              fillOpacity: 0.06,
               interactive: false,
             },
           }).addTo(map)
