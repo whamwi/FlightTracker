@@ -252,8 +252,7 @@ function MiniFlightCard({ f, isSelected }: { f: InAirFlight; isSelected?: boolea
 }
 
 // ── In-air side panel ────────────────────────────────────────────────────────
-function InAirPanel({ selectedFlight }: { selectedFlight?: string }) {
-  const [open, setOpen]       = useState(true)
+function InAirPanel({ selectedFlight, open, setOpen }: { selectedFlight?: string; open: boolean; setOpen: (v: boolean) => void }) {
   const [flights, setFlights] = useState<InAirFlight[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -367,6 +366,16 @@ function InAirPanel({ selectedFlight }: { selectedFlight?: string }) {
 function HomeInner() {
   const searchParams = useSearchParams()
   const flight = searchParams.get('flight') ?? undefined
+  const [panelOpen, setPanelOpen] = useState(true)
+
+  useEffect(() => {
+    if (window.innerWidth < 640) setPanelOpen(false)
+  }, [])
+
+  useEffect(() => {
+    if (flight) setPanelOpen(false)
+  }, [flight])
+
   return (
     <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column' }}>
       <style>{`
@@ -437,10 +446,10 @@ function HomeInner() {
 
       {/* Map area */}
       <main style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
-        <Map targetFlight={flight} />
+        <Map targetFlight={flight} panelOpen={panelOpen} />
 
         {/* In-air side panel */}
-        <InAirPanel selectedFlight={flight} />
+        <InAirPanel selectedFlight={flight} open={panelOpen} setOpen={setPanelOpen} />
 
         {/* Legend (bottom-right, above bottom nav on mobile) */}
         <div className="map-legend" style={{ position: 'absolute', zIndex: 1000, background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(6px)', borderRadius: 10, padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 5, boxShadow: '0 1px 4px rgba(0,0,0,0.12)' }}>

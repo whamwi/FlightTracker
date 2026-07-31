@@ -558,11 +558,14 @@ function tabDateLabel(offset: number): string {
 }
 
 // ── Plane SVG ─────────────────────────────────────────────────────────────────
-const LogoPlane = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#EDEBE0" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M2 22h20"/>
-    <path d="M6.36 17.4 4 17l-2-4 1.1-.55a2 2 0 0 1 1.8 0l.7.35 1.7-3.4 1.9-.95a2 2 0 0 1 1.8 0l.7.35"/>
-    <path d="m14.5 12.5 2.5-5.5a2 2 0 0 1 1.5-1.1l2.9-.5a1 1 0 0 1 1.1 1.3l-1.1 3a2 2 0 0 1-1.1 1.2L6.4 17.4"/>
+const FlySyriaLogo = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 100 100" fill="none">
+    <circle cx="40" cy="58" r="32" stroke="#054239" strokeWidth="2.6"/>
+    <circle cx="40" cy="58" r="25" fill="#054239" stroke="#054239" strokeWidth="2.6"/>
+    <g transform="rotate(90 40 58)"><path d="M40 33v50M20 38c7 8 7 32 0 40M60 38c-7 8-7 32 0 40M11 58h58" stroke="#EDEBE0" strokeWidth="2.2" strokeLinecap="round"/></g>
+    <g transform="translate(58 4) rotate(-12) scale(1.7)">
+      <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" fill="#B9A779" stroke="#054239" strokeWidth="1.1" strokeLinejoin="round" strokeLinecap="round"/>
+    </g>
   </svg>
 )
 
@@ -574,6 +577,11 @@ export default function BoardPage() {
   const [flights, setFlights] = useState<Flight[]>([])
   const [loading, setLoading] = useState(true)
   const [date, setDate]       = useState('')
+  const [query, setQuery]           = useState('')
+  const [sortMode, setSortMode]     = useState<'time' | 'airline'>('time')
+  const [airlineFilter, setAirlineFilter] = useState<string | null>(null)
+  const [airlinePopover, setAirlinePopover] = useState(false)
+  const airlineBtnRef = useRef<HTMLButtonElement>(null)
 
   type WeeklyStats = {
     from: string; to: string; days: number
@@ -715,20 +723,38 @@ export default function BoardPage() {
 
   const sorted = [...byViewAndAirport]
     .filter(f => effectiveStatus(f) !== 'Unknown')
-    .sort((a, b) => effectiveLocalMin(a, view) - effectiveLocalMin(b, view))
+    .sort((a, b) => sortMode === 'airline'
+      ? a.airline_name.localeCompare(b.airline_name) || effectiveLocalMin(a, view) - effectiveLocalMin(b, view)
+      : effectiveLocalMin(a, view) - effectiveLocalMin(b, view))
+
+  const airlineFiltered = airlineFilter ? sorted.filter(f => f.airline_iata === airlineFilter) : sorted
+
+  const availableAirlines = [...new Map(sorted.map(f => [f.airline_iata, { iata: f.airline_iata, name: f.airline_name, flag: f.country_flag }])).values()]
+    .sort((a, b) => a.name.localeCompare(b.name))
 
   const nowSyriaMinRaw = Math.floor((Date.now() + 3 * 3_600_000) / 60_000) % 1440
 
   // Build pin-aware display order
   const pinnedSet   = pins
   const isPast      = (f: Flight) => effectiveStatus(f) === 'Arrived'
-  const nonPinned   = sorted.filter(f => !pinnedSet.has(f.iata_number))
-  const pinnedArr   = sorted.filter(f => pinnedSet.has(f.iata_number) && isPast(f))
-  const pinnedFwd   = sorted.filter(f => pinnedSet.has(f.iata_number) && !isPast(f))
+  const nonPinned   = airlineFiltered.filter(f => !pinnedSet.has(f.iata_number))
+  const pinnedArr   = airlineFiltered.filter(f => pinnedSet.has(f.iata_number) && isPast(f))
+  const pinnedFwd   = airlineFiltered.filter(f => pinnedSet.has(f.iata_number) && !isPast(f))
   const nonPinnedBefore = nonPinned.filter(f => effectiveLocalMin(f, view) < nowSyriaMinRaw)
   const nonPinnedAfter  = nonPinned.filter(f => effectiveLocalMin(f, view) >= nowSyriaMinRaw)
-  const displayed   = [...nonPinnedBefore, ...pinnedArr, ...pinnedFwd, ...nonPinnedAfter]
+  const preDisplayed = [...nonPinnedBefore, ...pinnedArr, ...pinnedFwd, ...nonPinnedAfter]
   const nowDisplayIdx = tab === 0 ? nonPinnedBefore.length + pinnedArr.length : -1
+
+  const q = query.trim().toLowerCase()
+  const displayed = q
+    ? preDisplayed.filter(f =>
+        f.iata_number.toLowerCase().includes(q) ||
+        f.airline_name.toLowerCase().includes(q) ||
+        f.airline_iata.toLowerCase().includes(q) ||
+        city(f.dep_iata).toLowerCase().includes(q) ||
+        city(f.arr_iata).toLowerCase().includes(q)
+      )
+    : preDisplayed
 
   const total     = sorted.length
   const landed    = sorted.filter(f => ['Arrived', 'Landed'].includes(effectiveStatus(f))).length
@@ -828,10 +854,8 @@ export default function BoardPage() {
       <div className="ft-nav" style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', position: 'sticky', top: 0, zIndex: 20 }}>
 
         {/* Logo */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 9, background: C.forest, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <LogoPlane />
-          </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <FlySyriaLogo />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <span style={{ font: `700 16px/1 'Instrument Sans', system-ui`, color: C.ink, letterSpacing: '-.01em', whiteSpace: 'nowrap' }}>FlySyria Tracker</span>
             <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: C.muted, letterSpacing: '.1em' }}>DAM · ALP</span>
@@ -862,15 +886,22 @@ export default function BoardPage() {
 
         {/* Search — desktop only */}
         <div className="ft-search" style={{
-          width: 260, height: 38, borderRadius: 10, background: C.sunken, border: `1px solid ${C.border}`,
+          width: 260, height: 38, borderRadius: 10, background: C.sunken, border: `1px solid ${query ? C.forest : C.border}`,
           alignItems: 'center', gap: 9, padding: '0 12px',
         }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth="1.9" strokeLinecap="round">
             <circle cx="11" cy="11" r="7"/><path d="m20 20-4.3-4.3"/>
           </svg>
-          <span style={{ font: `500 12.5px/1 'Instrument Sans', system-ui`, color: C.muted }}>Flight number, city or airline</span>
-          <div style={{ flex: 1 }} />
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, fontWeight: 600, color: '#A6A093', background: C.bg, padding: '3px 5px', borderRadius: 4 }}>⌘K</span>
+          <input
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Flight number, city or airline"
+            style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', font: `500 12.5px/1 'Instrument Sans', system-ui`, color: C.ink, minWidth: 0 }}
+          />
+          {query
+            ? <button onClick={() => setQuery('')} style={{ border: 'none', background: 'none', cursor: 'pointer', padding: 0, color: C.muted, fontSize: 14, lineHeight: 1 }}>✕</button>
+            : <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, fontWeight: 600, color: '#A6A093', background: C.bg, padding: '3px 5px', borderRadius: 4, flexShrink: 0 }}>⌘K</span>
+          }
         </div>
 
       </div>
@@ -958,23 +989,64 @@ export default function BoardPage() {
             <div style={{ flex: 1 }} />
 
             {/* Airline filter + Sort — desktop only */}
-            <div className="ft-sort-btns" style={{ gap: 8, alignItems: 'center' }}>
-              <button style={{
+            <div className="ft-sort-btns" style={{ gap: 8, alignItems: 'center', position: 'relative' }}>
+              {/* Airline filter button */}
+              <button ref={airlineBtnRef} onClick={() => setAirlinePopover(p => !p)} style={{
                 display: 'flex', alignItems: 'center', gap: 7, padding: '8px 13px', borderRadius: 10, cursor: 'pointer',
-                background: C.surface, border: `1px solid ${C.border}`, boxShadow: '0 1px 2px rgba(22,22,22,.06)',
+                background: airlineFilter ? C.forest : C.surface,
+                border: `1px solid ${airlineFilter ? C.forest : C.border}`,
+                boxShadow: '0 1px 2px rgba(22,22,22,.06)',
               }}>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                  <line x1="2" y1="4" x2="14" y2="4" stroke={C.secondary} strokeWidth="1.5" strokeLinecap="round"/>
-                  <line x1="4" y1="8" x2="12" y2="8" stroke={C.secondary} strokeWidth="1.5" strokeLinecap="round"/>
-                  <line x1="6" y1="12" x2="10" y2="12" stroke={C.secondary} strokeWidth="1.5" strokeLinecap="round"/>
+                  <line x1="2" y1="4" x2="14" y2="4" stroke={airlineFilter ? '#fff' : C.secondary} strokeWidth="1.5" strokeLinecap="round"/>
+                  <line x1="4" y1="8" x2="12" y2="8" stroke={airlineFilter ? '#fff' : C.secondary} strokeWidth="1.5" strokeLinecap="round"/>
+                  <line x1="6" y1="12" x2="10" y2="12" stroke={airlineFilter ? '#fff' : C.secondary} strokeWidth="1.5" strokeLinecap="round"/>
                 </svg>
-                <span style={{ font: `600 13px/1 'Instrument Sans', system-ui`, color: C.secondary }}>Airline</span>
+                <span style={{ font: `600 13px/1 'Instrument Sans', system-ui`, color: airlineFilter ? '#fff' : C.secondary }}>
+                  {airlineFilter ? (availableAirlines.find(a => a.iata === airlineFilter)?.name ?? airlineFilter) : 'Airline'}
+                </span>
+                {airlineFilter && (
+                  <span onClick={e => { e.stopPropagation(); setAirlineFilter(null); setAirlinePopover(false) }}
+                    style={{ color: 'rgba(255,255,255,.7)', fontSize: 13, lineHeight: 1, cursor: 'pointer' }}>✕</span>
+                )}
               </button>
-              <button style={{
+
+              {/* Airline popover */}
+              {airlinePopover && (
+                <>
+                  <div onClick={() => setAirlinePopover(false)} style={{ position: 'fixed', inset: 0, zIndex: 99 }} />
+                  <div style={{
+                    position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 100,
+                    background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12,
+                    boxShadow: '0 8px 24px -8px rgba(22,22,22,.22)', minWidth: 200, maxHeight: 320, overflowY: 'auto',
+                    padding: '6px 0',
+                  }}>
+                    {availableAirlines.map(a => (
+                      <button key={a.iata} onClick={() => { setAirlineFilter(airlineFilter === a.iata ? null : a.iata); setAirlinePopover(false) }}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '9px 14px',
+                          background: airlineFilter === a.iata ? C.sunken : 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left',
+                        }}>
+                        <span style={{ fontSize: 15 }}>{a.flag}</span>
+                        <span style={{ font: `${airlineFilter === a.iata ? 700 : 500} 12.5px/1 'Instrument Sans', system-ui`, color: airlineFilter === a.iata ? C.forest : C.ink }}>
+                          {a.name}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {/* Sort toggle */}
+              <button onClick={() => setSortMode(m => m === 'time' ? 'airline' : 'time')} style={{
                 display: 'flex', alignItems: 'center', gap: 7, padding: '8px 13px', borderRadius: 10, cursor: 'pointer',
-                background: C.surface, border: `1px solid ${C.border}`, lineHeight: '14px',
+                background: sortMode === 'airline' ? C.sunken : C.surface,
+                border: `1px solid ${sortMode === 'airline' ? C.forest : C.border}`,
+                lineHeight: '14px',
               }}>
-                <span style={{ font: `600 12.5px/14px 'Instrument Sans', system-ui`, color: C.secondary }}>Sort · Scheduled time</span>
+                <span style={{ font: `600 12.5px/14px 'Instrument Sans', system-ui`, color: sortMode === 'airline' ? C.forest : C.secondary }}>
+                  Sort · {sortMode === 'time' ? 'Scheduled time' : 'Airline A→Z'}
+                </span>
               </button>
             </div>
           </div>
