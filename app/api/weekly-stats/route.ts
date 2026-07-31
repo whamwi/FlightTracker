@@ -8,6 +8,15 @@ const HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 
 const SYRIAN = new Set(['DAM', 'ALP', 'LTK'])
 
+const PREFIX_TO_IATA: Record<string, string> = { FYC: 'XH', SYR: 'RB', HST: 'RB' }
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function flightAirlineIata(f: any): string {
+  if (f.airline_iata) return f.airline_iata
+  const num = (f.num ?? '').replace(/\s/g, '')
+  return PREFIX_TO_IATA[num.slice(0, 3)] || num.slice(0, 2)
+}
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
   const airport = searchParams.get('airport')
@@ -21,16 +30,25 @@ export async function GET(req: Request) {
   const toDate   = new Date(todayMs).toLocaleDateString('en-CA', { timeZone: 'Asia/Damascus' })
   const fromDate = new Date(todayMs - (days - 1) * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Asia/Damascus' })
 
-  const res = await fetch(
-    `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=gte.${fromDate}&flight_date=lte.${toDate}&airport_iata=eq.${airport}&select=arrivals,departures`,
-    { headers: HEADERS, next: { revalidate: 3600 } }
-  )
+  const [res, alRes] = await Promise.all([
+    fetch(
+      `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=gte.${fromDate}&flight_date=lte.${toDate}&airport_iata=eq.${airport}&select=arrivals,departures`,
+      { headers: HEADERS, next: { revalidate: 3600 } }
+    ),
+    fetch(
+      `${SB_URL}/rest/v1/airlines?select=iata`,
+      { headers: HEADERS, next: { revalidate: 3600 } }
+    ),
+  ])
   if (!res.ok) {
     return NextResponse.json({ ok: false, error: `cache fetch failed: ${res.status}` }, { status: 502 })
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows: { arrivals: any[]; departures: any[] }[] = await res.json()
+  const knownAirlines = new Set<string>(
+    alRes.ok ? (await alRes.json() as { iata: string }[]).map(r => r.iata) : []
+  )
 
   const arrMap: Record<string, number> = {}
   const depMap: Record<string, number> = {}
@@ -40,12 +58,14 @@ export async function GET(req: Request) {
       const iata = f.dep_iata
       if (!iata || SYRIAN.has(iata)) continue
       if ((f.status ?? '').toLowerCase().includes('cancel')) continue
+      if (!knownAirlines.has(flightAirlineIata(f))) continue
       arrMap[iata] = (arrMap[iata] ?? 0) + 1
     }
     for (const f of (row.departures ?? [])) {
       const iata = f.arr_iata
       if (!iata || SYRIAN.has(iata)) continue
       if ((f.status ?? '').toLowerCase().includes('cancel')) continue
+      if (!knownAirlines.has(flightAirlineIata(f))) continue
       depMap[iata] = (depMap[iata] ?? 0) + 1
     }
   }

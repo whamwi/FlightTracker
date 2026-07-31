@@ -173,7 +173,9 @@ export async function GET(req: Request) {
     }
 
     const airlineIata = f.airline_iata || PREFIX_TO_IATA[num.slice(0, 3)] || ''
-    const al          = airlineMap[airlineIata] ?? { name: f.airline ?? airlineIata, flag: '' }
+    // Reject flights from airlines not in our database — filters out FR24 noise (e.g. Taquan Air K3…)
+    if (!airlineMap[airlineIata]) return
+    const al = airlineMap[airlineIata]
 
     flightMap[key] = {
       iata_number:     num,
