@@ -857,8 +857,7 @@ export default function BoardPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <FlySyriaLogo />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <span style={{ font: `700 16px/1 'Instrument Sans', system-ui`, color: C.ink, letterSpacing: '-.01em', whiteSpace: 'nowrap' }}>FlySyria Tracker</span>
-            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: C.muted, letterSpacing: '.1em' }}>DAM · ALP</span>
+            <span style={{ font: `700 16px/1 'Instrument Sans', system-ui`, color: C.ink, letterSpacing: '-.01em', whiteSpace: 'nowrap' }}>FlySyria</span>
           </div>
         </div>
 
@@ -1232,7 +1231,7 @@ export default function BoardPage() {
 
           {/* Footer */}
           <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 18, display: 'flex', alignItems: 'center', gap: 22, flexWrap: 'wrap' }}>
-            <span style={{ font: `500 11.5px/1 'Instrument Sans', system-ui`, color: C.muted }}>© 2026 FlySyria Tracker</span>
+            <span style={{ font: `500 11.5px/1 'Instrument Sans', system-ui`, color: C.muted }}>© 2026 FlySyria</span>
             <span style={{ font: `500 11.5px/1 'Instrument Sans', system-ui`, color: C.muted }}>Damascus · Aleppo</span>
             <span style={{ font: `500 11.5px/1 'Instrument Sans', system-ui`, color: C.muted }}>Schedule data updated every 60s</span>
             <div style={{ flex: 1 }} />

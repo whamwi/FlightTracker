@@ -8,18 +8,18 @@ export const viewport: Viewport = {
 }
 
 export const metadata: Metadata = {
-  title: 'FlySyria Tracker',
+  title: 'FlySyria',
   description: 'Live flight status for Damascus & Aleppo — real-time arrivals, departures and gate updates.',
   openGraph: {
-    title: 'FlySyria Tracker',
+    title: 'FlySyria',
     description: 'Live flight status for Damascus & Aleppo — real-time arrivals, departures and gate updates.',
     url: 'https://www.flysyria.app',
-    siteName: 'FlySyria Tracker',
+    siteName: 'FlySyria',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'FlySyria Tracker',
+    title: 'FlySyria',
     description: 'Live flight status for Damascus & Aleppo.',
   },
 }

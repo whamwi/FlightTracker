@@ -445,8 +445,7 @@ function HomeInner() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <FlySyriaLogo />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <span style={{ font: `700 16px/1 'Instrument Sans', system-ui`, color: C.ink, letterSpacing: '-.01em', whiteSpace: 'nowrap' }}>FlySyria Tracker</span>
-            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: C.muted, letterSpacing: '.1em' }}>DAM · ALP</span>
+            <span style={{ font: `700 16px/1 'Instrument Sans', system-ui`, color: C.ink, letterSpacing: '-.01em', whiteSpace: 'nowrap' }}>FlySyria</span>
           </div>
         </div>
         <div style={{ marginLeft: 24, gap: 2 }} className="map-desktop-tabs-inline">
