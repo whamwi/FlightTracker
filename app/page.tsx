@@ -296,6 +296,7 @@ function InAirPanel({ selectedFlight, open, setOpen }: { selectedFlight?: string
     return (
       <button
         onClick={() => setOpen(true)}
+        className="fab-pill"
         style={{
           position: 'absolute', left: 12, top: 12, zIndex: 1000,
           display: 'flex', alignItems: 'center', gap: 7,
@@ -392,7 +393,14 @@ function HomeInner() {
       <style>{`
         @keyframes spin { to { transform: rotate(360deg) } }
         @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.35 } }
+        @keyframes fab-attract {
+          0%, 80%, 100% { transform: scale(1); box-shadow: 0 2px 10px rgba(0,0,0,.18); }
+          88% { transform: scale(1.06); box-shadow: 0 6px 22px rgba(5,66,57,.45), 0 0 0 9px rgba(5,66,57,.1); }
+          94% { transform: scale(1.02); box-shadow: 0 3px 14px rgba(5,66,57,.25), 0 0 0 4px rgba(5,66,57,.05); }
+        }
         .live-dot { animation: pulse 2s infinite; }
+        .fab-pill { animation: fab-attract 6s 2s infinite; transition: transform .15s ease, box-shadow .15s ease; }
+        .fab-pill:hover { transform: translateY(-2px) scale(1.04) !important; box-shadow: 0 6px 22px rgba(0,0,0,.28) !important; animation-play-state: paused; }
         .map-top-nav {
           display: flex; align-items: center;
           padding: env(safe-area-inset-top) 16px 0;
