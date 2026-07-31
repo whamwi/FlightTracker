@@ -380,9 +380,7 @@ function HomeInner() {
   const flight = searchParams.get('flight') ?? undefined
   const [panelOpen, setPanelOpen] = useState(true)
 
-  useEffect(() => {
-    if (window.innerWidth < 640) setPanelOpen(false)
-  }, [])
+  // panel starts expanded on all screen sizes
 
   useEffect(() => {
     if (flight) setPanelOpen(false)
@@ -394,12 +392,13 @@ function HomeInner() {
         @keyframes spin { to { transform: rotate(360deg) } }
         @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.35 } }
         @keyframes fab-attract {
-          0%, 80%, 100% { transform: scale(1); box-shadow: 0 2px 10px rgba(0,0,0,.18); }
-          88% { transform: scale(1.06); box-shadow: 0 6px 22px rgba(5,66,57,.45), 0 0 0 9px rgba(5,66,57,.1); }
-          94% { transform: scale(1.02); box-shadow: 0 3px 14px rgba(5,66,57,.25), 0 0 0 4px rgba(5,66,57,.05); }
+          0%, 75%, 100% { transform: scale(1);    box-shadow: 0 2px 10px rgba(0,0,0,.18), 0 0 0 0px rgba(20,120,80,0); }
+          82%           { transform: scale(1.08); box-shadow: 0 4px 20px rgba(20,120,80,.5), 0 0 0 6px rgba(20,120,80,.35); }
+          90%           { transform: scale(1.03); box-shadow: 0 2px 14px rgba(20,120,80,.2), 0 0 0 11px rgba(20,120,80,.1); }
+          97%           { transform: scale(1);    box-shadow: 0 2px 10px rgba(0,0,0,.18), 0 0 0 15px rgba(20,120,80,0); }
         }
         .live-dot { animation: pulse 2s infinite; }
-        .fab-pill { animation: fab-attract 6s 2s infinite; transition: transform .15s ease, box-shadow .15s ease; }
+        .fab-pill { animation: fab-attract 6s 1s infinite; transition: transform .15s ease, box-shadow .15s ease; }
         .fab-pill:hover { transform: translateY(-2px) scale(1.04) !important; box-shadow: 0 6px 22px rgba(0,0,0,.28) !important; animation-play-state: paused; }
         .map-top-nav {
           display: flex; align-items: center;
