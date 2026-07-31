@@ -990,7 +990,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           const predPos: PredictorLivePos = {
             lat:         a.lat,
             lon:         a.lon,
-            track_deg:   typeof a.track === 'number' ? a.track : 0,
+            track_deg:   bestHeading(a),   // cross-checks true_heading vs track
             gs_kts:      a.gs,
             vs_fpm:      0,   // ADS-B feed does not provide vs directly
             altitude_ft: typeof a.alt_baro === 'number' ? a.alt_baro : null,

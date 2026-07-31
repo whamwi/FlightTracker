@@ -573,9 +573,15 @@ export class FlightPredictor {
     const effWRoute = 1 - effWKin
 
     // Linear lat/lon blend is accurate within 0.01° for flights up to 10 000 km.
-    const blendLat   = kinLat   * effWKin + routeLat   * effWRoute
-    const blendLon   = kinLon   * effWKin + routeLon   * effWRoute
-    const blendTrack = lerpAngle(routeTrack, kinTrack, effWKin)
+    const blendLat  = kinLat * effWKin + routeLat * effWRoute
+    const blendLon  = kinLon * effWKin + routeLon * effWRoute
+    // Track sanity: if kinematic heading contradicts the route direction by >90°
+    // it is almost certainly corrupted (GPS spoofing/jamming). Fall back to the
+    // route bearing so the icon at least points the right way.
+    const trackDiff  = Math.abs(((kinTrack - routeTrack) + 540) % 360 - 180)
+    const blendTrack = trackDiff > 90
+      ? routeTrack
+      : lerpAngle(routeTrack, kinTrack, effWKin)
 
     return { lat: blendLat, lon: blendLon, track_deg: blendTrack, altitude_ft: kinAlt }
   }
