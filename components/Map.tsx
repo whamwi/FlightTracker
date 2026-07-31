@@ -1226,25 +1226,35 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           } else if (a.gs && a.track &&
               (schedEntry == null || fraction !== null ||
                (typeof a.alt_baro === 'number' && a.alt_baro > 2_000))) {
-            // Fallback: kinematic dead-reckoning
-            const projDistKm = a.gs * 1.852 * (elapsed / 3_600_000)
-            const destDists  = [a.dep_iata, a.arr_iata]
-              .filter((ap): ap is string => !!ap && !!AIRPORT_COORDS[ap])
-              .map(ap => greatCircleKm(a.lat, a.lon, AIRPORT_COORDS[ap][0], AIRPORT_COORDS[ap][1]))
-            const minDestKm = destDists.length ? Math.min(...destDists) : Infinity
-            if (projDistKm < minDestKm) {
-              const [pLat, pLon] = projectPosition(a.lat, a.lon, a.track, a.gs, elapsed)
-              dispLat = pLat; dispLon = pLon; projected = true
+            // Fallback: kinematic dead-reckoning (no waypoints available)
+            // Use _apCoords (full DB airport map) so European destinations like DUS are included
+            const arrAp  = schedEntry?.arr_iata ?? a.arr_iata ?? null
+            const depAp  = schedEntry?.dep_iata ?? a.dep_iata ?? null
+            const arrApC = arrAp ? _apCoords[arrAp] : null
+            const depApC = depAp ? _apCoords[depAp] : null
+            // If the last fix was within 15 km of the arrival airport, snap immediately
+            if (arrApC && greatCircleKm(a.lat, a.lon, arrApC[0], arrApC[1]) < 15) {
+              dispLat = arrApC[0]; dispLon = arrApC[1]; arrSnapped = true; projected = true
             } else {
-              const bestAp = ([a.arr_iata, a.dep_iata].find(ap => ap && AIRPORT_COORDS[ap]) ?? '')
-              if (AIRPORT_COORDS[bestAp]) {
-                const apC = AIRPORT_COORDS[bestAp]
-                const bearingToAp = (Math.atan2(
-                  (apC[1] - a.lon) * Math.cos(a.lat * Math.PI / 180),
-                  apC[0] - a.lat
-                ) * 180 / Math.PI + 360) % 360
-                const headingDiff = Math.abs(((a.track - bearingToAp) + 180) % 360 - 180)
-                if (headingDiff < 90) { dispLat = apC[0]; dispLon = apC[1]; arrSnapped = true }
+              const projDistKm = a.gs * 1.852 * (elapsed / 3_600_000)
+              const destDists  = [arrApC, depApC]
+                .filter((c): c is [number, number] => !!c)
+                .map(c => greatCircleKm(a.lat, a.lon, c[0], c[1]))
+              const minDestKm = destDists.length ? Math.min(...destDists) : Infinity
+              if (projDistKm < minDestKm) {
+                const [pLat, pLon] = projectPosition(a.lat, a.lon, a.track, a.gs, elapsed)
+                dispLat = pLat; dispLon = pLon; projected = true
+              } else {
+                // Snap to arrival if heading toward it, otherwise departure
+                const snapC = arrApC ?? depApC
+                if (snapC) {
+                  const bearingToAp = (Math.atan2(
+                    (snapC[1] - a.lon) * Math.cos(a.lat * Math.PI / 180),
+                    snapC[0] - a.lat
+                  ) * 180 / Math.PI + 360) % 360
+                  const headingDiff = Math.abs(((a.track - bearingToAp) + 180) % 360 - 180)
+                  if (headingDiff < 90) { dispLat = snapC[0]; dispLon = snapC[1]; arrSnapped = !!arrApC }
+                }
               }
             }
           }
