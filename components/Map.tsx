@@ -541,6 +541,28 @@ function buildEmbedFlight(callsign: string, se: ScheduleEntry | null, fs: Flight
   }
 }
 
+// ── Over-Syria geofence ──────────────────────────────────────────────────────
+function _raycast(lat: number, lon: number, ring: number[][]): boolean {
+  let inside = false
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j]
+    if (((yi > lat) !== (yj > lat)) && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi)
+      inside = !inside
+  }
+  return inside
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function isInSyria(lat: number, lon: number, geo: any): boolean {
+  if (!geo) return false
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const feat of (geo.features ?? [{ geometry: geo }])) {
+    const g = feat.geometry ?? feat
+    if (g.type === 'Polygon'      && _raycast(lat, lon, g.coordinates[0]))              return true
+    if (g.type === 'MultiPolygon' && g.coordinates.some((p: number[][][]) => _raycast(lat, lon, p[0]))) return true
+  }
+  return false
+}
+
 export default function Map({ embed = false, targetFlight, panelOpen }: { embed?: boolean; targetFlight?: string; panelOpen?: boolean }) {
   const mapRef          = useRef<HTMLDivElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -600,6 +622,13 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
   const [loading, setLoading] = useState(true)
   const [loadMs, setLoadMs]   = useState(0)
   const firstLoadDoneRef      = useRef(false)
+
+  // ── Over-Syria feature state ─────────────────────────────────────────────
+  const [overSyriaOn, setOverSyriaOn]       = useState(false)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const syriaGeoRef                          = useRef<any>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const overSyriaMarkersRef                  = useRef<Record<string, any>>({})
 
   useEffect(() => {
     if (!loading) return
@@ -1745,10 +1774,94 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
     return () => { clearInterval(interval); fetchUpdateRef.current = null }
   }, [])
 
+  // ── Load Syria GeoJSON once for geofence checks ──────────────────────────
+  useEffect(() => {
+    fetch('/syria_adm0.geojson').then(r => r.json()).then(geo => { syriaGeoRef.current = geo }).catch(() => {})
+  }, [])
+
+  // ── Over-Syria poll loop ─────────────────────────────────────────────────
+  useEffect(() => {
+    if (!overSyriaOn) {
+      Object.values(overSyriaMarkersRef.current).forEach((m: any) => m.remove())  // eslint-disable-line
+      overSyriaMarkersRef.current = {}
+      return
+    }
+    const poll = async () => {
+      const map = mapInstanceRef.current
+      if (!map || !syriaGeoRef.current) return
+      const L = (await import('leaflet')).default
+      try {
+        const res  = await fetch('/api/airspace')
+        const data = await res.json()
+        if (!data.ok) return
+        const seen = new Set<string>()
+        for (const a of (data.aircraft as Aircraft[])) {
+          if (a.board_match) continue
+          const cs = (a.flight ?? '').trim()
+          if (!cs || typeof a.lat !== 'number' || typeof a.lon !== 'number') continue
+          if (!isInSyria(a.lat, a.lon, syriaGeoRef.current)) continue
+          seen.add(cs)
+          if (overSyriaMarkersRef.current[cs]) {
+            overSyriaMarkersRef.current[cs].setLatLng([a.lat, a.lon])
+          } else {
+            const icon = L.divIcon({
+              className: '',
+              html: `<div style="width:24px;height:24px;background:#475569;border:2px solid #fff;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 5px rgba(0,0,0,.35)"><svg width="11" height="11" viewBox="0 0 24 24" fill="#fff"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg></div>`,
+              iconSize:   [24, 24],
+              iconAnchor: [12, 12],
+            })
+            const alt   = typeof a.alt_baro === 'number' ? `${Math.round(a.alt_baro / 100) * 100} ft` : 'alt unknown'
+            const speed = a.gs ? `${Math.round(a.gs)} kt` : ''
+            const popup = `<b>${cs}</b><br><span style="opacity:.7">Overflight · not on board</span><br>${alt}${speed ? ' · ' + speed : ''}`
+            const mk = L.marker([a.lat, a.lon], { icon, zIndexOffset: -200 })
+            mk.bindPopup(popup, { className: 'fp-popup', closeButton: false, maxWidth: 220 })
+            mk.addTo(map)
+            overSyriaMarkersRef.current[cs] = mk
+          }
+        }
+        for (const cs of Object.keys(overSyriaMarkersRef.current)) {
+          if (!seen.has(cs)) {
+            overSyriaMarkersRef.current[cs].remove()
+            delete overSyriaMarkersRef.current[cs]
+          }
+        }
+      } catch { /* silent */ }
+    }
+    poll()
+    const iv = setInterval(poll, 15_000)
+    return () => {
+      clearInterval(iv)
+      Object.values(overSyriaMarkersRef.current).forEach((m: any) => m.remove())  // eslint-disable-line
+      overSyriaMarkersRef.current = {}
+    }
+  }, [overSyriaOn])
+
   return (
     <div className="relative w-full h-full">
       <style>{`@keyframes ft-spin{to{transform:rotate(360deg)}}`}</style>
       <div ref={mapRef} className="w-full h-full" />
+      {!embed && (
+        <button
+          onClick={() => setOverSyriaOn(v => !v)}
+          title="Show non-board aircraft currently inside Syrian airspace"
+          style={{
+            position: 'absolute', top: 82, right: 10, zIndex: 1000,
+            background: overSyriaOn ? '#054239' : '#fff',
+            color:      overSyriaOn ? '#fff'    : '#333',
+            border: '2px solid rgba(0,0,0,.2)',
+            borderRadius: 4, padding: '4px 8px',
+            fontSize: 11, fontWeight: 700, cursor: 'pointer',
+            fontFamily: "'Instrument Sans', system-ui", letterSpacing: '-.01em',
+            display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap',
+            boxShadow: '0 1px 5px rgba(0,0,0,.15)', lineHeight: 1.4,
+          }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
+          </svg>
+          Over Syria
+        </button>
+      )}
       {loading && !embed && (
         <div style={{
           position: 'absolute', inset: 0, zIndex: 2000,
