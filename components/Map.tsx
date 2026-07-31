@@ -1324,7 +1324,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           markersRef.current[cs].setLatLng([dispLat, dispLon])
           markersRef.current[cs].setIcon(icon)
           if (!embed) markersRef.current[cs].setPopupContent(popup)
-          if (cs === selectedCSRef.current) {
+          if (cs === highlightedCSRef.current || cs === selectedCSRef.current) {
             const se_ = scheduleRef.current.find(e => e.callsign === cs)
             drawTrackRoute(markersRef.current[cs], se_?.dep_iata ?? a.dep_iata ?? null, se_?.arr_iata ?? a.arr_iata ?? null)
           }
@@ -1614,7 +1614,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           schedMarkersRef.current[callsign].setLatLng([lat, lon])
           schedMarkersRef.current[callsign].setIcon(icon)
           if (!embed) schedMarkersRef.current[callsign].setPopupContent(popup)
-          if (callsign === selectedCSRef.current) {
+          if (callsign === highlightedCSRef.current || callsign === selectedCSRef.current) {
             drawTrackRoute(schedMarkersRef.current[callsign], dep_iata, arr_iata)
           }
         } else {
