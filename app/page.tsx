@@ -150,7 +150,7 @@ function MiniLogo({ iata, name }: { iata: string; name: string }) {
 }
 
 // ── Live progress bar (mini) ─────────────────────────────────────────────────
-function MiniProgress({ depUtc, durationMin, approaching }: { depUtc: string; durationMin: number; approaching: boolean }) {
+function MiniProgress({ depUtc, durationMin, approaching, accentColor }: { depUtc: string; durationMin: number; approaching: boolean; accentColor?: string }) {
   const calc = () => Math.min(100, Math.max(0, ((Date.now() - new Date(depUtc).getTime()) / (durationMin * 60_000)) * 100))
   const [pct, setPct] = useState(calc)
   useEffect(() => {
@@ -162,7 +162,7 @@ function MiniProgress({ depUtc, durationMin, approaching }: { depUtc: string; du
   const fill  = Math.max(2, pct)
   const empty = Math.max(2, 100 - pct)
   const rem   = Math.round((1 - pct / 100) * durationMin)
-  const dotColor = approaching ? C.forest : C.forestMid
+  const dotColor = accentColor ?? (approaching ? C.forest : C.forestMid)
 
   return (
     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
@@ -186,7 +186,8 @@ function MiniProgress({ depUtc, durationMin, approaching }: { depUtc: string; du
 function MiniFlightCard({ f, isSelected }: { f: InAirFlight; isSelected?: boolean }) {
   const status = panelEffectiveStatus(f)
   const approaching = status === 'Approaching'
-  const railColor = approaching ? C.forest : C.forestMid
+  const isAlp = f.dep_iata === 'ALP' || f.arr_iata === 'ALP'
+  const railColor = isAlp ? '#f97316' : (approaching ? C.forest : C.forestMid)
 
   const depOff  = tzOffset(f.dep_iata)
   const arrOff  = tzOffset(f.arr_iata)
@@ -241,7 +242,7 @@ function MiniFlightCard({ f, isSelected }: { f: InAirFlight; isSelected?: boolea
 
           {/* Progress */}
           {f.actual_dep_utc && f.duration_min > 0 ? (
-            <MiniProgress depUtc={f.actual_dep_utc} durationMin={f.duration_min} approaching={approaching} />
+            <MiniProgress depUtc={f.actual_dep_utc} durationMin={f.duration_min} approaching={approaching} accentColor={isAlp ? '#f97316' : undefined} />
           ) : (
             <div style={{ flex: 1, height: 3, borderRadius: 99, background: C.trackEmpty }} />
           )}
