@@ -449,13 +449,13 @@ function FlightCard({ f, view, isPinned, onTogglePin }: { f: Flight; view: View;
         {/* Arr */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5, width: 96, alignItems: 'flex-end', minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ fontSize: 13, flexShrink: 0 }}>{airportFlag(f.arr_iata)}</span>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 1, alignItems: 'flex-end', minWidth: 0 }}>
               <span style={{ font: `600 13px/1.1 'Instrument Sans', system-ui`, color: isCancelled ? C.secondary : C.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {city(f.arr_iata)}
               </span>
               <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: C.muted, letterSpacing: '.06em' }}>{f.arr_iata}</span>
             </div>
-            <span style={{ fontSize: 13, flexShrink: 0 }}>{airportFlag(f.arr_iata)}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
             {!isCancelled && isArr && <DelayChip min={arrDelay} />}
