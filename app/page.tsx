@@ -265,6 +265,7 @@ function MiniFlightCard({ f, isSelected }: { f: InAirFlight; isSelected?: boolea
 function InAirPanel({ selectedFlight, open, setOpen }: { selectedFlight?: string; open: boolean; setOpen: (v: boolean) => void }) {
   const [flights, setFlights] = useState<InAirFlight[]>([])
   const [loading, setLoading] = useState(true)
+  const [geoReady, setGeoReady] = useState(false)
 
   const load = useCallback(async () => {
     const d = new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10)
@@ -282,7 +283,7 @@ function InAirPanel({ selectedFlight, open, setOpen }: { selectedFlight?: string
   }, [])
 
   useEffect(() => {
-    loadGeoData()
+    loadGeoData().then(() => setGeoReady(true))
     load()
     const t = setInterval(load, 60_000)
     return () => clearInterval(t)
