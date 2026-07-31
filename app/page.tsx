@@ -380,7 +380,9 @@ function HomeInner() {
   const flight = searchParams.get('flight') ?? undefined
   const [panelOpen, setPanelOpen] = useState(true)
 
-  // panel starts expanded on all screen sizes
+  useEffect(() => {
+    if (window.innerWidth < 640) setPanelOpen(false)
+  }, [])
 
   useEffect(() => {
     if (flight) setPanelOpen(false)
