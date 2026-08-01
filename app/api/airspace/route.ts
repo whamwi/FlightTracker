@@ -317,16 +317,19 @@ let signalCache: { flights: SignalFlight[]; ts: number } | null = null
 async function fetchSignalFlights(): Promise<SignalFlight[]> {
   if (signalCache && Date.now() - signalCache.ts < 30_000) return signalCache.flights
   const today   = new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10)
-  // Only include flights that became airborne within the last 8 hours — covers the longest
-  // Syrian route (DAM→AMS ~4.5h). Using airborne_at, not last_seen_at: a flight leaving
-  // the Syria radius 20 min after takeoff would have last_seen ~2h ago on a 3h flight,
-  // which a tight last_seen cutoff would incorrectly exclude.
-  const cutoff  = new Date(Date.now() - 8 * 3_600_000).toISOString()
+  // Only include flights that became airborne within the last 6 hours — the longest
+  // Syrian route is DAM→AMS at ~4.5h, so 6h gives a 1.5h buffer before we stop tracking.
+  // Using airborne_at, not last_seen_at: a flight leaving the Syria radius 20 min after
+  // takeoff would have last_seen ~2h ago on a 3h flight, which a last_seen cutoff would
+  // incorrectly exclude. Sort by airborne_at desc so same-hex aircraft (two legs same day)
+  // yield the most recent leg first — the seenHex dedup then keeps the right one.
+  const cutoff  = new Date(Date.now() - 6 * 3_600_000).toISOString()
   try {
     const res = await fetch(
       `${SB_URL}/rest/v1/flight_signal_log`
       + `?flight_date=eq.${today}&actual_arr_at=is.null&airborne_at=not.is.null&hex=not.is.null`
       + `&airborne_at=gte.${cutoff}`
+      + `&order=airborne_at.desc`
       + `&select=callsign,hex,dep_iata,arr_iata,flight_date`,
       { headers: SB_HEADERS, signal: AbortSignal.timeout(5000) }
     )
