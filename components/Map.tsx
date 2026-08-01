@@ -5,7 +5,12 @@ import { useEffect, useRef, useState } from 'react'
 import { FlightPredictor } from '@/lib/flight-predictor'
 import type { LivePosition as PredictorLivePos } from '@/lib/flight-predictor'
 import { airlineLogo, LOGO_WHITE_BG } from '@/lib/airlines'
+import { TrackerStore, type FlightInput } from '@/lib/tracker-store'
 import VideoBox from './VideoBox'
+
+// Path-anchored motion: markers are positioned by the animation loop rather than written
+// once per poll. Set false to fall back to the poll writing positions directly.
+const RAF_MOTION = true
 import PhotoBox from './PhotoBox'
 
 interface Aircraft {
@@ -624,6 +629,10 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
   const kinematicStateRef = useRef<Record<string, KinematicState>>({})
   // One FlightPredictor per callsign — handles hybrid DR + smooth recovery for ADS-B entries.
   const predictorRef      = useRef<Record<string, FlightPredictor>>({})
+  // Path-anchored trackers, one per airborne flight, driving the animation loop.
+  const storeRef          = useRef<TrackerStore>(new TrackerStore())
+  const storeInputsRef    = useRef<FlightInput[]>([])
+  const lastFedPosRef     = useRef<Record<string, string>>({})
 
   const [error, setError]     = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -782,6 +791,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
   // ── Poll loop ───────────────────────────────────────────────────────────────
   useEffect(() => {
     const fetchAndUpdate = async () => {
+      storeInputsRef.current = []
       const L   = (await import('leaflet')).default
       const map = mapInstanceRef.current
       if (!map) return
@@ -1388,8 +1398,41 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           dispLon = p.lng + BLEND * (dispLon - p.lng)
         }
 
+        // Feed the path tracker. Only a fix and an arrival estimate go in; where the
+        // aircraft is drawn comes from the animation loop, not from here.
+        if (RAF_MOTION && !arrSnapped) {
+          const dep = a.dep_iata ?? null
+          const arr = a.arr_iata ?? null
+          const depC = dep ? _apCoords[dep] : null
+          const arrC = arr ? _apCoords[arr] : null
+          const depAt = a.actual_dep_utc ? Date.parse(a.actual_dep_utc) : null
+          if (depC && arrC && depAt && Number.isFinite(depAt)) {
+            const wps = dep && arr ? routePathsRef.current[`${dep}|${arr}`] : undefined
+            // Offer a fix only when the reported position actually moved, otherwise the
+            // same stale position would keep dragging the rate down every poll.
+            const posKey = `${a.lat},${a.lon}`
+            const moved  = lastFedPosRef.current[cs] !== posKey
+            if (moved) lastFedPosRef.current[cs] = posKey
+            storeInputsRef.current.push({
+              callsign:       cs,
+              variants:       wps && wps.length >= 2 ? [wps] : [],
+              dep_coords:     depC,
+              arr_coords:     arrC,
+              departed_at_ms: depAt,
+              eta_ms:         a.duration_min ? depAt + a.duration_min * 60_000 : null,
+              duration_ms:    a.duration_min ? a.duration_min * 60_000 : null,
+              fix: (moved && isLive) ? {
+                lat: a.lat, lon: a.lon, at_ms: now,
+                gs_kts: a.gs ?? null, track_deg: a.track ?? null,
+                altitude_ft: typeof a.alt_baro === 'number' ? a.alt_baro : null,
+              } : null,
+            })
+          }
+        }
+
         if (markersRef.current[cs]) {
-          markersRef.current[cs].setLatLng([dispLat, dispLon])
+          // The animation loop owns position for flights the tracker manages.
+          if (!(RAF_MOTION && storeRef.current.has(cs))) markersRef.current[cs].setLatLng([dispLat, dispLon])
           markersRef.current[cs].setIcon(icon)
           if (!embed) markersRef.current[cs].setPopupContent(popup)
           if (cs === highlightedCSRef.current || cs === selectedCSRef.current) {
@@ -1678,8 +1721,32 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         activeSchedKeys.add(callsign)
         if (!arrived) activeSchedEnRoute.add(callsign)
 
+        // Schedule-overlay flights have no live fix at all — a departure time, a route and
+        // an arrival estimate is everything they get, which is precisely what the rate
+        // channel was built for. These are also the flights that step once per poll today,
+        // since ADS-B is frequently returning nothing for the region.
+        if (RAF_MOTION && !arrived && !pinToLastPos) {
+          const depAt = fs?.actual_dep_utc ? Date.parse(fs.actual_dep_utc) : null
+          if (depAt && Number.isFinite(depAt)) {
+            const revised = fs?.revised_arr_utc ? Date.parse(fs.revised_arr_utc) : null
+            storeInputsRef.current.push({
+              callsign,
+              variants:       wps && wps.length >= 2 ? [wps] : [],
+              dep_coords:     depC,
+              arr_coords:     arrC,
+              departed_at_ms: depAt,
+              eta_ms:         revised && Number.isFinite(revised)
+                                ? revised
+                                : entry.duration_min ? depAt + entry.duration_min * 60_000 : null,
+              duration_ms:    entry.duration_min ? entry.duration_min * 60_000 : null,
+              fix:            null,
+            })
+          }
+        }
+
         if (schedMarkersRef.current[callsign]) {
-          schedMarkersRef.current[callsign].setLatLng([lat, lon])
+          // The animation loop owns position for flights the tracker manages.
+          if (!(RAF_MOTION && storeRef.current.has(callsign))) schedMarkersRef.current[callsign].setLatLng([lat, lon])
           schedMarkersRef.current[callsign].setIcon(icon)
           if (!embed) schedMarkersRef.current[callsign].setPopupContent(popup)
           if (callsign === highlightedCSRef.current || callsign === selectedCSRef.current) {
@@ -1788,12 +1855,40 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         const total = Object.keys(markersRef.current).length + activeSchedEnRoute.size
         rnPost({ type: 'COUNT', count: total })
       }
+
+      // Reconcile the trackers with this poll: new flights start, landed ones are
+      // dropped, fixes and revised arrivals are handed over. Nothing here moves a marker.
+      if (RAF_MOTION) storeRef.current.update(storeInputsRef.current, Date.now())
     }
 
     fetchUpdateRef.current = fetchAndUpdate
     fetchAndUpdate()
     const interval = setInterval(fetchAndUpdate, 10_000)
     return () => { clearInterval(interval); fetchUpdateRef.current = null }
+  }, [])
+
+  // ── Animation loop ─────────────────────────────────────────────────────────
+  // Ask each tracker where its flight is on every frame. Progress is a scalar advancing
+  // at a known rate, so this is answerable at any instant — which is what makes the
+  // 10-second poll cadence invisible instead of a visible step.
+  useEffect(() => {
+    if (!RAF_MOTION) return
+    // Debug handle: lets the tracker state be inspected from the console.
+    ;(window as unknown as Record<string, unknown>).__trackerStore = storeRef.current
+    let raf = 0
+    const step = () => {
+      const now   = Date.now()
+      const store = storeRef.current
+      for (const cs of store.callsigns()) {
+        const m = markersRef.current[cs] ?? schedMarkersRef.current[cs]
+        if (!m) continue
+        const p = store.position(cs, now)
+        if (p) m.setLatLng([p.lat, p.lon])
+      }
+      raf = requestAnimationFrame(step)
+    }
+    raf = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(raf)
   }, [])
 
   // ── Load Syria GeoJSON once for geofence checks ──────────────────────────
