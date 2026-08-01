@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 import { FlightPredictor } from '@/lib/flight-predictor'
 import type { LivePosition as PredictorLivePos } from '@/lib/flight-predictor'
 import { airlineLogo, LOGO_WHITE_BG } from '@/lib/airlines'
+import VideoBox from './VideoBox'
 
 interface Aircraft {
   hex: string
@@ -335,6 +336,8 @@ function buildPopup(
     ? `<span style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;padding:2px 5px;border-radius:99px;margin-left:5px;line-height:1.4">${min > 0 ? '+' : ''}${min}m</span>`
     : ''
 
+  const fillPct  = fraction != null ? Math.max(1, Math.round(fraction * 100))           : 0
+  const emptyPct = fraction != null ? Math.max(1, Math.round((1 - fraction) * 100)) : 100
   const progressHtml = (dep && arr)
     ? `<div style="padding:4px 14px 12px">
         ${etaStr ? `<div style="text-align:center;color:#9ca3af;font-size:11px;margin-bottom:8px">${etaStr}</div>` : ''}
@@ -343,10 +346,13 @@ function buildPopup(
             <div style="font-size:12px;color:#d1d5db;white-space:nowrap">${_apFlag[dep] ?? ''} ${iataCity(dep)}</div>
             <div style="font-size:10px;color:#6b7280;font-family:monospace">${dep}</div>
           </div>
-          <div style="flex:1;position:relative;height:3px;background:#374151;border-radius:2px">
+          <div style="flex:1;display:flex;flex-direction:row;align-items:center;height:20px">
+            <div style="flex:${fillPct};height:4px;border-radius:99px;background:${fraction!=null?'#3b82f6':'#374151'};min-width:0"></div>
             ${fraction != null ? `
-              <div style="width:${Math.round(fraction*100)}%;height:100%;background:#3b82f6;border-radius:2px"></div>
-              <span style="position:absolute;top:50%;transform:translateY(-50%) translateX(-50%);left:${Math.round(fraction*100)}%;color:#3b82f6;font-size:12px;line-height:1;pointer-events:none">✈</span>
+              <div style="width:18px;height:18px;border-radius:9px;background:#1e293b;flex-shrink:0;border:1.5px solid #3b82f6;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 5px rgba(59,130,246,.3)">
+                <svg width="9" height="9" viewBox="0 0 10 10" fill="#3b82f6"><path d="M.7 1.1 9.3 5 .7 8.9 2.5 5z"/></svg>
+              </div>
+              <div style="flex:${emptyPct};height:4px;border-radius:99px;background:#374151;min-width:0"></div>
             ` : ''}
           </div>
           <div style="text-align:right">
@@ -629,6 +635,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
   const syriaGeoRef                          = useRef<any>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const overSyriaMarkersRef                  = useRef<Record<string, any>>({})
+  const lastLoggedPosRef = useRef<Record<string, { lat: number; lon: number; alt: number | null }>>({})
 
   useEffect(() => {
     if (!loading) return
@@ -718,6 +725,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         [25.3285, 55.5172], // SHJ
         [51.2895,  6.7668], // DUS
         [52.3667, 13.5033], // BER
+        [36.8987, 30.7999], // AYT
       ]
       for (const coords of SERVICED) {
         L.circle(coords, {
@@ -947,6 +955,10 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           const alt = typeof a.alt_baro === 'number' ? a.alt_baro
                     : a.alt_baro === 'ground'        ? 0
                     : null
+          // Skip if position unchanged since last log (stale ADS-B tick)
+          const prev = lastLoggedPosRef.current[cs]
+          if (prev && prev.lat === a.lat && prev.lon === a.lon && prev.alt === alt) return []
+          lastLoggedPosRef.current[cs] = { lat: a.lat, lon: a.lon, alt }
           return [{
             callsign:    cs,
             flight_date: syriaDt,
@@ -1873,6 +1885,126 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
     }
   }, [overSyriaOn])
 
+  // ── OpenSky hex-pull loop ─────────────────────────────────────────────────
+  // Tracks our scheduled flights globally — beyond the 700nm radius feed.
+  // Browser-side fetch avoids datacenter IP block on opensky-network.org.
+  useEffect(() => {
+    const MS_TO_KTS = 1.94384
+    const M_TO_FT   = 3.28084
+
+    const poll = async () => {
+      // 1. Get active flight hex list (30s server cache — safe to call every cycle)
+      let hexFlights: { callsign: string; hex: string; dep_iata: string | null; arr_iata: string | null; flight_date: string }[]
+      try {
+        const r = await fetch('/api/opensky-hexes')
+        if (!r.ok) return
+        hexFlights = (await r.json()).flights ?? []
+      } catch { return }
+      if (!hexFlights.length) return
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const hexMap: Record<string, any> = {}
+      for (const f of hexFlights) hexMap[f.hex.toLowerCase()] = f
+
+      // 2. Query OpenSky from browser (residential IP — never blocked)
+      const hexList = Object.keys(hexMap).join(',')
+      let states: unknown[][] = []
+      try {
+        const r = await fetch(`https://opensky-network.org/api/states/all?icao24=${hexList}`, {
+          headers: { 'User-Agent': 'FlightTracker/1.0' },
+        })
+        if (!r.ok) return
+        states = ((await r.json()) as { states?: unknown[][] }).states ?? []
+      } catch { return }
+
+      if (!states.length) return
+
+      const now   = Date.now()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const batch: any[] = []
+
+      for (const s of states) {
+        const icao24 = (s[0] as string).toLowerCase()
+        const lat    = s[6] as number | null
+        const lon    = s[5] as number | null
+        if (lat == null || lon == null) continue
+
+        const flight = hexMap[icao24]
+        if (!flight) continue
+
+        const cs = flight.callsign
+
+        // Skip if already live in radius feed — don't override fresher ADS-B
+        const existing = trackedRef.current[cs]
+        if (existing && existing.lostAt === 0 && !existing.isFr24) continue
+
+        const alt_baro = s[7] != null ? Math.round((s[7] as number) * M_TO_FT)   : null
+        const gs       = s[9] != null ? Math.round((s[9] as number) * MS_TO_KTS) : null
+        const track    = s[10] as number | null
+        const on_gnd   = Boolean(s[8])
+
+        if (on_gnd || (alt_baro ?? 0) < 500 || (gs ?? 0) < 50) continue
+
+        // Enrich with schedule/status already loaded in this component
+        const se = scheduleRef.current.find(e => e.callsign === cs)
+        const fs = flightStatusRef.current[cs] ?? null
+
+        const aircraft: Aircraft = {
+          hex:            icao24,
+          flight:         cs,
+          lat,
+          lon,
+          alt_baro,
+          gs,
+          track,
+          true_heading:   track,
+          t:              null,
+          r:              null,
+          board_match:    true,
+          dep_iata:       flight.dep_iata,
+          arr_iata:       flight.arr_iata,
+          arr_time_utc:   se?.arr_time_utc  ?? null,
+          duration_min:   se?.duration_min  ?? null,
+          iata_number:    fs?.flight_number ?? null,
+          actual_dep_utc: fs?.actual_dep_utc ?? null,
+          actual_arr_utc: fs?.actual_arr_utc ?? null,
+          dep_delay_min:  fs?.dep_delay_min  ?? null,
+          airline_iata:   fs?.airline_iata   ?? null,
+        }
+
+        // Use isFr24-style so it isn't cleared by freshCallsigns cleanup;
+        // lostAt = now means ghost predictor starts from this fresh fix
+        trackedRef.current[cs] = { a: aircraft, lostAt: now, isFr24: true }
+
+        batch.push({
+          callsign:    cs,
+          flight_date: flight.flight_date,
+          lat, lon,
+          alt_baro,
+          gs,
+          track,
+          hex:         icao24,
+          dep_iata:    flight.dep_iata,
+          arr_iata:    flight.arr_iata,
+          iata_number: fs?.flight_number ?? null,
+        })
+      }
+
+      // 3. Log positions (fire-and-forget)
+      if (batch.length) {
+        fetch('/api/signal-log', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify(batch),
+        }).catch(() => {})
+      }
+    }
+
+    poll()
+    const iv = setInterval(poll, 30_000)
+    return () => clearInterval(iv)
+  }, [])   // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div className="relative w-full h-full">
       <style>{`@keyframes ft-spin{to{transform:rotate(360deg)}}`}</style>
@@ -1899,6 +2031,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           Over Syria
         </button>
       )}
+      {!embed && <VideoBox />}
       {loading && !embed && (
         <div style={{
           position: 'absolute', inset: 0, zIndex: 2000,
