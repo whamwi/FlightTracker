@@ -663,11 +663,14 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         maxBoundsViscosity: 0,
         zoomControl: false,
       })
-      if (!embed && window.innerWidth >= 768) {
-        L.control.zoom({ position: 'topright' }).addTo(map)
-      }
       if (embed) {
         map.fitBounds([[22, 26], [43, 62]])
+      }
+      // Added before the tile layer so it lands above the attribution in the bottom-right
+      // corner. Desktop-only, but gated in CSS rather than on innerWidth — a one-shot
+      // width read here can fire before the viewport settles and silently drop the control.
+      if (!embed) {
+        L.control.zoom({ position: 'bottomright' }).addTo(map)
       }
       L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
         attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/">CARTO</a>',
@@ -838,8 +841,14 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
                 trackedRef.current[cs] = { a, lostAt, isFr24: false }
               }
             } else if (isFr24) {
-              // FR24 cache: lostAt = fr24Ts so DR advances between 5-min refreshes
-              trackedRef.current[cs] = { a, lostAt: fr24Ts || now - 30_000, isFr24: true }
+              // FR24 cache: lostAt = fr24Ts so DR advances between 5-min refreshes.
+              // Don't overwrite a fresher OpenSky entry — that would give it a stale
+              // lostAt and immediately trigger the FR24_HAND_OFF_MS deletion.
+              const fr24LostAt = fr24Ts || now - 30_000
+              const prevFr24   = trackedRef.current[cs]
+              if (!prevFr24 || prevFr24.lostAt <= fr24LostAt) {
+                trackedRef.current[cs] = { a, lostAt: fr24LostAt, isFr24: true }
+              }
             } else {
               // Live ADS-B: prefer non-stale, then highest gs (freshest fix)
               const prev = trackedRef.current[cs]
@@ -2022,14 +2031,29 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
 
   return (
     <div className="relative w-full h-full">
-      <style>{`@keyframes ft-spin{to{transform:rotate(360deg)}}`}</style>
+      <style>{`
+        @keyframes ft-spin{to{transform:rotate(360deg)}}
+        /* Zoom sits in the bottom-right corner, lifted clear of the legend below it.
+           Hidden on phones, where pinch-to-zoom makes it redundant and the bottom tab
+           bar and legend already crowd that corner. */
+        .leaflet-control-zoom { display: none; }
+        @media (min-width: 768px) {
+          .leaflet-control-zoom { display: block; margin: 0 12px 78px 0; }
+        }
+      `}</style>
       <div ref={mapRef} className="w-full h-full" />
       {!embed && (
+        // Top-right control stack. A flex column rather than fixed `top` offsets, so the
+        // Over Syria button follows the video box up and down as it collapses.
+        <div style={{
+          position: 'absolute', top: 10, right: 10, zIndex: 1000,
+          display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8,
+        }}>
+        <VideoBox />
         <button
           onClick={() => setOverSyriaOn(v => !v)}
           title="Show non-board aircraft currently inside Syrian airspace"
           style={{
-            position: 'absolute', top: 82, right: 10, zIndex: 1000,
             background: overSyriaOn ? '#054239' : '#fff',
             color:      overSyriaOn ? '#fff'    : '#333',
             border: '2px solid rgba(0,0,0,.2)',
@@ -2045,8 +2069,8 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           </svg>
           Over Syria
         </button>
+        </div>
       )}
-      {!embed && <VideoBox />}
       {loading && !embed && (
         <div style={{
           position: 'absolute', inset: 0, zIndex: 2000,
