@@ -194,26 +194,33 @@ function toRows(post: AnyRec): MediaRow[] {
 }
 
 // ── Storage ───────────────────────────────────────────────────────────────────
+// Returns null on any failure. Facebook's CDN drops connections often enough that a
+// single bad download must not abort an ingest that has already stored dozens of photos
+// — the caller treats null as "skip this one" and moves on.
 async function rehost(srcUrl: string, path: string): Promise<string | null> {
-  const res = await fetch(srcUrl, { cache: 'no-store' })
-  if (!res.ok) return null
+  try {
+    const res = await fetch(srcUrl, { cache: 'no-store' })
+    if (!res.ok) return null
 
-  const declared = Number(res.headers.get('content-length') ?? 0)
-  if (declared > MAX_BYTES) return null
+    const declared = Number(res.headers.get('content-length') ?? 0)
+    if (declared > MAX_BYTES) return null
 
-  const buf = await res.arrayBuffer()
-  if (buf.byteLength === 0 || buf.byteLength > MAX_BYTES) return null
+    const buf = await res.arrayBuffer()
+    if (buf.byteLength === 0 || buf.byteLength > MAX_BYTES) return null
 
-  const contentType = res.headers.get('content-type') ?? 'image/jpeg'
-  if (!contentType.startsWith('image/')) return null
+    const contentType = res.headers.get('content-type') ?? 'image/jpeg'
+    if (!contentType.startsWith('image/')) return null
 
-  const up = await fetch(`${SB_URL}/storage/v1/object/${BUCKET}/${path}`, {
-    method:  'POST',
-    headers: { ...HEADERS, 'Content-Type': contentType, 'x-upsert': 'true' },
-    body:    buf,
-  })
-  if (!up.ok) return null
-  return `${SB_URL}/storage/v1/object/public/${BUCKET}/${path}`
+    const up = await fetch(`${SB_URL}/storage/v1/object/${BUCKET}/${path}`, {
+      method:  'POST',
+      headers: { ...HEADERS, 'Content-Type': contentType, 'x-upsert': 'true' },
+      body:    buf,
+    })
+    if (!up.ok) return null
+    return `${SB_URL}/storage/v1/object/public/${BUCKET}/${path}`
+  } catch {
+    return null
+  }
 }
 
 async function existingIds(ids: string[]): Promise<Set<string>> {
@@ -288,20 +295,26 @@ export async function GET(req: Request) {
         break
       }
 
-      const thumb = await rehost(row.thumb_url, `${row.media_id}-t.jpg`)
-      if (!thumb) { skipped++; continue }
+      // One bad item is skipped, never fatal — the batch keeps going and anything
+      // missed is retried on the next run, since stored ids are filtered out up front.
+      try {
+        const thumb = await rehost(row.thumb_url, `${row.media_id}-t.jpg`)
+        if (!thumb) { skipped++; continue }
 
-      const image = !row.image_url || row.image_url === row.thumb_url
-        ? thumb
-        : await rehost(row.image_url, `${row.media_id}.jpg`) ?? thumb
+        const image = !row.image_url || row.image_url === row.thumb_url
+          ? thumb
+          : await rehost(row.image_url, `${row.media_id}.jpg`) ?? thumb
 
-      const ins = await fetch(`${SB_URL}/rest/v1/syrgaca_media`, {
-        method:  'POST',
-        headers: { ...HEADERS, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates' },
-        body:    JSON.stringify({ ...row, thumb_url: thumb, image_url: image }),
-      })
-      if (ins.ok) inserted++
-      else skipped++
+        const ins = await fetch(`${SB_URL}/rest/v1/syrgaca_media`, {
+          method:  'POST',
+          headers: { ...HEADERS, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates' },
+          body:    JSON.stringify({ ...row, thumb_url: thumb, image_url: image }),
+        })
+        if (ins.ok) inserted++
+        else skipped++
+      } catch {
+        skipped++
+      }
     }
 
     if (deferred === 0) {
