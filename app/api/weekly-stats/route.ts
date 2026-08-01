@@ -8,7 +8,7 @@ const HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 
 const SYRIAN = new Set(['DAM', 'ALP', 'LTK'])
 
-const PREFIX_TO_IATA: Record<string, string> = { FYC: 'XH', SYR: 'RB', HST: 'RB' }
+const PREFIX_TO_IATA: Record<string, string> = { FYC: 'XH', SYR: 'RB', HST: 'RB', SXS: 'XQ' }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function flightAirlineIata(f: any): string {

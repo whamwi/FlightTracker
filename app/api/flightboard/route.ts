@@ -10,6 +10,7 @@ const PREFIX_TO_IATA: Record<string, string> = {
   FYC: 'XH',
   SYR: 'RB',
   HST: 'RB',
+  SXS: 'XQ',
 }
 
 function unixToUtcHHMM(unix: number | null): string {
@@ -90,7 +91,7 @@ export async function GET(req: Request) {
   const flightMap: Record<string, any> = {}
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function addFlight(f: any, keyOverride?: string) {
+  function addFlight(f: any, keyOverride?: string, skipArrFilter = false) {
     const num      = f.num       ?? ''
     const depIata  = f.dep_iata  ?? ''
     const arrIata  = f.arr_iata  ?? ''
@@ -100,15 +101,16 @@ export async function GET(req: Request) {
     // Only keep flights that touch a Syrian airport
     if (!SYRIAN_AIRPORTS.has(depIata) && !SYRIAN_AIRPORTS.has(arrIata)) return
 
-    // Drop overnight arrivals that land on a different Damascus calendar day
-    if (arrIata && SYRIAN_AIRPORTS.has(arrIata) && schedArr) {
+    // Drop overnight arrivals that land on a different Damascus calendar day.
+    // skipArrFilter bypasses this for cross-midnight inbound flights still airborne.
+    if (!skipArrFilter && arrIata && SYRIAN_AIRPORTS.has(arrIata) && schedArr) {
       const arrMs = schedArr * 1000
       if (arrMs < dayStartMs || arrMs >= dayEndMs) return
     }
 
     // If FR24's estimated arrival has slipped past Syria midnight, exclude from today's board.
     // The prev-day overflow pass will add it to tomorrow's board instead.
-    if (arrIata && SYRIAN_AIRPORTS.has(arrIata) && f.est_arr && schedArr) {
+    if (!skipArrFilter && arrIata && SYRIAN_AIRPORTS.has(arrIata) && f.est_arr && schedArr) {
       if (f.est_arr > schedArr && f.est_arr * 1000 >= dayEndMs) return
     }
 
@@ -317,10 +319,7 @@ export async function GET(req: Request) {
     }
   }
 
-  // "Early landing" reverse pass: flights scheduled past Syria midnight (stored in the
-  // NEXT day's cache) that actually landed within today's Syria window.
-  // Example: sched_arr = 00:10 Syria tomorrow, but real_arr = 23:44 Syria today.
-  // These are missed by Pass 1 (wrong flight_date) and Pass 3 (only looks backward).
+  // Fetch tomorrow's Syrian arrival caches once — shared by two sub-cases below.
   {
     const next = new Date(date + 'T12:00:00Z')
     next.setUTCDate(next.getUTCDate() + 1)
@@ -336,21 +335,40 @@ export async function GET(req: Request) {
         const ap = row.airport_iata as string
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         for (const f of (row.arrivals ?? [])) {
-          if (!f.real_arr) continue
-          const realMs = (f.real_arr as number) * 1000
-          if (realMs < dayStartMs || realMs >= dayEndMs) continue
           const arrIata = f.arr_iata || ap
           const key = `${f.num ?? ''}|${f.dep_iata ?? ''}|${arrIata}`
-          if (flightMap[key]) continue  // already captured by another pass
-          addFlight({
-            ...f,
-            sched_arr: f.real_arr,  // use actual landing for day-assignment and sorting
-            arr_iata: arrIata,
-            fr24_actual_arr:  new Date(f.real_arr * 1000).toISOString(),
-            fr24_actual_dep:  f.real_dep ? new Date(f.real_dep * 1000).toISOString() : null,
-            fr24_revised_dep: f.est_dep  ? new Date(f.est_dep  * 1000).toISOString() : null,
-            fr24_revised_arr: null,
-          })
+          if (flightMap[key]) continue
+
+          if (f.real_arr) {
+            // Case A — "Early landing": sched_arr is past Syria midnight but plane
+            // actually landed within today's Syria window (real_arr < dayEndMs).
+            const realMs = (f.real_arr as number) * 1000
+            if (realMs < dayStartMs || realMs >= dayEndMs) continue
+            addFlight({
+              ...f,
+              sched_arr: f.real_arr,  // use actual landing for day-assignment and sorting
+              arr_iata: arrIata,
+              fr24_actual_arr:  new Date(f.real_arr * 1000).toISOString(),
+              fr24_actual_dep:  f.real_dep ? new Date(f.real_dep * 1000).toISOString() : null,
+              fr24_revised_dep: f.est_dep  ? new Date(f.est_dep  * 1000).toISOString() : null,
+              fr24_revised_arr: null,
+            })
+          } else {
+            // Case B — "Cross-midnight inbound": flight is still airborne, arrives within
+            // the first 4 hours of next Syria day. Show it on today's board and map.
+            // skipArrFilter bypasses the dayEndMs guard inside addFlight.
+            if (!f.sched_arr) continue
+            const arrMs = (f.sched_arr as number) * 1000
+            if (arrMs < dayEndMs || arrMs >= dayEndMs + 4 * 60 * 60 * 1000) continue
+            addFlight({
+              ...f,
+              arr_iata: arrIata,
+              fr24_actual_arr:  null,
+              fr24_revised_arr: f.est_arr ? new Date(f.est_arr * 1000).toISOString() : null,
+              fr24_actual_dep:  f.real_dep ? new Date(f.real_dep * 1000).toISOString() : null,
+              fr24_revised_dep: f.est_dep  ? new Date(f.est_dep  * 1000).toISOString() : null,
+            }, undefined, true /* skipArrFilter */)
+          }
         }
       }
     }
