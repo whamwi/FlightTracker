@@ -10,12 +10,12 @@ const HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 export async function GET() {
   const today = new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10)
 
-  // 1. Fetch active flights with hex from signal_log — 90min cutoff
-  const cutoff  = new Date(Date.now() - 90 * 60_000).toISOString()
+  // 1. Fetch flights airborne in the last 8h — airborne_at cutoff (not last_seen_at)
+  const cutoff  = new Date(Date.now() - 8 * 3_600_000).toISOString()
   const sigRes = await fetch(
     `${SB_URL}/rest/v1/flight_signal_log`
     + `?flight_date=eq.${today}&actual_arr_at=is.null&airborne_at=not.is.null&hex=not.is.null`
-    + `&last_seen_at=gte.${cutoff}`
+    + `&airborne_at=gte.${cutoff}`
     + `&select=callsign,hex,dep_iata,arr_iata,airborne_at,last_seen_at`,
     { headers: HEADERS }
   )

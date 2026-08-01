@@ -248,8 +248,9 @@ async function fetchTrackedPositions(callsigns: string[]): Promise<Record<string
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const results: Record<string, any> = {}
-  const BATCH = 8
+  const BATCH = 3
   for (let i = 0; i < callsigns.length; i += BATCH) {
+    if (i > 0) await new Promise(r => setTimeout(r, 300))
     await Promise.all(callsigns.slice(i, i + BATCH).map(async cs => {
       try {
         const res = await fetch(`https://opendata.adsb.fi/api/v2/callsign/${cs}`, {
@@ -316,13 +317,16 @@ let signalCache: { flights: SignalFlight[]; ts: number } | null = null
 async function fetchSignalFlights(): Promise<SignalFlight[]> {
   if (signalCache && Date.now() - signalCache.ts < 30_000) return signalCache.flights
   const today   = new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10)
-  // Only include flights last seen within the past 90 minutes — older flights have landed
-  const cutoff  = new Date(Date.now() - 90 * 60_000).toISOString()
+  // Only include flights that became airborne within the last 8 hours — covers the longest
+  // Syrian route (DAM→AMS ~4.5h). Using airborne_at, not last_seen_at: a flight leaving
+  // the Syria radius 20 min after takeoff would have last_seen ~2h ago on a 3h flight,
+  // which a tight last_seen cutoff would incorrectly exclude.
+  const cutoff  = new Date(Date.now() - 8 * 3_600_000).toISOString()
   try {
     const res = await fetch(
       `${SB_URL}/rest/v1/flight_signal_log`
       + `?flight_date=eq.${today}&actual_arr_at=is.null&airborne_at=not.is.null&hex=not.is.null`
-      + `&last_seen_at=gte.${cutoff}`
+      + `&airborne_at=gte.${cutoff}`
       + `&select=callsign,hex,dep_iata,arr_iata,flight_date`,
       { headers: SB_HEADERS, signal: AbortSignal.timeout(5000) }
     )
@@ -473,9 +477,14 @@ export async function GET() {
     const boardMap = new Map<string, BoardFlight>()
     for (const f of resolvedBoard) boardMap.set(f.callsign, f)
 
-    // Flights whose status says they're airborne — track globally by callsign
+    // Flights whose status says they're airborne — track globally by callsign.
+    // Also include flights confirmed departed by real_dep timestamp but with no
+    // arrival yet — these appear in Business API data without a "status" text string.
     const activeCallsigns = resolvedBoard
-      .filter(f => ACTIVE_KEYWORDS.some(kw => f.status.includes(kw)))
+      .filter(f =>
+        ACTIVE_KEYWORDS.some(kw => f.status.includes(kw)) ||
+        (f.actual_dep_utc != null && f.actual_arr_utc == null)
+      )
       .map(f => f.callsign)
 
     // Radius feeds (cached 10s, in-flight dedup)

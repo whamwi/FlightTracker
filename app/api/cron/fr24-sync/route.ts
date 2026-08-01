@@ -101,9 +101,13 @@ export async function GET(req: Request) {
 
   const { searchParams } = new URL(req.url)
   const forceDate = searchParams.get('date')
-  const yesterday = new Date(Date.now() - 24 * 3600_000)
-    .toLocaleDateString('en-CA', { timeZone: TZ })
-  const targetDate = forceDate ?? yesterday
+  // Default to today (Syria time, UTC+3) so the scheduled cron keeps today's board fresh.
+  // Pass ?date=yesterday to backfill the previous day's completed flights.
+  const today = new Date(Date.now() + 3 * 3_600_000)
+    .toISOString().slice(0, 10)
+  const targetDate = forceDate === 'yesterday'
+    ? new Date(Date.now() - 21 * 3_600_000).toISOString().slice(0, 10)  // ~UTC+3 yesterday
+    : forceDate ?? today
 
   const summary: string[] = []
   const rows: object[]    = []
