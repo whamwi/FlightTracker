@@ -4,7 +4,8 @@
 // issues 30-minute bearer tokens from a Keycloak token endpoint. The credentials are an
 // *API client* pair created under the account's API tab — not the website login pair:
 //
-//   OPENSKY_CLIENT_ID / OPENSKY_CLIENT_SECRET
+//   OPENSKY_CLIENT_ID / OPENSKY_CLIENT_SECRET   (canonical)
+//   OPENSKY_USER      / OPENSKY_PASS            (legacy names, same OAuth2 values)
 //
 // Credits are charged per *request*, not per aircraft, so batching every tracked hex
 // into one icao24 query is by far the cheapest shape: 1 credit however many hexes it
@@ -42,8 +43,21 @@ export interface StatesResult {
 // At a 2-minute cron cadence most invocations hit a warm instance and cost no token call.
 let cachedToken: { token: string; expiresAt: number } | null = null
 
+// Canonical names first, then the legacy pair. OPENSKY_USER/OPENSKY_PASS are accepted
+// because that is where this deployment's client_id/client_secret actually live — despite
+// the names, they are NOT a username and password. OpenSky stopped accepting those
+// entirely, so anything sent here is only ever tried as client credentials; a genuine
+// username/password in these slots simply fails the token exchange with invalid_client,
+// which is loud rather than silent. Prefer the canonical names for any new environment.
+function clientId(): string | undefined {
+  return process.env.OPENSKY_CLIENT_ID || process.env.OPENSKY_USER
+}
+function clientSecret(): string | undefined {
+  return process.env.OPENSKY_CLIENT_SECRET || process.env.OPENSKY_PASS
+}
+
 export function hasCredentials(): boolean {
-  return !!(process.env.OPENSKY_CLIENT_ID && process.env.OPENSKY_CLIENT_SECRET)
+  return !!(clientId() && clientSecret())
 }
 
 export interface BBox { lamin: number; lomin: number; lamax: number; lomax: number }
@@ -93,10 +107,10 @@ async function getToken(force = false): Promise<{ token: string | null; error: s
   if (!force && cachedToken && Date.now() < cachedToken.expiresAt) {
     return { token: cachedToken.token, error: null }
   }
-  const client_id     = process.env.OPENSKY_CLIENT_ID
-  const client_secret = process.env.OPENSKY_CLIENT_SECRET
+  const client_id     = clientId()
+  const client_secret = clientSecret()
   if (!client_id || !client_secret) {
-    return { token: null, error: 'OPENSKY_CLIENT_ID/OPENSKY_CLIENT_SECRET not set' }
+    return { token: null, error: 'no OpenSky credentials (OPENSKY_CLIENT_ID/SECRET or OPENSKY_USER/PASS)' }
   }
 
   let res: Response

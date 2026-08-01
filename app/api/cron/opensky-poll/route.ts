@@ -96,7 +96,7 @@ export async function GET(req: Request) {
 
   if (!hasCredentials()) {
     return NextResponse.json(
-      { ok: false, error: 'OPENSKY_CLIENT_ID/OPENSKY_CLIENT_SECRET not set' },
+      { ok: false, error: 'no OpenSky credentials (OPENSKY_CLIENT_ID/SECRET or OPENSKY_USER/PASS)' },
       { status: 503 },
     )
   }
