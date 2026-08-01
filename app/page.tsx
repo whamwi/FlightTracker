@@ -54,11 +54,20 @@ const IconAirlines = ({ color }: { color: string }) => (
   </svg>
 )
 
+const IconNews = ({ color }: { color: string }) => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="4" width="18" height="16" rx="2"/>
+    <circle cx="8.5" cy="9.5" r="1.8"/>
+    <path d="m3 17 5-4.5 4 3.5 3.5-3L21 17"/>
+  </svg>
+)
+
 const NAV_TABS = [
   { label: 'Flights',      href: '/board',        active: false, Icon: IconFlights },
   { label: 'Track',        href: '/',             active: true,  Icon: IconTrack },
   { label: 'Destinations', href: '/destinations', active: false, Icon: IconDestinations },
   { label: 'Airlines',     href: '/airlines',     active: false, Icon: IconAirlines },
+  { label: 'News',         href: '/news',         active: false, Icon: IconNews },
 ]
 
 // ── InAirPanel types & helpers ───────────────────────────────────────────────

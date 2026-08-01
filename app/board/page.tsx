@@ -868,6 +868,7 @@ export default function BoardPage() {
             { label: 'Track',   active: false, href: '/' },
             { label: 'Destinations', active: false, href: '/destinations' },
             { label: 'Airlines',     active: false, href: null },
+            { label: 'News',         active: false, href: '/news' },
           ].map(item => {
             const inner = (
               <span style={{ font: `${item.active ? 700 : 600} 13.5px/1 'Instrument Sans', system-ui`, color: item.active ? C.forest : C.secondary }}>

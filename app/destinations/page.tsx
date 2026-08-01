@@ -148,6 +148,7 @@ function NavBar() {
     { label: 'Track',        href: '/',             active: false },
     { label: 'Destinations', href: '/destinations', active: true  },
     { label: 'Airlines',     href: '/airlines',     active: false },
+    { label: 'News',         href: '/news',         active: false },
   ]
   return (
     <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', position: 'sticky', top: 0, zIndex: 20 }}>
