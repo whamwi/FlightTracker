@@ -314,11 +314,14 @@ async function fetchHexPositions(flights: SignalFlight[], skipHexes: Set<string>
 let signalCache: { flights: SignalFlight[]; ts: number } | null = null
 async function fetchSignalFlights(): Promise<SignalFlight[]> {
   if (signalCache && Date.now() - signalCache.ts < 30_000) return signalCache.flights
-  const today = new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10)
+  const today   = new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10)
+  // Only include flights last seen within the past 3 hours — anything older has landed
+  const cutoff  = new Date(Date.now() - 3 * 3_600_000).toISOString()
   try {
     const res = await fetch(
       `${SB_URL}/rest/v1/flight_signal_log`
       + `?flight_date=eq.${today}&actual_arr_at=is.null&airborne_at=not.is.null&hex=not.is.null`
+      + `&last_seen_at=gte.${cutoff}`
       + `&select=callsign,hex,dep_iata,arr_iata,flight_date`,
       { headers: SB_HEADERS, signal: AbortSignal.timeout(5000) }
     )
