@@ -54,7 +54,10 @@ function openskyAuthHeader(): string | null {
   return 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64')
 }
 
-async function queryOpenSky(params: Record<string, string>): Promise<StateVec[]> {
+async function queryOpenSky(
+  params: Record<string, string>,
+  debug?: string[],
+): Promise<StateVec[]> {
   const qs   = new URLSearchParams(params).toString()
   const auth = openskyAuthHeader()
   let res: Response
@@ -66,11 +69,16 @@ async function queryOpenSky(params: Record<string, string>): Promise<StateVec[]>
       },
       signal: AbortSignal.timeout(12_000),
     })
-  } catch {
+  } catch (e) {
+    debug?.push(`fetch error: ${e}`)
     return []
   }
-  if (res.status === 429) return []   // rate-limited — skip silently
-  if (!res.ok) return []
+  debug?.push(`HTTP ${res.status} (auth=${!!auth})`)
+  if (res.status === 429) return []
+  if (!res.ok) {
+    debug?.push(await res.text().catch(() => ''))
+    return []
+  }
   const data = await res.json() as { states?: unknown[][] }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (data.states ?? []).flatMap(s => { const v = parseState(s as any[]); return v ? [v] : [] })
@@ -159,13 +167,14 @@ export async function GET(req: Request) {
   for (const f of active) hexMap.set(f.hex.toLowerCase(), f)
 
   // 2. Hex batch — tracks our flights anywhere in the world
+  const dbg: string[] = []
   let hexStates: StateVec[] = []
   if (hexMap.size > 0) {
-    hexStates = await queryOpenSky({ icao24: [...hexMap.keys()].join(',') })
+    hexStates = await queryOpenSky({ icao24: [...hexMap.keys()].join(',') }, dbg)
   }
 
   // 3. Bounding box — all traffic over Syria + neighbours (feeds "Over Syria" view)
-  const bboxStates = await queryOpenSky(BBOX)
+  const bboxStates = await queryOpenSky(BBOX, dbg)
 
   // 4. Merge — hex batch wins on conflict (same icao24 in both responses)
   const merged = new Map<string, StateVec>()
@@ -184,5 +193,6 @@ export async function GET(req: Request) {
     hex_found:    hexStates.length,
     bbox_found:   bboxStates.length,
     total:        merged.size,
+    debug:        dbg,
   })
 }
