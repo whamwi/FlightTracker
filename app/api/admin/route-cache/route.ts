@@ -79,6 +79,12 @@ function utcToLocal(hhmm: string, iata: string): string {
 export async function DELETE(req: Request) {
   const { id } = await req.json()
   if (!id) return NextResponse.json({ ok: false, error: 'id required' }, { status: 400 })
+  // Clear FK reference in unfiled_flights first to avoid constraint violation
+  await sb(`/unfiled_flights?route_master_id=eq.${id}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({ route_master_id: null }),
+  })
   await sb(`/route_master?id=eq.${id}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } })
   return NextResponse.json({ ok: true })
 }

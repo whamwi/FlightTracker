@@ -61,26 +61,42 @@ function buildWaypoints(positions: any[], numWaypoints = 20): {
     throw new Error(`Only ${airborne.length} airborne positions — not enough to build path`)
   }
 
-  // Accumulate cumulative distance
-  let cumDist = 0
-  const track: { lat: number; lon: number; dist: number }[] = []
-
-  for (let i = 0; i < airborne.length; i++) {
-    const p = airborne[i]
+  // Step 1: collect raw points, skipping >200nm jumps (GPS artifacts)
+  const raw: { lat: number; lon: number }[] = []
+  for (const p of airborne) {
     const lat = p.lat ?? p.latitude
     const lon = p.lon ?? p.longitude
     if (typeof lat !== 'number' || typeof lon !== 'number') continue
-
-    if (i === 0) {
-      track.push({ lat, lon, dist: 0 })
+    if (raw.length === 0) {
+      raw.push({ lat, lon })
     } else {
-      const prev = track[track.length - 1]
-      const d    = haversineNm(prev.lat, prev.lon, lat, lon)
-      // Skip positions that jump unrealistically (>200nm in one step — data artifact)
-      if (d > 200) continue
-      cumDist += d
-      track.push({ lat, lon, dist: cumDist })
+      const prev = raw[raw.length - 1]
+      if (haversineNm(prev.lat, prev.lon, lat, lon) < 200) raw.push({ lat, lon })
     }
+  }
+
+  // Step 2: gap-fill — linearly interpolate at 10nm intervals between sparse points
+  const FILL_INTERVAL_NM = 10
+  const dense: { lat: number; lon: number }[] = [raw[0]]
+  for (let i = 1; i < raw.length; i++) {
+    const A = raw[i - 1], B = raw[i]
+    const d = haversineNm(A.lat, A.lon, B.lat, B.lon)
+    if (d > FILL_INTERVAL_NM) {
+      const steps = Math.floor(d / FILL_INTERVAL_NM)
+      for (let j = 1; j < steps; j++) {
+        const frac = j / steps
+        dense.push({ lat: A.lat + frac * (B.lat - A.lat), lon: A.lon + frac * (B.lon - A.lon) })
+      }
+    }
+    dense.push(B)
+  }
+
+  // Step 3: accumulate cumulative distance over the dense track
+  let cumDist = 0
+  const track: { lat: number; lon: number; dist: number }[] = [{ ...dense[0], dist: 0 }]
+  for (let i = 1; i < dense.length; i++) {
+    cumDist += haversineNm(dense[i - 1].lat, dense[i - 1].lon, dense[i].lat, dense[i].lon)
+    track.push({ ...dense[i], dist: cumDist })
   }
 
   const total_dist_nm = Math.round(cumDist * 10) / 10
@@ -145,6 +161,18 @@ export async function GET(req: Request) {
   }
 
   const { waypoints, total_dist_nm, airborne_count } = result
+
+  // Anchor last waypoint to actual arrival airport coords
+  const apRes = await fetch(
+    `${SB_URL}/rest/v1/airports?iata=eq.${arr_iata}&select=lat,lon`,
+    { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` } }
+  )
+  if (apRes.ok) {
+    const rows: { lat: number; lon: number }[] = await apRes.json()
+    if (rows[0]) {
+      waypoints[waypoints.length - 1] = { lat: rows[0].lat, lon: rows[0].lon, f: 1.0 }
+    }
+  }
 
   if (save) {
     const writeRes = await fetch(`${SB_URL}/rest/v1/route_paths`, {

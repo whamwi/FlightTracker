@@ -145,12 +145,24 @@ export default function AdminRouteCache() {
   async function deleteRow(id: number) {
     if (!confirm('Delete this rotation from route_master?')) return
     setDeleting(id)
-    await fetch('/api/admin/route-cache', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
-    })
-    setData(prev => prev ? { ...prev, filled: prev.filled.filter(r => r.id !== id) } : prev)
+    setMsg('')
+    try {
+      const res = await fetch('/api/admin/route-cache', {
+        method: 'DELETE',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+      if (!res.ok) {
+        const text = await res.text()
+        setMsg(`Delete failed (${res.status}): ${text}`)
+        setDeleting(null)
+        return
+      }
+      setData(prev => prev ? { ...prev, filled: prev.filled.filter(r => r.id !== id) } : prev)
+    } catch (e) {
+      setMsg('Delete error: ' + String(e))
+    }
     setDeleting(null)
   }
 
