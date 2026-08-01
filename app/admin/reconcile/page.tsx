@@ -66,6 +66,7 @@ const s: Record<string, React.CSSProperties> = {
   tdDim:   { padding: '8px 10px', borderBottom: '1px solid #f0f0f0', verticalAlign: 'middle' as const, color: '#999' },
   btn:     { padding: '4px 10px', borderRadius: 5, border: '1px solid #d1d5db', background: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 500 },
   btnDone: { padding: '4px 10px', borderRadius: 5, border: '1px solid #d1fae5', background: '#d1fae5', cursor: 'default', fontSize: 12, fontWeight: 500, color: '#065f46' },
+  btnDel:  { padding: '4px 10px', borderRadius: 5, border: '1px solid #fecaca', background: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 500, color: '#dc2626' },
   chip:    { display: 'inline-block', borderRadius: 4, padding: '2px 7px', fontSize: 11, fontWeight: 600 },
 }
 
@@ -107,6 +108,7 @@ export default function ReconcilePage() {
   const [tab, setTab]             = useState<'time_drift' | 'new_route'>('time_drift')
   const [hideReviewed, setHide]   = useState(true)
   const [saving, setSaving]       = useState<number | null>(null)
+  const [deleting, setDeleting]   = useState<string | null>(null)
   const [sortDir, setSortDir]     = useState<'asc' | 'desc' | null>(null)
   const [inserting, setInserting] = useState<string | null>(null)
   const [insertErr, setInsertErr] = useState<Record<string, string>>({})
@@ -132,6 +134,17 @@ export default function ReconcilePage() {
     })
     setRows(prev => prev.map(r => r.id === id ? { ...r, reviewed: true } : r))
     setSaving(null)
+  }
+
+  async function deleteRows(ids: number[], key: string) {
+    setDeleting(key)
+    await fetch('/api/admin/reconcile', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    })
+    setRows(prev => prev.filter(r => !ids.includes(r.id)))
+    setDeleting(null)
   }
 
   async function addRoute(g: RouteGroup) {
@@ -266,13 +279,20 @@ export default function ReconcilePage() {
                   <span style={{ color: '#ccc' }}> ({hhmm(r.rm_dep_time_utc)} UTC)</span>
                 </td>
                 <td style={s.td}>{diffBadge(r.diff_minutes)}</td>
-                <td style={s.td}>
+                <td style={{ ...s.td, display: 'flex', gap: 6, alignItems: 'center' }}>
                   {r.reviewed
                     ? <span style={s.btnDone}>✓ Reviewed</span>
                     : <button style={s.btn} disabled={saving === r.id} onClick={() => markReviewed(r.id)}>
                         {saving === r.id ? '…' : 'Mark reviewed'}
                       </button>
                   }
+                  <button
+                    style={s.btnDel}
+                    disabled={deleting === String(r.id)}
+                    onClick={() => deleteRows([r.id], String(r.id))}
+                  >
+                    {deleting === String(r.id) ? '…' : 'Delete'}
+                  </button>
                 </td>
               </tr>
             ))}
@@ -311,7 +331,7 @@ export default function ReconcilePage() {
                   <td style={{ ...s.td, color: '#2563eb', fontWeight: 600 }}>{localTime(g.dep_utc)}</td>
                   <td style={{ ...s.td, color: '#2563eb', fontWeight: 600 }}>{localTime(g.arr_utc)}</td>
                   <td style={s.tdDim}>{g.duration_min ? `${Math.floor(g.duration_min / 60)}h ${g.duration_min % 60}m` : '—'}</td>
-                  <td style={s.td}>
+                  <td style={{ ...s.td, display: 'flex', gap: 6, alignItems: 'center' }}>
                     {g.reviewed
                       ? <span style={s.btnDone}>✓ Added</span>
                       : <button style={{ ...s.btn, background: '#1d4ed8', color: '#fff', border: 'none', padding: '5px 12px' }}
@@ -319,6 +339,13 @@ export default function ReconcilePage() {
                           {inserting === g.key ? '…' : '+ Add Route'}
                         </button>
                     }
+                    <button
+                      style={s.btnDel}
+                      disabled={deleting === g.key}
+                      onClick={() => deleteRows(g.ids, g.key)}
+                    >
+                      {deleting === g.key ? '…' : 'Delete'}
+                    </button>
                   </td>
                 </tr>
                 {insertErr[g.key] && (

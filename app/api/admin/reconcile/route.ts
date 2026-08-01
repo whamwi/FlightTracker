@@ -33,6 +33,16 @@ function addHours(t: string, h: number): string {
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}:00`
 }
 
+export async function DELETE(req: Request) {
+  const { ids } = await req.json()
+  if (!ids?.length) return NextResponse.json({ ok: false, error: 'ids required' }, { status: 400 })
+  await sb(`/unfiled_flights?id=in.(${ids.join(',')})`, {
+    method: 'DELETE',
+    headers: { Prefer: 'return=minimal' },
+  })
+  return NextResponse.json({ ok: true })
+}
+
 export async function PATCH(req: Request) {
   const { id, reviewed } = await req.json()
   if (!id) return NextResponse.json({ ok: false, error: 'id required' }, { status: 400 })
