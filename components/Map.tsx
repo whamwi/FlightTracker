@@ -2035,10 +2035,17 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         @keyframes ft-spin{to{transform:rotate(360deg)}}
         /* Zoom sits in the bottom-right corner, lifted clear of the legend below it.
            Hidden on phones, where pinch-to-zoom makes it redundant and the bottom tab
-           bar and legend already crowd that corner. */
-        .leaflet-control-zoom { display: none; }
+           bar and legend already crowd that corner.
+
+           The selector has to outrank leaflet.css's own .leaflet-bottom .leaflet-control
+           margin rule, hence the doubled-up corner classes. */
+        .leaflet-bottom.leaflet-right .leaflet-control-zoom { display: none; }
         @media (min-width: 768px) {
-          .leaflet-control-zoom { display: block; margin: 0 12px 78px 0; }
+          .leaflet-bottom.leaflet-right .leaflet-control-zoom {
+            display: block;
+            margin-right: 12px;
+            margin-bottom: 72px;
+          }
         }
       `}</style>
       <div ref={mapRef} className="w-full h-full" />
