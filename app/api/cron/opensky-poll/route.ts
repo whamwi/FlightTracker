@@ -47,13 +47,24 @@ function parseState(s: any[]): StateVec | null {
   }
 }
 
+function openskyAuthHeader(): string | null {
+  const user = process.env.OPENSKY_USER
+  const pass = process.env.OPENSKY_PASS
+  if (!user || !pass) return null
+  return 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64')
+}
+
 async function queryOpenSky(params: Record<string, string>): Promise<StateVec[]> {
-  const qs  = new URLSearchParams(params).toString()
+  const qs   = new URLSearchParams(params).toString()
+  const auth = openskyAuthHeader()
   let res: Response
   try {
     res = await fetch(`https://opensky-network.org/api/states/all?${qs}`, {
-      headers: { 'User-Agent': 'FlightTracker/1.0' },
-      signal:  AbortSignal.timeout(12_000),
+      headers: {
+        'User-Agent':    'FlightTracker/1.0',
+        ...(auth ? { Authorization: auth } : {}),
+      },
+      signal: AbortSignal.timeout(12_000),
     })
   } catch {
     return []
