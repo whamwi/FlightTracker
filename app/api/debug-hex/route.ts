@@ -10,8 +10,8 @@ const HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 export async function GET() {
   const today = new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10)
 
-  // 1. Fetch active flights with hex from signal_log
-  const cutoff  = new Date(Date.now() - 3 * 3_600_000).toISOString()
+  // 1. Fetch active flights with hex from signal_log — 90min cutoff
+  const cutoff  = new Date(Date.now() - 90 * 60_000).toISOString()
   const sigRes = await fetch(
     `${SB_URL}/rest/v1/flight_signal_log`
     + `?flight_date=eq.${today}&actual_arr_at=is.null&airborne_at=not.is.null&hex=not.is.null`
@@ -22,8 +22,11 @@ export async function GET() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const flights: any[] = sigRes.ok ? await sigRes.json() : []
 
-  // 2. Test adsb.fi hex lookup for each
-  const results = await Promise.all(flights.map(async f => {
+  // 2. Test adsb.fi hex lookup sequentially to avoid 429 rate limiting
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const results: any[] = []
+  for (const f of flights) {
+    if (results.length > 0) await new Promise(r => setTimeout(r, 300))
     const hex = (f.hex as string).toLowerCase()
     let status = 'not_tried'
     let found  = false
@@ -44,20 +47,20 @@ export async function GET() {
     } catch (e) {
       status = `ERROR: ${e}`
     }
-    return {
-      callsign:   f.callsign,
+    results.push({
+      callsign:    f.callsign,
       hex,
-      route:      `${f.dep_iata}→${f.arr_iata}`,
+      route:       `${f.dep_iata}→${f.arr_iata}`,
       airborne_at: f.airborne_at,
-      last_seen:  f.last_seen_at,
-      adsbfi:     status,
+      last_seen:   f.last_seen_at,
+      adsbfi:      status,
       found,
-      lat:        ac?.lat ?? null,
-      lon:        ac?.lon ?? null,
-      alt_ft:     ac?.alt_baro ?? null,
-      gs_kts:     ac?.gs ?? null,
-    }
-  }))
+      lat:         ac?.lat ?? null,
+      lon:         ac?.lon ?? null,
+      alt_ft:      ac?.alt_baro ?? null,
+      gs_kts:      ac?.gs ?? null,
+    })
+  }
 
   const found    = results.filter(r => r.found)
   const notFound = results.filter(r => !r.found)

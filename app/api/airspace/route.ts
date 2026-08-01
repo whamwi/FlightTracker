@@ -288,8 +288,9 @@ async function fetchHexPositions(flights: SignalFlight[], skipHexes: Set<string>
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const results: Record<string, any> = {}
-  const BATCH = 8
+  const BATCH = 3
   for (let i = 0; i < pending.length; i += BATCH) {
+    if (i > 0) await new Promise(r => setTimeout(r, 300))
     await Promise.all(pending.slice(i, i + BATCH).map(async f => {
       try {
         const res = await fetch(`https://opendata.adsb.fi/api/v2/hex/${f.hex.toLowerCase()}`, {
@@ -315,8 +316,8 @@ let signalCache: { flights: SignalFlight[]; ts: number } | null = null
 async function fetchSignalFlights(): Promise<SignalFlight[]> {
   if (signalCache && Date.now() - signalCache.ts < 30_000) return signalCache.flights
   const today   = new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10)
-  // Only include flights last seen within the past 3 hours — anything older has landed
-  const cutoff  = new Date(Date.now() - 3 * 3_600_000).toISOString()
+  // Only include flights last seen within the past 90 minutes — older flights have landed
+  const cutoff  = new Date(Date.now() - 90 * 60_000).toISOString()
   try {
     const res = await fetch(
       `${SB_URL}/rest/v1/flight_signal_log`
