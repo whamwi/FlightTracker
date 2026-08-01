@@ -6,6 +6,7 @@ import { FlightPredictor } from '@/lib/flight-predictor'
 import type { LivePosition as PredictorLivePos } from '@/lib/flight-predictor'
 import { airlineLogo, LOGO_WHITE_BG } from '@/lib/airlines'
 import VideoBox from './VideoBox'
+import PhotoBox from './PhotoBox'
 
 interface Aircraft {
   hex: string
@@ -2057,6 +2058,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8,
         }}>
         <VideoBox />
+        <PhotoBox />
         <button
           onClick={() => setOverSyriaOn(v => !v)}
           title="Show non-board aircraft currently inside Syrian airspace"
