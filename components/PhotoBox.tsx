@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import MapBox, { BOX, iconBtn } from './MapBox'
+import Link from 'next/link'
+import MapBox, { PANEL, actionBtn } from './MapBox'
 
 /**
  * Rotating photo showcase for the Track map's control stack — same shell and size as the
@@ -28,7 +29,7 @@ type Photo = {
 }
 
 const PhotoIcon = () => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={BOX.forest} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={PANEL.forest} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <rect x="3" y="4" width="18" height="16" rx="2"/>
     <circle cx="8.5" cy="9.5" r="1.6"/>
     <path d="m3 17 5-4.5 4 3.5 3.5-3L21 17"/>
@@ -92,20 +93,22 @@ export default function PhotoBox() {
   return (
     <MapBox
       title="Authority Photos"
+      subtitle={
+        <>
+          {idx + 1} of {photos.length} · <Link href="/news" style={{ color: PANEL.forestMid, fontWeight: 600, textDecoration: 'none' }}>view all ↗</Link>
+        </>
+      }
       pillLabel="Photos"
       icon={<PhotoIcon />}
       onOpenChange={setOpen}
       actions={
         <>
-          <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 9.5, color: BOX.muted }}>
-            {idx + 1}/{photos.length}
-          </span>
-          <button onClick={() => step(-1)} style={iconBtn} title="Previous">
+          <button onClick={() => step(-1)} style={actionBtn} title="Previous">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <path d="m15 18-6-6 6-6"/>
             </svg>
           </button>
-          <button onClick={() => step(1)} style={iconBtn} title="Next">
+          <button onClick={() => step(1)} style={actionBtn} title="Next">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <path d="m9 18 6-6-6-6"/>
             </svg>
@@ -117,7 +120,7 @@ export default function PhotoBox() {
       <div onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
         <a href={p.permalink} target="_blank" rel="noopener noreferrer"
           title="View the original post" style={{ display: 'block', textDecoration: 'none' }}>
-          <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 9', background: '#EDEBE0' }}>
+          <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 9', background: PANEL.sunken }}>
             <img
               src={shown ?? src}
               alt={p.caption?.slice(0, 120) ?? 'Aviation Authority photo'}
@@ -126,9 +129,9 @@ export default function PhotoBox() {
           </div>
         </a>
 
-        <div style={{ padding: '7px 9px 9px', minHeight: 42 }}>
+        <div style={{ padding: '8px 10px 10px', minHeight: 44 }}>
           <p dir={rtl ? 'rtl' : 'ltr'} style={{
-            margin: 0, font: `500 11.5px/1.45 ${AR_FONT}`, color: '#3D3A3B',
+            margin: 0, font: `500 11.5px/1.45 ${AR_FONT}`, color: PANEL.secondary,
             textAlign: rtl ? 'right' : 'left',
             display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
           }}>

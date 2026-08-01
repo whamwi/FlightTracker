@@ -1,7 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import MapBox, { BOX, iconBtn } from './MapBox'
+import Link from 'next/link'
+import MapBox, { PANEL, actionBtn } from './MapBox'
 
 /**
  * Plays the Syrian Civil Aviation Authority's YouTube videos back to back in the Track
@@ -47,7 +48,7 @@ function loadYouTubeApi(): Promise<any> {
 }
 
 const PlayIcon = () => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill={BOX.forest}><path d="M8 5v14l11-7z"/></svg>
+  <svg width="12" height="12" viewBox="0 0 24 24" fill={PANEL.forest}><path d="M8 5v14l11-7z"/></svg>
 )
 
 export default function VideoBox() {
@@ -118,12 +119,17 @@ export default function VideoBox() {
   return (
     <MapBox
       title="Aviation Authority"
+      subtitle={
+        <>
+          {videos.length} videos · <Link href="/news" style={{ color: PANEL.forestMid, fontWeight: 600, textDecoration: 'none' }}>view all ↗</Link>
+        </>
+      }
       pillLabel="Videos"
       icon={<PlayIcon />}
       onOpenChange={setOpen}
       actions={
         <>
-          <button onClick={toggleMute} style={iconBtn} title={muted ? 'Unmute' : 'Mute'}>
+          <button onClick={toggleMute} style={actionBtn} title={muted ? 'Unmute' : 'Mute'}>
             {muted ? (
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M11 5 6 9H2v6h4l5 4z"/><path d="M22 9l-6 6M16 9l6 6"/>
@@ -134,7 +140,7 @@ export default function VideoBox() {
               </svg>
             )}
           </button>
-          <button onClick={expand} style={iconBtn} title="Expand">
+          <button onClick={expand} style={actionBtn} title="Expand">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M9 3H3v6M21 9V3h-6M15 21h6v-6M3 15v6h6"/>
             </svg>

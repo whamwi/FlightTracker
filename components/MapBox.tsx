@@ -1,38 +1,51 @@
 'use client'
 
-import { useEffect, useState, type ReactNode } from 'react'
-import Link from 'next/link'
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 
 /**
- * Shared chrome for the floating boxes in the Track map's top-right control stack.
- * Keeps the video and photo boxes identical in size and behaviour.
+ * Shared chrome for the floating boxes in the Track map's control stack.
+ *
+ * Deliberately mirrors the InAirPanel on the left of the map — same translucent panel,
+ * radius, shadow, dot-and-subtitle header and 28px square buttons — so the two sides of
+ * the map read as one interface rather than two.
  */
 
-export const BOX = {
-  surface: '#FFFFFF',
-  forest:  '#054239',
-  muted:   '#8A8578',
-  ink:     '#161616',
+export const PANEL = {
+  bg:        'rgba(237,235,224,0.97)',
+  surface:   '#FFFFFF',
+  border:    '#D8D3BF',
+  ink:       '#161616',
+  muted:     '#8A8578',
+  secondary: '#3D3A3B',
+  forest:    '#054239',
+  forestMid: '#428177',
+  sunken:    '#F7F5EC',
 }
 
-export const shell = {
-  background: BOX.surface,
-  border: '2px solid rgba(0,0,0,.2)',
-  borderRadius: 6,
-  boxShadow: '0 1px 5px rgba(0,0,0,.15)',
+const panelShell: CSSProperties = {
+  background: PANEL.bg,
+  backdropFilter: 'blur(20px)',
+  WebkitBackdropFilter: 'blur(20px)',
+  border: `1px solid ${PANEL.border}`,
+  borderRadius: 16,
+  boxShadow: '0 4px 28px rgba(0,0,0,.13)',
   fontFamily: "'Instrument Sans', system-ui",
   overflow: 'hidden',
-} as const
+}
 
-export const iconBtn = {
-  background: 'none', border: 0, cursor: 'pointer',
-  color: BOX.muted, padding: 0, lineHeight: 0,
-} as const
+/** Matches the panel's close button, so header actions sit in the same visual family. */
+export const actionBtn: CSSProperties = {
+  width: 28, height: 28, borderRadius: 8,
+  border: `1px solid ${PANEL.border}`, background: PANEL.sunken,
+  cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+  flexShrink: 0, color: PANEL.muted, fontSize: 13, lineHeight: 1, padding: 0,
+}
 
 export default function MapBox({
-  title, pillLabel, icon, actions, children, onOpenChange,
+  title, subtitle, pillLabel, icon, actions, children, onOpenChange,
 }: {
   title:     string
+  subtitle?: ReactNode
   pillLabel: string
   icon:      ReactNode
   actions?:  ReactNode
@@ -70,10 +83,10 @@ export default function MapBox({
         onClick={() => toggle(true)}
         title={title}
         style={{
-          ...shell, padding: '4px 8px', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', gap: 4,
-          fontSize: 11, fontWeight: 700, color: BOX.ink, letterSpacing: '-.01em',
-          lineHeight: 1.4, whiteSpace: 'nowrap',
+          ...panelShell, borderRadius: 12, padding: '9px 13px', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', gap: 7,
+          font: `700 12px/1 'Instrument Sans',system-ui`, color: PANEL.ink,
+          whiteSpace: 'nowrap',
         }}
       >
         {icon}
@@ -83,26 +96,41 @@ export default function MapBox({
   }
 
   return (
-    // Never wider than the viewport allows, so the box still fits on a phone.
-    <div style={{ ...shell, width: 'min(320px, calc(100vw - 24px))' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px' }}>
-        {icon}
-        <span style={{ font: `700 11.5px/1.4 'Instrument Sans',system-ui`, color: BOX.ink, letterSpacing: '-.01em' }}>
-          {title}
-        </span>
-        <span style={{ flex: 1 }} />
-        {actions}
-        <Link href="/news" title="Open the full gallery"
-          style={{ font: `600 10px/1 'Instrument Sans',system-ui`, color: BOX.muted, textDecoration: 'none' }}>
-          All ↗
-        </Link>
-        <button onClick={() => toggle(false)} style={iconBtn} title="Collapse">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
-            <path d="M6 6l12 12M18 6 6 18"/>
-          </svg>
-        </button>
+    // Matches the InAirPanel's width so both sides of the map line up.
+    <div style={{ ...panelShell, width: 'min(308px, calc(88vw - 12px))' }}>
+      <div style={{
+        padding: '14px 14px 11px', borderBottom: `1px solid ${PANEL.border}`,
+        display: 'flex', alignItems: 'flex-start', gap: 10,
+      }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <span style={{ width: 7, height: 7, borderRadius: 99, background: PANEL.forestMid, display: 'block', flexShrink: 0 }} />
+            <span style={{ font: `700 13.5px/1 'Instrument Sans',system-ui`, color: PANEL.ink }}>{title}</span>
+          </div>
+          {subtitle && (
+            <span style={{ font: `500 10.5px/1.3 'Instrument Sans',system-ui`, color: PANEL.muted, marginTop: 5, display: 'block' }}>
+              {subtitle}
+            </span>
+          )}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          {actions}
+          <button onClick={() => toggle(false)} style={actionBtn} title="Collapse">✕</button>
+        </div>
       </div>
-      {children}
+
+      {/* Inner card echoes the flight cards, accent bar included. */}
+      <div style={{ padding: 10 }}>
+        <div style={{
+          background: PANEL.surface,
+          border: `1px solid ${PANEL.border}`,
+          borderTop: `3px solid ${PANEL.forest}`,
+          borderRadius: 12,
+          overflow: 'hidden',
+        }}>
+          {children}
+        </div>
+      </div>
     </div>
   )
 }
