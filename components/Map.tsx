@@ -325,17 +325,45 @@ function buildPopup(
     fraction = total > 0 ? Math.max(0.02, Math.min(0.97, 1 - rem / total)) : null
   }
 
-  // ETA
-  let etaStr = ''
-  if (arrCoord && typeof a.lat === 'number' && typeof a.lon === 'number' && typeof a.gs === 'number' && a.gs > 50) {
-    const nm = greatCircleKm(a.lat, a.lon, arrCoord[0], arrCoord[1]) / 1.852
-    const eta = Math.round(nm / a.gs * 60)
-    etaStr = eta >= 60 ? `${Math.floor(eta/60)}h ${eta%60}m left` : `${eta}m left`
-  }
+  // Remaining time.
+  //
+  // This must NOT be derived from a.lat/a.lon/a.gs. On a dead-reckoned flight those are
+  // frozen at the instant the signal dropped, so the card computed "distance from where it
+  // was then, at the speed it had then" and the countdown stopped dead — RB444 sat at
+  // "1h 50m left" from 02:02 onward while the panel counted down past it to 0h 59m off the
+  // same arrival time. Flights with a live fix hid the bug, because there the frozen values
+  // happen to be current.
+  //
+  // Deriving it from the arrival estimate the card already displays makes the countdown,
+  // the ARRIVAL column and the panel agree by construction rather than by coincidence.
+  //
+  // ONE resolved arrival instant drives both the countdown and the ARRIVAL column. Keeping
+  // them on separate chains is how a card ends up reading "ARRIVAL 02:52" beside
+  // "26m left" — each defensible alone, nonsense together.
+  const arrISO = fs?.actual_arr_utc ?? fs?.revised_arr_utc ?? fs?.scheduled_arr_utc
+    ?? (() => {
+      const depMs = Date.parse(fs?.actual_dep_utc ?? a.actual_dep_utc ?? '')
+      return Number.isFinite(depMs) && a.duration_min
+        ? new Date(depMs + a.duration_min * 60_000).toISOString()
+        : null
+    })()
 
   // Times (local at each airport)
   const depOffset = _apOffset[dep ?? ''] ?? 3
   const arrOffset = _apOffset[arr ?? ''] ?? 3
+
+  let etaStr = ''
+  if (arrISO && !fs?.actual_arr_utc) {
+    const remMin = Math.round((Date.parse(arrISO) - Date.now()) / 60_000)
+    if (remMin > 0) etaStr = remMin >= 60 ? `${Math.floor(remMin / 60)}h ${remMin % 60}m left` : `${remMin}m left`
+  } else if (!arrISO && arrCoord && typeof a.lat === 'number' && typeof a.lon === 'number'
+             && typeof a.gs === 'number' && a.gs > 50) {
+    // No arrival estimate anywhere — fall back to the geometric one. Only meaningful for a
+    // genuinely live fix, which is the only case that reaches here.
+    const nm  = greatCircleKm(a.lat, a.lon, arrCoord[0], arrCoord[1]) / 1.852
+    const eta = Math.round(nm / a.gs * 60)
+    etaStr = eta >= 60 ? `${Math.floor(eta / 60)}h ${eta % 60}m left` : `${eta}m left`
+  }
   // Fall back to the scheduled time carried on the aircraft when flightStatusRef has
   // nothing — the same chain buildSchedulePopup has always used. Without it the marker
   // popup rendered a bare dash while the schedule panel showed a time for the same flight
@@ -343,7 +371,8 @@ function buildPopup(
   // and boardDeparted is what populates revised_arr_utc.
   const depTimeLocal = popupToLocal(fs?.actual_dep_utc ?? fs?.revised_dep_utc ?? fs?.scheduled_dep_utc ?? null, depOffset)
                     || (a.dep_time_utc ? schedToLocal(a.dep_time_utc, depOffset) : '')
-  const arrTimeLocal = popupToLocal(fs?.actual_arr_utc ?? fs?.revised_arr_utc ?? fs?.scheduled_arr_utc ?? null, arrOffset)
+  // arrISO above, not a second chain — this is the value the countdown is measured against.
+  const arrTimeLocal = popupToLocal(arrISO, arrOffset)
                     || (a.arr_time_utc ? schedToLocal(a.arr_time_utc, arrOffset) : '')
 
   const delayBadge = (min: number | null | undefined) => min != null && Math.abs(min) >= 2
@@ -449,7 +478,17 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
   const depTimeLocal = fs?.actual_dep_utc
     ? popupToLocal(fs.actual_dep_utc, depOffset)
     : schedToLocal(e.dep_time_utc, depOffset)
-  const bestArrISO   = fs?.actual_arr_utc ?? fs?.revised_arr_utc ?? null
+  // Same rule as buildPopup: one resolved arrival instant feeds both the ARRIVAL column and
+  // the countdown below. The synthesised leg (actual departure + block time) matters for a
+  // delayed flight — without it the column showed the scheduled arrival while the countdown
+  // ran to the real one, so the card contradicted itself by exactly the delay.
+  const bestArrISO   = fs?.actual_arr_utc ?? fs?.revised_arr_utc
+    ?? (() => {
+      const depMs = Date.parse(fs?.actual_dep_utc ?? '')
+      return Number.isFinite(depMs) && e.duration_min > 0
+        ? new Date(depMs + e.duration_min * 60_000).toISOString()
+        : null
+    })()
   const arrTimeLocal = bestArrISO
     ? popupToLocal(bestArrISO, arrOffset)
     : schedToLocal(e.arr_time_utc, arrOffset)
@@ -468,9 +507,14 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
     ? Math.round(Math.min(fraction, 0.97) * 100)
     : arrived ? 100 : null
 
-  // ETA from fraction + duration
+  // Countdown to the arrival instant shown above, not to a separately-derived one.
+  // `fraction` is clamped to 0.97 for the progress bar, so deriving minutes from it also
+  // pinned the countdown at ~3% of block time and it never reached zero.
   let etaStr = ''
-  if (pct != null && pct < 100 && e.duration_min > 0) {
+  if (!arrived && bestArrISO) {
+    const remMin = Math.round((Date.parse(bestArrISO) - Date.now()) / 60_000)
+    if (remMin > 0) etaStr = remMin >= 60 ? `${Math.floor(remMin/60)}h ${remMin%60}m left` : `${remMin}m left`
+  } else if (!arrived && pct != null && pct < 100 && e.duration_min > 0) {
     const remMin = Math.round(e.duration_min * (1 - (pct / 100)))
     etaStr = remMin >= 60 ? `${Math.floor(remMin/60)}h ${remMin%60}m left` : `${remMin}m left`
   }
