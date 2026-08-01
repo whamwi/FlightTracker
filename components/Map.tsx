@@ -29,6 +29,7 @@ interface Aircraft {
   board_match:    boolean
   dep_iata:       string | null
   arr_iata:       string | null
+  dep_time_utc?:  string | null   // scheduled "HH:MM" UTC — popup fallback when no status
   arr_time_utc:   string | null
   duration_min:   number | null
   iata_number:    string | null
@@ -335,8 +336,15 @@ function buildPopup(
   // Times (local at each airport)
   const depOffset = _apOffset[dep ?? ''] ?? 3
   const arrOffset = _apOffset[arr ?? ''] ?? 3
+  // Fall back to the scheduled time carried on the aircraft when flightStatusRef has
+  // nothing — the same chain buildSchedulePopup has always used. Without it the marker
+  // popup rendered a bare dash while the schedule panel showed a time for the same flight
+  // at the same moment: a flight surfaced as an *aircraft* is excluded from boardDeparted,
+  // and boardDeparted is what populates revised_arr_utc.
   const depTimeLocal = popupToLocal(fs?.actual_dep_utc ?? fs?.revised_dep_utc ?? fs?.scheduled_dep_utc ?? null, depOffset)
+                    || (a.dep_time_utc ? schedToLocal(a.dep_time_utc, depOffset) : '')
   const arrTimeLocal = popupToLocal(fs?.actual_arr_utc ?? fs?.revised_arr_utc ?? fs?.scheduled_arr_utc ?? null, arrOffset)
+                    || (a.arr_time_utc ? schedToLocal(a.arr_time_utc, arrOffset) : '')
 
   const delayBadge = (min: number | null | undefined) => min != null && Math.abs(min) >= 2
     ? `<span style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;padding:2px 5px;border-radius:99px;margin-left:5px;line-height:1.4">${min > 0 ? '+' : ''}${min}m</span>`
@@ -386,11 +394,17 @@ function buildPopup(
       </div>`
     : ''
 
+  // Same clock as the arrival column directly above it. This was toLocaleTimeString(),
+  // i.e. the *viewer's* zone, so a single card carried three unlabelled zones — departure
+  // in the origin's, arrival in the destination's, this one in the reader's. On a mostly
+  // diaspora audience that also made a signal-lost stamp read as later than the arrival
+  // time beside it.
+  const lostLocal = lostAt ? popupToLocal(new Date(lostAt).toISOString(), arrOffset) : ''
   const lostLine = lostAt && !projected
-    ? `<div style="color:#ef4444;font-size:11px;padding:5px 14px">⚠ Signal lost ${new Date(lostAt).toLocaleTimeString()}</div>`
+    ? `<div style="color:#ef4444;font-size:11px;padding:5px 14px">⚠ Signal lost ${lostLocal}</div>`
     : ''
   const drLine = projected && lostAt
-    ? `<div style="color:#9ca3af;font-size:10px;padding:2px 14px 6px">Dead reckoning from ${new Date(lostAt).toLocaleTimeString()}</div>`
+    ? `<div style="color:#9ca3af;font-size:10px;padding:2px 14px 6px">Dead reckoning from ${lostLocal}</div>`
     : ''
   const photoHtml = photoUrl
     ? `<img src="${photoUrl}" style="width:100%;height:110px;object-fit:cover;display:block">`
