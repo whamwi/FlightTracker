@@ -302,7 +302,13 @@ async function fetchHexPositions(flights: SignalFlight[], skipHexes: Set<string>
         const json = await res.json()
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const ac = (json.ac ?? []).find((a: any) => a.lat != null)
-        if (ac) results[f.callsign] = { ...ac, _sigFlight: f }
+        if (!ac) return
+        // Reject if adsb.fi shows a different callsign — same airframe, different leg.
+        // The signal_log entry is stale (actual_arr_at not yet written); skip it so
+        // the airframe's new flight doesn't get mislabelled as the old one.
+        const acCs = (ac.flight ?? '').trim().toUpperCase()
+        if (acCs && acCs !== f.callsign.toUpperCase()) return
+        results[f.callsign] = { ...ac, _sigFlight: f }
       } catch { /* silent */ }
     }))
   }
