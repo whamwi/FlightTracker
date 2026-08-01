@@ -242,22 +242,45 @@ function AirportHero({ airport, totalDests, totalFlights }: { airport: string; t
 }
 
 // ── Destination card — desktop ────────────────────────────────────────────────
-function DestCardDesktop({ dest, onView, weeklyCount, imageUrl }: {
+function DestCardDesktop({ dest, onView, weeklyCount, imageUrl, onImageUploaded }: {
   dest: Destination; onView: () => void; weeklyCount: number; imageUrl?: string
+  onImageUploaded: (iata: string, url: string) => void
 }) {
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)
   const bg = destBg(dest.iata)
   const badge = weeklyCount >= 14 ? C.forest : C.gold
   const [imgFailed, setImgFailed] = useState(false)
   useEffect(() => { setImgFailed(false) }, [imageUrl])
   const showImg = imageUrl && !imgFailed
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    const form = new FormData()
+    form.append('iata', dest.iata)
+    form.append('file', file)
+    const res = await fetch('/api/dest-images', { method: 'POST', body: form })
+    const data = await res.json()
+    if (data.ok) onImageUploaded(dest.iata, data.url)
+    setUploading(false)
+    e.target.value = ''
+  }
   return (
     <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, overflow: 'hidden', boxShadow: `0 1px 2px rgba(22,22,22,.05),0 12px 26px -22px rgba(22,22,22,.5)`, display: 'flex', flexDirection: 'column' }}>
-      {/* Photo area — no overlays */}
+      {/* Photo area */}
       <div style={{ position: 'relative', height: 160, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
         {showImg
           ? <img src={imageUrl} alt={destName(dest.iata)} onError={() => setImgFailed(true)} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
           : <span style={{ fontSize: 40, opacity: .35 }}>{apFlag(dest.iata)}</span>
         }
+        {showImg && <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,.35) 0%, transparent 55%)' }} />}
+        <button onClick={() => fileRef.current?.click()} disabled={uploading}
+          style={{ position: 'absolute', right: 10, bottom: 10, display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 8, background: 'rgba(0,0,0,.38)', backdropFilter: 'blur(8px)', border: '1px solid rgba(255,255,255,.18)', cursor: 'pointer', color: '#fff', font: `600 11px/1 'Instrument Sans',system-ui`, opacity: uploading ? .6 : 1 }}>
+          {uploading ? 'Uploading…' : 'Photo'}
+        </button>
+        <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleFile} />
       </div>
       {/* Info */}
       <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 9, flex: 1 }}>
@@ -522,6 +545,9 @@ export default function DestinationsPage() {
   const totalFlights = Object.values(weeklyCounts).reduce((s,v) => s+v, 0)
 
   const handleClose = useCallback(() => setSelected(null), [])
+  const handleImageUploaded = useCallback((iata: string, url: string) => {
+    setDestImages(prev => ({ ...prev, [iata]: url }))
+  }, [])
 
   return (
     <div style={{ minHeight: '100vh', background: C.bg, fontFamily: "'Instrument Sans',system-ui,sans-serif" }}>
@@ -615,7 +641,7 @@ export default function DestinationsPage() {
                   {/* Desktop grid */}
                   <div className="dst-grid">
                     {dests.map(d => (
-                      <DestCardDesktop key={d.iata} dest={d} weeklyCount={weeklyCounts[d.iata]??0} onView={() => setSelected(d)} imageUrl={destImages[d.iata]} />
+                      <DestCardDesktop key={d.iata} dest={d} weeklyCount={weeklyCounts[d.iata]??0} onView={() => setSelected(d)} imageUrl={destImages[d.iata]} onImageUploaded={handleImageUploaded} />
                     ))}
                   </div>
                   {/* Mobile list */}
