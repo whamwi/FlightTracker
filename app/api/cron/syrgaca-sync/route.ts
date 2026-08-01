@@ -43,6 +43,13 @@ const MAX_BYTES      = 12 * 1024 * 1024
 const POLL_DEADLINE_MS   = 180_000
 const INGEST_DEADLINE_MS = 275_000
 
+// A parked run older than this is treated as lost and replaced, so a run that never
+// reaches a terminal state can't wedge the sync permanently.
+const STALE_RUN_MS = 6 * 3600_000
+// Transient fetch failures mid-poll are common enough that one shouldn't abandon a run
+// that is almost certainly still fine.
+const MAX_POLL_ERRORS = 5
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 // ── Apify response shapes are loosely typed and drift between actor versions ──────
@@ -102,14 +109,21 @@ async function startRun(): Promise<{ runId: string; datasetId: string }> {
 }
 
 async function pollRun(runId: string, deadline: number) {
+  let errors = 0
   while (Date.now() < deadline) {
-    const res = await fetch(`https://api.apify.com/v2/actor-runs/${runId}?token=${APIFY_TOKEN}`, {
-      cache: 'no-store',
-    })
-    if (!res.ok) throw new Error(`Apify poll failed: ${res.status}`)
-    const { data } = await res.json()
-    if (data.status !== 'READY' && data.status !== 'RUNNING') {
-      return { status: data.status as string, datasetId: data.defaultDatasetId as string }
+    try {
+      const res = await fetch(`https://api.apify.com/v2/actor-runs/${runId}?token=${APIFY_TOKEN}`, {
+        cache: 'no-store',
+      })
+      if (!res.ok) throw new Error(`Apify poll failed: ${res.status}`)
+      const { data } = await res.json()
+      errors = 0
+      if (data.status !== 'READY' && data.status !== 'RUNNING') {
+        return { status: data.status as string, datasetId: data.defaultDatasetId as string }
+      }
+    } catch (e) {
+      // Ride out a blip; the run keeps going on Apify's side regardless.
+      if (++errors >= MAX_POLL_ERRORS) throw e
     }
     await sleep(5_000)
   }
@@ -231,6 +245,12 @@ export async function GET(req: Request) {
 
     // Resume a run parked by a previous invocation, otherwise kick off a new one.
     let runId: string = state.run_id ?? ''
+
+    // Don't resume something that has clearly gone nowhere — otherwise a run stuck in a
+    // non-terminal state would block every future sync.
+    const startedAtMs = state.run_started_at ? new Date(state.run_started_at).getTime() : 0
+    if (runId && startedAtMs && Date.now() - startedAtMs > STALE_RUN_MS) runId = ''
+
     if (!runId) {
       const started = await startRun()
       runId = started.runId
@@ -292,7 +312,10 @@ export async function GET(req: Request) {
       ok: true, runId, posts: posts.length, found: unique.length, inserted, skipped, deferred,
     })
   } catch (e) {
-    await writeState({ run_id: null, last_error: String(e) })
+    // Deliberately keep run_id: an actor run that is still alive on Apify's side should
+    // be picked up by the next invocation rather than paid for twice. The staleness
+    // check above is what eventually releases a genuinely dead one.
+    await writeState({ last_error: String(e) })
     return NextResponse.json({ ok: false, error: String(e) }, { status: 500 })
   }
 }
