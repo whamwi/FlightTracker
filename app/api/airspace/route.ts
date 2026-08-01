@@ -7,6 +7,10 @@ const SB_KEY     = process.env.SUPABASE_ANON_KEY!
 const SB_HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 
 // ── Visual radius feeds ───────────────────────────────────────────────────────
+// `dist` is in NAUTICAL MILES, not km — verified against a dense-coverage area, where a
+// dist=250 query returned aircraft out to 233 nm (431 km). So the Syria circle spans
+// 1,296 km, not 700. Get this wrong and the circles look half the size they are.
+//
 // Syria + neighbors: covers DAM, ALP, TK routes, LB, JO, IQ border traffic.
 // UAE + Gulf: covers DXB, AUH, SHJ, DOH, BAH, KWI, MCT.
 const FEEDS_SYRIA: string[] = [
@@ -17,9 +21,37 @@ const FEEDS_UAE: string[] = [
   'https://opendata.adsb.fi/api/v2/lat/25.0/lon/55.0/dist/400',
   'https://api.adsb.lol/v2/lat/25.0/lon/55.0/dist/400',
 ]
+// Turkey + Marmara/Aegean. The Syria circle clips western Turkey at its boundary rather
+// than at the edge of receiver coverage: over 48 h, aircraft_last_seen held 1,409 aircraft
+// in the 650–700 nm ring (centroid 38.5N 29.0E) and 8 beyond it. Istanbul sits at 664 nm
+// of a 700 nm radius, so its northwestern approaches, Edirne and the Aegean fall outside.
+//
+// Centred on IST rather than on Turkey's geographic centre, because the centre is already
+// covered — only the northwest is missing. 400 nm from here also reaches up the northern
+// legs of DAM–AMS, ALP–DUS and BER–DAM into the Balkans. Combined with the Syria circle,
+// the union covers all of Turkey.
+const FEEDS_TURKEY: string[] = [
+  'https://opendata.adsb.fi/api/v2/lat/41.0/lon/29.0/dist/400',
+  'https://api.adsb.lol/v2/lat/41.0/lon/29.0/dist/400',
+]
 
+// Syria's extent (32.31–37.32 N, 35.61–42.38 E) padded a little. Used only to drop
+// non-board aircraft from the response — the client applies the exact polygon, so this
+// deliberately errs wide.
+const SYRIA_BOX = { latMin: 32.0, latMax: 37.7, lonMin: 35.3, lonMax: 42.7 }
+function inSyriaBox(lat: number, lon: number): boolean {
+  return lat >= SYRIA_BOX.latMin && lat <= SYRIA_BOX.latMax
+      && lon >= SYRIA_BOX.lonMin && lon <= SYRIA_BOX.lonMax
+}
+
+// A feed that answered with an empty list and a feed that never answered are different
+// facts, and every caller downstream needs to tell them apart: one means quiet airspace,
+// the other means we are blind. Returning [] for both is what kept the DB fallback from
+// ever firing — the map simply cleared.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function fetchRadiusFeed(feeds: string[]): Promise<any[]> {
+interface FeedResult { ok: boolean; aircraft: any[] }
+
+async function fetchRadiusFeed(feeds: string[]): Promise<FeedResult> {
   for (const url of feeds) {
     try {
       const res = await fetch(url, {
@@ -29,10 +61,10 @@ async function fetchRadiusFeed(feeds: string[]): Promise<any[]> {
       if (!res.ok) continue
       const json = await res.json()
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (json.ac ?? []).filter((a: any) => a.lat != null && a.lon != null)
+      return { ok: true, aircraft: (json.ac ?? []).filter((a: any) => a.lat != null && a.lon != null) }
     } catch { /* try next */ }
   }
-  return []
+  return { ok: false, aircraft: [] }
 }
 
 // ── IATA → ICAO airline prefix (1h cache) ─────────────────────────────────────
@@ -231,90 +263,67 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<Bo
   return flights
 }
 
-// ── Callsign-based ADS-B lookup for active flights (10s cache) ────────────────
-// Active = FR24 status suggests the plane is airborne or about to depart.
-// "estimated" covers "Estimated dep HH:MM" — the daily cache is frozen after the 02:00 UTC
-// cron, so flights that departed later in the day still show "Estimated dep" all day.
-// Querying adsb.fi for them is cheap — if they're on the ground it returns nothing.
-const ACTIVE_KEYWORDS = ['departed', 'took off', 'en route', 'in flight', 'boarding', 'gate close', 'approaching', 'estimated']
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let trackedCache: { map: Record<string, any>; ts: number } | null = null
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function fetchTrackedPositions(callsigns: string[]): Promise<Record<string, any>> {
-  if (!callsigns.length) return {}
-  if (trackedCache && Date.now() - trackedCache.ts < 10_000) return trackedCache.map
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const results: Record<string, any> = {}
-  const BATCH = 3
-  for (let i = 0; i < callsigns.length; i += BATCH) {
-    if (i > 0) await new Promise(r => setTimeout(r, 300))
-    await Promise.all(callsigns.slice(i, i + BATCH).map(async cs => {
-      try {
-        const res = await fetch(`https://opendata.adsb.fi/api/v2/callsign/${cs}`, {
-          headers: { 'User-Agent': 'FlightTracker/1.0' },
-          signal: AbortSignal.timeout(5000),
-        })
-        if (!res.ok) return
-        const json = await res.json()
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const ac = (json.ac ?? []).find((a: any) => a.lat != null)
-        if (ac) results[cs] = ac
-      } catch { /* silent */ }
-    }))
-  }
-
-  trackedCache = { map: results, ts: Date.now() }
-  return results
-}
-
-// ── Hex-based global lookup from flight_signal_log ────────────────────────────
-// Tracks confirmed-airborne flights (real ADS-B, not FR24 cache guess) that have
-// left both radii. Calls adsb.fi /api/v2/hex/{hex} — works globally from Vercel.
+// The per-callsign and per-hex adsb.fi lookups that used to live here are gone.
+//
+// They fanned out one HTTP request per flight, three at a time with a 300 ms sleep between
+// rounds — about 53 callsigns a day, because ACTIVE_KEYWORDS matched 'estimated' and the
+// daily cache stays "Estimated dep" all day. Measured cost: ~10 s per cache miss against a
+// completely empty sky, on a request path that runs per visitor.
+//
+// Measured benefit: both loops only ever contributed aircraft the radius circles missed
+// (`trackedExtra` skips anything already in `seenHex`). Over 7 days, of 7,983 aircraft in
+// aircraft_last_seen, 13 were outside the circles — and the Turkey circle now covers 9 of
+// those. Net unique yield: 4 aircraft in 7 days.
+//
+// What they were actually for is now done properly by /api/cron/opensky-poll: one request,
+// one credit, every tracked hex at once, global, no radius limit, on a 2-minute cron rather
+// than per visitor. fetchLoggedPositions below surfaces its fixes to the map.
 interface SignalFlight { callsign: string; hex: string; dep_iata: string | null; arr_iata: string | null; flight_date: string }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let hexCache: { map: Record<string, any>; ts: number } | null = null
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function fetchHexPositions(flights: SignalFlight[], skipHexes: Set<string>): Promise<Record<string, any>> {
-  const pending = flights.filter(f => f.hex && !skipHexes.has(f.hex.toLowerCase()))
-  if (!pending.length) return {}
-  if (hexCache && Date.now() - hexCache.ts < 10_000) {
-    // Return cached result filtered to current pending set
-    const hexSet = new Set(pending.map(f => f.hex.toLowerCase()))
-    return Object.fromEntries(Object.entries(hexCache.map).filter(([, a]) => hexSet.has((a.hex ?? '').toLowerCase())))
-  }
+// ── Poller-written positions (10s cache) ──────────────────────────────────────
+// /api/cron/opensky-poll writes flight_position_log every couple of minutes for every
+// tracked hex, worldwide. OpenSky sees traffic the volunteer ADS-B networks miss over
+// this region, so these rows are often the only live fix a flight has. Reading them here
+// is a DB hit rather than an upstream call, so the cost does not scale with visitor
+// count — which is the point of polling on a cron instead of from the browser.
+//
+// A row can be up to one poll interval old, so it is emitted as an out-of-band fix
+// carrying its own capture time (`fix_at`) rather than as a current position: the client
+// dead-reckons forward from it instead of assuming the aircraft is there now.
+const LOGGED_MAX_AGE_MS = 6 * 60_000
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const results: Record<string, any> = {}
-  const BATCH = 3
-  for (let i = 0; i < pending.length; i += BATCH) {
-    if (i > 0) await new Promise(r => setTimeout(r, 300))
-    await Promise.all(pending.slice(i, i + BATCH).map(async f => {
-      try {
-        const res = await fetch(`https://opendata.adsb.fi/api/v2/hex/${f.hex.toLowerCase()}`, {
-          headers: { 'User-Agent': 'FlightTracker/1.0' },
-          signal: AbortSignal.timeout(5000),
-        })
-        if (!res.ok) return
-        const json = await res.json()
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const ac = (json.ac ?? []).find((a: any) => a.lat != null)
-        if (!ac) return
-        // Reject if adsb.fi shows a different callsign — same airframe, different leg.
-        // The signal_log entry is stale (actual_arr_at not yet written); skip it so
-        // the airframe's new flight doesn't get mislabelled as the old one.
-        const acCs = (ac.flight ?? '').trim().toUpperCase()
-        if (acCs && acCs !== f.callsign.toUpperCase()) return
-        results[f.callsign] = { ...ac, _sigFlight: f }
-      } catch { /* silent */ }
-    }))
-  }
+interface LoggedPos {
+  callsign:    string
+  lat:         number
+  lon:         number
+  alt_baro:    number | null
+  gs:          number | null
+  track:       number | null
+  hex:         string | null
+  captured_at: string
+}
+let loggedCache: { map: Record<string, LoggedPos>; ts: number } | null = null
 
-  hexCache = { map: results, ts: Date.now() }
-  return results
+async function fetchLoggedPositions(): Promise<Record<string, LoggedPos>> {
+  if (loggedCache && Date.now() - loggedCache.ts < 10_000) return loggedCache.map
+  const cutoff = new Date(Date.now() - LOGGED_MAX_AGE_MS).toISOString()
+  try {
+    const res = await fetch(
+      `${SB_URL}/rest/v1/flight_position_log`
+      + `?captured_at=gte.${cutoff}&order=captured_at.desc&limit=500`
+      + `&select=callsign,lat,lon,alt_baro,gs,track,hex,captured_at`,
+      { headers: SB_HEADERS, signal: AbortSignal.timeout(5000) },
+    )
+    const rows: LoggedPos[] = res.ok ? await res.json() : []
+    const map: Record<string, LoggedPos> = {}
+    // Newest-first, so the first row seen for a callsign is its latest fix.
+    for (const r of rows) {
+      if (!r.callsign || r.lat == null || r.lon == null) continue
+      if (!map[r.callsign]) map[r.callsign] = r
+    }
+    loggedCache = { map, ts: Date.now() }
+    return map
+  } catch { return loggedCache?.map ?? {} }
 }
 
 // Fetch today's confirmed-airborne flights with hex codes from flight_signal_log
@@ -377,8 +386,18 @@ async function upsertPositions(aircraft: any[]): Promise<void> {
 }
 
 // ── DB fallback when all ADS-B feeds are down ─────────────────────────────────
+// Every row is resolved against the board. The previous version hardcoded
+// `board_match: false` and left dep/arr null, which made the whole fallback a no-op: the
+// client drops any aircraft without `board_match`, so the rows were queried, serialised,
+// sent, and discarded on arrival. The enrichment is not cosmetic either — without
+// dep_iata/arr_iata/duration_min/actual_dep_utc the ghost predictor and the path tracker
+// have nothing to advance a marker along.
+//
+// Non-board rows are dropped here rather than shipped: they only feed the Over Syria view,
+// which is a statement about who is in Syrian airspace *now* — a two-hour-old position
+// cannot answer that. Dropping them also takes the payload from 500 rows to a handful.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function fetchLastKnownPositions(): Promise<any[]> {
+async function fetchLastKnownPositions(boardMap: Map<string, BoardFlight>): Promise<any[]> {
   const cutoff = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
   const res = await fetch(
     `${SB_URL}/rest/v1/aircraft_last_seen?seen_at=gte.${cutoff}&order=seen_at.desc&limit=500`,
@@ -387,26 +406,42 @@ async function fetchLastKnownPositions(): Promise<any[]> {
   if (!res.ok) return []
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows: any[] = await res.json()
-  return rows.map(r => ({
-    hex:          r.hex,
-    flight:       r.callsign ?? '',
-    lat:          r.lat,
-    lon:          r.lon,
-    alt_baro:     r.alt_baro,
-    gs:           r.gs,
-    track:        r.track,
-    t:            r.aircraft_type,
-    r:            r.registration,
-    board_match:    false,
-    dep_iata:       null,
-    arr_iata:       null,
-    arr_time_utc:   null,
-    duration_min:   null,
-    iata_number:    null,
-    actual_dep_utc: null,
-    seen_at:        r.seen_at,
-    stale:          true,
-  }))
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const out: any[] = []
+  const seen = new Set<string>()
+  for (const r of rows) {
+    const cs   = (r.callsign ?? '').trim().toUpperCase()
+    const info = cs ? boardMap.get(cs) : undefined
+    if (!info) continue
+    // Rows are newest-first; keep only the most recent fix per callsign.
+    if (seen.has(cs)) continue
+    seen.add(cs)
+    out.push({
+      hex:            r.hex,
+      flight:         cs,
+      lat:            r.lat,
+      lon:            r.lon,
+      alt_baro:       r.alt_baro,
+      gs:             r.gs,
+      track:          r.track,
+      t:              r.aircraft_type,
+      r:              r.registration,
+      board_match:    true,
+      dep_iata:       info.dep_iata,
+      arr_iata:       info.arr_iata,
+      dep_time_utc:   info.sched_dep ? unixToHHMM(info.sched_dep) : null,
+      arr_time_utc:   info.sched_arr ? unixToHHMM(info.sched_arr) : null,
+      duration_min:   info.duration_min,
+      iata_number:    info.num,
+      actual_dep_utc: info.actual_dep_utc,
+      actual_arr_utc: info.actual_arr_utc,
+      dep_delay_min:  info.dep_delay_min,
+      airline_iata:   info.airline_iata,
+      seen_at:        r.seen_at,
+      stale:          true,
+    })
+  }
+  return out
 }
 
 function unixToHHMM(unix: number): string {
@@ -415,10 +450,12 @@ function unixToHHMM(unix: number): string {
 }
 
 // ── Radius feed in-flight dedup ───────────────────────────────────────────────
+// `live` is false only when every mirror of every circle failed to answer — the signal
+// that we are blind rather than looking at quiet sky.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let feedCache: { aircraft: any[]; ts: number } | null = null
+let feedCache: { aircraft: any[]; live: boolean; ts: number } | null = null
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let feedInflight: Promise<any[]> | null = null
+let feedInflight: Promise<{ aircraft: any[]; live: boolean }> | null = null
 
 // ── Live ADS-B departure writeback ────────────────────────────────────────────
 // writeInboundDep: UAE/Gulf radius sees an inbound flight airborne → write real_dep
@@ -478,56 +515,58 @@ async function writeOutboundDep(info: BoardFlight, depTs: number): Promise<void>
 
 // ── Handler ───────────────────────────────────────────────────────────────────
 export async function GET() {
+  // Hoisted out of the try so the catch block can still resolve board metadata for the
+  // DB fallback. An empty map there just means the fallback returns nothing, which is the
+  // same as the old behaviour rather than a regression.
+  const boardMap = new Map<string, BoardFlight>()
   try {
     const iataToIcao    = await fetchIataToIcao()
     const resolvedBoard = await fetchBoardFlights(iataToIcao)
 
     // callsign → board info
-    const boardMap = new Map<string, BoardFlight>()
     for (const f of resolvedBoard) boardMap.set(f.callsign, f)
-
-    // Flights whose status says they're airborne — track globally by callsign.
-    // Also include flights confirmed departed by real_dep timestamp but with no
-    // arrival yet — these appear in Business API data without a "status" text string.
-    const activeCallsigns = resolvedBoard
-      .filter(f =>
-        ACTIVE_KEYWORDS.some(kw => f.status.includes(kw)) ||
-        (f.actual_dep_utc != null && f.actual_arr_utc == null)
-      )
-      .map(f => f.callsign)
 
     // Radius feeds (cached 10s, in-flight dedup)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let visualAircraft: any[]
+    let feedsLive: boolean
     if (feedCache && Date.now() - feedCache.ts < 10_000) {
       visualAircraft = feedCache.aircraft
+      feedsLive      = feedCache.live
     } else {
       if (!feedInflight) {
         feedInflight = Promise.all([
           fetchRadiusFeed(FEEDS_SYRIA),
           fetchRadiusFeed(FEEDS_UAE),
-        ]).then(([syria, uae]) => {
+          fetchRadiusFeed(FEEDS_TURKEY),
+        ]).then(([syria, uae, turkey]) => {
+          // One surviving circle still gives a real picture; only a clean sweep of
+          // failures means we are blind.
+          const live = syria.ok || uae.ok || turkey.ok
           const seenHex = new Set<string>()
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const merged: any[] = []
-          for (const a of [...syria, ...uae]) {
+          // Syria first: on an overlapping aircraft its entry wins, keeping the
+          // existing feed's fix rather than swapping in the Turkey circle's copy.
+          for (const a of [...syria.aircraft, ...uae.aircraft, ...turkey.aircraft]) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             if (seenHex.has((a as any).hex)) continue
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             seenHex.add((a as any).hex)
             merged.push(a)
           }
-          feedCache = { aircraft: merged, ts: Date.now() }
+          feedCache = { aircraft: merged, live, ts: Date.now() }
           feedInflight = null
-          return merged
+          return { aircraft: merged, live }
         }).catch(err => { feedInflight = null; throw err })
       }
-      visualAircraft = await feedInflight
+      const feed     = await feedInflight
+      visualAircraft = feed.aircraft
+      feedsLive      = feed.live
     }
 
-    // Tracked callsigns + confirmed-airborne hex list fetched in parallel with persist
-    const [trackedMap, signalFlights] = await Promise.all([
-      fetchTrackedPositions(activeCallsigns),
+    // Confirmed-airborne hex list, fetched in parallel with the position persist
+    const [signalFlights] = await Promise.all([
       fetchSignalFlights(),
       upsertPositions(visualAircraft),
     ] as const)
@@ -585,64 +624,43 @@ export async function GET() {
       })
     }
 
-    // Tracked flights outside both visual radii
+    // Board flights located outside the radius circles. Sourced from the OpenSky poller
+    // below rather than from per-flight adsb.fi lookups.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const trackedExtra: any[] = []
-    for (const [cs, a] of Object.entries(trackedMap)) {
-      if (seenHex.has(a.hex)) continue
-      seenHex.add(a.hex)
-      const info = boardMap.get(cs)
 
-      // Same departure writeback as the visual radius loop — catches outbound ALP/DAM/LTK
-      // flights that only become visible to adsb.fi once they cross into Turkish airspace
-      // (outside the 700 km Syria radius but returned by the global callsign query).
-      let te_actual_dep_utc = info?.actual_dep_utc ?? null
-      const teAirborne = (a.alt_baro ?? 0) > 500 && (a.gs ?? 0) > 80
-      if (!te_actual_dep_utc && info && teAirborne) {
-        if (info.arr_iata && SYRIAN_AIRPORTS_SET.has(info.arr_iata)
-            && !SYRIAN_AIRPORTS_SET.has(info.dep_iata ?? '')) {
-          // Inbound to Syrian airport
-          const depTs = info.sched_dep ?? Math.floor(Date.now() / 1000)
-          te_actual_dep_utc = new Date(depTs * 1000).toISOString()
-          if (!depSynced.has(cs)) { depSynced.add(cs); writeInboundDep(info, depTs).catch(() => {}) }
-        } else if (info.dep_iata && SYRIAN_AIRPORTS_SET.has(info.dep_iata)
-            && !SYRIAN_AIRPORTS_SET.has(info.arr_iata ?? '')) {
-          // Outbound from Syrian airport
-          const depTs = info.sched_dep ?? Math.floor(Date.now() / 1000)
-          te_actual_dep_utc = new Date(depTs * 1000).toISOString()
-          if (!depSynced.has(cs)) { depSynced.add(cs); writeOutboundDep(info, depTs).catch(() => {}) }
-        }
-      }
-
-      trackedExtra.push({
-        ...a,
-        board_match:    !!info,
-        dep_iata:       info?.dep_iata       ?? null,
-        arr_iata:       info?.arr_iata       ?? null,
-        dep_time_utc:   info?.sched_dep      ? unixToHHMM(info.sched_dep) : null,
-        arr_time_utc:   info?.sched_arr      ? unixToHHMM(info.sched_arr) : null,
-        duration_min:   info?.duration_min   ?? null,
-        iata_number:    info?.num            ?? null,
-        actual_dep_utc: te_actual_dep_utc,
-        actual_arr_utc: info?.actual_arr_utc ?? null,
-        dep_delay_min:  info?.dep_delay_min  ?? null,
-        airline_iata:   info?.airline_iata   ?? null,
-      })
-    }
-    // Hex-based global lookup for flights confirmed airborne by real ADS-B signal
-    // but outside both radii and not found by the callsign tracker.
-    const hexMap = await fetchHexPositions(signalFlights, seenHex)
-    for (const [cs, a] of Object.entries(hexMap)) {
-      const hexLower = (a.hex ?? '').toLowerCase()
-      if (seenHex.has(hexLower)) continue
-      seenHex.add(hexLower)
-      const sig  = a._sigFlight as SignalFlight
+    // Poller-written fixes for tracked flights that no radius circle found.
+    //
+    // Nothing in trackedExtra is fed back through upsertPositions: every source below is
+    // already DB-derived (flight_position_log, aircraft_last_seen), and writing a row back
+    // would stamp seen_at = now, making a fix of known age look permanently current.
+    const emittedCs = new Set<string>(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      annotated.map((a: any) => (a.flight ?? '').trim().toUpperCase()),
+    )
+    const loggedMap = await fetchLoggedPositions()
+    for (const sig of signalFlights) {
+      const cs = sig.callsign.trim().toUpperCase()
+      if (emittedCs.has(cs)) continue
+      if (sig.hex && seenHex.has(sig.hex.toLowerCase())) continue
+      const p = loggedMap[sig.callsign] ?? loggedMap[cs]
+      if (!p) continue
+      emittedCs.add(cs)
+      if (p.hex) seenHex.add(p.hex.toLowerCase())
       const info = boardMap.get(cs)
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { _sigFlight: _unused, ...aircraft } = a
       trackedExtra.push({
-        ...aircraft,
+        hex:            p.hex ?? sig.hex,
         flight:         cs,
+        lat:            p.lat,
+        lon:            p.lon,
+        alt_baro:       p.alt_baro,
+        gs:             p.gs,
+        track:          p.track,
+        true_heading:   p.track,
+        t:              null,
+        r:              null,
+        fr24:           true,          // out-of-band fix: dead-reckon from fix_at, don't treat as live
+        fix_at:         p.captured_at,
         board_match:    true,
         dep_iata:       sig.dep_iata,
         arr_iata:       sig.arr_iata,
@@ -657,7 +675,22 @@ export async function GET() {
       })
     }
 
-    if (trackedExtra.length) upsertPositions(trackedExtra).catch(() => {})
+    // Every circle failed — we are blind, not looking at empty sky. Fall back to the last
+    // known position of each board flight so the map keeps its aircraft instead of
+    // clearing. Marked stale with its own seen_at, so the client dead-reckons from the
+    // fix's real age rather than pinning a marker to an hours-old position.
+    //
+    // Deliberately NOT fed through upsertPositions above: these rows came out of
+    // aircraft_last_seen, and writing them back would stamp seen_at = now and make a stale
+    // position look permanently fresh.
+    if (!feedsLive) {
+      for (const a of await fetchLastKnownPositions(boardMap)) {
+        const cs = (a.flight ?? '').trim().toUpperCase()
+        if (!cs || emittedCs.has(cs)) continue
+        emittedCs.add(cs)
+        trackedExtra.push(a)
+      }
+    }
 
     // Board flights confirmed departed but not found by any ADS-B feed
     // (no coverage over central Saudi Arabia, Iraqi desert, etc.).
@@ -717,19 +750,32 @@ export async function GET() {
         }
       })
 
+    // Non-board aircraft are consumed only by the Over Syria view, which discards
+    // everything outside the Syria polygon. Shipping the rest to every visitor — an
+    // audience that is ~72% mobile — is bandwidth spent on markers that are never drawn,
+    // and adding the Turkey circle would have made that materially worse. Board-matched
+    // aircraft are always kept, wherever they are. upsertPositions above already saw the
+    // unfiltered set, so aircraft_last_seen is unaffected.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const visible = annotated.filter((a: any) => a.board_match || inSyriaBox(a.lat, a.lon))
+
     return NextResponse.json({
       ok:           true,
-      aircraft:     [...annotated, ...trackedExtra],
+      aircraft:     [...visible, ...trackedExtra],
       boardDeparted,
       ts:           feedCache!.ts,
+      // Enough to tell "the feeds returned nothing" from "we filtered it all out".
+      feed_total:   annotated.length,
+      // False means every circle failed and the aircraft above are last-known positions.
+      feeds_live:   feedsLive,
     })
   } catch (err) {
     if (feedCache?.aircraft.length) {
       return NextResponse.json({ ok: true, aircraft: feedCache.aircraft, ts: feedCache.ts, warn: String(err) })
     }
     try {
-      const dbAc = await fetchLastKnownPositions()
-      return NextResponse.json({ ok: true, aircraft: dbAc, ts: 0, warn: String(err), from_db: true })
+      const dbAc = await fetchLastKnownPositions(boardMap)
+      return NextResponse.json({ ok: true, aircraft: dbAc, ts: 0, warn: String(err), from_db: true, feeds_live: false })
     } catch {
       return NextResponse.json({ ok: false, aircraft: [], warn: String(err) })
     }

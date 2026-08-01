@@ -146,11 +146,16 @@ loop or in `setLatLng` being overwritten elsewhere — not in the model.
 
 | Item | Notes |
 |---|---|
-| **OpenSky is broken two ways** | `Map.tsx:2027` calls `opensky-network.org` **from the browser** — a deliberate attempt to dodge a datacenter IP block. It fails CORS for every visitor (OpenSky sends no permissive `Access-Control-Allow-Origin`), so this path has never worked. The premise was also wrong: OpenSky does not block Vercel; `adsb.fi` is what blocks non-datacenter IPs. Move the call server-side into the poller, where CORS does not apply. |
-| Poller restructure | `/api/airspace` still fetches upstream per user request; load scales with visitors, not aircraft. `/api/cron/opensky-poll` exists but is **not scheduled** and uses HTTP Basic auth, which OpenSky no longer accepts (OAuth2 client credentials only — token endpoint and flow are in section 6). Fixing that route and scheduling it also fixes the CORS row above, since the browser would stop calling OpenSky entirely. |
+| ~~OpenSky is broken two ways~~ | **Done 2026-08-02.** The browser-side call and `/api/opensky-hexes` are deleted; OAuth2 client credentials replace Basic auth (`lib/opensky.ts`); the poll is scheduled `*/2 * * * *`. **Blocked on credentials**: `OPENSKY_CLIENT_ID`/`OPENSKY_CLIENT_SECRET` must be created on the OpenSky account API tab and added to Vercel — until then the route 503s. `OPENSKY_USER`/`OPENSKY_PASS` are dead and still in Vercel. |
+| ~~Poller restructure~~ | **Done 2026-08-02.** Poller fixes reach the map via a `flight_position_log` read (`fetchLoggedPositions`). The per-callsign and per-hex adsb.fi fan-outs are **deleted**: they issued one request per flight, 3 at a time with 300 ms sleeps (~53 callsigns/day, since `ACTIVE_KEYWORDS` matched `'estimated'` and the daily cache stays "Estimated dep" all day). Measured ~10 s per cache miss against an empty sky; measured yield 4 aircraft in 7 days. `/api/airspace` now makes exactly 3 upstream ADS-B calls — one per circle, in parallel. Typical cache miss 0.7–1.8 s. |
+| Remaining `/api/airspace` latency | Worst case is now a single circle's 8 s `AbortSignal.timeout` when adsb.lol stalls (observed 8.65 s). The three circles run in parallel so it does not compound, but 8 s is long for a per-visitor path — consider dropping it to ~3 s. |
+| Europe has no live fix source until OpenSky runs | The deleted hex/callsign loops were the only channel reaching outside the circles (they caught SYR272 over Schiphol). Europe is ~12 flights/30 days and is carried by the path-anchored ETA channel meanwhile, which is the documented normal case. `fetchLoggedPositions` picks it up the moment the OpenSky cron has credentials. |
+| OpenSky bbox sweep | The Syria+neighbours bounding-box query writes nothing — `writeState` persists only aircraft present in our hex list, and discards the rest. It cost 3 of the 4 credits per poll. Now off by default; `OPENSKY_BBOX_POLL=1` re-enables it. Give it a consumer (an OpenSky-backed "Over Syria" view) before turning it back on. |
 | `import-route-path` | Still overwrites the final waypoint with the airport, which can only manufacture geometry. Should append, and should add a *new variant* when a track disagrees with every stored corridor rather than overwriting one. |
 | RLS | Disabled on 13 tables; anon key can read *and write* `route_master`, `airports`, the caches. Deliberately deferred by the user to a hardening pass. **Live writes use the anon key**, so enabling RLS without switching those to the service key will take tracking down. |
-| Empty-feed handling | `/api/airspace` returning zero should not clear the map, and failure should be distinguishable from empty sky. |
+| ~~Empty-feed handling~~ | **Done 2026-08-02.** `fetchRadiusFeed` returns `{ok, aircraft}`, so a dead feed is no longer indistinguishable from quiet sky; `feeds_live: false` in the response means every circle failed. The DB fallback was doubly broken — it could never fire (nothing threw, because `fetchRadiusFeed` swallowed its own errors), and it discarded its own output (`board_match` hardcoded `false`, which the client filters on). Both fixed and verified by pointing the feeds at a dead port: 3 board flights came back stale, enriched and `board_match: true`. |
+| Radius feeds are in **nautical miles** | `dist` is nm, not km — a dist=250 probe returned aircraft out to 233 nm (431 km). The Syria circle is 1,296 km, not 700. A Turkey circle (IST, 400 nm) was added 2026-08-02: over 48 h `aircraft_last_seen` held 1,409 aircraft in the 650–700 nm ring and 8 past it, a cliff at the query boundary rather than at the edge of coverage. It closes Thrace/Edirne and reaches Sofia and Athens. **Europe is still uncovered** — ALP–DUS and DAM–AMS run ~1,080 nm out from IST. Now that non-board aircraft are filtered out of the response, a wider circle costs upstream time but not client bandwidth, so extending it is cheap if those routes need it. |
+| Marker heading ("flying sideways") | **Fixed 2026-08-02.** The rAF loop set `setLatLng` per frame but never touched the icon, so position came from the tracker's progress scalar while rotation came from the poll's `fPos` (clamped to 0.97) every 10 s. When the two estimators drift, the nose points somewhere the aircraft isn't going — measured on FYC362 at 81.8° when the true path bearing was 138.9°. Worst on turning routes: MJI–DAM swings 84°→184° inside its last 15%. The loop now writes `p.track_deg` onto the existing `<svg>` (no `setIcon`, no DOM rebuild). Intermittent by nature — both surfaces looked correct an hour later, so don't treat "it looks fine now" as evidence it is fixed. |
 | Geometry duplication | `interpolatePath`, `bearingFromPath`, `slerpGreatCircle` exist in both `lib/flight-predictor.ts` and `components/Map.tsx`. |
 | `tsconfig.tsbuildinfo` | Tracked build artifact; should be gitignored. |
 
@@ -167,8 +172,17 @@ path-anchored model is what makes that affordable, since it corrects a rate rath
 chasing a position.
 
 OpenSky charges **per call, not per aircraft** — an `icao24` batch is 1 credit regardless
-of size, so its free 4,000/day is worth more than it looks. Credentials are in Vercel;
-`OPENSKY_USER`/`OPENSKY_PASS` are dead and should be removed.
+of size, so its free 4,000/day is worth more than it looks. A bounding box costs by area:
+≤25 sq° = 1, ≤100 = 2, ≤400 = 3, larger or global = 4. The Syria box is 12° × 21° = 252 sq°,
+so 3 credits.
+
+At `*/2` with the bbox off that is 720 credits/day against a 4,000 free tier; with the bbox
+on it would be 2,880, which still fits. Auth is OAuth2 client credentials — 30-minute
+bearer tokens from
+`https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token`.
+Basic auth is no longer accepted at all. `icao24` must be **repeated once per address**
+(`?icao24=a&icao24=b`), not comma-joined. All of this lives in `lib/opensky.ts`.
+`OPENSKY_USER`/`OPENSKY_PASS` are dead and should be removed from Vercel.
 
 ---
 

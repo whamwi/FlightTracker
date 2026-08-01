@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { queryStates, creditCost, hasCredentials, type StateVec, type BBox } from '@/lib/opensky'
 
 export const dynamic     = 'force-dynamic'
 export const maxDuration = 30
@@ -7,11 +8,15 @@ const SB_URL  = process.env.SUPABASE_URL!
 const SB_KEY  = process.env.SUPABASE_ANON_KEY!
 const HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 
-// Syria + neighbours bounding box (catches approaches / departures)
-const BBOX = { lamin: '28', lomin: '29', lamax: '40', lomax: '50' }
+// Syria + neighbours bounding box (catches approaches / departures).
+// 12° × 21° = 252 sq° → 3 credits, i.e. three quarters of every poll's cost.
+const BBOX: BBox = { lamin: 28, lomin: 29, lamax: 40, lomax: 50 }
 
-const MS_TO_KTS = 1.94384
-const M_TO_FT   = 3.28084
+// The bbox sweep is off by default. writeState only persists aircraft that appear in our
+// hex list, so every non-tracked aircraft the sweep returns is discarded — it currently
+// buys nothing and costs 3 of the 4 credits per poll. Set OPENSKY_BBOX_POLL=1 to re-enable
+// it once something consumes general traffic (e.g. an OpenSky-backed "Over Syria" view).
+const BBOX_ENABLED = process.env.OPENSKY_BBOX_POLL === '1'
 
 interface ActiveFlight {
   callsign:    string
@@ -19,69 +24,6 @@ interface ActiveFlight {
   flight_date: string
   dep_iata:    string | null
   arr_iata:    string | null
-}
-
-interface StateVec {
-  icao24:    string
-  callsign:  string
-  lat:       number
-  lon:       number
-  alt_ft:    number | null
-  gs_kts:    number | null
-  track:     number | null
-  on_ground: boolean
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function parseState(s: any[]): StateVec | null {
-  if (s[6] == null || s[5] == null) return null
-  return {
-    icao24:    (s[0] as string).toLowerCase(),
-    callsign:  ((s[1] as string) || '').trim(),
-    lat:       s[6] as number,
-    lon:       s[5] as number,
-    alt_ft:    s[7] != null ? Math.round((s[7] as number) * M_TO_FT)   : null,
-    gs_kts:    s[9] != null ? Math.round((s[9] as number) * MS_TO_KTS) : null,
-    track:     s[10] as number | null,
-    on_ground: Boolean(s[8]),
-  }
-}
-
-function openskyAuthHeader(): string | null {
-  const user = process.env.OPENSKY_USER
-  const pass = process.env.OPENSKY_PASS
-  if (!user || !pass) return null
-  return 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64')
-}
-
-async function queryOpenSky(
-  params: Record<string, string>,
-  debug?: string[],
-): Promise<StateVec[]> {
-  const qs   = new URLSearchParams(params).toString()
-  const auth = openskyAuthHeader()
-  let res: Response
-  try {
-    res = await fetch(`https://opensky-network.org/api/states/all?${qs}`, {
-      headers: {
-        'User-Agent':    'FlightTracker/1.0',
-        ...(auth ? { Authorization: auth } : {}),
-      },
-      signal: AbortSignal.timeout(12_000),
-    })
-  } catch (e) {
-    debug?.push(`fetch error: ${e}`)
-    return []
-  }
-  debug?.push(`HTTP ${res.status} (auth=${!!auth})`)
-  if (res.status === 429) return []
-  if (!res.ok) {
-    debug?.push(await res.text().catch(() => ''))
-    return []
-  }
-  const data = await res.json() as { states?: unknown[][] }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (data.states ?? []).flatMap(s => { const v = parseState(s as any[]); return v ? [v] : [] })
 }
 
 async function writeState(sv: StateVec, flight: ActiveFlight | undefined, now: string, today: string) {
@@ -152,6 +94,13 @@ export async function GET(req: Request) {
     }
   }
 
+  if (!hasCredentials()) {
+    return NextResponse.json(
+      { ok: false, error: 'OPENSKY_CLIENT_ID/OPENSKY_CLIENT_SECRET not set' },
+      { status: 503 },
+    )
+  }
+
   const now   = new Date().toISOString()
   const today = now.slice(0, 10)
 
@@ -166,15 +115,26 @@ export async function GET(req: Request) {
   const hexMap = new Map<string, ActiveFlight>()
   for (const f of active) hexMap.set(f.hex.toLowerCase(), f)
 
-  // 2. Hex batch — tracks our flights anywhere in the world
-  const dbg: string[] = []
+  const errors: string[] = []
+  let credits = 0
+
+  // 2. Hex batch — tracks our flights anywhere in the world, 1 credit for the whole list
   let hexStates: StateVec[] = []
   if (hexMap.size > 0) {
-    hexStates = await queryOpenSky({ icao24: [...hexMap.keys()].join(',') }, dbg)
+    const r = await queryStates({ icao24: [...hexMap.keys()] })
+    hexStates = r.states
+    credits  += r.credits
+    if (!r.ok) errors.push(`hex: ${r.error}`)
   }
 
-  // 3. Bounding box — all traffic over Syria + neighbours (feeds "Over Syria" view)
-  const bboxStates = await queryOpenSky(BBOX, dbg)
+  // 3. Bounding box — all traffic over Syria + neighbours (see BBOX_ENABLED)
+  let bboxStates: StateVec[] = []
+  if (BBOX_ENABLED) {
+    const r = await queryStates({ bbox: BBOX })
+    bboxStates = r.states
+    credits   += r.credits
+    if (!r.ok) errors.push(`bbox: ${r.error}`)
+  }
 
   // 4. Merge — hex batch wins on conflict (same icao24 in both responses)
   const merged = new Map<string, StateVec>()
@@ -182,17 +142,25 @@ export async function GET(req: Request) {
   for (const sv of hexStates)  merged.set(sv.icao24, sv)
 
   // 5. Write positions + milestones concurrently
-  await Promise.allSettled(
+  const writes = await Promise.allSettled(
     [...merged.values()].map(sv => writeState(sv, hexMap.get(sv.icao24), now, today))
   )
+  const writeFailures = writes.filter(w => w.status === 'rejected').length
 
   return NextResponse.json({
-    ok:           true,
-    polled_at:    now,
-    active_hexes: hexMap.size,
-    hex_found:    hexStates.length,
-    bbox_found:   bboxStates.length,
-    total:        merged.size,
-    debug:        dbg,
+    // A poll that reached OpenSky and found nothing is a success; one that failed to reach
+    // it is not. The old route returned ok:true either way, which is why a broken feed
+    // looked identical to empty sky.
+    ok:            errors.length === 0,
+    polled_at:     now,
+    active_hexes:  hexMap.size,
+    hex_found:     hexStates.length,
+    bbox_enabled:  BBOX_ENABLED,
+    bbox_found:    bboxStates.length,
+    total:         merged.size,
+    credits,
+    credits_if_bbox_enabled: credits + (BBOX_ENABLED ? 0 : creditCost({ bbox: BBOX })),
+    write_failures: writeFailures,
+    errors,
   })
 }

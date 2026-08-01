@@ -855,7 +855,11 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
               // FR24 cache: lostAt = fr24Ts so DR advances between 5-min refreshes.
               // Don't overwrite a fresher OpenSky entry — that would give it a stale
               // lostAt and immediately trigger the FR24_HAND_OFF_MS deletion.
-              const fr24LostAt = fr24Ts || now - 30_000
+              // A poller fix carries its own capture time; fr24Ts is the batch-wide
+              // fallback for sources that only stamp the whole response.
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const fixAt      = Date.parse((a as any).fix_at ?? '') || 0
+              const fr24LostAt = fixAt || fr24Ts || now - 30_000
               const prevFr24   = trackedRef.current[cs]
               if (!prevFr24 || prevFr24.lostAt <= fr24LostAt) {
                 trackedRef.current[cs] = { a, lostAt: fr24LostAt, isFr24: true }
@@ -948,7 +952,14 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
             }
           }
 
-          setError(data.warn ? 'Feed degraded' : null)
+          // feeds_live === false means every ADS-B circle failed and the aircraft above
+          // are last-known positions, not live fixes. Worth saying out loud rather than
+          // presenting hours-old positions as current.
+          setError(
+            data.feeds_live === false ? 'Live feed down — showing last known positions'
+            : data.warn                ? 'Feed degraded'
+            : null
+          )
         }
       } catch (e) {
         setError(String(e))
@@ -1883,7 +1894,29 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         const m = markersRef.current[cs] ?? schedMarkersRef.current[cs]
         if (!m) continue
         const p = store.position(cs, now)
-        if (p) m.setLatLng([p.lat, p.lon])
+        if (!p) continue
+        m.setLatLng([p.lat, p.lon])
+
+        // The nose has to follow the motion. Position advances every frame from the
+        // tracker's own progress scalar, but the icon's rotation was only ever written at
+        // poll time, from a *different* progress estimate (`fPos`, clamped to 0.97). The
+        // two drift apart, so the marker slid one way while the nose pointed another —
+        // measured 57 deg apart on a DAM approach, and worse where the route turns, since
+        // MJI–DAM swings from 84 deg (eastbound over the Med) to 184 deg (south into DAM)
+        // inside the last 15% of the path. That reads exactly as "flying sideways".
+        //
+        // Writing the transform on the existing <svg> rather than calling setIcon keeps it
+        // cheap: no DOM rebuild per frame, and the label element is left untouched. The
+        // dataset guard skips the write when the angle hasn't visibly changed, and
+        // self-heals after a poll's setIcon replaces the element.
+        const svg = m.getElement()?.querySelector('svg') as SVGElement | null | undefined
+        if (svg && Number.isFinite(p.track_deg)) {
+          const deg = Math.round(p.track_deg * 10) / 10
+          if (svg.dataset.deg !== String(deg)) {
+            svg.dataset.deg = String(deg)
+            svg.style.transform = `rotate(${deg}deg)`
+          }
+        }
       }
       raf = requestAnimationFrame(step)
     }
@@ -1990,140 +2023,11 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
     }
   }, [overSyriaOn])
 
-  // ── OpenSky hex-pull loop ─────────────────────────────────────────────────
-  // Tracks our scheduled flights globally — beyond the 700nm radius feed.
-  // Browser-side fetch avoids datacenter IP block on opensky-network.org.
-  // localStorage lock ensures only ONE tab calls OpenSky per 25s window —
-  // other tabs read the cached result — so multiple open tabs don't pile up.
-  useEffect(() => {
-    const MS_TO_KTS  = 1.94384
-    const M_TO_FT    = 3.28084
-    const POLL_MS    = 10_000
-    const LOCK_KEY   = 'osky-lock'    // timestamp of last successful poll
-    const RESULT_KEY = 'osky-result'  // last raw states JSON
-
-    const poll = async () => {
-      // 1. Fetch active hex list (server has 30s cache — cheap for all tabs)
-      let hexFlights: { callsign: string; hex: string; dep_iata: string | null; arr_iata: string | null; flight_date: string }[]
-      try {
-        const r = await fetch('/api/opensky-hexes')
-        if (!r.ok) return
-        hexFlights = (await r.json()).flights ?? []
-      } catch { return }
-      if (!hexFlights.length) return
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const hexMap: Record<string, any> = {}
-      for (const f of hexFlights) hexMap[f.hex.toLowerCase()] = f
-
-      // 2. Tab coordination — only one tab calls OpenSky per 25s window
-      const lastPoll = parseInt(localStorage.getItem(LOCK_KEY) ?? '0', 10)
-      let states: unknown[][] = []
-
-      if (Date.now() - lastPoll >= 25_000) {
-        // This tab wins — call OpenSky then share the result
-        const hexList = hexFlights.map(f => f.hex.toLowerCase()).join(',')
-        try {
-          const r = await fetch(`https://opensky-network.org/api/states/all?icao24=${hexList}`, {
-            headers: { 'User-Agent': 'FlightTracker/1.0' },
-          })
-          if (!r.ok) return
-          states = ((await r.json()) as { states?: unknown[][] }).states ?? []
-        } catch { return }
-        localStorage.setItem(LOCK_KEY,   String(Date.now()))
-        localStorage.setItem(RESULT_KEY, JSON.stringify(states))
-      } else {
-        // Another tab polled recently — read the shared result
-        try { states = JSON.parse(localStorage.getItem(RESULT_KEY) ?? '[]') } catch { return }
-      }
-
-      if (!states.length) return
-
-      const now   = Date.now()
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const batch: any[] = []
-
-      for (const s of states) {
-        const icao24 = (s[0] as string).toLowerCase()
-        const lat    = s[6] as number | null
-        const lon    = s[5] as number | null
-        if (lat == null || lon == null) continue
-
-        const flight = hexMap[icao24]
-        if (!flight) continue
-
-        const cs = flight.callsign
-
-        // Skip if already live in radius feed — don't override fresher ADS-B
-        const existing = trackedRef.current[cs]
-        if (existing && existing.lostAt === 0 && !existing.isFr24) continue
-
-        const alt_baro = s[7] != null ? Math.round((s[7] as number) * M_TO_FT)   : null
-        const gs       = s[9] != null ? Math.round((s[9] as number) * MS_TO_KTS) : null
-        const track    = s[10] as number | null
-        const on_gnd   = Boolean(s[8])
-
-        if (on_gnd || (alt_baro ?? 0) < 500 || (gs ?? 0) < 50) continue
-
-        // Enrich with schedule/status already loaded in this component
-        const se = scheduleRef.current.find(e => e.callsign === cs)
-        const fs = flightStatusRef.current[cs] ?? null
-
-        const aircraft: Aircraft = {
-          hex:            icao24,
-          flight:         cs,
-          lat,
-          lon,
-          alt_baro,
-          gs,
-          track,
-          true_heading:   track,
-          t:              null,
-          r:              null,
-          board_match:    true,
-          dep_iata:       flight.dep_iata,
-          arr_iata:       flight.arr_iata,
-          arr_time_utc:   se?.arr_time_utc  ?? null,
-          duration_min:   se?.duration_min  ?? null,
-          iata_number:    fs?.flight_number ?? null,
-          actual_dep_utc: fs?.actual_dep_utc ?? null,
-          actual_arr_utc: fs?.actual_arr_utc ?? null,
-          dep_delay_min:  fs?.dep_delay_min  ?? null,
-          airline_iata:   fs?.airline_iata   ?? null,
-        }
-
-        // Use isFr24-style so it isn't cleared by freshCallsigns cleanup;
-        // lostAt = now means ghost predictor starts from this fresh fix
-        trackedRef.current[cs] = { a: aircraft, lostAt: now, isFr24: true }
-
-        batch.push({
-          callsign:    cs,
-          flight_date: flight.flight_date,
-          lat, lon,
-          alt_baro,
-          gs,
-          track,
-          hex:         icao24,
-          dep_iata:    flight.dep_iata,
-          arr_iata:    flight.arr_iata,
-          iata_number: fs?.flight_number ?? null,
-        })
-      }
-
-      // 3. Log positions (fire-and-forget)
-      if (batch.length) {
-        fetch('/api/signal-log', {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify(batch),
-        }).catch(() => {})
-      }
-    }
-
-    poll()
-    const iv = setInterval(poll, POLL_MS)
-    return () => clearInterval(iv)
-  }, [])   // eslint-disable-line react-hooks/exhaustive-deps
+  // The OpenSky hex-pull that used to live here ran in the browser to dodge what was
+  // assumed to be a datacenter IP block. It never worked: opensky-network.org sends no
+  // permissive Access-Control-Allow-Origin, so every visitor's fetch failed CORS. The
+  // premise was wrong too — OpenSky does not block Vercel. It now runs server-side in
+  // /api/cron/opensky-poll, and its fixes reach the map through /api/airspace.
 
   return (
     <div className="relative w-full h-full">
