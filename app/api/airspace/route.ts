@@ -109,14 +109,20 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<Bo
   if (boardCache && boardCache.date === date && Date.now() - boardCache.ts < 60_000)
     return boardCache.flights
 
-  // Also pull yesterday's Syria date so flights that departed before midnight
-  // but are still airborne after midnight continue to show as ghost markers.
-  const yesterday = new Date(Date.now() + 3 * 3_600_000 - 86_400_000).toISOString().slice(0, 10)
-  // Syria midnight in UTC = start of today's Syria date (e.g. 21:00 UTC yesterday).
-  const syriaMidnightMs = new Date(date + 'T00:00:00+03:00').getTime()
+  // Pull yesterday, today, and tomorrow so cross-midnight flights appear on both sides:
+  // - Yesterday: departures from Syrian airports that are still airborne after midnight.
+  // - Tomorrow:  arrivals at Syrian airports from non-Syrian origins that depart tonight
+  //              but land just after Syria midnight (stored in tomorrow's cache by FR24).
+  const yesterday         = new Date(Date.now() + 3 * 3_600_000 - 86_400_000).toISOString().slice(0, 10)
+  const tomorrow          = new Date(Date.now() + 3 * 3_600_000 + 86_400_000).toISOString().slice(0, 10)
+  // Syria midnight boundaries (UTC):
+  //   syriaMidnightMs     = tonight's Syria midnight  (start of today's Syria date)
+  //   tomorrowMidnightMs  = next Syria midnight         (start of tomorrow's Syria date)
+  const syriaMidnightMs    = new Date(date     + 'T00:00:00+03:00').getTime()
+  const tomorrowMidnightMs = new Date(tomorrow + 'T00:00:00+03:00').getTime()
 
   const res = await fetch(
-    `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=in.(${yesterday},${date})&airport_iata=in.(DAM,ALP,LTK)&select=airport_iata,flight_date,departures,arrivals`,
+    `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=in.(${yesterday},${date},${tomorrow})&airport_iata=in.(DAM,ALP,LTK)&select=airport_iata,flight_date,departures,arrivals`,
     { headers: SB_HEADERS },
   )
   if (!res.ok) return boardCache?.flights ?? []
@@ -124,7 +130,7 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<Bo
   const rows: any[] = await res.json()
 
   // Today's rows first — ensures today's version of a flight wins the seen-set dedup
-  // and yesterday's identical entry (same num|sched_dep) is skipped.
+  // and yesterday's / tomorrow's identical entries are skipped.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   rows.sort((a: any, b: any) => (a.flight_date === date ? -1 : 0) - (b.flight_date === date ? -1 : 0))
 
@@ -144,9 +150,22 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<Bo
       for (const f of (row[section] ?? [])) {
         const num = (f.num ?? '').toString()
         if (!num) continue
-        // Yesterday's rows: skip any flight whose scheduled arrival is before Syria midnight
-        // (it landed before the date rolled over and is not a cross-midnight ghost candidate).
-        if (row.flight_date !== date && f.sched_arr && f.sched_arr * 1000 <= syriaMidnightMs) continue
+        // Cross-midnight filtering for non-today rows.
+        if (row.flight_date !== date) {
+          if (row.flight_date === yesterday) {
+            // Keep only flights still airborne after Syria midnight (sched_arr > tonight's midnight).
+            if (!f.sched_arr || f.sched_arr * 1000 <= syriaMidnightMs) continue
+          } else if (row.flight_date === tomorrow) {
+            // Keep only inbound arrivals at Syrian airports that arrive within the first
+            // 4 hours of tomorrow and haven't landed yet — departed tonight, cross midnight.
+            if (section !== 'arrivals') continue
+            if (!f.sched_arr || f.real_arr) continue
+            const arrMs = (f.sched_arr as number) * 1000
+            if (arrMs < tomorrowMidnightMs || arrMs >= tomorrowMidnightMs + 4 * 60 * 60 * 1000) continue
+          } else {
+            continue  // safety: ignore any unexpected date
+          }
+        }
         const key = `${num}|${f.sched_dep ?? ''}`
         if (seen.has(key)) continue
         seen.add(key)
@@ -248,6 +267,65 @@ async function fetchTrackedPositions(callsigns: string[]): Promise<Record<string
 
   trackedCache = { map: results, ts: Date.now() }
   return results
+}
+
+// ── Hex-based global lookup from flight_signal_log ────────────────────────────
+// Tracks confirmed-airborne flights (real ADS-B, not FR24 cache guess) that have
+// left both radii. Calls adsb.fi /api/v2/hex/{hex} — works globally from Vercel.
+interface SignalFlight { callsign: string; hex: string; dep_iata: string | null; arr_iata: string | null; flight_date: string }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let hexCache: { map: Record<string, any>; ts: number } | null = null
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function fetchHexPositions(flights: SignalFlight[], skipHexes: Set<string>): Promise<Record<string, any>> {
+  const pending = flights.filter(f => f.hex && !skipHexes.has(f.hex.toLowerCase()))
+  if (!pending.length) return {}
+  if (hexCache && Date.now() - hexCache.ts < 10_000) {
+    // Return cached result filtered to current pending set
+    const hexSet = new Set(pending.map(f => f.hex.toLowerCase()))
+    return Object.fromEntries(Object.entries(hexCache.map).filter(([, a]) => hexSet.has((a.hex ?? '').toLowerCase())))
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const results: Record<string, any> = {}
+  const BATCH = 8
+  for (let i = 0; i < pending.length; i += BATCH) {
+    await Promise.all(pending.slice(i, i + BATCH).map(async f => {
+      try {
+        const res = await fetch(`https://opendata.adsb.fi/api/v2/hex/${f.hex.toLowerCase()}`, {
+          headers: { 'User-Agent': 'FlightTracker/1.0' },
+          signal: AbortSignal.timeout(5000),
+        })
+        if (!res.ok) return
+        const json = await res.json()
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ac = (json.ac ?? []).find((a: any) => a.lat != null)
+        if (ac) results[f.callsign] = { ...ac, _sigFlight: f }
+      } catch { /* silent */ }
+    }))
+  }
+
+  hexCache = { map: results, ts: Date.now() }
+  return results
+}
+
+// Fetch today's confirmed-airborne flights with hex codes from flight_signal_log
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let signalCache: { flights: SignalFlight[]; ts: number } | null = null
+async function fetchSignalFlights(): Promise<SignalFlight[]> {
+  if (signalCache && Date.now() - signalCache.ts < 30_000) return signalCache.flights
+  const today = new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10)
+  try {
+    const res = await fetch(
+      `${SB_URL}/rest/v1/flight_signal_log`
+      + `?flight_date=eq.${today}&actual_arr_at=is.null&airborne_at=not.is.null&hex=not.is.null`
+      + `&select=callsign,hex,dep_iata,arr_iata,flight_date`,
+      { headers: SB_HEADERS, signal: AbortSignal.timeout(5000) }
+    )
+    const flights: SignalFlight[] = res.ok ? await res.json() : []
+    signalCache = { flights, ts: Date.now() }
+    return flights
+  } catch { return signalCache?.flights ?? [] }
 }
 
 // ── Persist last known positions ───────────────────────────────────────────────
@@ -425,11 +503,12 @@ export async function GET() {
       visualAircraft = await feedInflight
     }
 
-    // Tracked callsigns fetched in parallel with persist
-    const [trackedMap] = await Promise.all([
+    // Tracked callsigns + confirmed-airborne hex list fetched in parallel with persist
+    const [trackedMap, signalFlights] = await Promise.all([
       fetchTrackedPositions(activeCallsigns),
+      fetchSignalFlights(),
       upsertPositions(visualAircraft),
-    ])
+    ] as const)
 
     // Annotate visual radius aircraft
     const seenHex = new Set<string>()
@@ -528,6 +607,34 @@ export async function GET() {
         airline_iata:   info?.airline_iata   ?? null,
       })
     }
+    // Hex-based global lookup for flights confirmed airborne by real ADS-B signal
+    // but outside both radii and not found by the callsign tracker.
+    const hexMap = await fetchHexPositions(signalFlights, seenHex)
+    for (const [cs, a] of Object.entries(hexMap)) {
+      const hexLower = (a.hex ?? '').toLowerCase()
+      if (seenHex.has(hexLower)) continue
+      seenHex.add(hexLower)
+      const sig  = a._sigFlight as SignalFlight
+      const info = boardMap.get(cs)
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { _sigFlight: _unused, ...aircraft } = a
+      trackedExtra.push({
+        ...aircraft,
+        flight:         cs,
+        board_match:    true,
+        dep_iata:       sig.dep_iata,
+        arr_iata:       sig.arr_iata,
+        dep_time_utc:   info?.sched_dep    ? unixToHHMM(info.sched_dep) : null,
+        arr_time_utc:   info?.sched_arr    ? unixToHHMM(info.sched_arr) : null,
+        duration_min:   info?.duration_min ?? null,
+        iata_number:    info?.num          ?? null,
+        actual_dep_utc: info?.actual_dep_utc ?? null,
+        actual_arr_utc: info?.actual_arr_utc ?? null,
+        dep_delay_min:  info?.dep_delay_min  ?? null,
+        airline_iata:   info?.airline_iata   ?? null,
+      })
+    }
+
     if (trackedExtra.length) upsertPositions(trackedExtra).catch(() => {})
 
     // Board flights confirmed departed but not found by any ADS-B feed
