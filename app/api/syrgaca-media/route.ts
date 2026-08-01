@@ -22,9 +22,11 @@ export async function GET(req: Request) {
 
   const res = await fetch(
     `${SB_URL}/rest/v1/syrgaca_media` +
-    `?select=media_id,source,media_type,video_id,caption,permalink,posted_at,image_url,thumb_url,width,height` +
+    `?select=media_id,source,media_type,video_id,caption,permalink,posted_at,image_url,thumb_url,width,height,pinned` +
     filter +
-    `&order=posted_at.desc.nullslast` +
+    // Pinned items sit above the feed; everything else is newest-first. nullslast keeps
+    // a dateless row at the bottom rather than letting it jump to the top.
+    `&order=pinned.desc,posted_at.desc.nullslast` +
     `&limit=${limit}&offset=${offset}`,
     { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }, cache: 'no-store' },
   )

@@ -220,11 +220,15 @@ export async function GET(req: Request) {
     // Trim anything outside the newest TARGET — including Shorts stored before this
     // filter existed. Only in api mode: the RSS feed sees just the latest 15 uploads,
     // so "not in this batch" there would wrongly delete perfectly good older rows.
+    //
+    // Pinned rows are exempt. A pin can point at a video this sync never returns — an
+    // older one, or one from a different channel entirely — and without this guard the
+    // next run would quietly delete it.
     let pruned = 0
     if (mode === 'api' && rows.length > 0) {
       const keep = rows.map((r) => `"${r.media_id}"`).join(',')
       const res  = await fetch(
-        `${SB_URL}/rest/v1/syrgaca_media?source=eq.youtube&media_id=not.in.(${keep})`,
+        `${SB_URL}/rest/v1/syrgaca_media?source=eq.youtube&pinned=is.false&media_id=not.in.(${keep})`,
         { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=representation' } },
       )
       if (res.ok) pruned = ((await res.json()) as unknown[]).length
