@@ -56,13 +56,14 @@ const AIRLINE_BG: Record<string, string> = {
   PC:  'linear-gradient(140deg,#F47920 0%,#904010 100%)',
   W6:  'linear-gradient(140deg,#FF6600 0%,#903800 100%)',
   '6Q':'linear-gradient(140deg,#204080 0%,#102040 100%)',
+  XQ:  'linear-gradient(140deg,#1A5090 0%,#0A2850 100%)',
 }
 const airlineBg = (prefix: string) => AIRLINE_BG[prefix] ?? 'linear-gradient(140deg,#607080 0%,#303840 100%)'
 
 const AIRLINE_REGION: Record<string, 'gulf' | 'europe'> = {
   '3L':'gulf', EK:'gulf', EY:'gulf', F3:'gulf', FZ:'gulf', G9:'gulf',
   J9:'gulf',  KU:'gulf', QR:'gulf', RB:'gulf', RJ:'gulf', XH:'gulf', XY:'gulf',
-  DN:'europe', KK:'europe', PC:'europe', SR:'europe', TK:'europe', VF:'europe', '42':'europe',
+  DN:'europe', KK:'europe', PC:'europe', SR:'europe', TK:'europe', VF:'europe', XQ:'europe', '42':'europe',
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
