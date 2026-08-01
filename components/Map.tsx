@@ -1888,12 +1888,17 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
   // ── OpenSky hex-pull loop ─────────────────────────────────────────────────
   // Tracks our scheduled flights globally — beyond the 700nm radius feed.
   // Browser-side fetch avoids datacenter IP block on opensky-network.org.
+  // localStorage lock ensures only ONE tab calls OpenSky per 25s window —
+  // other tabs read the cached result — so multiple open tabs don't pile up.
   useEffect(() => {
-    const MS_TO_KTS = 1.94384
-    const M_TO_FT   = 3.28084
+    const MS_TO_KTS  = 1.94384
+    const M_TO_FT    = 3.28084
+    const POLL_MS    = 10_000
+    const LOCK_KEY   = 'osky-lock'    // timestamp of last successful poll
+    const RESULT_KEY = 'osky-result'  // last raw states JSON
 
     const poll = async () => {
-      // 1. Get active flight hex list (30s server cache — safe to call every cycle)
+      // 1. Fetch active hex list (server has 30s cache — cheap for all tabs)
       let hexFlights: { callsign: string; hex: string; dep_iata: string | null; arr_iata: string | null; flight_date: string }[]
       try {
         const r = await fetch('/api/opensky-hexes')
@@ -1906,16 +1911,26 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
       const hexMap: Record<string, any> = {}
       for (const f of hexFlights) hexMap[f.hex.toLowerCase()] = f
 
-      // 2. Query OpenSky from browser (residential IP — never blocked)
-      const hexList = Object.keys(hexMap).join(',')
+      // 2. Tab coordination — only one tab calls OpenSky per 25s window
+      const lastPoll = parseInt(localStorage.getItem(LOCK_KEY) ?? '0', 10)
       let states: unknown[][] = []
-      try {
-        const r = await fetch(`https://opensky-network.org/api/states/all?icao24=${hexList}`, {
-          headers: { 'User-Agent': 'FlightTracker/1.0' },
-        })
-        if (!r.ok) return
-        states = ((await r.json()) as { states?: unknown[][] }).states ?? []
-      } catch { return }
+
+      if (Date.now() - lastPoll >= 25_000) {
+        // This tab wins — call OpenSky then share the result
+        const hexList = hexFlights.map(f => f.hex.toLowerCase()).join(',')
+        try {
+          const r = await fetch(`https://opensky-network.org/api/states/all?icao24=${hexList}`, {
+            headers: { 'User-Agent': 'FlightTracker/1.0' },
+          })
+          if (!r.ok) return
+          states = ((await r.json()) as { states?: unknown[][] }).states ?? []
+        } catch { return }
+        localStorage.setItem(LOCK_KEY,   String(Date.now()))
+        localStorage.setItem(RESULT_KEY, JSON.stringify(states))
+      } else {
+        // Another tab polled recently — read the shared result
+        try { states = JSON.parse(localStorage.getItem(RESULT_KEY) ?? '[]') } catch { return }
+      }
 
       if (!states.length) return
 
@@ -2001,7 +2016,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
     }
 
     poll()
-    const iv = setInterval(poll, 30_000)
+    const iv = setInterval(poll, POLL_MS)
     return () => clearInterval(iv)
   }, [])   // eslint-disable-line react-hooks/exhaustive-deps
 
