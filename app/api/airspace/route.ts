@@ -276,21 +276,29 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<Bo
 // those. Net unique yield: 4 aircraft in 7 days.
 //
 // What they were actually for is now done properly by /api/cron/opensky-poll: one request,
-// one credit, every tracked hex at once, global, no radius limit, on a 2-minute cron rather
-// than per visitor. fetchLoggedPositions below surfaces its fixes to the map.
+// one credit, every tracked hex at once, global, no radius limit, on a cron rather than
+// per visitor. fetchLoggedPositions below surfaces its fixes to the map.
 interface SignalFlight { callsign: string; hex: string; dep_iata: string | null; arr_iata: string | null; flight_date: string }
 
 // ── Poller-written positions (10s cache) ──────────────────────────────────────
-// /api/cron/opensky-poll writes flight_position_log every couple of minutes for every
-// tracked hex, worldwide. OpenSky sees traffic the volunteer ADS-B networks miss over
-// this region, so these rows are often the only live fix a flight has. Reading them here
-// is a DB hit rather than an upstream call, so the cost does not scale with visitor
-// count — which is the point of polling on a cron instead of from the browser.
+// /api/cron/opensky-poll writes flight_position_log on a cron for every tracked hex,
+// worldwide. OpenSky sees traffic the volunteer ADS-B networks miss over this region, so
+// these rows are often the only live fix a flight has. Reading them here is a DB hit
+// rather than an upstream call, so the cost does not scale with visitor count — which is
+// the point of polling on a cron instead of from the browser.
 //
 // A row can be up to one poll interval old, so it is emitted as an out-of-band fix
 // carrying its own capture time (`fix_at`) rather than as a current position: the client
 // dead-reckons forward from it instead of assuming the aircraft is there now.
-const LOGGED_MAX_AGE_MS = 6 * 60_000
+//
+// This window MUST stay above the cron interval in vercel.json, or fixes age out before
+// the next poll replaces them and the channel goes dark for part of every cycle with no
+// error anywhere — the window was 6 min while the cron ran every 2, and moving the cron
+// to 15 without this would have blanked it for two thirds of each interval.
+// It must also stay under FR24_HAND_OFF_MS (30 min) in Map.tsx, which retires a fix
+// client-side; a row older than that would be dropped on arrival instead.
+const OPENSKY_POLL_INTERVAL_MS = 15 * 60_000          // keep in sync with vercel.json
+const LOGGED_MAX_AGE_MS        = OPENSKY_POLL_INTERVAL_MS + 5 * 60_000
 
 interface LoggedPos {
   callsign:    string

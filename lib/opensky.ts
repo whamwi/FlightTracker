@@ -40,7 +40,8 @@ export interface StatesResult {
 }
 
 // Module scope, so a warm serverless instance reuses the token across invocations.
-// At a 2-minute cron cadence most invocations hit a warm instance and cost no token call.
+// At a 15-minute cadence the instance is usually cold again, so expect a token exchange on
+// most polls — ~96/day. Token requests are not credit-charged; only the API calls are.
 let cachedToken: { token: string; expiresAt: number } | null = null
 
 // Canonical names first, then the legacy pair. OPENSKY_USER/OPENSKY_PASS are accepted
