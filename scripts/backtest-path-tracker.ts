@@ -42,12 +42,18 @@ const median = (xs: number[]) => {
 }
 
 async function main() {
-  const paths  = await sb('route_paths?select=dep_iata,arr_iata,waypoints')
+  // Most-observed corridor first, so index 0 is the default before fixes decide.
+  const paths  = await sb('route_paths?select=dep_iata,arr_iata,variant,waypoints,observed_count&order=observed_count.desc,variant.asc')
   const signal = await sb('flight_signal_log?select=callsign,flight_date,dep_iata,arr_iata,airborne_at,actual_arr_at')
   const rmaster= await sb('route_master?select=dep_iata,arr_iata,duration_min')
   const pos    = await sb('flight_position_log?select=callsign,flight_date,captured_at,lat,lon,alt_baro,gs,track&order=captured_at.asc&limit=10000')
 
-  const pathBy = new Map(paths.map(p => [`${p.dep_iata}-${p.arr_iata}`, p.waypoints as Waypoint[]]))
+  const pathBy = new Map<string, Waypoint[][]>()
+  for (const p of paths) {
+    const k = `${p.dep_iata}-${p.arr_iata}`
+    if (!pathBy.has(k)) pathBy.set(k, [])
+    pathBy.get(k)!.push(p.waypoints as Waypoint[])
+  }
   const sigBy  = new Map(signal.map(s => [`${s.callsign}|${s.flight_date}`, s]))
 
   // Scheduled duration per OD pair — known at flight time, unlike the landing time.
@@ -76,8 +82,9 @@ async function main() {
     const sig = sigBy.get(key)
     if (!sig?.dep_iata || !sig?.arr_iata) continue
     const od  = `${sig.dep_iata}-${sig.arr_iata}`
-    const wps = pathBy.get(od)
-    if (!wps || wps.length < 2) continue
+    const variants = pathBy.get(od)?.filter(v => v && v.length >= 2)
+    if (!variants?.length) continue
+    const wps = variants[0]
 
     const t0 = new Date(sig.airborne_at ?? fixes[0].captured_at).getTime()
     const schedMin = durBy.get(od)
@@ -86,7 +93,7 @@ async function main() {
     const actualArr = sig.actual_arr_at ? new Date(sig.actual_arr_at).getTime() : null
 
     const ctx: PathContext = {
-      waypoints: wps,
+      variants,
       dep_coords: [wps[0].lat, wps[0].lon],
       arr_coords: [wps[wps.length - 1].lat, wps[wps.length - 1].lon],
       departed_at_ms: t0,
@@ -113,7 +120,8 @@ async function main() {
       while (fi < fixes.length && new Date(fixes[fi].captured_at).getTime() <= t) {
         const f = fixes[fi++]
         const at = new Date(f.captured_at).getTime()
-        const { offPathKm } = geo.project(f.lat, f.lon)
+        // Measure against whichever corridor fits best, matching what the tracker does.
+        const offPathKm = Math.min(...variants.map(v => new PathGeometry(v).project(f.lat, f.lon).offPathKm))
         const out = tracker.applyFix(
           { lat: f.lat, lon: f.lon, at_ms: at, gs_kts: f.gs, track_deg: f.track, altitude_ft: f.alt_baro },
           t,
@@ -149,6 +157,7 @@ async function main() {
       `${String(violations).padStart(5)} |` +
       `${Number.isNaN(arrErr) ? '     -  ' : pad(arrErr, 7, 0) + '%'} |` +
       ` ${pad(median(offAcc), 5)} / ${offRej.length ? pad(median(offRej), 5) : '    -'}` +
+      `${variants.length > 1 ? `  [corridor ${tracker.snapshot().variant + 1}/${variants.length}]` : ''}` +
       `${geo.degeneracy() > 4 ? '  ⚠ truncated path' : ''}`,
     )
 

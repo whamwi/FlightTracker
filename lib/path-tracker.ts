@@ -202,7 +202,15 @@ export interface PathFix {
 }
 
 export interface PathContext {
-  waypoints:      Waypoint[]
+  /**
+   * One entry per known corridor for this OD pair, ordered most-observed first.
+   *
+   * Most routes have exactly one. IST-DAM has two — northern via Ankara and a
+   * southwestern diagonal, 282 km apart and both flown daily — and with a single stored
+   * path the other corridor's flights read as 200 km off route, which is
+   * indistinguishable from a spoofed position.
+   */
+  variants:       Waypoint[][]
   dep_coords:     [number, number]
   arr_coords:     [number, number]
   /** Confirmed wheels-up. Anchors s = 0. */
@@ -234,6 +242,19 @@ export interface PathConfig {
   minRemainingMs: number
   /** Fixes older than this are ignored on arrival. */
   maxFixAgeMs: number
+  /** A rival corridor must fit this many times better before the flight switches to it. */
+  variantSwitchMargin: number
+  /**
+   * Progress past which the corridor is locked in.
+   *
+   * Corridors share their endpoints and fan apart in the middle, so a late switch means
+   * moving the aircraft across the full gap between them — 282 km on IST-DAM, which is a
+   * teleport by any measure. Early on the two are still close, so the same decision costs
+   * tens of kilometres instead of hundreds.
+   */
+  variantLockS: number
+  /** Time over which a corridor change is glided rather than jumped. */
+  variantTransitionMs: number
 }
 
 export const DEFAULT_PATH_CONFIG: Readonly<PathConfig> = {
@@ -247,6 +268,9 @@ export const DEFAULT_PATH_CONFIG: Readonly<PathConfig> = {
   divergenceCount:       3,
   minRemainingMs:        60_000,
   maxFixAgeMs:           30 * 60_000,
+  variantSwitchMargin:   2,
+  variantLockS:          0.3,
+  variantTransitionMs:   60_000,
 }
 
 export interface PathPosition {
@@ -289,10 +313,23 @@ export class PathTracker {
   private offPathStreak  = 0
   private mode: PathMode = 'path'
 
-  /** Distance-aware view of the route; also supplies the length used to cap the rate. */
-  private geo: PathGeometry
+  /** One geometry per known corridor. Usually length 1. */
+  private geos: PathGeometry[]
+  /** Cumulative off-path distance and sample count, per corridor. */
+  private offSum: number[]
+  private offN:   number[]
+  /** Index of the corridor currently believed to be in use. */
+  private active = 0
+  private switches = 0
+  /** Corridor being glided away from, and when the glide began. */
+  private transitionFrom: number | null = null
+  private transitionAtMs = 0
+
   /** True when no stored path existed and a great circle was substituted. */
   readonly synthesized: boolean
+
+  /** The corridor driving position and correction right now. */
+  private get geo(): PathGeometry { return this.geos[this.active] }
 
   /** Rejection tallies, surfaced for telemetry. */
   readonly rejects: Record<RejectReason, number> = {
@@ -306,11 +343,13 @@ export class PathTracker {
 
     // Fall back to a great circle rather than going path-less, so routes with no stored
     // waypoints still get projection and rate correction instead of rejecting every fix.
-    const stored = ctx.waypoints ?? []
-    this.synthesized = stored.length < 2
-    this.geo = new PathGeometry(
-      this.synthesized ? synthesizePath(ctx.dep_coords, ctx.arr_coords) : stored,
-    )
+    const stored = (ctx.variants ?? []).filter(v => v && v.length >= 2)
+    this.synthesized = stored.length === 0
+    this.geos = this.synthesized
+      ? [new PathGeometry(synthesizePath(ctx.dep_coords, ctx.arr_coords))]
+      : stored.map(v => new PathGeometry(v))
+    this.offSum = this.geos.map(() => 0)
+    this.offN   = this.geos.map(() => 0)
 
     // A flight already underway when the tracker is created starts at the fraction its
     // elapsed time implies, so a server restart doesn't rewind every aircraft to zero.
@@ -409,14 +448,25 @@ export class PathTracker {
       return this.reject('stale')
     }
 
-    // Is the fix anywhere near the route we believe it is flying?
-    const { sDist: sLive, offPathKm } = this.geo.project(fix.lat, fix.lon)
+    // Test against every known corridor, not just the active one. A fix that fits any of
+    // them is a legitimate position; only one that fits none is genuinely off route. That
+    // distinction is what stops an aircraft on a second, unmodelled corridor from looking
+    // identical to a spoofed position.
+    const proj = this.geos.map(g => g.project(fix.lat, fix.lon))
+    const bestFit = proj.reduce((b, p, i) => (p.offPathKm < proj[b].offPathKm ? i : b), 0)
+    const offPathKm = proj[bestFit].offPathKm
 
     if (offPathKm > this.cfg.maxOffPathKm) {
       this.offPathStreak++
       if (this.offPathStreak >= this.cfg.divergenceCount) this.mode = 'diverged'
       return this.reject('off_path')
     }
+
+    // Score all corridors on every accepted-looking fix, then let the evidence choose.
+    proj.forEach((p, i) => { this.offSum[i] += p.offPathKm; this.offN[i]++ })
+    this.reconsiderVariant(nowMs)
+
+    const sLive = proj[this.active].sDist
 
     // Could the aircraft have got here from the last believed position?
     if (this.lastAcceptedFix && this.lastAcceptedMs != null) {
@@ -456,6 +506,37 @@ export class PathTracker {
     return { accepted: true, reason: null, errorS }
   }
 
+  /**
+   * Switch corridors when another fits materially better.
+   *
+   * Requires a clear margin rather than a bare minimum, so noise around two similar
+   * corridors cannot make the flight oscillate between them. Where corridors genuinely
+   * differ — IST-DAM's two are 282 km apart — one or two fixes settle it decisively.
+   *
+   * Progress carries across unchanged: `s` is a distance fraction and variants share
+   * their endpoints, so the aircraft keeps its place along the route.
+   */
+  private reconsiderVariant(nowMs: number): void {
+    if (this.geos.length < 2) return
+    // Past the lock point the corridors have fanned too far apart to move between without
+    // a teleport. A mismatch after this is divergence, not a wrong choice of corridor.
+    if (this.s > this.cfg.variantLockS) return
+
+    const mean = (i: number) => (this.offN[i] ? this.offSum[i] / this.offN[i] : Infinity)
+
+    let challenger = this.active
+    for (let i = 0; i < this.geos.length; i++) {
+      if (mean(i) < mean(challenger)) challenger = i
+    }
+    if (challenger !== this.active
+        && mean(challenger) * this.cfg.variantSwitchMargin < mean(this.active)) {
+      this.transitionFrom  = this.active
+      this.transitionAtMs  = nowMs
+      this.active = challenger
+      this.switches++
+    }
+  }
+
   private reject(reason: RejectReason, errorS: number | null = null): FixOutcome {
     this.rejects[reason]++
     return { accepted: false, reason, errorS }
@@ -467,11 +548,27 @@ export class PathTracker {
     this.advance(nowMs)
 
     const hasPath = this.geo.usable
-    const [lat, lon] = hasPath
+    let [lat, lon] = hasPath
       ? this.geo.positionAt(this.s)
       : lerpCoords(this.ctx.dep_coords, this.ctx.arr_coords, this.s)
 
-    const track = hasPath ? this.geo.bearingAt(this.s) : 0
+    let track = hasPath ? this.geo.bearingAt(this.s) : 0
+
+    // Ease across a corridor change instead of cutting to it. Locking the choice early
+    // keeps this gap small, but small is not zero and a cut would still read as a jump.
+    if (this.transitionFrom != null) {
+      const elapsed = nowMs - this.transitionAtMs
+      if (elapsed >= this.cfg.variantTransitionMs) {
+        this.transitionFrom = null
+      } else {
+        const raw = elapsed / this.cfg.variantTransitionMs
+        const t   = raw * raw * (3 - 2 * raw)          // smoothstep: no velocity jolt at either end
+        const [fLat, fLon] = this.geos[this.transitionFrom].positionAt(this.s)
+        lat   = fLat + (lat - fLat) * t
+        lon   = fLon + (lon - fLon) * t
+        track = this.geos[this.transitionFrom].bearingAt(this.s) * (1 - t) + track * t
+      }
+    }
 
     const fixAgeMs = this.lastAcceptedMs == null ? null : nowMs - this.lastAcceptedMs
 
@@ -494,6 +591,10 @@ export class PathTracker {
       synthesized: this.synthesized,
       totalKm:     this.geo.totalKm,
       degeneracy:  this.geo.degeneracy(),
+      variant:     this.active,
+      variantCount: this.geos.length,
+      variantSwitches: this.switches,
+      variantMeanOffPathKm: this.geos.map((_, i) => (this.offN[i] ? this.offSum[i] / this.offN[i] : null)),
       lastAdvanceMs:  this.lastAdvanceMs,
       lastAcceptedMs: this.lastAcceptedMs,
       rejects:        { ...this.rejects },

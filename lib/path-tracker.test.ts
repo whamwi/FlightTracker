@@ -29,7 +29,7 @@ const HOUR = 3_600_000
 
 function ctx(over: Partial<PathContext> = {}): PathContext {
   return {
-    waypoints:      PATH,
+    variants:       [PATH],
     dep_coords:     [33.0, 36.0],
     arr_coords:     [33.0, 52.0],
     departed_at_ms: T0,
@@ -231,8 +231,64 @@ describe('the ETA channel carries a flight with no fixes at all', () => {
   })
 })
 
+describe('routes with more than one corridor', () => {
+  // Same endpoints, but bowing well north of PATH — far enough apart that a fix on one
+  // is nowhere near the other, as with IST-DAM's two real corridors.
+  const NORTH: Waypoint[] = [
+    { f: 0.00, lat: 33.0, lon: 36.0 },
+    { f: 0.25, lat: 35.5, lon: 40.0 },
+    { f: 0.50, lat: 36.0, lon: 44.0 },
+    { f: 0.75, lat: 35.5, lon: 48.0 },
+    { f: 1.00, lat: 33.0, lon: 52.0 },
+  ]
+  const both = () => ctx({ variants: [PATH, NORTH] })
+  const onNorth = (f: number) => {
+    const [lat, lon] = interpolatePath(NORTH, f)
+    return { lat, lon }
+  }
+
+  test('a fix on the second corridor is accepted, not rejected as off-path', () => {
+    const t = new PathTracker(both(), T0)
+    const t1 = T0 + HOUR
+    const out = t.applyFix({ ...onNorth(0.26), at_ms: t1 }, t1)
+    assert.equal(out.accepted, true, `expected acceptance, got ${out.reason}`)
+  })
+
+  test('the flight switches to whichever corridor its fixes match', () => {
+    const t = new PathTracker(both(), T0)
+    assert.equal(t.snapshot().variant, 0, 'starts on the most-observed corridor')
+
+    let now = T0
+    for (let i = 0; i < 3; i++) {
+      now += 20 * 60_000
+      t.applyFix({ ...onNorth(0.2 + i * 0.08), at_ms: now }, now)
+    }
+    assert.equal(t.snapshot().variant, 1, 'should have moved to the matching corridor')
+    assert.ok(t.snapshot().variantSwitches >= 1)
+  })
+
+  test('staying on the matching corridor does not cause switching', () => {
+    const t = new PathTracker(both(), T0)
+    let now = T0
+    for (let i = 0; i < 4; i++) {
+      now += 20 * 60_000
+      t.applyFix({ ...onPath(0.2 + i * 0.08), at_ms: now }, now)
+    }
+    assert.equal(t.snapshot().variant, 0)
+    assert.equal(t.snapshot().variantSwitches, 0)
+  })
+
+  test('a fix matching neither corridor still reads as off-path', () => {
+    const t = new PathTracker(both(), T0)
+    const now = T0 + HOUR
+    const out = t.applyFix({ lat: 25.0, lon: 44.0, at_ms: now }, now)
+    assert.equal(out.accepted, false)
+    assert.equal(out.reason, 'off_path')
+  })
+})
+
 describe('routes with no stored path', () => {
-  const noPath = () => ctx({ waypoints: [] })
+  const noPath = () => ctx({ variants: [] })
 
   test('substitutes a great circle rather than going path-less', () => {
     const t = new PathTracker(noPath(), T0)
