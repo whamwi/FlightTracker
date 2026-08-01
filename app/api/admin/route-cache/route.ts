@@ -75,6 +75,14 @@ function utcToLocal(hhmm: string, iata: string): string {
   return `${String(Math.floor(local / 60)).padStart(2, '0')}:${String(local % 60).padStart(2, '0')}`
 }
 
+// DELETE: hard-delete a route_master row by id
+export async function DELETE(req: Request) {
+  const { id } = await req.json()
+  if (!id) return NextResponse.json({ ok: false, error: 'id required' }, { status: 400 })
+  await sb(`/route_master?id=eq.${id}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } })
+  return NextResponse.json({ ok: true })
+}
+
 // POST: patch an existing row by id, or insert a new rotation
 export async function POST(req: Request) {
   const body = await req.json() as {

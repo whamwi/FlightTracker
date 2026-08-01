@@ -88,12 +88,12 @@ function sortRows<T extends Record<string, any>>(rows: T[], sort: SortState | nu
 }
 
 export default function AdminRouteCache() {
-  const [data, setData]     = useState<{ unfilled: UnfilledRow[]; filled: FilledRow[] } | null>(null)
-  const [edit, setEdit]     = useState<EditState | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [msg, setMsg]       = useState('')
-  const [tab, setTab]       = useState<'unfilled' | 'filled'>('unfilled')
-  const [sort, setSort]     = useState<SortState>({ col: 'broadcast_callsign', dir: 'asc' })
+  const [data, setData]       = useState<{ unfilled: UnfilledRow[]; filled: FilledRow[] } | null>(null)
+  const [edit, setEdit]       = useState<EditState | null>(null)
+  const [saving, setSaving]   = useState(false)
+  const [deleting, setDeleting] = useState<number | null>(null)
+  const [msg, setMsg]         = useState('')
+  const [sort, setSort]       = useState<SortState>({ col: 'broadcast_callsign', dir: 'asc' })
 
   function handleSort(col: string) {
     setSort(s => s.col === col ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' })
@@ -140,6 +140,18 @@ export default function AdminRouteCache() {
       days_of_week: row.days_of_week ?? [],
       dayTimes: {}, activeDay: null,
     })
+  }
+
+  async function deleteRow(id: number) {
+    if (!confirm('Delete this rotation from route_master?')) return
+    setDeleting(id)
+    await fetch('/api/admin/route-cache', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    })
+    setData(prev => prev ? { ...prev, filled: prev.filled.filter(r => r.id !== id) } : prev)
+    setDeleting(null)
   }
 
   function addRotation(row: FilledRow) {
@@ -287,73 +299,12 @@ export default function AdminRouteCache() {
         {msg && <div style={s.msg}>{msg}</div>}
 
         <div style={s.stats}>
-          <div style={s.stat}><span style={s.statNum}>{unfilled.length}</span><span style={s.statLabel}>Unfilled</span></div>
           <div style={s.stat}><span style={s.statNum}>{filled.length}</span><span style={s.statLabel}>Filled</span></div>
-        </div>
-
-        <div style={s.tabs}>
-          <button style={{ ...s.tab, ...(tab === 'unfilled' ? s.tabActive : {}) }} onClick={() => setTab('unfilled')}>
-            Unfilled ({unfilled.length})
-          </button>
-          <button style={{ ...s.tab, ...(tab === 'filled' ? s.tabActive : {}) }} onClick={() => setTab('filled')}>
-            Filled Routes ({filled.length})
-          </button>
         </div>
       </div>
 
-      {/* ── UNFILLED ── */}
-      {tab === 'unfilled' && (
-        unfilled.length === 0
-          ? <p style={s.empty}>All routes are filled. Nothing left to do.</p>
-          : (
-            <div style={s.tableWrap}>
-              <table style={s.table}>
-                <thead>
-                  <tr>
-                    <SortTh col="iata_number"        label="Flight" />
-                    <SortTh col="broadcast_callsign" label="Callsign" />
-                    <SortTh col="dep_iata"           label="Route" />
-                    <th style={s.th}>Known Side</th>
-                    <SortTh col="arr_time_utc"       label="Known UTC" />
-                    <th style={s.th}>Known Local</th>
-                    <th style={s.th}>Days</th>
-                    <th style={s.th}>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortRows(unfilled, sort).map(row => {
-                    const knownUtc = row.missing === 'dep' ? row.arr_time_utc : row.dep_time_utc
-                    return (
-                      <tr key={row.id} style={s.tr}>
-                        <td style={s.td}>
-                          <a href={fr24Url(row.iata_number, row.broadcast_callsign)} target="_blank" rel="noreferrer" style={s.fr24}>
-                            {row.iata_number}
-                          </a>
-                        </td>
-                        <td style={{ ...s.td, ...s.callsign }}>{row.broadcast_callsign}</td>
-                        <td style={s.td}>{row.dep_iata} → {row.arr_iata}</td>
-                        <td style={s.td}>
-                          <span style={{ ...s.badge, ...(row.missing === 'dep' ? s.badgeArr : s.badgeDep) }}>
-                            {row.missing === 'dep' ? 'ARR known' : 'DEP known'}
-                          </span>
-                        </td>
-                        <td style={{ ...s.td, ...s.mono }}>{knownUtc?.slice(0, 5) ?? '—'}</td>
-                        <td style={{ ...s.td, ...s.mono }}>{fmtLocal(knownUtc, row.missing === 'dep' ? row.arr_iata : row.dep_iata)}</td>
-                        <td style={s.td}>{(row.days_of_week ?? []).map(d => d.slice(0, 3)).join(' ')}</td>
-                        <td style={s.td}>
-                          <button onClick={() => openEditFromUnfilled(row)} style={s.editBtn}>Add Times</button>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )
-      )}
-
       {/* ── FILLED ── */}
-      {tab === 'filled' && (() => {
+      {(() => {
         const sortedFilled = sortRows(filled, sort)
 
         // Count how many rows each flight has, and assign a shade index to multi-row flights
@@ -407,10 +358,12 @@ export default function AdminRouteCache() {
                       <td style={{ ...s.td, ...s.mono }}>{fmtLocal(row.arr_time_utc, row.arr_iata)}</td>
                       <td style={s.td}>{durLabel(row.dep_time_utc ?? '', row.arr_time_utc ?? '')}</td>
                       <td style={s.td}>{(row.days_of_week ?? []).map(d => d.slice(0, 3)).join(' ')}</td>
-                      <td style={s.td}>
+                      <td style={{ ...s.td, display: 'flex', gap: 5, alignItems: 'center' }}>
                         <button onClick={() => openEditFromFilled(row)} style={s.editBtn}>Edit</button>
-                        {' '}
                         <button onClick={() => addRotation(row)} style={s.rotBtn}>+ Rotation</button>
+                        <button onClick={() => deleteRow(row.id)} style={s.delBtn} disabled={deleting === row.id}>
+                          {deleting === row.id ? '…' : 'Delete'}
+                        </button>
                       </td>
                     </tr>
                   )
@@ -644,6 +597,7 @@ const s: Record<string, React.CSSProperties> = {
   fr24:         { fontWeight: 700, color: '#0070f3', textDecoration: 'none', fontFamily: 'monospace', fontSize: 13 },
   editBtn:      { padding: '4px 12px', fontSize: 13, border: '1px solid #0070f3', background: '#fff', color: '#0070f3', borderRadius: 5, cursor: 'pointer', fontWeight: 600 },
   rotBtn:       { padding: '4px 10px', fontSize: 12, border: '1px solid #16a34a', background: '#f0fdf4', color: '#16a34a', borderRadius: 5, cursor: 'pointer', fontWeight: 600 },
+  delBtn:       { padding: '4px 10px', fontSize: 12, border: '1px solid #fca5a5', background: '#fff', color: '#dc2626', borderRadius: 5, cursor: 'pointer', fontWeight: 600 },
   reconcileBtn: { padding: '8px 18px', background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: 14, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' },
   overlay:      { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '20px' },
   modal:        { background: '#ffffff', borderRadius: 12, padding: 28, width: '100%', maxWidth: 440, boxShadow: '0 20px 60px rgba(0,0,0,0.3)', color: '#1a1a1a', boxSizing: 'border-box' },
