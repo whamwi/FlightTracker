@@ -146,7 +146,8 @@ loop or in `setLatLng` being overwritten elsewhere — not in the model.
 
 | Item | Notes |
 |---|---|
-| Poller restructure | `/api/airspace` still fetches upstream per user request; load scales with visitors, not aircraft. `/api/cron/opensky-poll` exists but is **not scheduled** and uses HTTP Basic auth, which OpenSky no longer accepts (OAuth2 client credentials only). |
+| **OpenSky is broken two ways** | `Map.tsx:2027` calls `opensky-network.org` **from the browser** — a deliberate attempt to dodge a datacenter IP block. It fails CORS for every visitor (OpenSky sends no permissive `Access-Control-Allow-Origin`), so this path has never worked. The premise was also wrong: OpenSky does not block Vercel; `adsb.fi` is what blocks non-datacenter IPs. Move the call server-side into the poller, where CORS does not apply. |
+| Poller restructure | `/api/airspace` still fetches upstream per user request; load scales with visitors, not aircraft. `/api/cron/opensky-poll` exists but is **not scheduled** and uses HTTP Basic auth, which OpenSky no longer accepts (OAuth2 client credentials only — token endpoint and flow are in section 6). Fixing that route and scheduling it also fixes the CORS row above, since the browser would stop calling OpenSky entirely. |
 | `import-route-path` | Still overwrites the final waypoint with the airport, which can only manufacture geometry. Should append, and should add a *new variant* when a track disagrees with every stored corridor rather than overwriting one. |
 | RLS | Disabled on 13 tables; anon key can read *and write* `route_master`, `airports`, the caches. Deliberately deferred by the user to a hardening pass. **Live writes use the anon key**, so enabling RLS without switching those to the service key will take tracking down. |
 | Empty-feed handling | `/api/airspace` returning zero should not clear the map, and failure should be distinguishable from empty sky. |
