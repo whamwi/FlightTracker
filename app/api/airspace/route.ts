@@ -13,26 +13,33 @@ const SB_HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 //
 // Syria + neighbors: covers DAM, ALP, TK routes, LB, JO, IQ border traffic.
 // UAE + Gulf: covers DXB, AUH, SHJ, DOH, BAH, KWI, MCT.
+// adsb.fi's v2 lat/lon/dist endpoint is DEPRECATED and answers 200 with an empty `ac`
+// array — not an error. Combined with the adsb.lol fallback also returning 200-and-empty
+// for this region, that read as "feeds healthy, quiet sky" for as long as it was wrong.
+// Measured 2026-08-02: v2 IST/250 → 0 aircraft, v3 IST/250 → 88, v3 DAM/250 → 31.
+//
+// v3 caps `dist` at 250 NM (400 returns HTTP 400) and the public rate limit is 1 req/s,
+// so the circles are queried sequentially with a gap — see fetchAllFeeds. The old 700 and
+// 400 NM radii were over the cap and could never have succeeded on v3.
 const FEEDS_SYRIA: string[] = [
-  'https://opendata.adsb.fi/api/v2/lat/33.0/lon/38.0/dist/700',
-  'https://api.adsb.lol/v2/lat/33.0/lon/38.0/dist/700',
+  'https://opendata.adsb.fi/api/v3/lat/33.41/lon/36.52/dist/250',
+  'https://api.adsb.lol/v2/lat/33.41/lon/36.52/dist/250',
 ]
 const FEEDS_UAE: string[] = [
-  'https://opendata.adsb.fi/api/v2/lat/25.0/lon/55.0/dist/400',
-  'https://api.adsb.lol/v2/lat/25.0/lon/55.0/dist/400',
+  'https://opendata.adsb.fi/api/v3/lat/25.0/lon/55.0/dist/250',
+  'https://api.adsb.lol/v2/lat/25.0/lon/55.0/dist/250',
 ]
-// Turkey + Marmara/Aegean. The Syria circle clips western Turkey at its boundary rather
-// than at the edge of receiver coverage: over 48 h, aircraft_last_seen held 1,409 aircraft
-// in the 650–700 nm ring (centroid 38.5N 29.0E) and 8 beyond it. Istanbul sits at 664 nm
-// of a 700 nm radius, so its northwestern approaches, Edirne and the Aegean fall outside.
-//
-// Centred on IST rather than on Turkey's geographic centre, because the centre is already
-// covered — only the northwest is missing. 400 nm from here also reaches up the northern
-// legs of DAM–AMS, ALP–DUS and BER–DAM into the Balkans. Combined with the Syria circle,
-// the union covers all of Turkey.
+// Istanbul — both IST–DAM corridors originate here, and it is the densest airspace the
+// board touches (v3 returned 88 aircraft at 02:15 UTC).
 const FEEDS_TURKEY: string[] = [
-  'https://opendata.adsb.fi/api/v2/lat/41.0/lon/29.0/dist/400',
-  'https://api.adsb.lol/v2/lat/41.0/lon/29.0/dist/400',
+  'https://opendata.adsb.fi/api/v3/lat/41.0/lon/29.0/dist/250',
+  'https://api.adsb.lol/v2/lat/41.0/lon/29.0/dist/250',
+]
+// Central Anatolia. At 250 NM the Damascus and Istanbul circles no longer meet, and the
+// gap falls squarely across the middle of both IST–DAM corridors. This closes it.
+const FEEDS_ANATOLIA: string[] = [
+  'https://opendata.adsb.fi/api/v3/lat/38.0/lon/33.5/dist/250',
+  'https://api.adsb.lol/v2/lat/38.0/lon/33.5/dist/250',
 ]
 
 // Syria's extent (32.31–37.32 N, 35.61–42.38 E) padded a little. Used only to drop
@@ -543,20 +550,25 @@ export async function GET() {
       feedsLive      = feedCache.live
     } else {
       if (!feedInflight) {
-        feedInflight = Promise.all([
-          fetchRadiusFeed(FEEDS_SYRIA),
-          fetchRadiusFeed(FEEDS_UAE),
-          fetchRadiusFeed(FEEDS_TURKEY),
-        ]).then(([syria, uae, turkey]) => {
+        // Sequential, not Promise.all: adsb.fi's public limit is 1 request per second, and
+        // firing four circles at once earns a 429 on most of them. The in-flight dedup
+        // below means only one request pays this cost per 10s window.
+        feedInflight = (async () => {
+          const circles = [FEEDS_SYRIA, FEEDS_UAE, FEEDS_TURKEY, FEEDS_ANATOLIA]
+          const results: FeedResult[] = []
+          for (let i = 0; i < circles.length; i++) {
+            if (i > 0) await new Promise(r => setTimeout(r, 1_100))
+            results.push(await fetchRadiusFeed(circles[i]))
+          }
           // One surviving circle still gives a real picture; only a clean sweep of
           // failures means we are blind.
-          const live = syria.ok || uae.ok || turkey.ok
+          const live = results.some(r => r.ok)
           const seenHex = new Set<string>()
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const merged: any[] = []
-          // Syria first: on an overlapping aircraft its entry wins, keeping the
-          // existing feed's fix rather than swapping in the Turkey circle's copy.
-          for (const a of [...syria.aircraft, ...uae.aircraft, ...turkey.aircraft]) {
+          // Syria first: on an overlapping aircraft its entry wins, keeping the home
+          // circle's fix rather than a neighbouring circle's copy.
+          for (const a of results.flatMap(r => r.aircraft)) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             if (seenHex.has((a as any).hex)) continue
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -566,7 +578,7 @@ export async function GET() {
           feedCache = { aircraft: merged, live, ts: Date.now() }
           feedInflight = null
           return { aircraft: merged, live }
-        }).catch(err => { feedInflight = null; throw err })
+        })().catch(err => { feedInflight = null; throw err })
       }
       const feed     = await feedInflight
       visualAircraft = feed.aircraft
