@@ -9,10 +9,10 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: 'FlySyria',
-  description: 'Live flight status for Damascus & Aleppo — real-time arrivals, departures and gate updates.',
+  description: 'Live flight status for Damascus & Aleppo — real-time arrivals, departures and live tracking.',
   openGraph: {
     title: 'FlySyria',
-    description: 'Live flight status for Damascus & Aleppo — real-time arrivals, departures and gate updates.',
+    description: 'Live flight status for Damascus & Aleppo — real-time arrivals, departures and live tracking.',
     url: 'https://www.flysyria.app',
     siteName: 'FlySyria',
     type: 'website',

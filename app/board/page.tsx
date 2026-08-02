@@ -1173,7 +1173,7 @@ export default function BoardPage() {
               Follow a flight from anywhere
             </span>
             <span style={{ font: `400 12px/1.5 'Instrument Sans', system-ui`, color: 'rgba(237,235,224,.72)' }}>
-              Get gate, delay and landing alerts for the flights your family is on — free, no account needed.
+              Get delay and landing alerts for the flights your family is on — free, no account needed.
             </span>
             <div style={{ display: 'flex', gap: 8 }}>
               <div style={{ flex: 1, padding: '10px 12px', borderRadius: 9, background: '#EDEBE0', textAlign: 'center', font: `600 12px/1 'Instrument Sans', system-ui`, color: C.forest }}>
