@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { NextResponse, after } from 'next/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,6 +40,14 @@ const FEEDS_TURKEY: string[] = [
 const FEEDS_ANATOLIA: string[] = [
   'https://opendata.adsb.fi/api/v3/lat/38.0/lon/33.5/dist/250',
   'https://api.adsb.lol/v2/lat/38.0/lon/33.5/dist/250',
+]
+// Northern Arabia. Centred between Riyadh and Kuwait so one circle reaches both (133 nm
+// each), plus Dammam and Basra — four airports otherwise invisible. It also fills most of
+// the DAM–Gulf corridor, which was 54% uncovered: ADY505 (DAM→AUH) was tracked leaving
+// Damascus, vanished over this gap, and only the schedule carried it onward.
+const FEEDS_ARABIA: string[] = [
+  'https://opendata.adsb.fi/api/v3/lat/27.1/lon/47.3/dist/250',
+  'https://api.adsb.lol/v2/lat/27.1/lon/47.3/dist/250',
 ]
 
 // Syria's extent (32.31–37.32 N, 35.61–42.38 E) padded a little. Used only to drop
@@ -647,6 +655,39 @@ async function writeOutboundDep(info: BoardFlight, depTs: number): Promise<void>
   })
 }
 
+// One sweep of every circle, sequentially. adsb.fi's public limit is 1 request/second, so
+// firing them together earns a 429 on most. Shared by the blocking path (cold cache) and the
+// background refresh, and guarded by feedInflight so concurrent callers share one sweep.
+function refreshFeeds(): Promise<{ aircraft: unknown[]; live: boolean }> {
+  const p = (async () => {
+    const circles = [FEEDS_SYRIA, FEEDS_UAE, FEEDS_TURKEY, FEEDS_ANATOLIA, FEEDS_ARABIA]
+    const results: FeedResult[] = []
+    for (let i = 0; i < circles.length; i++) {
+      if (i > 0) await new Promise(r => setTimeout(r, 1_100))
+      results.push(await fetchRadiusFeed(circles[i]))
+    }
+    // One surviving circle still gives a real picture; only a clean sweep of failures
+    // means we are blind.
+    const live = results.some(r => r.ok)
+    const seenHex = new Set<string>()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const merged: any[] = []
+    // Syria first: on an overlapping aircraft its entry wins, keeping the home circle's
+    // fix rather than a neighbouring circle's copy.
+    for (const a of results.flatMap(r => r.aircraft)) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (seenHex.has((a as any).hex)) continue
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      seenHex.add((a as any).hex)
+      merged.push(a)
+    }
+    feedCache = { aircraft: merged, live, ts: Date.now() }
+    feedInflight = null
+    return { aircraft: merged, live }
+  })().catch(err => { feedInflight = null; throw err })
+  return p
+}
+
 // ── Handler ───────────────────────────────────────────────────────────────────
 export async function GET() {
   // Hoisted out of the try so the catch block can still resolve board metadata for the
@@ -662,45 +703,35 @@ export async function GET() {
     // callsign → board info
     for (const f of resolvedBoard) boardMap.set(f.callsign, f)
 
-    // Radius feeds (cached 10s, in-flight dedup)
+    // Radius feeds — stale-while-revalidate.
+    //
+    // adsb.fi allows 1 request/second, so the circles are queried sequentially and a full
+    // sweep costs roughly (circles × 1.1s). Making the caller wait for that put user-visible
+    // latency in direct proportion to coverage: measured 0.98–5.91 s on four circles, and it
+    // was the reason for not adding the Gulf circle that RUH, KWI, DMM and BSR need.
+    //
+    // Serving the cached response and refreshing behind it breaks that link. Latency stops
+    // depending on circle count, so coverage can be chosen on merit. FRESH_MS is when a
+    // refresh is triggered; STALE_MS is how old data may be before a caller waits for it —
+    // beyond that we would be showing a picture too old to be worth serving instantly.
+    const FRESH_MS = 10_000
+    const STALE_MS = 60_000
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let visualAircraft: any[]
     let feedsLive: boolean
-    if (feedCache && Date.now() - feedCache.ts < 10_000) {
+    const cacheAge = feedCache ? Date.now() - feedCache.ts : Infinity
+
+    if (feedCache && cacheAge < FRESH_MS) {
       visualAircraft = feedCache.aircraft
       feedsLive      = feedCache.live
+    } else if (feedCache && cacheAge < STALE_MS) {
+      // Serve now, refresh after the response is sent. `after()` keeps the function alive
+      // past the response on Vercel; without it the work would be frozen mid-flight.
+      visualAircraft = feedCache.aircraft
+      feedsLive      = feedCache.live
+      if (!feedInflight) after(() => refreshFeeds().catch(() => {}))
     } else {
-      if (!feedInflight) {
-        // Sequential, not Promise.all: adsb.fi's public limit is 1 request per second, and
-        // firing four circles at once earns a 429 on most of them. The in-flight dedup
-        // below means only one request pays this cost per 10s window.
-        feedInflight = (async () => {
-          const circles = [FEEDS_SYRIA, FEEDS_UAE, FEEDS_TURKEY, FEEDS_ANATOLIA]
-          const results: FeedResult[] = []
-          for (let i = 0; i < circles.length; i++) {
-            if (i > 0) await new Promise(r => setTimeout(r, 1_100))
-            results.push(await fetchRadiusFeed(circles[i]))
-          }
-          // One surviving circle still gives a real picture; only a clean sweep of
-          // failures means we are blind.
-          const live = results.some(r => r.ok)
-          const seenHex = new Set<string>()
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const merged: any[] = []
-          // Syria first: on an overlapping aircraft its entry wins, keeping the home
-          // circle's fix rather than a neighbouring circle's copy.
-          for (const a of results.flatMap(r => r.aircraft)) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            if (seenHex.has((a as any).hex)) continue
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            seenHex.add((a as any).hex)
-            merged.push(a)
-          }
-          feedCache = { aircraft: merged, live, ts: Date.now() }
-          feedInflight = null
-          return { aircraft: merged, live }
-        })().catch(err => { feedInflight = null; throw err })
-      }
+      if (!feedInflight) feedInflight = refreshFeeds()
       const feed     = await feedInflight
       visualAircraft = feed.aircraft
       feedsLive      = feed.live
