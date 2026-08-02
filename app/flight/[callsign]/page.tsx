@@ -13,18 +13,18 @@ export async function generateMetadata(
   const { callsign } = await params
   const pretty = prettyNum(callsign)
   return {
-    title: `${pretty} · FlySyria Tracker`,
+    title: `${pretty} · FlySyria`,
     description: `Real-time flight status for ${pretty} — Syria airports`,
     openGraph: {
       title: `${pretty} · Flight Status`,
-      description: `Track ${pretty} live on FlySyria Tracker`,
-      siteName: 'FlySyria Tracker',
+      description: `Track ${pretty} live on FlySyria`,
+      siteName: 'FlySyria',
       type: 'website',
     },
     twitter: {
       card: 'summary_large_image',
       title: `${pretty} · Flight Status`,
-      description: `Track ${pretty} live on FlySyria Tracker`,
+      description: `Track ${pretty} live on FlySyria`,
     },
   }
 }

@@ -166,10 +166,10 @@ export default async function Image(
                 <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" fill="#B9A779" stroke="#054239" strokeWidth="1.1" strokeLinejoin="round" strokeLinecap="round" />
               </g>
             </svg>
-            {/* Wordmark: FlySyria dark green / Tracker light green */}
+            {/* Wordmark: Fly in brand beige, Syria in deep green — matches the site header. */}
             <span style={{ display: 'flex', alignItems: 'baseline' }}>
-              <span style={{ fontSize: 36, fontWeight: 800, color: C.forest, letterSpacing: '-.4px', display: 'flex' }}>FlySyria</span>
-              <span style={{ fontSize: 36, fontWeight: 600, color: C.forestMid, letterSpacing: '-.2px', marginLeft: 8, display: 'flex' }}>Tracker</span>
+              <span style={{ fontSize: 36, fontWeight: 800, color: '#B9A779', letterSpacing: '-.4px', display: 'flex' }}>Fly</span>
+              <span style={{ fontSize: 36, fontWeight: 800, color: '#054239', letterSpacing: '-.4px', display: 'flex' }}>Syria</span>
             </span>
           </div>
 
