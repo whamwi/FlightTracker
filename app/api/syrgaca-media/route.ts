@@ -17,13 +17,16 @@ export async function GET(req: Request) {
   const limit  = Math.min(Number(searchParams.get('limit') ?? 40) || 40, MAX_LIMIT)
   const offset = Math.max(Number(searchParams.get('offset') ?? 0) || 0, 0)
   const type   = searchParams.get('type')
+  const source = searchParams.get('source')
 
   const filter = type === 'photo' || type === 'video' ? `&media_type=eq.${type}` : ''
+  // Whitelisted rather than passed through — this value lands in a PostgREST filter.
+  const srcFilter = ['facebook', 'youtube', 'curated'].includes(source ?? '') ? `&source=eq.${source}` : ''
 
   const res = await fetch(
     `${SB_URL}/rest/v1/syrgaca_media` +
     `?select=media_id,source,media_type,video_id,caption,permalink,posted_at,image_url,thumb_url,width,height,pinned` +
-    filter +
+    filter + srcFilter +
     // Pinned items sit above the feed; everything else is newest-first. nullslast keeps
     // a dateless row at the bottom rather than letting it jump to the top.
     `&order=pinned.desc,posted_at.desc.nullslast` +

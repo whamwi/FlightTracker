@@ -10,10 +10,11 @@ import { NextResponse } from 'next/server'
  * channel batch, and a video from a different channel is absent by definition, so storing
  * these as 'youtube' would have them silently deleted within the day.
  *
- * Metadata comes from oEmbed, which needs no key and no quota. YOUTUBE_API_KEY would also
- * give a publish date, but it is only set in production, and a curated list that behaves
- * differently depending on where it runs is worse than one that never has the date.
- * posted_at is left null and the gallery already sorts those last.
+ * Metadata comes from oEmbed for the title and the watch page's JSON-LD for the publish
+ * date. Neither needs a key or quota. The date is not decoration: the gallery orders by
+ * posted_at with nulls last, so dateless rows pile up behind every photo and channel video
+ * and are effectively invisible. YOUTUBE_API_KEY would give the same date, but it is only
+ * set in production, and a list that behaves differently by environment is worse.
  */
 
 export const dynamic = 'force-dynamic'
@@ -65,6 +66,25 @@ async function fetchTitle(videoId: string): Promise<string | null> {
   }
 }
 
+// The watch page carries JSON-LD with the real upload date. Scraping is not ideal, but the
+// alternative is either an API key or no date at all, and no date means the entry sinks
+// below every dated row in the gallery.
+async function fetchUploadDate(videoId: string): Promise<string | null> {
+  try {
+    const res = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+      headers: { 'Accept-Language': 'en' },
+      cache:   'no-store',
+    })
+    if (!res.ok) return null
+    const m = /"uploadDate":"([^"]+)"/.exec(await res.text())
+    if (!m) return null
+    const d = new Date(m[1])
+    return isNaN(d.getTime()) ? null : d.toISOString()
+  } catch {
+    return null
+  }
+}
+
 export async function GET() {
   const res = await fetch(
     `${SB_URL}/rest/v1/syrgaca_media?select=${SELECT}&source=eq.curated&order=created_at.desc`,
@@ -84,8 +104,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: 'Not a YouTube link — paste a watch, youtu.be, embed or shorts URL.' }, { status: 400 })
   }
 
-  const manual  = typeof body?.caption === 'string' ? body.caption.trim() : ''
-  const caption = manual || (await fetchTitle(videoId))
+  const manual = typeof body?.caption === 'string' ? body.caption.trim() : ''
+  const [fetched, postedAt] = await Promise.all([
+    manual ? Promise.resolve(null) : fetchTitle(videoId),
+    fetchUploadDate(videoId),
+  ])
+  const caption = manual || fetched
 
   const row = {
     media_id:   `curated:${videoId}`,
@@ -95,7 +119,7 @@ export async function POST(req: Request) {
     video_id:   videoId,
     caption,
     permalink:  `https://www.youtube.com/watch?v=${videoId}`,
-    posted_at:  null,
+    posted_at:  postedAt,
     image_url:  null,
     thumb_url:  `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
     width:      480,

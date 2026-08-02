@@ -26,8 +26,13 @@ declare global {
   }
 }
 
-const MAX_CLIPS  = 30
-const SCRIPT_ID  = 'yt-iframe-api'
+const MAX_CLIPS   = 30
+// Curated clips are pulled separately and always kept. Ordering the whole table by date and
+// taking the top MAX_CLIPS dropped every one of them: the channel alone had 31 videos, all
+// newer than most hand-picked airline uploads, so the curated entries fell past the cap and
+// never played. They are the deliberately chosen ones, so they get the guaranteed slots.
+const MAX_CURATED = 12
+const SCRIPT_ID   = 'yt-iframe-api'
 
 type Video = { media_id: string; video_id: string | null }
 
@@ -61,10 +66,28 @@ export default function VideoBox() {
 
   useEffect(() => {
     let cancelled = false
-    fetch(`/api/syrgaca-media?type=video&limit=${MAX_CLIPS}`)
-      .then((r) => r.json())
-      .then((j) => { if (!cancelled) setVideos((j.media ?? []).filter((v: Video) => v.video_id)) })
-      .catch(() => {})
+    const get = (qs: string) =>
+      fetch(`/api/syrgaca-media?type=video&${qs}`)
+        .then((r) => r.json())
+        .then((j) => ((j.media ?? []) as Video[]).filter((v) => v.video_id))
+        .catch(() => [] as Video[])
+
+    Promise.all([get(`source=curated&limit=${MAX_CURATED}`), get(`limit=${MAX_CLIPS}`)])
+      .then(([curated, recent]) => {
+        if (cancelled) return
+        // Interleave rather than concatenate: a curated clip every third slot, so the mix
+        // shows up early instead of after a dozen channel videos nobody waits through.
+        const seen = new Set(curated.map((v) => v.video_id))
+        const rest = recent.filter((v) => !seen.has(v.video_id))
+        const out: Video[] = []
+        let ci = 0, ri = 0
+        while (out.length < MAX_CLIPS && (ci < curated.length || ri < rest.length)) {
+          if (out.length % 3 === 2 && ci < curated.length) out.push(curated[ci++])
+          else if (ri < rest.length) out.push(rest[ri++])
+          else if (ci < curated.length) out.push(curated[ci++])
+        }
+        setVideos(out)
+      })
     return () => { cancelled = true }
   }, [])
 
