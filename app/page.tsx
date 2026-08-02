@@ -301,11 +301,24 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
     let raf = 0
     let held = false
     let resumeAt = 0
+    let last = 0
+    // The offset is tracked here as a float and written to the element, never read back and
+    // incremented. Browsers round the stored scrollLeft, so `el.scrollLeft += 0.4` reads the
+    // same integer every frame and adds to it again — the strip sits at zero and never
+    // moves. Time-based rather than per-frame so the speed does not double on a 120Hz screen.
+    let pos = el.scrollLeft
+    const PX_PER_MS = 0.022
     const tick = (t: number) => {
       const width = setRef.current?.offsetWidth ?? 0
+      const dt = last ? t - last : 0
+      last = t
       if (!held && t >= resumeAt && width > 0) {
-        el.scrollLeft += 0.4
-        if (el.scrollLeft >= width) el.scrollLeft -= width
+        pos += PX_PER_MS * dt
+        if (pos >= width) pos -= width
+        el.scrollLeft = pos
+      } else {
+        // The user is driving; pick up from wherever they left it.
+        pos = el.scrollLeft
       }
       raf = requestAnimationFrame(tick)
     }
