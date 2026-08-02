@@ -736,6 +736,34 @@ export default function BoardPage() {
   const preDisplayed = [...nonPinnedBefore, ...pinnedArr, ...pinnedFwd, ...nonPinnedAfter]
   const nowDisplayIdx = tab === 0 ? nonPinnedBefore.length + pinnedArr.length : -1
 
+  const nowLine = (complete: boolean) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '2px 0' }}>
+      <div style={{ flex: 1, height: 1, background: C.separator }} />
+      {(landed > 0 || complete) && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px 5px 9px', borderRadius: 999, background: '#E6EFEC', border: '1px solid #B4CFC9' }}>
+          <span style={{ width: 6, height: 6, borderRadius: 99, background: C.forest, display: 'block' }} />
+          <span style={{ font: `600 11.5px/1 'Instrument Sans', system-ui`, color: '#002623', whiteSpace: 'nowrap' }}>
+            {landed} {view === 'arr' ? 'arrived' : 'departed'}
+          </span>
+        </div>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 12px', borderRadius: 999, background: C.ink }}>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, fontWeight: 600, color: '#fff', letterSpacing: '.04em' }}>
+          {nowSyriaHHMM} NOW
+        </span>
+      </div>
+      {(enroute > 0 || complete) && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px 5px 9px', borderRadius: 999, background: C.forestMid }}>
+          <span style={{ width: 6, height: 6, borderRadius: 99, background: '#fff', display: 'block' }} />
+          <span style={{ font: `600 11.5px/1 'Instrument Sans', system-ui`, color: '#fff', whiteSpace: 'nowrap' }}>
+            {enroute} in air
+          </span>
+        </div>
+      )}
+      <div style={{ flex: 1, height: 1, background: C.separator }} />
+    </div>
+  )
+
   const q = query.trim().toLowerCase()
   const displayed = q
     ? preDisplayed.filter(f =>
@@ -1015,43 +1043,24 @@ export default function BoardPage() {
             </div>
           )}
 
+          {/* The now marker, rendered either between two cards or after the last one.
+              `complete` is the end-of-day case: every flight is behind us, so the marker has
+              no card to precede and used to vanish entirely — the board then looked identical
+              to one that had never loaded live data. There it also forces both counts to show,
+              including a zero, because "N arrived · 0 in air" is exactly the signal that the
+              day is finished. Mid-list a zero count is just noise, so it stays hidden. */}
           {/* Flight cards */}
           {!loading && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {displayed.map((f, i) => (
                 <Fragment key={`${f.iata_number}-${f.dep_iata}-${f.arr_iata}-${f.dep_time_utc}-${f.arr_time_utc}`}>
-                  {i === nowDisplayIdx && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '2px 0' }}>
-                      <div style={{ flex: 1, height: 1, background: C.separator }} />
-                      {landed > 0 && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px 5px 9px', borderRadius: 999, background: '#E6EFEC', border: '1px solid #B4CFC9' }}>
-                          <span style={{ width: 6, height: 6, borderRadius: 99, background: C.forest, display: 'block' }} />
-                          <span style={{ font: `600 11.5px/1 'Instrument Sans', system-ui`, color: '#002623', whiteSpace: 'nowrap' }}>
-                            {landed} {view === 'arr' ? 'arrived' : 'departed'}
-                          </span>
-                        </div>
-                      )}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 12px', borderRadius: 999, background: C.ink }}>
-                        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, fontWeight: 600, color: '#fff', letterSpacing: '.04em' }}>
-                          {nowSyriaHHMM} NOW
-                        </span>
-                      </div>
-                      {enroute > 0 && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px 5px 9px', borderRadius: 999, background: C.forestMid }}>
-                          <span style={{ width: 6, height: 6, borderRadius: 99, background: '#fff', display: 'block' }} />
-                          <span style={{ font: `600 11.5px/1 'Instrument Sans', system-ui`, color: '#fff', whiteSpace: 'nowrap' }}>
-                            {enroute} in air
-                          </span>
-                        </div>
-                      )}
-                      <div style={{ flex: 1, height: 1, background: C.separator }} />
-                    </div>
-                  )}
+                  {i === nowDisplayIdx && nowLine(false)}
                   <div ref={i === nowDisplayIdx - 1 ? prevNowRef : undefined} style={i === nowDisplayIdx - 1 ? { scrollMarginTop: 80 } : undefined}>
                     <FlightCard f={f} view={view} isPinned={pins.has(f.iata_number)} onTogglePin={() => togglePin(f.iata_number)} />
                   </div>
                 </Fragment>
               ))}
+              {tab === 0 && !q && displayed.length > 0 && nowDisplayIdx >= displayed.length && nowLine(true)}
             </div>
           )}
 
