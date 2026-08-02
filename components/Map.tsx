@@ -817,6 +817,11 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
       // actually require, which is the floor short of hiding it behind a tap-to-expand
       // control.
       map.attributionControl.setPrefix(false)
+      // Top-left, out of the way of everything: the flight strip owns the bottom edge on
+      // phones, and on desktop the media boxes hold the top-right while zoom and Over Syria
+      // hold the bottom-right. Position is not something the licence dictates — only that
+      // the credit stays visible — and up here nothing has to be nudged around it.
+      map.attributionControl.setPosition('topleft')
       // Added before the tile layer so it lands above the attribution in the bottom-right
       // corner. Desktop-only, but gated in CSS rather than on innerWidth — a one-shot
       // width read here can fire before the viewport settles and silently drop the control.

@@ -365,14 +365,6 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
     card?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
   }, [selectedFlight, flights.length])
 
-  // The OSM/CARTO credit is a licence condition, so the strip cannot simply sit on top of
-  // it. Instead the attribution is lifted above the strip while one is showing — flagged on
-  // <body> because the credit lives inside Leaflet's own DOM, well outside this component.
-  useEffect(() => {
-    document.body.classList.toggle('has-ia-strip', flights.length > 0)
-    return () => document.body.classList.remove('has-ia-strip')
-  }, [flights.length])
-
   if (flights.length === 0) return null
 
   const cards = (ghost: boolean) => (
@@ -384,6 +376,13 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
         const depTime = fmtLocal(f.actual_dep_utc ?? f.revised_dep_utc ?? f.dep_time_utc, depOff)
         const arrMs   = etaMs(f)
         const arrTime = arrMs ? fmtLocal(new Date(arrMs).toISOString(), arrOff) : fmtLocal(f.arr_time_utc, arrOff)
+        // Which end is home decides whether the other end is a destination or an origin.
+        // Read from the flag rather than a hardcoded airport list: DEZ is due to open and
+        // Latakia and Qamishli come and go, and a stale list would silently label those
+        // flights backwards. Every flight here has exactly one Syrian end.
+        const outbound = (apFlag[f.dep_iata] ?? '') === '🇸🇾'
+        const otherIata = outbound ? f.arr_iata : f.dep_iata
+        const otherCity = airportCity[otherIata] ?? otherIata
         return (
           <button
             key={`${ghost ? 'g' : ''}${f.iata_number}-${f.dep_iata}-${f.arr_iata}`}
@@ -402,8 +401,13 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
           >
             <MiniLogo iata={f.airline_iata} name={f.airline_name} />
             <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-              <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11.5, fontWeight: 700, color: C.ink, letterSpacing: '.04em' }}>
-                {f.iata_number}
+              <span style={{ display: 'flex', alignItems: 'baseline', gap: 6, whiteSpace: 'nowrap' }}>
+                <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11.5, fontWeight: 700, color: C.ink, letterSpacing: '.04em' }}>
+                  {f.iata_number}
+                </span>
+                <span style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>
+                  {outbound ? 'To:' : 'From:'} <span style={{ fontWeight: 700, color: C.ink }}>{otherCity}</span>
+                </span>
               </span>
               <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, fontWeight: 600, color: C.muted, whiteSpace: 'nowrap' }}>
                 {f.dep_iata} {depTime} <span style={{ color: C.forestLight }}>→</span> {f.arr_iata} {arrTime}
@@ -615,7 +619,6 @@ function HomeInner() {
         }
         .live-dot { animation: pulse 2s infinite; }
         .ia-strip { scrollbar-width: none; -ms-overflow-style: none; -webkit-overflow-scrolling: touch; }
-        body.has-ia-strip .leaflet-control-attribution { margin-bottom: calc(62px + env(safe-area-inset-bottom)) !important; }
         .ia-strip::-webkit-scrollbar { display: none; }
         .fab-pill { animation: fab-attract 6s 1s infinite; transition: transform .15s ease, box-shadow .15s ease; }
         .fab-pill:hover { transform: translateY(-2px) scale(1.04) !important; box-shadow: 0 6px 22px rgba(0,0,0,.28) !important; animation-play-state: paused; }
