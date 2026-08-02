@@ -820,6 +820,13 @@ export default function BoardPage() {
   const prevNowRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!loading && nowDisplayIdx >= 1 && prevNowRef.current) {
+      // Measured, not assumed. This used to be a flat 80px, which was about right when only
+      // the header was sticky on desktop. The controls are sticky on phones now too, and
+      // they wrap to two rows there, so 80px parked the card underneath them and clipped its
+      // top — the airline and flight number, which is the part you are scanning for.
+      const navH      = document.querySelector('.sn-bar')?.getBoundingClientRect().height ?? 58
+      const controlsH = document.querySelector('.ft-controls-wrap')?.getBoundingClientRect().height ?? 0
+      prevNowRef.current.style.scrollMarginTop = `${Math.round(navH + controlsH + 12)}px`
       prevNowRef.current.scrollIntoView({ behavior: 'instant', block: 'start' })
     }
   }, [loading, tab, view, airport])
@@ -1055,7 +1062,7 @@ export default function BoardPage() {
               {displayed.map((f, i) => (
                 <Fragment key={`${f.iata_number}-${f.dep_iata}-${f.arr_iata}-${f.dep_time_utc}-${f.arr_time_utc}`}>
                   {i === nowDisplayIdx && nowLine(false)}
-                  <div ref={i === nowDisplayIdx - 1 ? prevNowRef : undefined} style={i === nowDisplayIdx - 1 ? { scrollMarginTop: 80 } : undefined}>
+                  <div ref={i === nowDisplayIdx - 1 ? prevNowRef : undefined}>
                     <FlightCard f={f} view={view} isPinned={pins.has(f.iata_number)} onTogglePin={() => togglePin(f.iata_number)} />
                   </div>
                 </Fragment>
