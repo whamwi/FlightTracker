@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { airportCity, airportFlag as _apFlag, loadGeoData } from '@/lib/geo-data'
-import Wordmark from '@/components/Wordmark'
+import SiteNav from '@/components/SiteNav'
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 const C = {
@@ -98,62 +98,7 @@ function AirlineLogo({ prefix, name, size = 22 }: { prefix: string; name: string
 }
 
 // ── Nav bar ───────────────────────────────────────────────────────────────────
-const DestIcon = ({ color = C.forest }: { color?: string }) => (
-  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.85" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M6 22V4a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v18"/>
-    <path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/>
-    <path d="M16 9h4a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-4"/>
-    <path d="M10 6.5h2M10 10.5h2M10 14.5h2M10 18.5h2"/>
-  </svg>
-)
 
-function NavBar() {
-  const tabs = [
-    { label: 'Flights',      href: '/board',        active: false },
-    { label: 'Track',        href: '/',             active: false },
-    { label: 'Destinations', href: '/destinations', active: false },
-    { label: 'Airlines',     href: '/airlines',     active: true  },
-    { label: 'News',         href: '/news',         active: false },
-  ]
-  return (
-    <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', position: 'sticky', top: 0, zIndex: 20 }}>
-      <style>{`
-        .al-nav { padding: 0 40px; height: 68px; gap: 28px; }
-        .al-tabs { display: flex; align-items: center; gap: 4px; margin-left: 14px; }
-        .al-search { display: flex; }
-        .al-spacer { display: block; flex: 1; }
-        @media (max-width: 767px) {
-          .al-nav { padding: 0 14px; height: auto; flex-direction: column; gap: 10px; padding-top: 10px; }
-          .al-tabs { overflow-x: auto; margin-left: 0; gap: 0; scrollbar-width: none; padding-bottom: 8px; }
-          .al-tabs::-webkit-scrollbar { display: none; }
-          .al-search { display: none; }
-          .al-spacer { display: none; }
-        }
-      `}</style>
-      <div className="al-nav" style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-        <Wordmark />
-        <div className="al-tabs">
-          {tabs.map(t => (
-            <Link key={t.label} href={t.href} style={{
-              display: 'flex', alignItems: 'center', gap: 7, padding: '9px 14px', borderRadius: 10, textDecoration: 'none',
-              background: t.active ? C.sunken : 'transparent',
-            }}>
-              {t.label === 'Destinations' && <DestIcon color={t.active ? C.forest : C.muted} />}
-              <span style={{ font: `${t.active ? 700 : 600} 13.5px/1 'Instrument Sans',system-ui`, color: t.active ? C.forest : C.secondary, whiteSpace: 'nowrap' }}>
-                {t.label}
-              </span>
-            </Link>
-          ))}
-        </div>
-        <div className="al-spacer" />
-        <div className="al-search" style={{ width: 260, height: 38, borderRadius: 10, background: C.sunken, border: `1px solid ${C.border}`, alignItems: 'center', gap: 9, padding: '0 12px' }}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth="1.9" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4.3-4.3"/></svg>
-          <span style={{ font: `500 12.5px/1 'Instrument Sans',system-ui`, color: C.muted }}>Search airlines</span>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 // ── Airport hero ──────────────────────────────────────────────────────────────
 const AIRPORT_HERO: Record<string, { src: string; fallback: string; label: string }> = {
@@ -469,7 +414,12 @@ export default function AirlinesPage() {
 
   return (
     <div style={{ minHeight: '100vh', background: C.bg, fontFamily: "'Instrument Sans',system-ui,sans-serif" }}>
-      <NavBar />
+      <SiteNav active="Airlines" right={
+        <div style={{ display: 'flex', width: 260, height: 38, borderRadius: 10, background: C.sunken, border: `1px solid ${C.border}`, alignItems: 'center', gap: 9, padding: '0 12px' }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth="1.9" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4.3-4.3"/></svg>
+          <span style={{ font: `500 12.5px/1 'Instrument Sans',system-ui`, color: C.muted }}>Search airlines</span>
+        </div>
+      } />
 
       <div className="al-body" style={{ maxWidth: 1400, margin: '0 auto', padding: '26px 40px 48px' }}>
         <style>{`

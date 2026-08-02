@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useRef, Fragment } from 'react'
 import Link from 'next/link'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { airportCity, airportFlag as _apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
-import Wordmark from '@/components/Wordmark'
+import SiteNav from '@/components/SiteNav'
 
 const city = (iata: string) => airportCity[iata] ?? iata
 const airportFlag = (iata: string) => _apFlag[iata] ?? ''
@@ -807,12 +807,6 @@ export default function BoardPage() {
   return (
     <div style={{ minHeight: '100vh', background: C.bg, fontFamily: "'Instrument Sans', system-ui, sans-serif" }}>
       <style>{`
-        .ft-nav { padding: 0 16px !important; gap: 12px !important; height: 56px !important; }
-        .ft-nav-tabs { display: none !important; }
-        .ft-search { display: none !important; }
-        .ft-nav-tabs { display: flex !important; overflow-x: auto !important; gap: 0 !important; margin-left: 6px !important; scrollbar-width: none !important; }
-        .ft-nav-tabs::-webkit-scrollbar { display: none; }
-        .ft-nav-spacer { display: none !important; }
         .ft-body { padding: 16px 16px 32px !important; flex-direction: column !important; }
         .ft-title { font-size: 26px !important; }
         .ft-content { flex-direction: column !important; }
@@ -821,10 +815,6 @@ export default function BoardPage() {
         .ft-airport-btn { padding: 8px 14px !important; }
         .ft-sort-btns { display: none !important; }
         @media (min-width: 768px) {
-          .ft-nav { padding: 0 28px !important; gap: 20px !important; height: 68px !important; }
-          .ft-nav-tabs { overflow-x: visible !important; gap: 4px !important; margin-left: 14px !important; }
-          .ft-nav-spacer { display: block !important; flex: 1; }
-          .ft-search { display: flex !important; }
           .ft-body { padding: 26px 28px 40px !important; }
           .ft-title { font-size: 34px !important; }
           .ft-content { flex-direction: row !important; align-items: flex-start !important; }
@@ -835,45 +825,16 @@ export default function BoardPage() {
           .ft-sort-btns { display: flex !important; }
         }
         @media (min-width: 1100px) {
-          .ft-nav { padding: 0 40px !important; }
           .ft-body { padding: 26px 40px 40px !important; }
           .ft-sidebar { width: 352px; }
         }
       `}</style>
 
       {/* ── Nav bar ── */}
-      <div className="ft-nav" style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', position: 'sticky', top: 0, zIndex: 20 }}>
-
-        {/* Logo */}
-        <Wordmark />
-
-        {/* Nav tabs — desktop only */}
-        <div className="ft-nav-tabs" style={{ alignItems: 'center', gap: 4, marginLeft: 14 }}>
-          {[
-            { label: 'Flights', active: true,  href: null },
-            { label: 'Track',   active: false, href: '/' },
-            { label: 'Destinations', active: false, href: '/destinations' },
-            { label: 'Airlines',     active: false, href: null },
-            { label: 'News',         active: false, href: '/news' },
-          ].map(item => {
-            const inner = (
-              <span style={{ font: `${item.active ? 700 : 600} 13.5px/1 'Instrument Sans', system-ui`, color: item.active ? C.forest : C.secondary }}>
-                {item.label}
-              </span>
-            )
-            const sharedStyle = { display: 'flex', alignItems: 'center', gap: 7, padding: '9px 14px', borderRadius: 10, background: item.active ? C.sunken : 'transparent' }
-            return item.href
-              ? <Link key={item.label} href={item.href} style={{ ...sharedStyle, textDecoration: 'none' }}>{inner}</Link>
-              : <div key={item.label} style={sharedStyle}>{inner}</div>
-          })}
-        </div>
-
-        <div className="ft-nav-spacer" style={{ flex: 1 }} />
-
-        {/* Search — desktop only */}
-        <div className="ft-search" style={{
-          width: 260, height: 38, borderRadius: 10, background: C.sunken, border: `1px solid ${query ? C.forest : C.border}`,
-          alignItems: 'center', gap: 9, padding: '0 12px',
+      <SiteNav active="Flights" right={
+        <div style={{
+          display: 'flex', width: 260, height: 38, borderRadius: 10, background: C.sunken,
+          border: `1px solid ${query ? C.forest : C.border}`, alignItems: 'center', gap: 9, padding: '0 12px',
         }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth="1.9" strokeLinecap="round">
             <circle cx="11" cy="11" r="7"/><path d="m20 20-4.3-4.3"/>
@@ -889,8 +850,7 @@ export default function BoardPage() {
             : <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, fontWeight: 600, color: '#A6A093', background: C.bg, padding: '3px 5px', borderRadius: 4, flexShrink: 0 }}>⌘K</span>
           }
         </div>
-
-      </div>
+      } />
 
       {/* ── Main body ── */}
       <div className="ft-body" style={{ maxWidth: 1400, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>

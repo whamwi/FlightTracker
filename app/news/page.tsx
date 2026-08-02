@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
-import Wordmark from '@/components/Wordmark'
+import SiteNav from '@/components/SiteNav'
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 const C = {
@@ -47,43 +47,6 @@ function fmtDate(iso: string | null) {
 
 // ── Nav bar ───────────────────────────────────────────────────────────────────
 
-function NavBar() {
-  const tabs = [
-    { label: 'Flights',      href: '/board',        active: false },
-    { label: 'Track',        href: '/',             active: false },
-    { label: 'Destinations', href: '/destinations', active: false },
-    { label: 'Airlines',     href: '/airlines',     active: false },
-    { label: 'News',         href: '/news',         active: true  },
-  ]
-  return (
-    <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', position: 'sticky', top: 0, zIndex: 20 }}>
-      <style>{`
-        .nw-nav { padding: 0 40px; height: 68px; gap: 28px; }
-        .nw-tabs { display: flex; align-items: center; gap: 4px; margin-left: 14px; }
-        @media (max-width: 767px) {
-          .nw-nav { padding: 0 14px; height: auto; flex-direction: column; gap: 10px; padding-top: 10px; }
-          .nw-tabs { overflow-x: auto; margin-left: 0; gap: 0; scrollbar-width: none; padding-bottom: 8px; }
-          .nw-tabs::-webkit-scrollbar { display: none; }
-        }
-      `}</style>
-      <div className="nw-nav" style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-        <Wordmark />
-        <div className="nw-tabs">
-          {tabs.map(t => (
-            <Link key={t.label} href={t.href} style={{
-              display: 'flex', alignItems: 'center', gap: 7, padding: '9px 14px', borderRadius: 10, textDecoration: 'none',
-              background: t.active ? C.sunken : 'transparent',
-            }}>
-              <span style={{ font: `${t.active ? 700 : 600} 13.5px/1 'Instrument Sans',system-ui`, color: t.active ? C.forest : C.secondary, whiteSpace: 'nowrap' }}>
-                {t.label}
-              </span>
-            </Link>
-          ))}
-        </div>
-      </div>
-    </div>
-  )
-}
 
 const PlayBadge = () => (
   <div style={{
@@ -198,7 +161,7 @@ function Lightbox({ m, onClose }: { m: Media; onClose: () => void }) {
           {/* Attribution back to the authority's own post. */}
           <a href={m.permalink} target="_blank" rel="noopener noreferrer"
             style={{ font: `600 12px/1 'Instrument Sans',system-ui`, color: C.gold, textDecoration: 'none' }}>
-            {m.source === 'facebook' ? 'المصدر · View on Facebook ↗' : 'المصدر · Watch on YouTube ↗'}
+            {'المصدر · View original ↗'}
           </a>
         </div>
       </div>
@@ -209,7 +172,8 @@ function Lightbox({ m, onClose }: { m: Media; onClose: () => void }) {
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function NewsPage() {
   const [media,   setMedia]   = useState<Media[]>([])
-  const [filter,  setFilter]  = useState<'all' | 'photo' | 'video'>('all')
+  // Videos lead the gallery, so the page opens on them rather than the mixed feed.
+  const [filter,  setFilter]  = useState<'all' | 'photo' | 'video'>('video')
   const [loading, setLoading] = useState(true)
   const [done,    setDone]    = useState(false)
   const [open,    setOpen]    = useState<Media | null>(null)
@@ -232,14 +196,14 @@ export default function NewsPage() {
   useEffect(() => { setDone(false); load(filter, 0) }, [filter, load])
 
   const TABS: { key: typeof filter; label: string }[] = [
-    { key: 'all',   label: 'All'    },
-    { key: 'photo', label: 'Photos' },
     { key: 'video', label: 'Videos' },
+    { key: 'photo', label: 'Photos' },
+    { key: 'all',   label: 'All'    },
   ]
 
   return (
     <div style={{ minHeight: '100vh', background: C.bg }}>
-      <NavBar />
+      <SiteNav active="News" />
       <style>{`
         .nw-grid { display: grid; gap: 16px; grid-template-columns: repeat(4, 1fr); }
         .nw-wrap { padding: 26px 40px 60px; max-width: 1400px; margin: 0 auto; }
@@ -251,20 +215,21 @@ export default function NewsPage() {
       `}</style>
 
       <div className="nw-wrap">
-        <h1 style={{ font: `700 25px/1.2 'Instrument Sans',system-ui`, color: C.ink, margin: 0, letterSpacing: '-.02em' }}>
-          Aviation Authority Updates
-        </h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <img
+            src="/av-authority.jpg"
+            alt="Syrian General Authority of Civil Aviation"
+            width={44}
+            height={44}
+            style={{ width: 44, height: 44, borderRadius: 10, flexShrink: 0, objectFit: 'cover' }}
+          />
+          <h1 style={{ font: `700 25px/1.2 'Instrument Sans',system-ui`, color: C.ink, margin: 0, letterSpacing: '-.02em' }}>
+            Aviation Authority Updates
+          </h1>
+        </div>
         <p style={{ font: `500 13px/1.6 ${AR_FONT}`, color: C.muted, margin: '7px 0 0', maxWidth: 620 }}>
           Photos and videos from the Syrian General Authority of Civil Aviation, alongside
-          selected clips from the airlines flying Syria —{' '}
-          <a href="https://www.facebook.com/SyrGACA" target="_blank" rel="noopener noreferrer"
-            style={{ color: C.forest, fontWeight: 600, textDecoration: 'none' }}>
-            Facebook ↗
-          </a>{' · '}
-          <a href="https://www.youtube.com/@SyGACA" target="_blank" rel="noopener noreferrer"
-            style={{ color: C.forest, fontWeight: 600, textDecoration: 'none' }}>
-            YouTube ↗
-          </a>
+          selected clips from the airlines flying Syria.
         </p>
 
         <div style={{ display: 'flex', gap: 6, margin: '18px 0 20px' }}>
