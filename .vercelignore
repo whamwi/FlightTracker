@@ -1,0 +1,11 @@
+# Keep local secrets out of the deployment bundle.
+#
+# `vercel deploy` uploads the working directory, and .env files are gitignored — so they
+# are invisible to code review but still shipped. That is how the SyriaTalent FastAPI
+# backend ended up on Vercel with SUPABASE_SERVICE_ROLE_KEY and the Cloudflare R2 keys
+# baked into the deployment, connected to live production data, for 67 days.
+#
+# Environment variables belong in the Vercel project settings, not in the upload.
+.env
+.env.*
+!.env.example
