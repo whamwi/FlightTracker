@@ -363,6 +363,22 @@ The lesson is the testing one, not the Next one: **a UI change that passes on `l
 is not verified.** Both broken versions were committed and deployed on the strength of a
 local pass. Only a click on the deployed site caught it.
 
+**Fly Cham is the airline that breaks identifier assumptions — test against it.**
+The map's deep-link/auto-open logic matched the selected flight with
+`a.iata_number === target`. The board lists Fly Cham under its broadcast callsign
+(FYC489) while the airspace feed puts the ticketed number in `iata_number` (XH489) and
+the callsign in `flight`, so the comparison never held: the plane drew normally but never
+turned red, never auto-panned and never opened its popup. Every other airline broadcasts
+what it tickets, so the same code worked everywhere else — the failure read as
+intermittent, and was reported as "sometimes it turns red and sometimes it does not".
+
+Fixed with `matchesTarget(...ids)`, which compares the selection case-insensitively
+against every identifier the aircraft is known by — ticketed number, broadcast callsign,
+marker key — and trims, because the feed pads callsigns to 8 characters (`'FYC489  '`).
+
+Any new code that matches a user-facing flight number against feed data must do the same.
+`XH`/`FYC` is the standing test case, alongside `DN`/`JOC` (Dan Air) and `3L`/`ADY`.
+
 ## 8. Commands
 
 ```bash
