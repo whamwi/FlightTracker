@@ -211,6 +211,7 @@ function AirlineCard({ info, onView, imageUrl, onImageUploaded }: {
   const fileRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const [imgFailed, setImgFailed] = useState(false)
+  const [uploadErr, setUploadErr] = useState<string | null>(null)
   useEffect(() => { setImgFailed(false) }, [imageUrl])
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -218,13 +219,19 @@ function AirlineCard({ info, onView, imageUrl, onImageUploaded }: {
     if (!file) return
     e.target.value = ''
     setUploading(true)
+    setUploadErr(null)
     try {
       const form = new FormData()
       form.append('prefix', info.prefix)
       form.append('file', file)
       const res = await fetch('/api/airline-images', { method: 'POST', body: form })
-      const data = await res.json()
-      if (data.ok) onImageUploaded(info.prefix, data.url)
+      const data = await res.json().catch(() => null)
+      // A rejected upload used to leave no trace at all: the button returned to "Photo" and
+      // the old picture stayed, which is indistinguishable from a silently ignored click.
+      if (data?.ok) onImageUploaded(info.prefix, data.url)
+      else setUploadErr(data?.error ?? `Upload failed (${res.status})`)
+    } catch (err) {
+      setUploadErr(String(err))
     } finally {
       setUploading(false)
     }
@@ -252,6 +259,11 @@ function AirlineCard({ info, onView, imageUrl, onImageUploaded }: {
           {uploading ? 'Uploading…' : 'Photo'}
         </button>
         <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleFile} />
+        {uploadErr && (
+          <div style={{ position: 'absolute', left: 10, right: 10, bottom: 10, padding: '6px 9px', borderRadius: 8, background: 'rgba(153,27,27,.92)', color: '#fff', font: `600 10.5px/1.35 'Instrument Sans',system-ui` }}>
+            {uploadErr}
+          </div>
+        )}
       </div>
       {/* Info */}
       <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 9, flex: 1 }}>
