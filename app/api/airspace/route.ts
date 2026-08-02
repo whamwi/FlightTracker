@@ -74,6 +74,33 @@ async function fetchRadiusFeed(feeds: string[]): Promise<FeedResult> {
   return { ok: false, aircraft: [] }
 }
 
+function haversineNm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 3440.065
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLon = (lon2 - lon1) * Math.PI / 180
+  const a = Math.sin(dLat / 2) ** 2
+          + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2
+  return 2 * R * Math.asin(Math.sqrt(a))
+}
+
+// ── Airport coordinates (1h cache) ────────────────────────────────────────────
+let apCoordCache: { map: Record<string, [number, number]>; ts: number } | null = null
+
+async function fetchAirportCoords(): Promise<Record<string, [number, number]>> {
+  if (apCoordCache && Date.now() - apCoordCache.ts < 3_600_000) return apCoordCache.map
+  const res = await fetch(`${SB_URL}/rest/v1/airports?select=iata,lat,lon`, { headers: SB_HEADERS })
+  if (!res.ok) return apCoordCache?.map ?? {}
+  const rows: { iata: string; lat: number | null; lon: number | null }[] = await res.json()
+  const map: Record<string, [number, number]> = {}
+  for (const r of rows) {
+    if (r.iata && typeof r.lat === 'number' && typeof r.lon === 'number') {
+      map[r.iata.toUpperCase()] = [r.lat, r.lon]
+    }
+  }
+  apCoordCache = { map, ts: Date.now() }
+  return map
+}
+
 // ── IATA → ICAO airline prefix (1h cache) ─────────────────────────────────────
 let iataToIcaoCache: { map: Record<string, string>; ts: number } | null = null
 
@@ -482,6 +509,47 @@ let feedInflight: Promise<{ aircraft: any[]; live: boolean }> | null = null
 const SYRIAN_AIRPORTS_SET = new Set(['DAM', 'ALP', 'LTK'])
 const depSynced = new Set<string>()
 
+/**
+ * Estimate when a flight departed, for a board flight we have just seen airborne but for
+ * which FR24 has published no departure yet.
+ *
+ * This used to answer `sched_dep`, which is the worst available guess: we are looking at
+ * an aircraft that is airborne, and a delayed flight has by definition *not* left at its
+ * scheduled time. JOC541/DN541 (OTP→DAM) departed 02:23:35 against a 02:00 schedule, so the
+ * marker was drawn 24 minutes along the route the moment it was spotted, then snapped back
+ * when fr24-sync published the real departure. FYC486 (SAW→DAM, +31 min) did the same.
+ *
+ * We already know enough to do better: the aircraft's position gives progress along the
+ * route, so `now − progress × block_time` recovers roughly when it started. Falls back to
+ * the scheduled time only when the geometry is unavailable.
+ *
+ * Bounded to [now − block_time, now]: it cannot have departed in the future, nor been
+ * airborne longer than the whole flight. Also not earlier than an hour before schedule —
+ * a wildly-off position should degrade toward the timetable, not invent a departure that
+ * never happened.
+ */
+function inferDepartureTs(
+  info: BoardFlight,
+  lat: number,
+  lon: number,
+  apCoords: Record<string, [number, number]>,
+  nowSec: number,
+): number {
+  const dep = info.dep_iata ? apCoords[info.dep_iata] : undefined
+  const arr = info.arr_iata ? apCoords[info.arr_iata] : undefined
+  const blockSec = (info.duration_min ?? 0) * 60
+  if (!dep || !arr || blockSec <= 0) return info.sched_dep ?? nowSec
+
+  const total = haversineNm(dep[0], dep[1], arr[0], arr[1])
+  if (total <= 0) return info.sched_dep ?? nowSec
+  const remaining = haversineNm(lat, lon, arr[0], arr[1])
+  const progress  = Math.max(0, Math.min(1, 1 - remaining / total))
+
+  const est   = Math.round(nowSec - progress * blockSec)
+  const floor = Math.max(nowSec - blockSec, (info.sched_dep ?? est) - 3600)
+  return Math.max(floor, Math.min(est, nowSec))
+}
+
 async function writeInboundDep(info: BoardFlight, depTs: number): Promise<void> {
   const arrAp = info.arr_iata
   if (!arrAp || !SYRIAN_AIRPORTS_SET.has(arrAp)) return
@@ -535,7 +603,7 @@ export async function GET() {
   // same as the old behaviour rather than a regression.
   const boardMap = new Map<string, BoardFlight>()
   try {
-    const iataToIcao    = await fetchIataToIcao()
+    const [iataToIcao, apCoords] = await Promise.all([fetchIataToIcao(), fetchAirportCoords()])
     const resolvedBoard = await fetchBoardFlights(iataToIcao)
 
     // callsign → board info
@@ -610,7 +678,7 @@ export async function GET() {
         if (info.arr_iata && SYRIAN_AIRPORTS_SET.has(info.arr_iata)
             && !SYRIAN_AIRPORTS_SET.has(info.dep_iata ?? '')) {
           // Inbound
-          const depTs    = info.sched_dep ?? Math.floor(Date.now() / 1000)
+          const depTs    = inferDepartureTs(info, a.lat, a.lon, apCoords, Math.floor(Date.now() / 1000))
           actual_dep_utc = new Date(depTs * 1000).toISOString()
           if (!depSynced.has(cs)) {
             depSynced.add(cs)
@@ -619,7 +687,7 @@ export async function GET() {
         } else if (info.dep_iata && SYRIAN_AIRPORTS_SET.has(info.dep_iata)
             && !SYRIAN_AIRPORTS_SET.has(info.arr_iata ?? '')) {
           // Outbound
-          const depTs    = info.sched_dep ?? Math.floor(Date.now() / 1000)
+          const depTs    = inferDepartureTs(info, a.lat, a.lon, apCoords, Math.floor(Date.now() / 1000))
           actual_dep_utc = new Date(depTs * 1000).toISOString()
           if (!depSynced.has(cs)) {
             depSynced.add(cs)
