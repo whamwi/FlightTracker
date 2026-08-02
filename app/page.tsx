@@ -279,6 +279,12 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
   const setRef      = useRef<HTMLDivElement>(null)
   const [looping, setLooping] = useState(false)
 
+  // Selecting a flight stops the ticker and drops the duplicate copy. Both matter: a moving
+  // strip is hard to read once you have picked something out of it, and with the list
+  // rendered twice the selected card is highlighted in both copies, so wrapping made the
+  // highlight appear to jump between first and second position.
+  const loop = looping && !selectedFlight
+
   // Only worth animating when the cards actually overrun the screen.
   useEffect(() => {
     const el = scrollerRef.current
@@ -292,7 +298,7 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
 
   useEffect(() => {
     const el = scrollerRef.current
-    if (!el || !looping) return
+    if (!el || !loop) return
     // Motion is the point — it signals there is more to see — but it must never fight a
     // finger. Any touch stops it dead and it only resumes a few seconds after release, so
     // the card you reached for is still where you saw it.
@@ -341,7 +347,15 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
       el.removeEventListener('pointercancel', release)
       el.removeEventListener('pointerleave', release)
     }
-  }, [looping, flights.length])
+  }, [loop, flights.length])
+
+  // Removing the duplicate can leave the scroll parked past the end of what remains, and
+  // the card you just tapped may be off-screen anyway. Put it back in view.
+  useEffect(() => {
+    if (!selectedFlight) return
+    const card = scrollerRef.current?.querySelector(`[data-flight="${CSS.escape(selectedFlight)}"]`)
+    card?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+  }, [selectedFlight, flights.length])
 
   if (flights.length === 0) return null
 
@@ -359,6 +373,7 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
             key={`${ghost ? 'g' : ''}${f.iata_number}-${f.dep_iata}-${f.arr_iata}`}
             onClick={() => (selected ? onClear() : onSelect(f.iata_number))}
             aria-label={`${f.iata_number}, ${f.dep_iata} to ${f.arr_iata}`}
+            data-flight={ghost ? undefined : f.iata_number}
             style={{
               flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8,
               padding: '8px 11px', borderRadius: 12, cursor: 'pointer', textAlign: 'left',
@@ -395,7 +410,7 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
         style={{ display: 'flex', overflowX: 'auto', padding: '0 12px', scrollSnapType: 'x proximity' }}
       >
         {cards(false)}
-        {looping && cards(true)}
+        {loop && cards(true)}
       </div>
     </div>
   )
