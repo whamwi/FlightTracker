@@ -354,8 +354,28 @@ function InAirPanel({ selectedFlight, open, setOpen }: { selectedFlight?: string
             {loading ? 'Loading…' : `${count} ${count === 1 ? 'flight' : 'flights'} · sorted by arrival`}
           </span>
         </div>
+        {/* Selection lives in the URL (/?flight=XX123), set by tapping a card. Without a way
+            back to `/` the only escape was editing the address bar or reloading. Rendered
+            only when something is selected, so the header stays quiet otherwise — and it is
+            a Link rather than a button so it shares the cards' navigation behaviour. */}
+        {selectedFlight && (
+          <Link
+            href="/"
+            scroll={false}
+            aria-label="Clear selected flight"
+            style={{
+              height: 28, borderRadius: 8, border: `1px solid ${C.border}`, background: C.sunken,
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0, color: C.muted, textDecoration: 'none', padding: '0 9px',
+              font: `600 11px/1 'Instrument Sans',system-ui`, whiteSpace: 'nowrap',
+            }}
+          >
+            Clear
+          </Link>
+        )}
         <button
           onClick={() => setOpen(false)}
+          aria-label="Close panel"
           style={{ width: 28, height: 28, borderRadius: 8, border: `1px solid ${C.border}`, background: C.sunken, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color: C.muted, fontSize: 13, lineHeight: 1 }}
         >
           ✕
