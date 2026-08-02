@@ -2,7 +2,7 @@
 
 import dynamic from 'next/dynamic'
 import Link from 'next/link'
-import { useSearchParams, useRouter } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import { Suspense, useState, useEffect, useCallback } from 'react'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { airportCity, airportFlag as apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
@@ -192,7 +192,7 @@ function MiniProgress({ depUtc, durationMin, approaching, accentColor }: { depUt
 }
 
 // ── Compact flight card for the panel ───────────────────────────────────────
-function MiniFlightCard({ f, isSelected }: { f: InAirFlight; isSelected?: boolean }) {
+function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelected?: boolean; onSelect: (n: string) => void }) {
   const status = panelEffectiveStatus(f)
   const approaching = status === 'Approaching'
   const isAlp = f.dep_iata === 'ALP' || f.arr_iata === 'ALP'
@@ -212,6 +212,7 @@ function MiniFlightCard({ f, isSelected }: { f: InAirFlight; isSelected?: boolea
   return (
     <Link
       href={`/?flight=${encodeURIComponent(f.iata_number)}`}
+      onClick={(e) => { e.preventDefault(); onSelect(f.iata_number) }}
       style={{ display: 'block', textDecoration: 'none', background: isSelected ? '#D4EBD4' : C.surface, border: `${isSelected ? 2 : 1}px solid ${isSelected ? C.forest : C.border}`, borderRadius: 12, overflow: 'hidden', boxShadow: isSelected ? '0 6px 20px rgba(5,66,57,0.22), 0 1px 4px rgba(5,66,57,0.12)' : '0 1px 4px rgba(0,0,0,.06)', position: 'relative', transform: isSelected ? 'translateY(-1px)' : 'none', transition: 'box-shadow .2s, transform .2s, background .2s', flexShrink: 0 }}
     >
       {/* Status rail (top) */}
@@ -272,8 +273,7 @@ function MiniFlightCard({ f, isSelected }: { f: InAirFlight; isSelected?: boolea
 }
 
 // ── In-air side panel ────────────────────────────────────────────────────────
-function InAirPanel({ selectedFlight, open, setOpen }: { selectedFlight?: string; open: boolean; setOpen: (v: boolean) => void }) {
-  const router = useRouter()
+function InAirPanel({ selectedFlight, open, setOpen, onSelect, onClear }: { selectedFlight?: string; open: boolean; setOpen: (v: boolean) => void; onSelect: (n: string) => void; onClear: () => void }) {
   const [flights, setFlights] = useState<InAirFlight[]>([])
   const [loading, setLoading] = useState(true)
   const [geoReady, setGeoReady] = useState(false)
@@ -355,16 +355,16 @@ function InAirPanel({ selectedFlight, open, setOpen }: { selectedFlight?: string
             {loading ? 'Loading…' : `${count} ${count === 1 ? 'flight' : 'flights'} · sorted by arrival`}
           </span>
         </div>
-        {/* Selection lives in the URL (/?flight=XX123), set by tapping a card. Without a way
-            back to `/` the only escape was editing the address bar or reloading.
-            router.replace, not <Link href="/">: the App Router keys its client cache on the
-            pathname, so a Link from /?flight=X to / is treated as the same route and the query
-            survives. That works in dev (caching disabled) and silently fails in production —
-            verified on the deployed site before switching. replace() rather than push() so
-            clearing does not add a history entry to back through. */}
+        {/* Clearing a selection. The obvious spellings — <Link href="/"> and router.replace('/')
+            — both leave ?flight= in the address bar in a production build: the App Router keys
+            its client cache on the pathname and treats a query-only change back to the bare
+            route as the same navigation. Neither fails in dev, where that caching is off, so
+            this was only caught by testing the deployed site. Selection therefore lives in
+            React state (see HomeInner) with the URL kept in sync by history.replaceState, and
+            the router is out of the loop entirely. Rendered only when something is selected. */}
         {selectedFlight && (
           <button
-            onClick={() => router.replace('/', { scroll: false })}
+            onClick={onClear}
             aria-label="Clear selected flight"
             style={{
               height: 28, borderRadius: 8, border: `1px solid ${C.border}`, background: C.sunken,
@@ -400,7 +400,7 @@ function InAirPanel({ selectedFlight, open, setOpen }: { selectedFlight?: string
           </div>
         )}
         {!loading && flights.map(f => (
-          <MiniFlightCard key={`${f.iata_number}-${f.dep_iata}-${f.arr_iata}`} f={f} isSelected={f.iata_number === selectedFlight} />
+          <MiniFlightCard key={`${f.iata_number}-${f.dep_iata}-${f.arr_iata}`} f={f} isSelected={f.iata_number === selectedFlight} onSelect={onSelect} />
         ))}
       </div>
     </div>
@@ -410,7 +410,19 @@ function InAirPanel({ selectedFlight, open, setOpen }: { selectedFlight?: string
 // ── Main map page ────────────────────────────────────────────────────────────
 function HomeInner() {
   const searchParams = useSearchParams()
-  const flight = searchParams.get('flight') ?? undefined
+  const urlFlight = searchParams.get('flight') ?? undefined
+  // Seeded from the URL so deep links keep working, but state is the source of truth from then
+  // on — see the note on the Clear button for why the router cannot own this.
+  const [flight, setFlight] = useState<string | undefined>(urlFlight)
+  useEffect(() => { setFlight(urlFlight) }, [urlFlight])
+
+  const syncUrl = useCallback((n?: string) => {
+    const q = n ? `?flight=${encodeURIComponent(n)}` : ''
+    window.history.replaceState(null, '', `${window.location.pathname}${q}`)
+  }, [])
+  const selectFlight = useCallback((n: string) => { setFlight(n); syncUrl(n) }, [syncUrl])
+  const clearFlight  = useCallback(() => { setFlight(undefined); syncUrl(undefined) }, [syncUrl])
+
   const [panelOpen, setPanelOpen] = useState(true)
 
   useEffect(() => {
@@ -501,7 +513,7 @@ function HomeInner() {
         <Map targetFlight={flight} panelOpen={panelOpen} />
 
         {/* In-air side panel */}
-        <InAirPanel selectedFlight={flight} open={panelOpen} setOpen={setPanelOpen} />
+        <InAirPanel selectedFlight={flight} open={panelOpen} setOpen={setPanelOpen} onSelect={selectFlight} onClear={clearFlight} />
 
         {/* Legend (bottom-right, above bottom nav on mobile) */}
         <div className="map-legend" style={{ position: 'absolute', zIndex: 1000, background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(6px)', borderRadius: 10, padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 5, boxShadow: '0 1px 4px rgba(0,0,0,0.12)' }}>
