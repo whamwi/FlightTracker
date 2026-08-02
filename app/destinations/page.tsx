@@ -46,10 +46,10 @@ const REGION_MAP: Record<string, RegionId> = {
   SVO: 'europe', THR: 'europe', IKA: 'europe',
   MJI: 'gulf',
 }
-const REGION_FILTERS: { id: RegionId; label: string }[] = [
-  { id: 'all',    label: 'All regions' },
-  { id: 'gulf',   label: 'Middle East & Gulf' },
-  { id: 'europe', label: 'Europe & Turkey' },
+const REGION_FILTERS: { id: RegionId; label: string; short: string }[] = [
+  { id: 'all',    label: 'All regions',        short: 'All' },
+  { id: 'gulf',   label: 'Middle East & Gulf', short: 'Med Eastern' },
+  { id: 'europe', label: 'Europe & Turkey',    short: 'Europeans' },
 ]
 const REGION_SECTIONS: { id: RegionId; label: string }[] = [
   { id: 'gulf',   label: 'Middle East & Gulf' },
@@ -487,17 +487,33 @@ export default function DestinationsPage() {
         </div>
       } />
 
-      <div style={{ maxWidth: 1400, margin: '0 auto', padding: '26px 40px 48px' }}>
+      <div className="dst-body" style={{ maxWidth: 1400, margin: '0 auto' }}>
         <style>{`
           .dst-body { padding: 26px 40px 48px !important; }
           .dst-map { height: 240px; overflow: hidden; }
           .dst-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 20px; }
           .dst-mobile-row { display: none; }
+          /* Desktop: title left, then the airport toggle, then the counts. */
+          .dst-head   { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; }
+          .dst-title  { order: 1; margin: 0 auto 0 0; font-size: 34px; }
+          .dst-toggle { order: 2; }
+          .dst-counts { order: 3; display: flex; align-items: center; gap: 8px; }
+          .dst-short  { display: none; }
           @media (max-width: 767px) {
             .dst-body { padding: 16px 14px 32px !important; }
             .dst-map { height: 200px; overflow: hidden; }
             .dst-grid { grid-template-columns: 1fr; gap: 14px; }
-            .dst-region-filter { display: none !important; }
+            /* Counts join the heading line and sit at its end; the airport toggle takes the
+               next row. "Destinations" is a far wider word than "Airlines", so the title has
+               to come down further for all three to clear 375px. */
+            .dst-title  { font-size: 21px; }
+            .dst-counts { order: 2; gap: 6px; }
+            .dst-toggle { order: 3; flex-basis: 100%; }
+            .dst-count-num { font-size: 12px !important; }
+            .dst-count-lbl { font-size: 10px !important; }
+            .dst-count-box { padding: 5px 8px !important; gap: 5px !important; }
+            .dst-full   { display: none; }
+            .dst-short  { display: inline; }
           }
           @media (min-width: 768px) and (max-width: 1099px) {
             .dst-body { padding: 22px 28px 40px !important; }
@@ -507,33 +523,29 @@ export default function DestinationsPage() {
 
 
         {/* Title + stats */}
-        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <span style={{ font: `500 12px/1 'Instrument Sans',system-ui`, color: C.muted, letterSpacing: '.02em' }}>From Damascus &amp; Aleppo</span>
-            <h1 style={{ margin: 0, font: `700 34px/1 'Instrument Sans',system-ui`, color: C.ink, letterSpacing: '-.025em' }}>Destinations</h1>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            {/* Airport toggle */}
-            <div style={{ display: 'flex', padding: 3, background: '#E4E1D2', borderRadius: 9, gap: 2 }}>
-              {([['DAM','Damascus'],['ALP','Aleppo']] as const).map(([code, label]) => (
-                <button key={code} onClick={() => setAirport(code)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 7, border: 'none', cursor: 'pointer', background: airport===code ? C.forest : 'transparent', color: airport===code ? '#fff' : C.muted, transition: 'all .15s' }}>
-                  <span style={{ font: `${airport===code?700:600} 12px/1 'Instrument Sans',system-ui` }}>{label}</span>
-                  <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 9.5, opacity: .7, lineHeight: 1 }}>{code}</span>
-                </button>
-              ))}
-            </div>
+        <div className="dst-head">
+          <h1 className="dst-title" style={{ fontFamily: "'Instrument Sans',system-ui", fontWeight: 700, lineHeight: 1, color: C.ink, letterSpacing: '-.025em' }}>Destinations</h1>
+          <div className="dst-counts">
             {totalDests > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 9, background: C.surface, border: `1px solid ${C.border}` }}>
-                <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{totalDests}</span>
-                <span style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>destinations</span>
+              <div className="dst-count-box" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 9, background: C.surface, border: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>
+                <span className="dst-count-num" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{totalDests}</span>
+                <span className="dst-count-lbl" style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>destinations</span>
               </div>
             )}
             {totalFlights > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 9, background: C.surface, border: `1px solid ${C.border}` }}>
-                <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{totalFlights}</span>
-                <span style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>flights / week</span>
+              <div className="dst-count-box" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 9, background: C.surface, border: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>
+                <span className="dst-count-num" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{totalFlights}</span>
+                <span className="dst-count-lbl" style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>flights / week</span>
               </div>
             )}
+          </div>
+          <div className="dst-toggle" style={{ display: 'flex', padding: 3, background: '#E4E1D2', borderRadius: 9, gap: 2, width: 'fit-content' }}>
+            {([['DAM','Damascus'],['ALP','Aleppo']] as const).map(([code, label]) => (
+              <button key={code} onClick={() => setAirport(code)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 7, border: 'none', cursor: 'pointer', background: airport===code ? C.forest : 'transparent', color: airport===code ? '#fff' : C.muted, transition: 'all .15s' }}>
+                <span style={{ font: `${airport===code?700:600} 12px/1 'Instrument Sans',system-ui` }}>{label}</span>
+                <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 9.5, opacity: .7, lineHeight: 1 }}>{code}</span>
+              </button>
+            ))}
           </div>
         </div>
 
@@ -549,7 +561,8 @@ export default function DestinationsPage() {
             const active = region === r.id
             return (
               <button key={r.id} onClick={() => setRegion(r.id)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 14px', borderRadius: 99, border: 'none', cursor: 'pointer', background: active ? C.ink : C.surface, color: active ? '#fff' : C.muted, boxShadow: active ? 'none' : `0 0 0 1px ${C.border}`, transition: 'all .15s', font: `${active ? 700 : 500} 12px/1 'Instrument Sans',system-ui`, whiteSpace: 'nowrap' as const }}>
-                {r.label}
+                <span className="dst-full">{r.label}</span>
+                <span className="dst-short">{r.short}</span>
                 <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, opacity: active ? .75 : .6 }}>{count}</span>
               </button>
             )
