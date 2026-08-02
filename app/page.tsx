@@ -305,11 +305,11 @@ function InAirPanel({ selectedFlight, open, setOpen, onSelect, onClear }: { sele
   // ── Closed: pill FAB ─────────────────────────────────────────────────────
   if (!open) {
     return (
+      <div style={{ position: 'absolute', left: 12, top: 12, zIndex: 1000, display: 'flex', alignItems: 'center', gap: 8 }}>
       <button
         onClick={() => setOpen(true)}
         className="fab-pill"
         style={{
-          position: 'absolute', left: 12, top: 12, zIndex: 1000,
           display: 'flex', alignItems: 'center', gap: 7,
           padding: '9px 13px', borderRadius: 99,
           background: count > 0 ? C.forest : 'rgba(255,255,255,0.92)',
@@ -327,6 +327,27 @@ function InAirPanel({ selectedFlight, open, setOpen, onSelect, onClear }: { sele
           <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21 4 19.5 2.5c-1.5-1.5-3.5-1.5-5 0L11 6 2.8 4.2l-2 2 7.4 4.5a55 55 0 0 0-3 6.3l-1.6 2 2 2 2.4-2a55 55 0 0 0 6.3-3l4.5 7.4 2-2-.8-4.2z"/>
         </svg>
       </button>
+      {/* Selecting a flight collapses the panel on phones, which is where you are looking
+          right after you select one — so the header's Clear button is exactly the thing you
+          cannot reach. Repeat it here, naming the flight so it is obvious what is selected. */}
+      {selectedFlight && (
+        <button
+          onClick={onClear}
+          aria-label={`Clear ${selectedFlight}`}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '9px 12px', borderRadius: 99,
+            background: 'rgba(255,255,255,0.92)',
+            backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+            border: `1px solid ${C.border}`, boxShadow: '0 2px 10px rgba(0,0,0,.18)',
+            cursor: 'pointer', color: C.ink, whiteSpace: 'nowrap',
+          }}
+        >
+          <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11.5, fontWeight: 700, letterSpacing: '.05em' }}>{selectedFlight}</span>
+          <span style={{ color: C.muted, fontSize: 12, lineHeight: 1 }}>✕</span>
+        </button>
+      )}
+      </div>
     )
   }
 
@@ -429,8 +450,10 @@ function HomeInner() {
     if (window.innerWidth < 640) setPanelOpen(false)
   }, [])
 
+  // Collapse on select only where the panel actually covers the map. On a wide screen there
+  // is room for both, and keeping it open leaves the Clear button in reach.
   useEffect(() => {
-    if (flight) setPanelOpen(false)
+    if (flight && window.innerWidth < 640) setPanelOpen(false)
   }, [flight])
 
   return (
