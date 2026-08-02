@@ -151,6 +151,10 @@ function extractRevisedArrUtc(status: string, date: string): string | null {
 interface CallsignLookup {
   byIata:     Record<string, string>   // XQ808  → SXS808
   byCallsign: Record<string, string>   // FYC455 → FYC455
+  // Either identifier → the real IATA number. FR24 publishes the callsign as `num` for the
+  // 38 flights with fr24_uses_callsign, so `num` alone cannot tell you the ticketed number:
+  // Fly Cham arrives as FYC727 when a passenger's booking says XH727.
+  toIata:     Record<string, string>   // FYC727 → XH727,  XQ808 → XQ808
 }
 let lookupCache: { map: CallsignLookup; ts: number } | null = null
 
@@ -160,13 +164,15 @@ async function fetchCallsignLookup(): Promise<CallsignLookup> {
     `${SB_URL}/rest/v1/flight_lookup?select=iata_number,broadcast_callsign&broadcast_callsign=not.is.null`,
     { headers: SB_HEADERS },
   )
-  if (!res.ok) return lookupCache?.map ?? { byIata: {}, byCallsign: {} }
+  if (!res.ok) return lookupCache?.map ?? { byIata: {}, byCallsign: {}, toIata: {} }
   const rows: { iata_number: string; broadcast_callsign: string }[] = await res.json()
-  const map: CallsignLookup = { byIata: {}, byCallsign: {} }
+  const map: CallsignLookup = { byIata: {}, byCallsign: {}, toIata: {} }
   for (const r of rows) {
     if (!r.iata_number || !r.broadcast_callsign) continue
-    map.byIata[r.iata_number.toUpperCase()]         = r.broadcast_callsign.toUpperCase()
+    map.byIata[r.iata_number.toUpperCase()]            = r.broadcast_callsign.toUpperCase()
     map.byCallsign[r.broadcast_callsign.toUpperCase()] = r.broadcast_callsign.toUpperCase()
+    map.toIata[r.iata_number.toUpperCase()]            = r.iata_number
+    map.toIata[r.broadcast_callsign.toUpperCase()]     = r.iata_number
   }
   lookupCache = { map, ts: Date.now() }
   return map
@@ -196,7 +202,8 @@ function toCallsign(num: string, iataToIcao: Record<string, string>): string {
 
 // ── Board flights (fr24_daily_cache, Syria op date = UTC+3, 60s cache) ────────
 interface BoardFlight {
-  num:            string
+  num:            string        // raw FR24 value — used to match rows back into fr24_daily_cache
+  iata_num:       string        // the ticketed IATA number (XH727), resolved via flight_lookup
   callsign:       string        // ADS-B broadcast callsign derived from num
   dep_iata:       string | null
   arr_iata:       string | null
@@ -319,6 +326,7 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>, lookup: Cal
         // and arr_iata for arrivals from the row's airport_iata.
         flights.push({
           num,
+          iata_num:       lookup.toIata[num.toUpperCase()] ?? num,
           callsign:       callsignCs,
           dep_iata:       f.dep_iata || (section === 'departures' ? ap : null) || null,
           arr_iata:       f.arr_iata || (section === 'arrivals'   ? ap : null) || null,
@@ -517,7 +525,7 @@ async function fetchLastKnownPositions(boardMap: Map<string, BoardFlight>): Prom
       dep_time_utc:   info.sched_dep ? unixToHHMM(info.sched_dep) : null,
       arr_time_utc:   info.sched_arr ? unixToHHMM(info.sched_arr) : null,
       duration_min:   info.duration_min,
-      iata_number:    info.num,
+      iata_number:    info.iata_num,
       actual_dep_utc: info.actual_dep_utc,
       actual_arr_utc: info.actual_arr_utc,
       dep_delay_min:  info.dep_delay_min,
@@ -749,7 +757,7 @@ export async function GET() {
         dep_time_utc:   info?.sched_dep      ? unixToHHMM(info.sched_dep) : null,
         arr_time_utc:   info?.sched_arr      ? unixToHHMM(info.sched_arr) : null,
         duration_min:   info?.duration_min   ?? null,
-        iata_number:    info?.num            ?? null,
+        iata_number:    info?.iata_num       ?? null,
         actual_dep_utc,
         actual_arr_utc: info?.actual_arr_utc ?? null,
         dep_delay_min:  info?.dep_delay_min  ?? null,
@@ -800,7 +808,7 @@ export async function GET() {
         dep_time_utc:   info?.sched_dep    ? unixToHHMM(info.sched_dep) : null,
         arr_time_utc:   info?.sched_arr    ? unixToHHMM(info.sched_arr) : null,
         duration_min:   info?.duration_min ?? null,
-        iata_number:    info?.num          ?? null,
+        iata_number:    info?.iata_num     ?? null,
         actual_dep_utc: info?.actual_dep_utc ?? null,
         actual_arr_utc: info?.actual_arr_utc ?? null,
         dep_delay_min:  info?.dep_delay_min  ?? null,
@@ -878,7 +886,7 @@ export async function GET() {
           actual_dep_utc,
           actual_arr_utc:  f.actual_arr_utc,
           revised_arr_utc: f.revised_arr_utc,
-          iata_number:     f.num,
+          iata_number:     f.iata_num,
           dep_delay_min:   f.dep_delay_min,
           airline_iata:    f.airline_iata,
         }
