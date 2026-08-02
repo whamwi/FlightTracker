@@ -280,8 +280,8 @@ function InAirPanel({ selectedFlight, open, setOpen, onSelect, onClear }: { sele
         <span style={{ font: `600 12.5px/1 'Instrument Sans',system-ui`, color: count > 0 ? '#fff' : C.ink, whiteSpace: 'nowrap' }}>
           {loading ? 'Loading…' : count === 0 ? 'No flights in air' : `${count} in air`}
         </span>
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={count > 0 ? '#fff' : C.muted} strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21 4 19.5 2.5c-1.5-1.5-3.5-1.5-5 0L11 6 2.8 4.2l-2 2 7.4 4.5a55 55 0 0 0-3 6.3l-1.6 2 2 2 2.4-2a55 55 0 0 0 6.3-3l4.5 7.4 2-2-.8-4.2z"/>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={count > 0 ? '#fff' : C.muted} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="m18 15-6-6-6 6"/>
         </svg>
       </button>
       {/* Selecting a flight collapses the panel on phones, which is where you are looking
