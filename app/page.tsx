@@ -2,7 +2,7 @@
 
 import dynamic from 'next/dynamic'
 import Link from 'next/link'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { Suspense, useState, useEffect, useCallback } from 'react'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { airportCity, airportFlag as apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
@@ -273,6 +273,7 @@ function MiniFlightCard({ f, isSelected }: { f: InAirFlight; isSelected?: boolea
 
 // ── In-air side panel ────────────────────────────────────────────────────────
 function InAirPanel({ selectedFlight, open, setOpen }: { selectedFlight?: string; open: boolean; setOpen: (v: boolean) => void }) {
+  const router = useRouter()
   const [flights, setFlights] = useState<InAirFlight[]>([])
   const [loading, setLoading] = useState(true)
   const [geoReady, setGeoReady] = useState(false)
@@ -355,23 +356,25 @@ function InAirPanel({ selectedFlight, open, setOpen }: { selectedFlight?: string
           </span>
         </div>
         {/* Selection lives in the URL (/?flight=XX123), set by tapping a card. Without a way
-            back to `/` the only escape was editing the address bar or reloading. Rendered
-            only when something is selected, so the header stays quiet otherwise — and it is
-            a Link rather than a button so it shares the cards' navigation behaviour. */}
+            back to `/` the only escape was editing the address bar or reloading.
+            router.replace, not <Link href="/">: the App Router keys its client cache on the
+            pathname, so a Link from /?flight=X to / is treated as the same route and the query
+            survives. That works in dev (caching disabled) and silently fails in production —
+            verified on the deployed site before switching. replace() rather than push() so
+            clearing does not add a history entry to back through. */}
         {selectedFlight && (
-          <Link
-            href="/"
-            scroll={false}
+          <button
+            onClick={() => router.replace('/', { scroll: false })}
             aria-label="Clear selected flight"
             style={{
               height: 28, borderRadius: 8, border: `1px solid ${C.border}`, background: C.sunken,
               cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              flexShrink: 0, color: C.muted, textDecoration: 'none', padding: '0 9px',
+              flexShrink: 0, color: C.muted, padding: '0 9px',
               font: `600 11px/1 'Instrument Sans',system-ui`, whiteSpace: 'nowrap',
             }}
           >
             Clear
-          </Link>
+          </button>
         )}
         <button
           onClick={() => setOpen(false)}
