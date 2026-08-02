@@ -8,6 +8,9 @@ const SB_URL   = process.env.SUPABASE_URL!
 const SB_KEY   = process.env.SUPABASE_ANON_KEY!
 
 // Haversine great-circle distance in nautical miles
+/** Same great-circle distance in km — the anchoring checks below read better in km. */
+const kmBetween = (lat1: number, lon1: number, lat2: number, lon2: number) => haversineNm(lat1, lon1, lat2, lon2) * 1.852
+
 function haversineNm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R    = 3440.065
   const dLat = (lat2 - lat1) * Math.PI / 180
@@ -162,15 +165,73 @@ export async function GET(req: Request) {
 
   const { waypoints, total_dist_nm, airborne_count } = result
 
-  // Anchor last waypoint to actual arrival airport coords
+  // Anchor the path to the arrival airport.
+  //
+  // This used to REPLACE the final waypoint with the airport, which does not anchor a path
+  // — it deletes a real observation and manufactures a straight leg from wherever the
+  // second-to-last waypoint happened to be. AMM–ALP ended up marching to 39.13 E near Deir
+  // ez-Zor and then teleporting 177 km west to Aleppo, against a 55 km median segment.
+  // EBL–ALP (4.3x) and AMS–DAM (3.4x) had the same signature.
+  //
+  // Append instead, and only when the track genuinely stops short. A trail that already
+  // ends on the airport needs nothing; one that ends far away is a truncated track, and
+  // fabricating the missing leg would hide that rather than fix it — so it is rejected.
   const apRes = await fetch(
     `${SB_URL}/rest/v1/airports?iata=eq.${arr_iata}&select=lat,lon`,
     { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` } }
   )
+  let anchor: 'already_at_airport' | 'appended' | 'interpolated_approach' | null = null
+  let anchor_gap_km: number | null = null
   if (apRes.ok) {
     const rows: { lat: number; lon: number }[] = await apRes.json()
-    if (rows[0]) {
-      waypoints[waypoints.length - 1] = { lat: rows[0].lat, lon: rows[0].lon, f: 1.0 }
+    const ap = rows[0]
+    if (ap) {
+      const last = waypoints[waypoints.length - 1]
+      const gapKm = kmBetween(last.lat, last.lon, ap.lat, ap.lon)
+      anchor_gap_km = Math.round(gapKm)
+      // Median segment length — the scale the rest of the path is sampled at.
+      const segs: number[] = []
+      for (let i = 1; i < waypoints.length; i++) {
+        segs.push(kmBetween(waypoints[i - 1].lat, waypoints[i - 1].lon, waypoints[i].lat, waypoints[i].lon))
+      }
+      segs.sort((a, b) => a - b)
+      const medianKm = segs[Math.floor(segs.length / 2)] ?? 0
+
+      // FR24 coverage routinely fades before the field — every AMM–ALP track measured ends
+      // 51–84 km short, EBL–ALP 149 km. A complete arrival track for those simply does not
+      // exist, so refusing outright would leave the route with no path at all. Fill the gap
+      // instead, but at the SAME spacing as the rest of the path: the last 50–150 km of an
+      // arrival is essentially a straight-in, so interpolating it is a defensible model.
+      // What is not defensible is the old behaviour — overwriting the final waypoint with
+      // the airport, which left one 177 km segment against a 55 km median and dragged the
+      // ghost marker across the map.
+      if (gapKm <= 5) {
+        // Trail already reaches the field; snap the final point exactly onto it.
+        waypoints[waypoints.length - 1] = { lat: ap.lat, lon: ap.lon, f: 1.0 }
+        anchor = 'already_at_airport'
+      } else if (gapKm <= 200) {
+        const steps = Math.max(1, Math.round(gapKm / Math.max(medianKm, 1)))
+        for (let k = 1; k < steps; k++) {
+          const t = k / steps
+          waypoints.push({
+            lat: Number((last.lat + (ap.lat - last.lat) * t).toFixed(5)),
+            lon: Number((last.lon + (ap.lon - last.lon) * t).toFixed(5)),
+            f:   0,   // re-spaced below
+          })
+        }
+        waypoints.push({ lat: ap.lat, lon: ap.lon, f: 1.0 })
+        for (let i = 0; i < waypoints.length; i++) {
+          waypoints[i].f = Number((i / (waypoints.length - 1)).toFixed(4))
+        }
+        anchor = steps > 1 ? 'interpolated_approach' : 'appended'
+      } else {
+        // Beyond ~200 km this is not a missing approach, it is a different flight.
+        return NextResponse.json({
+          error: `track ends ${Math.round(gapKm)} km from ${arr_iata} (median segment ${Math.round(medianKm)} km) — too far to be a final approach; refusing to fabricate it`,
+          waypoints_built: waypoints.length,
+          last_waypoint:   waypoints[waypoints.length - 1],
+        }, { status: 422 })
+      }
     }
   }
 
@@ -208,6 +269,8 @@ export async function GET(req: Request) {
     airborne_count,
     total_dist_nm,
     waypoints_count: waypoints.length,
+    anchor,
+    anchor_gap_km,
     waypoints,
     saved:           save,
   })
