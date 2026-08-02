@@ -1,3 +1,15 @@
+// UNSCHEDULED as of 2026-08-02 — deliberately kept, not deleted.
+//
+// OpenSky blocks Vercel's egress at the IP level: from a production function both
+// opensky-network.org and auth.opensky-network.org (one host, 194.209.200.34) fail after
+// ~10 s while a control host answers in 347 ms, and the same request from a home connection
+// answers in 0.43 s. So this route is correct code that cannot succeed where it is deployed,
+// and leaving it on a schedule only burned invocations against a black hole.
+//
+// It is removed from vercel.json rather than from the repo because it becomes useful the
+// moment the poll runs from an egress OpenSky accepts (a container host, or the Damascus
+// ADS-B Pi). Nothing else needs to change when that happens: this writes only to Supabase,
+// and /api/airspace's fetchLoggedPositions only reads from Supabase.
 import { NextResponse } from 'next/server'
 import { queryStates, creditCost, hasCredentials, type StateVec, type BBox } from '@/lib/opensky'
 

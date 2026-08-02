@@ -286,6 +286,41 @@ function schedToLocal(hhmm: string, offset: number): string {
   return `${String(lh).padStart(2,'0')}:${String(lm).padStart(2,'0')}`
 }
 
+// One progress bar for both popup builders.
+//
+// They had drifted into two designs: a flex layout with an 18px circled SVG marker, and an
+// absolutely-positioned 3px track with a `✈` text glyph. Because a flight hands off between
+// the tracked marker and the schedule overlay as its signal comes and goes, the *same*
+// flight rendered one way on one refresh and the other way on the next. Two implementations
+// of one component will always drift; there is now one.
+function progressBarHtml(dep: string | null, arr: string | null, fraction: number | null, etaStr: string): string {
+  if (!dep || !arr) return ''
+  const fillPct  = fraction != null ? Math.max(1, Math.round(fraction * 100))       : 0
+  const emptyPct = fraction != null ? Math.max(1, Math.round((1 - fraction) * 100)) : 100
+  return `<div style="padding:4px 14px 12px">
+        ${etaStr ? `<div style="text-align:center;color:#9ca3af;font-size:11px;margin-bottom:8px">${etaStr}</div>` : ''}
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="text-align:left">
+            <div style="font-size:12px;color:#d1d5db;white-space:nowrap">${_apFlag[dep] ?? ''} ${iataCity(dep)}</div>
+            <div style="font-size:10px;color:#6b7280;font-family:monospace">${dep}</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:row;align-items:center;height:20px">
+            <div style="flex:${fillPct};height:4px;border-radius:99px;background:${fraction!=null?'#3b82f6':'#374151'};min-width:0"></div>
+            ${fraction != null ? `
+              <div style="width:18px;height:18px;border-radius:9px;background:#1e293b;flex-shrink:0;border:1.5px solid #3b82f6;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 5px rgba(59,130,246,.3)">
+                <svg width="9" height="9" viewBox="0 0 10 10" fill="#3b82f6"><path d="M.7 1.1 9.3 5 .7 8.9 2.5 5z"/></svg>
+              </div>
+              <div style="flex:${emptyPct};height:4px;border-radius:99px;background:#374151;min-width:0"></div>
+            ` : ''}
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:12px;color:#d1d5db;white-space:nowrap">${iataCity(arr)} ${_apFlag[arr] ?? ''}</div>
+            <div style="font-size:10px;color:#6b7280;font-family:monospace;text-align:right">${arr}</div>
+          </div>
+        </div>
+      </div>`
+}
+
 function buildPopup(
   a: Aircraft,
   lostAt?: number,
@@ -379,32 +414,7 @@ function buildPopup(
     ? `<span style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;padding:2px 5px;border-radius:99px;margin-left:5px;line-height:1.4">${min > 0 ? '+' : ''}${min}m</span>`
     : ''
 
-  const fillPct  = fraction != null ? Math.max(1, Math.round(fraction * 100))           : 0
-  const emptyPct = fraction != null ? Math.max(1, Math.round((1 - fraction) * 100)) : 100
-  const progressHtml = (dep && arr)
-    ? `<div style="padding:4px 14px 12px">
-        ${etaStr ? `<div style="text-align:center;color:#9ca3af;font-size:11px;margin-bottom:8px">${etaStr}</div>` : ''}
-        <div style="display:flex;align-items:center;gap:8px">
-          <div style="text-align:left">
-            <div style="font-size:12px;color:#d1d5db;white-space:nowrap">${_apFlag[dep] ?? ''} ${iataCity(dep)}</div>
-            <div style="font-size:10px;color:#6b7280;font-family:monospace">${dep}</div>
-          </div>
-          <div style="flex:1;display:flex;flex-direction:row;align-items:center;height:20px">
-            <div style="flex:${fillPct};height:4px;border-radius:99px;background:${fraction!=null?'#3b82f6':'#374151'};min-width:0"></div>
-            ${fraction != null ? `
-              <div style="width:18px;height:18px;border-radius:9px;background:#1e293b;flex-shrink:0;border:1.5px solid #3b82f6;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 5px rgba(59,130,246,.3)">
-                <svg width="9" height="9" viewBox="0 0 10 10" fill="#3b82f6"><path d="M.7 1.1 9.3 5 .7 8.9 2.5 5z"/></svg>
-              </div>
-              <div style="flex:${emptyPct};height:4px;border-radius:99px;background:#374151;min-width:0"></div>
-            ` : ''}
-          </div>
-          <div style="text-align:right">
-            <div style="font-size:12px;color:#d1d5db;white-space:nowrap">${iataCity(arr)} ${_apFlag[arr] ?? ''}</div>
-            <div style="font-size:10px;color:#6b7280;font-family:monospace;text-align:right">${arr}</div>
-          </div>
-        </div>
-      </div>`
-    : ''
+  const progressHtml = progressBarHtml(dep, arr, fraction, etaStr)
 
   const timesHtml = (depTimeLocal || arrTimeLocal)
     ? `<div style="display:flex;background:#1f2937;padding:11px 14px">
@@ -519,25 +529,7 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
     etaStr = remMin >= 60 ? `${Math.floor(remMin/60)}h ${remMin%60}m left` : `${remMin}m left`
   }
 
-  const progressHtml = `<div style="padding:4px 14px 12px">
-    ${etaStr ? `<div style="text-align:center;color:#9ca3af;font-size:11px;margin-bottom:8px">${etaStr}</div>` : ''}
-    <div style="display:flex;align-items:center;gap:8px">
-      <div style="text-align:left">
-        <div style="font-size:12px;color:#d1d5db;white-space:nowrap">${_apFlag[e.dep_iata] ?? ''} ${iataCity(e.dep_iata)}</div>
-        <div style="font-size:10px;color:#6b7280;font-family:monospace">${e.dep_iata}</div>
-      </div>
-      <div style="flex:1;position:relative;height:3px;background:#374151;border-radius:2px">
-        ${pct != null ? `
-          <div style="width:${pct}%;height:100%;background:#3b82f6;border-radius:2px"></div>
-          ${pct < 100 ? `<span style="position:absolute;top:50%;transform:translateY(-50%) translateX(-50%);left:${pct}%;color:#3b82f6;font-size:12px;line-height:1;pointer-events:none">✈</span>` : ''}
-        ` : ''}
-      </div>
-      <div style="text-align:right">
-        <div style="font-size:12px;color:#d1d5db;white-space:nowrap">${iataCity(e.arr_iata)} ${_apFlag[e.arr_iata] ?? ''}</div>
-        <div style="font-size:10px;color:#6b7280;font-family:monospace;text-align:right">${e.arr_iata}</div>
-      </div>
-    </div>
-  </div>`
+  const progressHtml = progressBarHtml(e.dep_iata, e.arr_iata, pct != null ? pct / 100 : null, etaStr)
 
   const timesHtml = `<div style="display:flex;background:#1f2937;padding:11px 14px">
     <div style="flex:1">
@@ -568,7 +560,7 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
       ${logoHtml}
       <div style="flex:1;min-width:0">
         <div style="font-size:14px;font-weight:700;color:#f9fafb;line-height:1.25">${alName}</div>
-        <div style="font-size:12px;color:#9ca3af;margin-top:2px">${e.callsign}${acType ? ` · ${acType}` : ''}</div>
+        <div style="font-size:12px;color:#9ca3af;margin-top:2px">${fs?.flight_number ?? e.callsign}${acType ? ` · ${acType}` : ''}</div>
       </div>
       <span style="background:${statusBg};color:${statusFg};font-size:10px;font-weight:600;padding:3px 8px;border-radius:99px;flex-shrink:0;margin-top:1px">${statusLabel}</span>
     </div>
