@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
-import { Suspense, useState, useEffect, useCallback } from 'react'
+import { Suspense, useState, useEffect, useCallback, useRef } from 'react'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { airportCity, airportFlag as apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
 import Wordmark from '@/components/Wordmark'
@@ -230,7 +230,8 @@ function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelecte
 }
 
 // ── In-air side panel ────────────────────────────────────────────────────────
-function InAirPanel({ selectedFlight, open, setOpen, onSelect, onClear }: { selectedFlight?: string; open: boolean; setOpen: (v: boolean) => void; onSelect: (n: string) => void; onClear: () => void }) {
+/** Shared by the desktop panel and the phone strip; only one of them is mounted at a time. */
+function useInAirFlights() {
   const [flights, setFlights] = useState<InAirFlight[]>([])
   const [loading, setLoading] = useState(true)
   const [geoReady, setGeoReady] = useState(false)
@@ -257,6 +258,138 @@ function InAirPanel({ selectedFlight, open, setOpen, onSelect, onClear }: { sele
     return () => clearInterval(t)
   }, [load])
 
+  return { flights, loading, geoReady }
+}
+
+/**
+ * Phone view of the live flights: a ticker along the bottom of the map instead of a panel
+ * over it. The panel grew to fill most of a 375x812 screen once more than one flight was in
+ * the air, which hid the thing people came to look at.
+ *
+ * Only what can be read at a glance — airline, number, both airports and both times. No
+ * progress bar: the map shows position far better than a 3px track does. No cities either;
+ * they do not fit at this width and the popup carries them.
+ *
+ * The list is rendered twice so the scroll can wrap without a visible jump back. The copy is
+ * aria-hidden so it is not announced as a second set of flights.
+ */
+function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: string; onSelect: (n: string) => void; onClear: () => void }) {
+  const { flights } = useInAirFlights()
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  const setRef      = useRef<HTMLDivElement>(null)
+  const [looping, setLooping] = useState(false)
+
+  // Only worth animating when the cards actually overrun the screen.
+  useEffect(() => {
+    const el = scrollerRef.current
+    if (!el) return
+    const check = () => setLooping(el.scrollWidth > el.clientWidth + 8)
+    check()
+    const ro = new ResizeObserver(check)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [flights.length])
+
+  useEffect(() => {
+    const el = scrollerRef.current
+    if (!el || !looping) return
+    // Motion is the point — it signals there is more to see — but it must never fight a
+    // finger. Any touch stops it dead and it only resumes a few seconds after release, so
+    // the card you reached for is still where you saw it.
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+
+    let raf = 0
+    let held = false
+    let resumeAt = 0
+    const tick = (t: number) => {
+      const width = setRef.current?.offsetWidth ?? 0
+      if (!held && t >= resumeAt && width > 0) {
+        el.scrollLeft += 0.4
+        if (el.scrollLeft >= width) el.scrollLeft -= width
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+
+    const hold    = () => { held = true }
+    const release = () => { held = false; resumeAt = performance.now() + 3500 }
+    el.addEventListener('pointerdown', hold)
+    el.addEventListener('pointerup', release)
+    el.addEventListener('pointercancel', release)
+    el.addEventListener('pointerleave', release)
+    // A swipe is momentum scrolling that keeps firing after the finger is gone, so the
+    // timer restarts on every scroll event rather than only on release.
+    el.addEventListener('scroll', () => { if (!held) resumeAt = performance.now() + 3500 }, { passive: true })
+
+    return () => {
+      cancelAnimationFrame(raf)
+      el.removeEventListener('pointerdown', hold)
+      el.removeEventListener('pointerup', release)
+      el.removeEventListener('pointercancel', release)
+      el.removeEventListener('pointerleave', release)
+    }
+  }, [looping, flights.length])
+
+  if (flights.length === 0) return null
+
+  const cards = (ghost: boolean) => (
+    <div ref={ghost ? undefined : setRef} aria-hidden={ghost} style={{ display: 'flex', gap: 8, paddingRight: 8 }}>
+      {flights.map((f) => {
+        const selected = f.iata_number === selectedFlight
+        const depOff = tzOffset(f.dep_iata)
+        const arrOff = tzOffset(f.arr_iata)
+        const depTime = fmtLocal(f.actual_dep_utc ?? f.revised_dep_utc ?? f.dep_time_utc, depOff)
+        const arrMs   = etaMs(f)
+        const arrTime = arrMs ? fmtLocal(new Date(arrMs).toISOString(), arrOff) : fmtLocal(f.arr_time_utc, arrOff)
+        return (
+          <button
+            key={`${ghost ? 'g' : ''}${f.iata_number}-${f.dep_iata}-${f.arr_iata}`}
+            onClick={() => (selected ? onClear() : onSelect(f.iata_number))}
+            aria-label={`${f.iata_number}, ${f.dep_iata} to ${f.arr_iata}`}
+            style={{
+              flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8,
+              padding: '8px 11px', borderRadius: 12, cursor: 'pointer', textAlign: 'left',
+              background: selected ? '#D4EBD4' : 'rgba(255,255,255,0.94)',
+              border: `${selected ? 2 : 1}px solid ${selected ? C.forest : C.border}`,
+              backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+              boxShadow: '0 2px 10px rgba(0,0,0,.12)',
+              scrollSnapAlign: 'start',
+            }}
+          >
+            <MiniLogo iata={f.airline_iata} name={f.airline_name} />
+            <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11.5, fontWeight: 700, color: C.ink, letterSpacing: '.04em' }}>
+                {f.iata_number}
+              </span>
+              <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, fontWeight: 600, color: C.muted, whiteSpace: 'nowrap' }}>
+                {f.dep_iata} {depTime} <span style={{ color: C.forestLight }}>→</span> {f.arr_iata} {arrTime}
+              </span>
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
+
+  return (
+    <div style={{
+      position: 'absolute', left: 0, right: 0, zIndex: 1000,
+      bottom: 'calc(30px + env(safe-area-inset-bottom))',
+    }}>
+      <div
+        ref={scrollerRef}
+        className="ia-strip"
+        style={{ display: 'flex', overflowX: 'auto', padding: '0 12px', scrollSnapType: 'x proximity' }}
+      >
+        {cards(false)}
+        {looping && cards(true)}
+      </div>
+    </div>
+  )
+}
+
+function InAirPanel({ selectedFlight, open, setOpen, onSelect, onClear }: { selectedFlight?: string; open: boolean; setOpen: (v: boolean) => void; onSelect: (n: string) => void; onClear: () => void }) {
+  const { flights, loading } = useInAirFlights()
   const count = flights.length
 
   // ── Closed: pill FAB ─────────────────────────────────────────────────────
@@ -403,6 +536,18 @@ function HomeInner() {
 
   const [panelOpen, setPanelOpen] = useState(true)
 
+  // The panel and the strip are different components, not one component restyled, so the
+  // breakpoint is read in JS. Tracked rather than sampled once: a one-shot read at mount can
+  // land before the viewport settles at its real width.
+  const [isPhone, setIsPhone] = useState(false)
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)')
+    const apply = () => setIsPhone(mq.matches)
+    apply()
+    mq.addEventListener('change', apply)
+    return () => mq.removeEventListener('change', apply)
+  }, [])
+
   useEffect(() => {
     if (window.innerWidth < 640) setPanelOpen(false)
   }, [])
@@ -425,6 +570,8 @@ function HomeInner() {
           97%           { transform: scale(1);    box-shadow: 0 2px 10px rgba(0,0,0,.18), 0 0 0 15px rgba(20,120,80,0); }
         }
         .live-dot { animation: pulse 2s infinite; }
+        .ia-strip { scrollbar-width: none; -ms-overflow-style: none; -webkit-overflow-scrolling: touch; }
+        .ia-strip::-webkit-scrollbar { display: none; }
         .fab-pill { animation: fab-attract 6s 1s infinite; transition: transform .15s ease, box-shadow .15s ease; }
         .fab-pill:hover { transform: translateY(-2px) scale(1.04) !important; box-shadow: 0 6px 22px rgba(0,0,0,.28) !important; animation-play-state: paused; }
         /* The in-air cards were built for the desktop panel. On a phone the same panel is a
@@ -449,7 +596,9 @@ function HomeInner() {
         <Map targetFlight={flight} panelOpen={panelOpen} />
 
         {/* In-air side panel */}
-        <InAirPanel selectedFlight={flight} open={panelOpen} setOpen={setPanelOpen} onSelect={selectFlight} onClear={clearFlight} />
+        {isPhone
+          ? <InAirStrip selectedFlight={flight} onSelect={selectFlight} onClear={clearFlight} />
+          : <InAirPanel selectedFlight={flight} open={panelOpen} setOpen={setPanelOpen} onSelect={selectFlight} onClear={clearFlight} />}
 
       </main>
 
