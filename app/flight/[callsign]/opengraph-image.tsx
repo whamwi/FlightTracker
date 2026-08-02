@@ -168,7 +168,7 @@ export default async function Image(
             </svg>
             {/* Wordmark: Fly in brand beige, Syria in deep green — matches the site header. */}
             <span style={{ display: 'flex', alignItems: 'baseline' }}>
-              <span style={{ fontSize: 36, fontWeight: 800, color: '#B9A779', letterSpacing: '-.4px', display: 'flex' }}>Fly</span>
+              <span style={{ fontSize: 36, fontWeight: 800, color: '#988561', letterSpacing: '-.4px', display: 'flex' }}>Fly</span>
               <span style={{ fontSize: 36, fontWeight: 800, color: '#054239', letterSpacing: '-.4px', display: 'flex' }}>Syria</span>
             </span>
           </div>
