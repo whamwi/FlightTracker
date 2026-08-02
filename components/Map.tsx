@@ -1,7 +1,7 @@
 'use client'
 
 import 'leaflet/dist/leaflet.css'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { FlightPredictor } from '@/lib/flight-predictor'
 import type { LivePosition as PredictorLivePos } from '@/lib/flight-predictor'
 import { airlineLogo, LOGO_WHITE_BG } from '@/lib/airlines'
@@ -685,6 +685,22 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
   const autoOpenDoneRef   = useRef(false)
   const targetFlightRef   = useRef(targetFlight)
   targetFlightRef.current = targetFlight
+
+  /**
+   * Does any identifier this aircraft is known by match the selected flight?
+   *
+   * Comparing against `iata_number` alone silently excluded Fly Cham. The board lists it
+   * under its broadcast callsign (FYC489) while the airspace feed carries the ticketed
+   * number in `iata_number` (XH489) and the callsign in `flight`, so the equality never
+   * held: the plane drew normally but never turned red, never auto-panned and never opened
+   * its popup. Every other airline broadcasts what it tickets, which is why it looked
+   * intermittent rather than broken.
+   */
+  const matchesTarget = useCallback((...ids: (string | null | undefined)[]) => {
+    const t = targetFlightRef.current?.trim().toUpperCase()
+    if (!t) return false
+    return ids.some((id) => id?.trim().toUpperCase() === t)
+  }, [])
   const highlightedCSRef  = useRef<string | null>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fetchUpdateRef    = useRef<(() => Promise<void>) | null>(null)
@@ -1550,7 +1566,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           markersRef.current[cs] = m
 
           // Auto-pan + open popup for deep-linked flight (new marker)
-          if (!embed && targetFlightRef.current && !autoOpenDoneRef.current && a.iata_number === targetFlightRef.current) {
+          if (!embed && !autoOpenDoneRef.current && matchesTarget(a.iata_number, a.flight, cs)) {
             autoOpenDoneRef.current = true
             highlightedCSRef.current = cs
             setLoading(false)
@@ -1564,7 +1580,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         }
 
         // Auto-open for existing live marker
-        if (!embed && targetFlightRef.current && !autoOpenDoneRef.current && a.iata_number === targetFlightRef.current && markersRef.current[cs]) {
+        if (!embed && !autoOpenDoneRef.current && matchesTarget(a.iata_number, a.flight, cs) && markersRef.current[cs]) {
           autoOpenDoneRef.current = true
           highlightedCSRef.current = cs
           setLoading(false)
@@ -1897,7 +1913,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
 
           // Auto-pan + open popup for deep-linked flight (new schedule marker)
           const fNum = flightStatusRef.current[callsign]?.flight_number ?? null
-          if (!embed && targetFlightRef.current && !autoOpenDoneRef.current && fNum === targetFlightRef.current) {
+          if (!embed && !autoOpenDoneRef.current && matchesTarget(fNum, callsign)) {
             autoOpenDoneRef.current = true
             highlightedCSRef.current = callsign
             setLoading(false)
@@ -1911,7 +1927,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
 
         // Auto-open for existing schedule marker
         const fNumEx = flightStatusRef.current[callsign]?.flight_number ?? null
-        if (!embed && targetFlightRef.current && !autoOpenDoneRef.current && fNumEx === targetFlightRef.current && schedMarkersRef.current[callsign]) {
+        if (!embed && !autoOpenDoneRef.current && matchesTarget(fNumEx, callsign) && schedMarkersRef.current[callsign]) {
           autoOpenDoneRef.current = true
           highlightedCSRef.current = callsign
           setLoading(false)
