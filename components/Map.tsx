@@ -12,6 +12,7 @@ import VideoBox from './VideoBox'
 // once per poll. Set false to fall back to the poll writing positions directly.
 const RAF_MOTION = true
 import PhotoBox from './PhotoBox'
+import { PANEL } from './MapBox'
 
 interface Aircraft {
   hex: string
@@ -2132,19 +2133,20 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
     <div className="relative w-full h-full">
       <style>{`
         @keyframes ft-spin{to{transform:rotate(360deg)}}
-        /* Zoom sits in the bottom-right corner, lifted clear of the legend below it.
-           Hidden on phones, where pinch-to-zoom makes it redundant and the bottom tab
-           bar and legend already crowd that corner.
+        /* Zoom sits in the bottom-right corner, lifted clear of the Over Syria toggle below
+           it. Hidden on phones, where pinch-to-zoom makes it redundant.
 
            The selector has to outrank leaflet.css's own .leaflet-bottom .leaflet-control
            margin rule, hence the doubled-up corner classes. */
         .leaflet-bottom.leaflet-right .leaflet-control-zoom { display: none; }
+        .map-oversyria { display: none; }
         @media (min-width: 768px) {
           .leaflet-bottom.leaflet-right .leaflet-control-zoom {
             display: block;
             margin-right: 12px;
             margin-bottom: 72px;
           }
+          .map-oversyria { display: flex; }
         }
       `}</style>
       <div ref={mapRef} className="w-full h-full" />
@@ -2157,26 +2159,38 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         }}>
         <VideoBox />
         <PhotoBox />
+        </div>
+      )}
+      {/* Over Syria is a filter — it changes what the map shows — while Videos and Photos
+          open content. Stacking the three together made that corner read as a wall of
+          buttons, so the filter sits apart, in the slot the DAM/ALP legend used to hold.
+          Zoom is already lifted 72px to clear that slot, so it still clears this.
+
+          Desktop only: on a phone the top-right stack is most of what you can see, and this
+          toggle is a power-user view of non-board traffic rather than anything a passenger
+          needs. */}
+      {!embed && (
         <button
+          className="map-oversyria"
           onClick={() => setOverSyriaOn(v => !v)}
           title="Show non-board aircraft currently inside Syrian airspace"
           style={{
-            background: overSyriaOn ? '#054239' : '#fff',
-            color:      overSyriaOn ? '#fff'    : '#333',
-            border: '2px solid rgba(0,0,0,.2)',
-            borderRadius: 4, padding: '4px 8px',
-            fontSize: 11, fontWeight: 700, cursor: 'pointer',
-            fontFamily: "'Instrument Sans', system-ui", letterSpacing: '-.01em',
-            display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap',
-            boxShadow: '0 1px 5px rgba(0,0,0,.15)', lineHeight: 1.4,
+            position: 'absolute', right: 12, bottom: 24, zIndex: 1000,
+            background: overSyriaOn ? PANEL.forest : PANEL.bg,
+            color:      overSyriaOn ? '#fff'       : PANEL.secondary,
+            backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+            border: `1px solid ${overSyriaOn ? PANEL.forest : PANEL.border}`,
+            borderRadius: 12, padding: '8px 12px',
+            font: `600 12px/1 'Instrument Sans', system-ui`, letterSpacing: '-.01em',
+            cursor: 'pointer', alignItems: 'center', gap: 6, whiteSpace: 'nowrap',
+            boxShadow: '0 4px 28px rgba(0,0,0,.13)',
           }}
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
             <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
           </svg>
           Over Syria
         </button>
-        </div>
       )}
       {loading && !embed && (
         <div style={{
