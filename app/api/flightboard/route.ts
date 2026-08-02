@@ -354,12 +354,23 @@ export async function GET(req: Request) {
               fr24_revised_arr: null,
             })
           } else {
-            // Case B — "Cross-midnight inbound": flight is still airborne, arrives within
-            // the first 4 hours of next Syria day. Show it on today's board and map.
-            // skipArrFilter bypasses the dayEndMs guard inside addFlight.
+            // Case B — "Cross-midnight inbound": a flight that is *already airborne* and
+            // lands in the first 4 hours of the next Syria day. It belongs on tomorrow's
+            // board by arrival date, but showing it on today's keeps it visible while it is
+            // actually in the air. skipArrFilter bypasses the dayEndMs guard in addFlight.
             if (!f.sched_arr) continue
             const arrMs = (f.sched_arr as number) * 1000
             if (arrMs < dayEndMs || arrMs >= dayEndMs + 4 * 60 * 60 * 1000) continue
+
+            // It must actually have departed. This condition was always in the comment and
+            // never in the code, so a flight qualified on its arrival window alone and
+            // appeared on today's board from 00:00 — FYC490 SAW→DAM showed up as
+            // "Scheduled" 19 hours before its 19:25 UTC departure, while also sitting
+            // correctly on tomorrow's board. Every late-evening inbound was double-listed.
+            const st = (f.status ?? '').toLowerCase()
+            const isAirborne = !!f.real_dep
+              || /departed|took off|en route|in flight|approach/.test(st)
+            if (!isAirborne) continue
             addFlight({
               ...f,
               arr_iata: arrIata,
