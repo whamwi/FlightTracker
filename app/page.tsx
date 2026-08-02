@@ -173,11 +173,11 @@ function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelecte
       style={{ display: 'block', textDecoration: 'none', background: isSelected ? '#D4EBD4' : C.surface, border: `${isSelected ? 2 : 1}px solid ${isSelected ? C.forest : C.border}`, borderRadius: 12, overflow: 'hidden', boxShadow: isSelected ? '0 6px 20px rgba(5,66,57,0.22), 0 1px 4px rgba(5,66,57,0.12)' : '0 1px 4px rgba(0,0,0,.06)', position: 'relative', transform: isSelected ? 'translateY(-1px)' : 'none', transition: 'box-shadow .2s, transform .2s, background .2s', flexShrink: 0 }}
     >
       {/* Status rail (top) */}
-      <div style={{ height: 3, background: railColor }} />
+      <div className="ia-rail" style={{ height: 3, background: railColor }} />
 
-      <div style={{ padding: '10px 12px 11px', display: 'flex', flexDirection: 'column', gap: 9 }}>
+      <div className="ia-body" style={{ padding: '10px 12px 11px', display: 'flex', flexDirection: 'column', gap: 9 }}>
         {/* Row 1: logo + flight info + badge */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div className="ia-row1" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <MiniLogo iata={f.airline_iata} name={f.airline_name} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11.5, fontWeight: 700, color: C.ink, letterSpacing: '.05em' }}>
@@ -187,7 +187,7 @@ function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelecte
               {f.airline_name}
             </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px 4px 6px', borderRadius: 99, background: approaching ? '#E6EFEC' : '#EBF2F1', border: `1px solid ${approaching ? '#B4CFC9' : '#BFD8D5'}`, flexShrink: 0 }}>
+          <div className="ia-badge" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px 4px 6px', borderRadius: 99, background: approaching ? '#E6EFEC' : '#EBF2F1', border: `1px solid ${approaching ? '#B4CFC9' : '#BFD8D5'}`, flexShrink: 0 }}>
             <span style={{ width: 5, height: 5, borderRadius: 99, background: railColor, display: 'block' }} />
             <span style={{ font: `600 9.5px/1 'Instrument Sans',system-ui`, color: railColor, whiteSpace: 'nowrap' }}>
               {status === 'En Route' ? 'En route' : status}
@@ -196,7 +196,7 @@ function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelecte
         </div>
 
         {/* Row 2: route with progress */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div className="ia-row2" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {/* Dep */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1, width: 56, flexShrink: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
@@ -427,6 +427,19 @@ function HomeInner() {
         .live-dot { animation: pulse 2s infinite; }
         .fab-pill { animation: fab-attract 6s 1s infinite; transition: transform .15s ease, box-shadow .15s ease; }
         .fab-pill:hover { transform: translateY(-2px) scale(1.04) !important; box-shadow: 0 6px 22px rgba(0,0,0,.28) !important; animation-play-state: paused; }
+        /* The in-air cards were built for the desktop panel. On a phone the same panel is a
+           much larger share of the screen, so the card is tightened: less padding, smaller
+           logo and badge, tighter rows. Nothing is removed — every field a card carried at
+           full size it still carries here, it just costs fewer pixels. */
+        @media (max-width: 767px) {
+          .ia-rail  { height: 2px !important; }
+          .ia-body  { padding: 7px 10px 8px !important; gap: 6px !important; }
+          .ia-row1  { gap: 7px !important; }
+          .ia-row1 > div:first-of-type,
+          .ia-row1 img { width: 26px !important; height: 26px !important; }
+          .ia-badge { padding: 3px 7px 3px 5px !important; }
+          .ia-row2  { gap: 7px !important; }
+        }
       `}</style>
 
       <SiteNav active="Track" />
