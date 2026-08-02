@@ -48,14 +48,14 @@ export default function SiteNav({ active, right }: { active: string; right?: Rea
   }, [open])
 
   return (
-    <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, position: 'sticky', top: 0, zIndex: 20 }}>
+    <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, position: 'sticky', top: 0, zIndex: 1100 }}>
       <style>{`
         .sn-bar   { display: flex; align-items: center; width: 100%; padding: 0 40px; height: 68px; gap: 14px; }
         .sn-tabs  { display: flex; align-items: center; gap: 4px; margin-left: 14px; }
         .sn-right { display: flex; margin-left: auto; align-items: center; }
         .sn-burger{ display: none; }
         @media (max-width: 767px) {
-          .sn-bar    { padding: 0 12px; height: 58px; gap: 0; }
+          .sn-bar    { padding: 0 12px; padding-top: env(safe-area-inset-top); height: calc(58px + env(safe-area-inset-top)); gap: 0; }
           .sn-tabs   { display: none; }
           .sn-right  { display: none; }
           .sn-burger { display: flex; margin-left: auto; }
@@ -108,7 +108,7 @@ export default function SiteNav({ active, right }: { active: string; right?: Rea
           {/* Sits below the panel but above the page, so any tap outside closes the menu. */}
           <div
             onClick={() => setOpen(false)}
-            style={{ position: 'fixed', inset: 0, top: 58, background: 'rgba(10,14,13,.35)', zIndex: 18 }}
+            style={{ position: 'fixed', inset: 0, top: 'calc(58px + env(safe-area-inset-top))', background: 'rgba(10,14,13,.35)', zIndex: 18 }}
           />
           <nav style={{
             position: 'absolute', left: 0, right: 0, top: '100%', zIndex: 19,

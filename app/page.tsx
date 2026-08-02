@@ -7,6 +7,7 @@ import { Suspense, useState, useEffect, useCallback } from 'react'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { airportCity, airportFlag as apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
 import Wordmark from '@/components/Wordmark'
+import SiteNav from '@/components/SiteNav'
 
 const Map = dynamic(() => import('@/components/Map'), { ssr: false })
 
@@ -23,43 +24,8 @@ const C = {
 }
 
 // ── Nav icons ────────────────────────────────────────────────────────────────
-const IconFlights = ({ color }: { color: string }) => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>
-  </svg>
-)
-const IconTrack = ({ color }: { color: string }) => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/>
-    <path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
-  </svg>
-)
-const IconDestinations = ({ color }: { color: string }) => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0z"/><circle cx="12" cy="10" r="3"/>
-  </svg>
-)
-const IconAirlines = ({ color }: { color: string }) => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21 4 19.5 2.5c-1.5-1.5-3.5-1.5-5 0L11 6 2.8 4.2l-2 2 7.4 4.5a55 55 0 0 0-3 6.3l-1.6 2 2 2 2.4-2a55 55 0 0 0 6.3-3l4.5 7.4 2-2-.8-4.2z"/>
-  </svg>
-)
 
-const IconNews = ({ color }: { color: string }) => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="3" y="4" width="18" height="16" rx="2"/>
-    <circle cx="8.5" cy="9.5" r="1.8"/>
-    <path d="m3 17 5-4.5 4 3.5 3.5-3L21 17"/>
-  </svg>
-)
 
-const NAV_TABS = [
-  { label: 'Flights',      href: '/board',        active: false, Icon: IconFlights },
-  { label: 'Track',        href: '/',             active: true,  Icon: IconTrack },
-  { label: 'Destinations', href: '/destinations', active: false, Icon: IconDestinations },
-  { label: 'Airlines',     href: '/airlines',     active: false, Icon: IconAirlines },
-  { label: 'News',         href: '/news',         active: false, Icon: IconNews },
-]
 
 // ── InAirPanel types & helpers ───────────────────────────────────────────────
 type InAirFlight = {
@@ -460,62 +426,22 @@ function HomeInner() {
         }
         .live-dot { animation: pulse 2s infinite; }
         .fab-pill { animation: fab-attract 6s 1s infinite; transition: transform .15s ease, box-shadow .15s ease; }
-        .fab-pill:hover { transform: translateY(-2px) scale(1.04) !important; box-shadow: 0 6px 22px rgba(0,0,0,.28) !important; animation-play-state: paused; }
-        .map-top-nav {
-          display: flex; align-items: center;
-          padding: env(safe-area-inset-top) 16px 0;
-          height: calc(56px + env(safe-area-inset-top));
-          background: ${C.surface};
+        .fab-pill:hover { transform: translateY(-2px) scale(1.04) !important; box-shadow: 0 6px 22px rgba(0,0,0,.28) !important; animation-play-state: paused; };
           border-bottom: 1px solid ${C.border};
           flex-shrink: 0;
-        }
-        .map-bottom-nav {
-          display: flex; align-items: stretch;
-          background: rgba(255,255,255,0.94);
-          backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-          border-top: 1px solid ${C.border};
+        };
           padding-bottom: env(safe-area-inset-bottom);
           height: calc(60px + env(safe-area-inset-bottom));
           flex-shrink: 0;
+        };
         }
-        .map-btab {
-          flex: 1; display: flex; flex-direction: column;
-          align-items: center; justify-content: center; gap: 3px;
-          text-decoration: none; padding: 8px 4px 6px;
-          -webkit-tap-highlight-color: transparent; position: relative;
-        }
-        .map-btab-label { font-family:'Instrument Sans',system-ui; font-size:10px; font-weight:600; letter-spacing:.01em; }
-        .map-btab-active-dot {
-          position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%);
-          width: 4px; height: 4px; border-radius: 50%; background: ${C.forest};
-        }
-        .map-legend { bottom: calc(72px + env(safe-area-inset-bottom)); right: 12px; }
-        .map-desktop-tabs-inline { display: none; }
+        .map-legend { bottom: calc(16px + env(safe-area-inset-bottom)); right: 12px; }
         @media (min-width: 768px) {
-          .map-top-nav { display: flex; }
-          .map-bottom-nav { display: none; }
-          .map-desktop-tabs-inline { display: flex; }
           .map-legend { bottom: 24px; right: 12px; }
         }
       `}</style>
 
-      {/* Top nav */}
-      <nav className="map-top-nav">
-        <Wordmark />
-        <div style={{ marginLeft: 24, gap: 2 }} className="map-desktop-tabs-inline">
-          {NAV_TABS.map(t => (
-            <Link key={t.label} href={t.href} style={{
-              display: 'flex', alignItems: 'center', padding: '7px 14px',
-              whiteSpace: 'nowrap', textDecoration: 'none', borderRadius: 8,
-              font: `${t.active ? 700 : 600} 13.5px/1 'Instrument Sans', system-ui`,
-              color: t.active ? C.forest : C.muted,
-              background: t.active ? C.sunken : 'transparent',
-            }}>
-              {t.label}
-            </Link>
-          ))}
-        </div>
-      </nav>
+      <SiteNav active="Track" />
 
       {/* Map area */}
       <main style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
@@ -540,19 +466,6 @@ function HomeInner() {
         </div>
       </main>
 
-      {/* Mobile bottom tab bar */}
-      <nav className="map-bottom-nav">
-        {NAV_TABS.map(t => {
-          const color = t.active ? C.forest : C.muted
-          return (
-            <Link key={t.href} href={t.href} className="map-btab">
-              <t.Icon color={color} />
-              <span className="map-btab-label" style={{ color }}>{t.label}</span>
-              {t.active && <span className="map-btab-active-dot" />}
-            </Link>
-          )
-        })}
-      </nav>
     </div>
   )
 }
