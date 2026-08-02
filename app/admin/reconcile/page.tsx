@@ -136,15 +136,39 @@ export default function ReconcilePage() {
     setSaving(null)
   }
 
-  async function deleteRows(ids: number[], key: string) {
+  // Delete is permanent and sits immediately beside "+ Add Route". These rows are the only
+  // record that a flight was ever flagged, so a mis-click loses the schedule data with them
+  // — RJ439/RJ440 (AMM↔DAM) were lost that way and only recovered because the values
+  // happened to still be on screen elsewhere. The confirmation lives here rather than at the
+  // call sites so a future button cannot skip it.
+  async function deleteRows(ids: number[], key: string, label: string) {
+    const n = ids.length
+    const ok = window.confirm(
+      `Delete ${n} unfiled row${n === 1 ? '' : 's'} for ${label}?\n\n`
+      + `This is permanent and cannot be undone.\n`
+      + `It does NOT file the route — use "+ Add Route" for that.`
+    )
+    if (!ok) return
+
     setDeleting(key)
-    await fetch('/api/admin/reconcile', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids }),
-    })
-    setRows(prev => prev.filter(r => !ids.includes(r.id)))
-    setDeleting(null)
+    try {
+      const res = await fetch('/api/admin/reconcile', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      })
+      // Previously the rows were dropped from local state regardless, so a failed request
+      // looked like a successful delete until the next reload.
+      if (!res.ok) {
+        window.alert(`Delete failed (HTTP ${res.status}). Nothing was removed.`)
+        return
+      }
+      setRows(prev => prev.filter(r => !ids.includes(r.id)))
+    } catch (e) {
+      window.alert(`Delete failed: ${e instanceof Error ? e.message : String(e)}. Nothing was removed.`)
+    } finally {
+      setDeleting(null)
+    }
   }
 
   async function addRoute(g: RouteGroup) {
@@ -289,7 +313,11 @@ export default function ReconcilePage() {
                   <button
                     style={s.btnDel}
                     disabled={deleting === String(r.id)}
-                    onClick={() => deleteRows([r.id], String(r.id))}
+                    onClick={() => deleteRows(
+                      [r.id],
+                      String(r.id),
+                      `${r.iata_number}  ${r.dep_iata}→${r.arr_iata}  ${hhmm(r.sched_dep_utc)} UTC${r.day_of_week ? '  ' + (DOW[r.day_of_week] ?? r.day_of_week) : ''}`,
+                    )}
                   >
                     {deleting === String(r.id) ? '…' : 'Delete'}
                   </button>
@@ -342,7 +370,11 @@ export default function ReconcilePage() {
                     <button
                       style={s.btnDel}
                       disabled={deleting === g.key}
-                      onClick={() => deleteRows(g.ids, g.key)}
+                      onClick={() => deleteRows(
+                        g.ids,
+                        g.key,
+                        `${g.iata_number}  ${g.dep_iata}→${g.arr_iata}  ${hhmm(g.dep_utc)} UTC  ${g.days.map(d => DOW[d] ?? d).join(', ')}`,
+                      )}
                     >
                       {deleting === g.key ? '…' : 'Delete'}
                     </button>
