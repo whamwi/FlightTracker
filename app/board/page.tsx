@@ -800,7 +800,6 @@ export default function BoardPage() {
     ? new Date(date + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
     : ''
 
-  const airportLabel = airport === 'DAM' ? 'Damascus International · DAM' : 'Aleppo International · ALP'
   const viewTitle    = view === 'arr' ? 'Arrivals' : 'Departures'
   const tabTitle     = tab === 0 ? 'today' : tab === -1 ? 'yesterday' : 'tomorrow'
 
@@ -812,6 +811,11 @@ export default function BoardPage() {
         .ft-content { flex-direction: column !important; }
         .ft-sidebar { display: none !important; }
         .ft-controls { gap: 8px !important; flex-wrap: wrap !important; }
+        /* Sticky on phones as well as desktop. The board scrolls itself to the NOW line on
+           load, which already leaves these controls above the fold — without this, changing
+           day or direction means scrolling back up first. 58px is the mobile header height;
+           the desktop rule below overrides it with 68px. */
+        .ft-controls-wrap { position: sticky; top: 58px; z-index: 10; background: #EDEBE0; padding: 10px 0; margin: -10px 0; }
         .ft-airport-btn { padding: 8px 14px !important; }
         .ft-sort-btns { display: none !important; }
         @media (min-width: 768px) {
@@ -857,15 +861,6 @@ export default function BoardPage() {
 
           {/* Title + controls */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-              <span style={{ font: `500 12px/1 'Instrument Sans', system-ui`, color: C.muted, letterSpacing: '.02em' }}>{airportLabel}</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 9px', borderRadius: 8, background: C.sunken, border: `1px solid ${C.border}`, flexShrink: 0 }}>
-                <span style={{ width: 6, height: 6, borderRadius: 99, background: C.forestMid, display: 'block' }} />
-                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, fontWeight: 600, color: C.secondary, whiteSpace: 'nowrap' }}>
-                  LIVE {nowSyriaHHMM}
-                </span>
-              </div>
-            </div>
             <h1 className="ft-title" style={{ margin: 0, font: `700 34px/1 'Instrument Sans', system-ui`, color: C.ink, letterSpacing: '-.025em' }}>
               {viewTitle} {tabTitle}
             </h1>
