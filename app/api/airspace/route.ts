@@ -136,9 +136,52 @@ function extractRevisedArrUtc(status: string, date: string): string | null {
   return extractStatusUtc(status, ['estimated', 'expect', 'delayed'], date)
 }
 
+// ── Per-flight callsign lookup (1h cache) ─────────────────────────────────────
+// `flight_lookup` is the authoritative iata_number → broadcast_callsign mapping, kept by
+// the admin tooling and the damairport sync. It is what /api/schedule and route-reconcile
+// read, and it is right where the prefix rule below is only a guess.
+//
+// That guess fails whenever an airline's callsign is not <ICAO><same digits>: DN541 is
+// broadcast as DNA541, and `airlines` said DN→JOC, so every Dan Air flight failed to match
+// its own ADS-B contact for two weeks with no error anywhere — indistinguishable from an
+// aircraft simply not being seen.
+//
+// FR24's `num` arrives in either form — IATA (XQ808) or already the callsign (FYC455, where
+// flight_lookup.fr24_uses_callsign is true) — so both are indexed.
+interface CallsignLookup {
+  byIata:     Record<string, string>   // XQ808  → SXS808
+  byCallsign: Record<string, string>   // FYC455 → FYC455
+}
+let lookupCache: { map: CallsignLookup; ts: number } | null = null
+
+async function fetchCallsignLookup(): Promise<CallsignLookup> {
+  if (lookupCache && Date.now() - lookupCache.ts < 3_600_000) return lookupCache.map
+  const res = await fetch(
+    `${SB_URL}/rest/v1/flight_lookup?select=iata_number,broadcast_callsign&broadcast_callsign=not.is.null`,
+    { headers: SB_HEADERS },
+  )
+  if (!res.ok) return lookupCache?.map ?? { byIata: {}, byCallsign: {} }
+  const rows: { iata_number: string; broadcast_callsign: string }[] = await res.json()
+  const map: CallsignLookup = { byIata: {}, byCallsign: {} }
+  for (const r of rows) {
+    if (!r.iata_number || !r.broadcast_callsign) continue
+    map.byIata[r.iata_number.toUpperCase()]         = r.broadcast_callsign.toUpperCase()
+    map.byCallsign[r.broadcast_callsign.toUpperCase()] = r.broadcast_callsign.toUpperCase()
+  }
+  lookupCache = { map, ts: Date.now() }
+  return map
+}
+
+/** Table first, prefix rule only for flights the table has never seen. */
+function resolveCallsign(num: string, lookup: CallsignLookup, iataToIcao: Record<string, string>): string {
+  const up = num.toUpperCase()
+  return lookup.byIata[up] ?? lookup.byCallsign[up] ?? toCallsign(up, iataToIcao)
+}
+
 // Convert FR24 flight number → ADS-B broadcast callsign.
 // FR24 uses IATA format (TK849, G9434, FZ1234) or already-ICAO (FYC490, SYR123).
 // ADS-B always broadcasts ICAO prefix (THY849, ABY434, FDB1234, FYC490).
+// Fallback only — prefer resolveCallsign above.
 function toCallsign(num: string, iataToIcao: Record<string, string>): string {
   const up = num.toUpperCase()
   // 2-char alphanumeric IATA prefix: "TK"→THY, "G9"→ABY, "FZ"→FDB
@@ -170,7 +213,7 @@ interface BoardFlight {
 
 let boardCache: { flights: BoardFlight[]; date: string; ts: number } | null = null
 
-async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<BoardFlight[]> {
+async function fetchBoardFlights(iataToIcao: Record<string, string>, lookup: CallsignLookup): Promise<BoardFlight[]> {
   const date = new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10)
   if (boardCache && boardCache.date === date && Date.now() - boardCache.ts < 60_000)
     return boardCache.flights
@@ -270,7 +313,7 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>): Promise<Bo
         const dep_delay_min = (schedDepMs && actualDepMs)
           ? Math.round((actualDepMs - schedDepMs) / 60_000)
           : null
-        const callsignCs   = toCallsign(num, iataToIcao)
+        const callsignCs   = resolveCallsign(num, lookup, iataToIcao)
         const icaoPrefix   = callsignCs.replace(/\d/g, '')
         // FR24 cache omits the implicit airport — fill dep_iata for departures
         // and arr_iata for arrivals from the row's airport_iata.
@@ -603,8 +646,10 @@ export async function GET() {
   // same as the old behaviour rather than a regression.
   const boardMap = new Map<string, BoardFlight>()
   try {
-    const [iataToIcao, apCoords] = await Promise.all([fetchIataToIcao(), fetchAirportCoords()])
-    const resolvedBoard = await fetchBoardFlights(iataToIcao)
+    const [iataToIcao, apCoords, lookup] = await Promise.all([
+      fetchIataToIcao(), fetchAirportCoords(), fetchCallsignLookup(),
+    ])
+    const resolvedBoard = await fetchBoardFlights(iataToIcao, lookup)
 
     // callsign → board info
     for (const f of resolvedBoard) boardMap.set(f.callsign, f)
