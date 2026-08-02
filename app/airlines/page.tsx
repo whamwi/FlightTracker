@@ -426,10 +426,26 @@ export default function AirlinesPage() {
           .al-body { padding: 26px 40px 48px !important; }
           .al-map { height: 240px; overflow: hidden; }
           .al-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 20px; }
+          /* Desktop: title left, then the airport toggle, then the counts. */
+          .al-head   { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; }
+          .al-title  { order: 1; margin-right: auto; font-size: 34px; }
+          .al-toggle { order: 2; }
+          .al-counts { order: 3; display: flex; align-items: center; gap: 8px; }
+          .al-short  { display: none; }
           @media (max-width: 767px) {
             .al-body { padding: 16px 14px 32px !important; }
             .al-map { height: 200px; overflow: hidden; }
             .al-grid { grid-template-columns: 1fr; gap: 14px; }
+            /* Counts join the heading line and sit at its end; the airport toggle takes the
+               next row of its own. The title shrinks so all three badges clear 375px. */
+            .al-title  { font-size: 24px; }
+            .al-counts { order: 2; gap: 6px; }
+            .al-toggle { order: 3; flex-basis: 100%; }
+            .al-count-num { font-size: 12px !important; }
+            .al-count-lbl { font-size: 10px !important; }
+            .al-count-box { padding: 5px 9px !important; }
+            .al-full   { display: none; }
+            .al-short  { display: inline; }
           }
           @media (min-width: 768px) and (max-width: 1099px) {
             .al-body { padding: 22px 28px 40px !important; }
@@ -438,33 +454,29 @@ export default function AirlinesPage() {
         `}</style>
 
         {/* Title + stats */}
-        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <span style={{ font: `500 12px/1 'Instrument Sans',system-ui`, color: C.muted, letterSpacing: '.02em' }}>From Damascus &amp; Aleppo</span>
-            <h1 style={{ margin: 0, font: `700 34px/1 'Instrument Sans',system-ui`, color: C.ink, letterSpacing: '-.025em' }}>Airlines</h1>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            {/* Airport toggle */}
-            <div style={{ display: 'flex', padding: 3, background: '#E4E1D2', borderRadius: 9, gap: 2 }}>
-              {([['DAM','Damascus'],['ALP','Aleppo']] as const).map(([code, label]) => (
-                <button key={code} onClick={() => setAirport(code)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 7, border: 'none', cursor: 'pointer', background: airport===code ? C.forest : 'transparent', color: airport===code ? '#fff' : C.muted, transition: 'all .15s' }}>
-                  <span style={{ font: `${airport===code?700:600} 12px/1 'Instrument Sans',system-ui` }}>{label}</span>
-                  <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 9.5, opacity: .7, lineHeight: 1 }}>{code}</span>
-                </button>
-              ))}
-            </div>
+        <div className="al-head">
+          <h1 className="al-title" style={{ margin: 0, fontFamily: "'Instrument Sans',system-ui", fontWeight: 700, lineHeight: 1, color: C.ink, letterSpacing: '-.025em' }}>Airlines</h1>
+          <div className="al-counts">
             {airlines.length > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 9, background: C.surface, border: `1px solid ${C.border}` }}>
-                <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{airlines.length}</span>
-                <span style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>airlines</span>
+              <div className="al-count-box" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 9, background: C.surface, border: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>
+                <span className="al-count-num" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{airlines.length}</span>
+                <span className="al-count-lbl" style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>airlines</span>
               </div>
             )}
             {totalFlights > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 9, background: C.surface, border: `1px solid ${C.border}` }}>
-                <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{totalFlights}</span>
-                <span style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>flights / week</span>
+              <div className="al-count-box" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 9, background: C.surface, border: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>
+                <span className="al-count-num" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{totalFlights}</span>
+                <span className="al-count-lbl" style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>flights / week</span>
               </div>
             )}
+          </div>
+          <div className="al-toggle" style={{ display: 'flex', padding: 3, background: '#E4E1D2', borderRadius: 9, gap: 2, width: 'fit-content' }}>
+            {([['DAM','Damascus'],['ALP','Aleppo']] as const).map(([code, label]) => (
+              <button key={code} onClick={() => setAirport(code)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 7, border: 'none', cursor: 'pointer', background: airport===code ? C.forest : 'transparent', color: airport===code ? '#fff' : C.muted, transition: 'all .15s' }}>
+                <span style={{ font: `${airport===code?700:600} 12px/1 'Instrument Sans',system-ui` }}>{label}</span>
+                <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 9.5, opacity: .7, lineHeight: 1 }}>{code}</span>
+              </button>
+            ))}
           </div>
         </div>
 
@@ -476,14 +488,15 @@ export default function AirlinesPage() {
         {/* Region filter tabs */}
         <div style={{ display: 'flex', gap: 6, marginBottom: 24, flexWrap: 'wrap' as const }}>
           {([
-            { id: 'all',    label: 'All regions',      count: airlines.length },
-            { id: 'gulf',   label: 'Middle East & Gulf', count: airlines.filter(a => a.region === 'gulf').length },
-            { id: 'europe', label: 'Europe & Turkey',  count: airlines.filter(a => a.region === 'europe').length },
+            { id: 'all',    label: 'All regions',        short: 'All',         count: airlines.length },
+            { id: 'gulf',   label: 'Middle East & Gulf', short: 'Med Eastern', count: airlines.filter(a => a.region === 'gulf').length },
+            { id: 'europe', label: 'Europe & Turkey',    short: 'Europeans',   count: airlines.filter(a => a.region === 'europe').length },
           ] as const).map(tab => {
             const active = region === tab.id
             return (
               <button key={tab.id} onClick={() => setRegion(tab.id)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 14px', borderRadius: 99, border: 'none', cursor: 'pointer', background: active ? C.ink : C.surface, color: active ? '#fff' : C.muted, boxShadow: active ? 'none' : `0 0 0 1px ${C.border}`, transition: 'all .15s', font: `${active ? 700 : 500} 12px/1 'Instrument Sans',system-ui` }}>
-                {tab.label}
+                <span className="al-full">{tab.label}</span>
+                <span className="al-short">{tab.short}</span>
                 <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, opacity: active ? .75 : .6 }}>{tab.count}</span>
               </button>
             )
