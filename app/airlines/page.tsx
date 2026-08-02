@@ -428,7 +428,7 @@ export default function AirlinesPage() {
           .al-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 20px; }
           /* Desktop: title left, then the airport toggle, then the counts. */
           .al-head   { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; }
-          .al-title  { order: 1; margin-right: auto; font-size: 34px; }
+          .al-title  { order: 1; margin: 0 auto 0 0; font-size: 34px; }
           .al-toggle { order: 2; }
           .al-counts { order: 3; display: flex; align-items: center; gap: 8px; }
           .al-short  { display: none; }
@@ -455,7 +455,7 @@ export default function AirlinesPage() {
 
         {/* Title + stats */}
         <div className="al-head">
-          <h1 className="al-title" style={{ margin: 0, fontFamily: "'Instrument Sans',system-ui", fontWeight: 700, lineHeight: 1, color: C.ink, letterSpacing: '-.025em' }}>Airlines</h1>
+          <h1 className="al-title" style={{ fontFamily: "'Instrument Sans',system-ui", fontWeight: 700, lineHeight: 1, color: C.ink, letterSpacing: '-.025em' }}>Airlines</h1>
           <div className="al-counts">
             {airlines.length > 0 && (
               <div className="al-count-box" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 9, background: C.surface, border: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>
