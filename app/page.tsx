@@ -426,15 +426,7 @@ function HomeInner() {
         }
         .live-dot { animation: pulse 2s infinite; }
         .fab-pill { animation: fab-attract 6s 1s infinite; transition: transform .15s ease, box-shadow .15s ease; }
-        .fab-pill:hover { transform: translateY(-2px) scale(1.04) !important; box-shadow: 0 6px 22px rgba(0,0,0,.28) !important; animation-play-state: paused; };
-          border-bottom: 1px solid ${C.border};
-          flex-shrink: 0;
-        };
-          padding-bottom: env(safe-area-inset-bottom);
-          height: calc(60px + env(safe-area-inset-bottom));
-          flex-shrink: 0;
-        };
-        }
+        .fab-pill:hover { transform: translateY(-2px) scale(1.04) !important; box-shadow: 0 6px 22px rgba(0,0,0,.28) !important; animation-play-state: paused; }
         .map-legend { bottom: calc(16px + env(safe-area-inset-bottom)); right: 12px; }
         @media (min-width: 768px) {
           .map-legend { bottom: 24px; right: 12px; }
