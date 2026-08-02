@@ -26,13 +26,13 @@ declare global {
   }
 }
 
-const MAX_CLIPS   = 30
-// Curated clips are pulled separately and always kept. Ordering the whole table by date and
-// taking the top MAX_CLIPS dropped every one of them: the channel alone had 31 videos, all
-// newer than most hand-picked airline uploads, so the curated entries fell past the cap and
-// never played. They are the deliberately chosen ones, so they get the guaranteed slots.
-const MAX_CURATED = 12
-const SCRIPT_ID   = 'yt-iframe-api'
+// The rotation plays everything in the library. There was a 30-clip cap, and ordering the
+// whole table by date under it dropped every curated entry: the channel alone had 31 videos,
+// all newer than most hand-picked airline uploads, so the deliberately chosen ones fell past
+// the cap and never played. Curated clips are still pulled separately and interleaved rather
+// than merged by date, so they appear early instead of wherever their upload date lands.
+const FEED_LIMIT = 100 // the read endpoint's own ceiling
+const SCRIPT_ID  = 'yt-iframe-api'
 
 type Video = { media_id: string; video_id: string | null }
 
@@ -72,16 +72,16 @@ export default function VideoBox() {
         .then((j) => ((j.media ?? []) as Video[]).filter((v) => v.video_id))
         .catch(() => [] as Video[])
 
-    Promise.all([get(`source=curated&limit=${MAX_CURATED}`), get(`limit=${MAX_CLIPS}`)])
-      .then(([curated, recent]) => {
+    Promise.all([get(`source=curated&limit=${FEED_LIMIT}`), get(`limit=${FEED_LIMIT}`)])
+      .then(([curated, all]) => {
         if (cancelled) return
         // Interleave rather than concatenate: a curated clip every third slot, so the mix
         // shows up early instead of after a dozen channel videos nobody waits through.
         const seen = new Set(curated.map((v) => v.video_id))
-        const rest = recent.filter((v) => !seen.has(v.video_id))
+        const rest = all.filter((v) => !seen.has(v.video_id))
         const out: Video[] = []
         let ci = 0, ri = 0
-        while (out.length < MAX_CLIPS && (ci < curated.length || ri < rest.length)) {
+        while (ci < curated.length || ri < rest.length) {
           if (out.length % 3 === 2 && ci < curated.length) out.push(curated[ci++])
           else if (ri < rest.length) out.push(rest[ri++])
           else if (ci < curated.length) out.push(curated[ci++])
