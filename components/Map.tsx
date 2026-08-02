@@ -810,6 +810,13 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
       if (embed) {
         map.fitBounds([[22, 26], [43, 62]])
       }
+
+      // Leaflet prepends its own "Leaflet |" credit. It is MIT-licensed and asks for no
+      // attribution, so that part is courtesy rather than obligation — dropping it takes
+      // roughly a quarter off the strip's width. What remains is the wording OSM and CARTO
+      // actually require, which is the floor short of hiding it behind a tap-to-expand
+      // control.
+      map.attributionControl.setPrefix(false)
       // Added before the tile layer so it lands above the attribution in the bottom-right
       // corner. Desktop-only, but gated in CSS rather than on innerWidth — a one-shot
       // width read here can fire before the viewport settles and silently drop the control.
