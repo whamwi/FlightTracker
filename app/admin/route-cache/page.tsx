@@ -94,6 +94,7 @@ export default function AdminRouteCache() {
   const [deleting, setDeleting] = useState<number | null>(null)
   const [msg, setMsg]         = useState('')
   const [sort, setSort]       = useState<SortState>({ col: 'broadcast_callsign', dir: 'asc' })
+  const [tab, setTab]         = useState<'routes' | 'videos'>('routes')
 
   function handleSort(col: string) {
     setSort(s => s.col === col ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' })
@@ -302,21 +303,38 @@ export default function AdminRouteCache() {
       <div style={s.stickyTop}>
         <div style={s.header}>
           <div>
-            <h1 style={s.title}>Route Master</h1>
-            <p style={s.sub}>Manually fill or correct dep/arr times in route_master</p>
+            <h1 style={s.title}>{tab === 'routes' ? 'Route Master' : 'Video Library'}</h1>
+            <p style={s.sub}>
+              {tab === 'routes'
+                ? 'Manually fill or correct dep/arr times in route_master'
+                : 'Hand-picked YouTube links for the news gallery and the Track map rotation'}
+            </p>
           </div>
           <a href="/admin/reconcile" style={s.reconcileBtn}>Reconcile Monitor →</a>
         </div>
 
         {msg && <div style={s.msg}>{msg}</div>}
 
-        <div style={s.stats}>
-          <div style={s.stat}><span style={s.statNum}>{filled.length}</span><span style={s.statLabel}>Filled</span></div>
+        {tab === 'routes' && (
+          <div style={s.stats}>
+            <div style={s.stat}><span style={s.statNum}>{filled.length}</span><span style={s.statLabel}>Filled</span></div>
+          </div>
+        )}
+
+        <div style={s.tabs}>
+          {([['routes', 'Route Master'], ['videos', 'Videos']] as const).map(([key, label]) => (
+            <button key={key} onClick={() => setTab(key)}
+              style={{ ...s.tab, ...(tab === key ? s.tabActive : null) }}>
+              {label}
+            </button>
+          ))}
         </div>
       </div>
 
+      {tab === 'videos' && <VideosTab />}
+
       {/* ── FILLED ── */}
-      {(() => {
+      {tab === 'routes' && (() => {
         const sortedFilled = sortRows(filled, sort)
 
         // Count how many rows each flight has, and assign a shade index to multi-row flights
@@ -581,6 +599,135 @@ export default function AdminRouteCache() {
   )
 }
 
+// ── Videos tab ───────────────────────────────────────────────────────────────
+interface CuratedVideo {
+  media_id:  string
+  video_id:  string
+  caption:   string | null
+  permalink: string
+  thumb_url: string
+}
+
+/**
+ * Adds videos the SyGACA channel does not carry — an airline's own upload, say — to the
+ * same library the news gallery and the map's rotation already read. Stored as
+ * source='curated' by the API so the channel sync's prune cannot delete them; see the
+ * route handler for why that matters.
+ */
+function VideosTab() {
+  const [videos, setVideos]   = useState<CuratedVideo[] | null>(null)
+  const [url, setUrl]         = useState('')
+  const [caption, setCaption] = useState('')
+  const [busy, setBusy]       = useState(false)
+  const [note, setNote]       = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+
+  const load = useCallback(async () => {
+    const res = await fetch('/api/admin/curated-videos')
+    const j   = await res.json().catch(() => null)
+    setVideos(res.ok && j?.ok ? j.videos : [])
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  async function add(e: React.FormEvent) {
+    e.preventDefault()
+    if (!url.trim() || busy) return
+    setBusy(true); setNote(null)
+    try {
+      const res = await fetch('/api/admin/curated-videos', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ url, caption }),
+      })
+      const j = await res.json().catch(() => null)
+      if (!res.ok || !j?.ok) {
+        setNote({ kind: 'err', text: j?.error ?? `Failed (${res.status})` })
+      } else {
+        setNote({
+          kind: 'ok',
+          text: j.alreadyFromChannel
+            ? 'Added — note this video is already in the library from the SyGACA channel sync, so it will appear twice.'
+            : `Added: ${j.video?.caption ?? j.video?.video_id}`,
+        })
+        setUrl(''); setCaption('')
+        await load()
+      }
+    } catch (err) {
+      setNote({ kind: 'err', text: String(err) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function remove(v: CuratedVideo) {
+    if (!window.confirm(`Remove this video from the library?\n\n${v.caption ?? v.video_id}`)) return
+    setBusy(true); setNote(null)
+    try {
+      const res = await fetch(`/api/admin/curated-videos?media_id=${encodeURIComponent(v.media_id)}`, { method: 'DELETE' })
+      const j   = await res.json().catch(() => null)
+      if (!res.ok || !j?.ok) setNote({ kind: 'err', text: j?.error ?? `Delete failed (${res.status})` })
+      else await load()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div style={{ maxWidth: 760 }}>
+      <form onSubmit={add} style={s.vidForm}>
+        <label style={s.vidLabel}>
+          YouTube link
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://www.youtube.com/watch?v=…  ·  youtu.be/…  ·  /shorts/…"
+            style={s.vidInput}
+          />
+        </label>
+        <label style={s.vidLabel}>
+          Caption <span style={{ color: '#888', fontWeight: 400 }}>— optional, defaults to the video title and channel</span>
+          <input
+            value={caption}
+            onChange={(e) => setCaption(e.target.value)}
+            placeholder="Leave blank to pull it from YouTube"
+            style={s.vidInput}
+          />
+        </label>
+        <button type="submit" disabled={busy || !url.trim()} style={{ ...s.vidBtn, opacity: busy || !url.trim() ? 0.5 : 1 }}>
+          {busy ? 'Working…' : 'Add to library'}
+        </button>
+      </form>
+
+      {note && (
+        <div style={note.kind === 'ok' ? s.msg : s.msgErr}>{note.text}</div>
+      )}
+
+      {videos === null && <p style={{ color: '#666', fontSize: 14 }}>Loading…</p>}
+      {videos?.length === 0 && (
+        <p style={{ color: '#666', fontSize: 14 }}>
+          No curated videos yet. Anything added here joins the SyGACA channel videos in the
+          news gallery and the rotation on the Track map.
+        </p>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {(videos ?? []).map((v) => (
+          <div key={v.media_id} style={s.vidRow}>
+            <img src={v.thumb_url} alt="" width={112} height={63} style={{ objectFit: 'cover', borderRadius: 6, flexShrink: 0, background: '#eee' }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: '#111' }}>{v.caption ?? v.video_id}</div>
+              <a href={v.permalink} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: '#0070f3', wordBreak: 'break-all' }}>
+                {v.permalink}
+              </a>
+            </div>
+            <button onClick={() => remove(v)} disabled={busy} style={s.vidDel}>Remove</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 const s: Record<string, React.CSSProperties> = {
   page:         { fontFamily: 'system-ui, sans-serif', maxWidth: 1300, margin: '0 auto', padding: '0 20px 24px', color: '#1a1a1a', background: '#ffffff', minHeight: '100vh' },
   stickyTop:    { position: 'sticky', top: 0, zIndex: 10, background: '#ffffff', paddingTop: 24, paddingBottom: 2, borderBottom: '1px solid #e5e5e5' },
@@ -595,6 +742,13 @@ const s: Record<string, React.CSSProperties> = {
   tabs:         { display: 'flex', gap: 4, borderBottom: '2px solid #ddd', marginBottom: 20 },
   tab:          { padding: '8px 18px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 14, color: '#444', borderBottom: '2px solid transparent', marginBottom: -2 },
   tabActive:    { color: '#0070f3', borderBottomColor: '#0070f3', fontWeight: 700 },
+  msgErr:       { background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 6, padding: '10px 14px', marginBottom: 16, fontSize: 14, color: '#7f1d1d' },
+  vidForm:      { display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 20, padding: 16, border: '1px solid #ddd', borderRadius: 8, background: '#fafafa' },
+  vidLabel:     { display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12, fontWeight: 700, color: '#333', textTransform: 'none' },
+  vidInput:     { padding: '9px 11px', border: '1px solid #ccc', borderRadius: 6, fontSize: 14, fontWeight: 400, color: '#111', background: '#fff' },
+  vidBtn:       { alignSelf: 'flex-start', padding: '9px 18px', border: 'none', borderRadius: 6, background: '#0070f3', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer' },
+  vidRow:       { display: 'flex', alignItems: 'center', gap: 12, padding: 10, border: '1px solid #e5e5e5', borderRadius: 8, background: '#fff' },
+  vidDel:       { padding: '7px 13px', border: '1px solid #fca5a5', borderRadius: 6, background: '#fff', color: '#b91c1c', fontSize: 13, fontWeight: 600, cursor: 'pointer', flexShrink: 0 },
   tableWrap:    { overflowX: 'auto', background: '#fff' },
   table:        { width: '100%', borderCollapse: 'collapse', fontSize: 14, color: '#1a1a1a' },
   th:           { padding: '8px 12px', textAlign: 'left', background: '#eeeeee', color: '#333', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap', borderBottom: '2px solid #ccc' },

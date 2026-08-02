@@ -23,7 +23,7 @@ const PAGE_SIZE = 24
 
 type Media = {
   media_id:   string
-  source:     'facebook' | 'youtube'
+  source:     'facebook' | 'youtube' | 'curated'
   media_type: 'photo' | 'video'
   video_id:   string | null
   caption:    string | null
@@ -213,7 +213,7 @@ function Lightbox({ m, onClose }: { m: Media; onClose: () => void }) {
           {/* Attribution back to the authority's own post. */}
           <a href={m.permalink} target="_blank" rel="noopener noreferrer"
             style={{ font: `600 12px/1 'Instrument Sans',system-ui`, color: C.gold, textDecoration: 'none' }}>
-            {m.source === 'youtube' ? 'المصدر · Watch on YouTube ↗' : 'المصدر · View on Facebook ↗'}
+            {m.source === 'facebook' ? 'المصدر · View on Facebook ↗' : 'المصدر · Watch on YouTube ↗'}
           </a>
         </div>
       </div>
@@ -270,7 +270,8 @@ export default function NewsPage() {
           Aviation Authority Updates
         </h1>
         <p style={{ font: `500 13px/1.6 ${AR_FONT}`, color: C.muted, margin: '7px 0 0', maxWidth: 620 }}>
-          Photos and videos published by the Syrian General Authority of Civil Aviation —{' '}
+          Photos and videos from the Syrian General Authority of Civil Aviation, alongside
+          selected clips from the airlines flying Syria —{' '}
           <a href="https://www.facebook.com/SyrGACA" target="_blank" rel="noopener noreferrer"
             style={{ color: C.forest, fontWeight: 600, textDecoration: 'none' }}>
             Facebook ↗
