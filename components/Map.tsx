@@ -286,6 +286,8 @@ function schedToLocal(hhmm: string, offset: number): string {
   return `${String(lh).padStart(2,'0')}:${String(lm).padStart(2,'0')}`
 }
 
+const fmtHm = (m: number) => m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`
+
 // One progress bar for both popup builders.
 //
 // They had drifted into two designs: a flex layout with an 18px circled SVG marker, and an
@@ -350,54 +352,59 @@ function buildPopup(
         onerror="this.src='https://images.flightsfrom.com/airlines/100/${aiata}_100px.png';this.onerror=null">`
     : `<div style="width:44px;height:44px;border-radius:10px;background:#1f2937;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:22px">${_apFlag[dep ?? ''] || '✈'}</div>`
 
-  // Route progress
   const depCoord = dep ? _apCoords[dep] : null
   const arrCoord = arr ? _apCoords[arr] : null
+
+  // ONE resolved pair of instants drives the progress bar, the countdown and the ARRIVAL
+  // column. Keeping them on separate chains is how a card ends up reading "ARRIVAL 02:52"
+  // beside "26m left" — each defensible alone, nonsense together.
+  const depISO = fs?.actual_dep_utc ?? a.actual_dep_utc ?? null
+  const arrISO = fs?.actual_arr_utc ?? fs?.revised_arr_utc ?? fs?.scheduled_arr_utc
+    ?? (() => {
+      const d = Date.parse(depISO ?? '')
+      return Number.isFinite(d) && a.duration_min
+        ? new Date(d + a.duration_min * 60_000).toISOString()
+        : null
+    })()
+
+  const depMs       = Date.parse(depISO ?? '')
+  const arrMs       = Date.parse(arrISO ?? '')
+  const actualArrMs = Date.parse(fs?.actual_arr_utc ?? a.actual_arr_utc ?? '')
+  const hasArrived  = Number.isFinite(actualArrMs) && Date.now() >= actualArrMs
+
+  // Progress from time, not from a.lat/a.lon. Those freeze at the instant the signal drops,
+  // so on a dead-reckoned flight the bar froze with them — while the schedule overlay
+  // computed the same flight's progress from time. The result was a bar that jumped
+  // position depending on which builder happened to render it that refresh. Geometry stays
+  // only as a fallback for a live aircraft with no usable schedule.
   let fraction: number | null = null
-  if (depCoord && arrCoord && typeof a.lat === 'number' && typeof a.lon === 'number') {
+  if (hasArrived) {
+    fraction = 1
+  } else if (Number.isFinite(depMs) && Number.isFinite(arrMs) && arrMs > depMs) {
+    fraction = Math.max(0.02, Math.min(0.97, (Date.now() - depMs) / (arrMs - depMs)))
+  } else if (depCoord && arrCoord && typeof a.lat === 'number' && typeof a.lon === 'number') {
     const total = greatCircleKm(depCoord[0], depCoord[1], arrCoord[0], arrCoord[1])
     const rem   = greatCircleKm(a.lat, a.lon, arrCoord[0], arrCoord[1])
     fraction = total > 0 ? Math.max(0.02, Math.min(0.97, 1 - rem / total)) : null
   }
-
-  // Remaining time.
-  //
-  // This must NOT be derived from a.lat/a.lon/a.gs. On a dead-reckoned flight those are
-  // frozen at the instant the signal dropped, so the card computed "distance from where it
-  // was then, at the speed it had then" and the countdown stopped dead — RB444 sat at
-  // "1h 50m left" from 02:02 onward while the panel counted down past it to 0h 59m off the
-  // same arrival time. Flights with a live fix hid the bug, because there the frozen values
-  // happen to be current.
-  //
-  // Deriving it from the arrival estimate the card already displays makes the countdown,
-  // the ARRIVAL column and the panel agree by construction rather than by coincidence.
-  //
-  // ONE resolved arrival instant drives both the countdown and the ARRIVAL column. Keeping
-  // them on separate chains is how a card ends up reading "ARRIVAL 02:52" beside
-  // "26m left" — each defensible alone, nonsense together.
-  const arrISO = fs?.actual_arr_utc ?? fs?.revised_arr_utc ?? fs?.scheduled_arr_utc
-    ?? (() => {
-      const depMs = Date.parse(fs?.actual_dep_utc ?? a.actual_dep_utc ?? '')
-      return Number.isFinite(depMs) && a.duration_min
-        ? new Date(depMs + a.duration_min * 60_000).toISOString()
-        : null
-    })()
 
   // Times (local at each airport)
   const depOffset = _apOffset[dep ?? ''] ?? 3
   const arrOffset = _apOffset[arr ?? ''] ?? 3
 
   let etaStr = ''
-  if (arrISO && !fs?.actual_arr_utc) {
-    const remMin = Math.round((Date.parse(arrISO) - Date.now()) / 60_000)
-    if (remMin > 0) etaStr = remMin >= 60 ? `${Math.floor(remMin / 60)}h ${remMin % 60}m left` : `${remMin}m left`
-  } else if (!arrISO && arrCoord && typeof a.lat === 'number' && typeof a.lon === 'number'
+  if (hasArrived && Number.isFinite(depMs) && actualArrMs > depMs) {
+    // Once it is down, time remaining is meaningless — how long it took is the useful number.
+    etaStr = `${fmtHm(Math.round((actualArrMs - depMs) / 60_000))} flown`
+  } else if (!hasArrived && Number.isFinite(arrMs)) {
+    const remMin = Math.round((arrMs - Date.now()) / 60_000)
+    if (remMin > 0) etaStr = `${fmtHm(remMin)} left`
+  } else if (!hasArrived && arrCoord && typeof a.lat === 'number' && typeof a.lon === 'number'
              && typeof a.gs === 'number' && a.gs > 50) {
     // No arrival estimate anywhere — fall back to the geometric one. Only meaningful for a
     // genuinely live fix, which is the only case that reaches here.
-    const nm  = greatCircleKm(a.lat, a.lon, arrCoord[0], arrCoord[1]) / 1.852
-    const eta = Math.round(nm / a.gs * 60)
-    etaStr = eta >= 60 ? `${Math.floor(eta / 60)}h ${eta % 60}m left` : `${eta}m left`
+    const nm = greatCircleKm(a.lat, a.lon, arrCoord[0], arrCoord[1]) / 1.852
+    etaStr = `${fmtHm(Math.round(nm / a.gs * 60))} left`
   }
   // Fall back to the scheduled time carried on the aircraft when flightStatusRef has
   // nothing — the same chain buildSchedulePopup has always used. Without it the marker
@@ -520,13 +527,17 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
   // Countdown to the arrival instant shown above, not to a separately-derived one.
   // `fraction` is clamped to 0.97 for the progress bar, so deriving minutes from it also
   // pinned the countdown at ~3% of block time and it never reached zero.
+  // Once down, elapsed time replaces it — same rule as buildPopup.
+  const sDepMs = Date.parse(fs?.actual_dep_utc ?? '')
+  const sArrMs = Date.parse(fs?.actual_arr_utc ?? '')
   let etaStr = ''
-  if (!arrived && bestArrISO) {
+  if (Number.isFinite(sArrMs) && Number.isFinite(sDepMs) && sArrMs > sDepMs) {
+    etaStr = `${fmtHm(Math.round((sArrMs - sDepMs) / 60_000))} flown`
+  } else if (!arrived && bestArrISO) {
     const remMin = Math.round((Date.parse(bestArrISO) - Date.now()) / 60_000)
-    if (remMin > 0) etaStr = remMin >= 60 ? `${Math.floor(remMin/60)}h ${remMin%60}m left` : `${remMin}m left`
+    if (remMin > 0) etaStr = `${fmtHm(remMin)} left`
   } else if (!arrived && pct != null && pct < 100 && e.duration_min > 0) {
-    const remMin = Math.round(e.duration_min * (1 - (pct / 100)))
-    etaStr = remMin >= 60 ? `${Math.floor(remMin/60)}h ${remMin%60}m left` : `${remMin}m left`
+    etaStr = `${fmtHm(Math.round(e.duration_min * (1 - (pct / 100))))} left`
   }
 
   const progressHtml = progressBarHtml(e.dep_iata, e.arr_iata, pct != null ? pct / 100 : null, etaStr)
