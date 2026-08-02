@@ -365,6 +365,14 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
     card?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
   }, [selectedFlight, flights.length])
 
+  // The OSM/CARTO credit is a licence condition, so the strip cannot simply sit on top of
+  // it. Instead the attribution is lifted above the strip while one is showing — flagged on
+  // <body> because the credit lives inside Leaflet's own DOM, well outside this component.
+  useEffect(() => {
+    document.body.classList.toggle('has-ia-strip', flights.length > 0)
+    return () => document.body.classList.remove('has-ia-strip')
+  }, [flights.length])
+
   if (flights.length === 0) return null
 
   const cards = (ghost: boolean) => (
@@ -410,7 +418,7 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
   return (
     <div style={{
       position: 'absolute', left: 0, right: 0, zIndex: 1000,
-      bottom: 'calc(30px + env(safe-area-inset-bottom))',
+      bottom: 'env(safe-area-inset-bottom)',
     }}>
       <div
         ref={scrollerRef}
@@ -607,6 +615,7 @@ function HomeInner() {
         }
         .live-dot { animation: pulse 2s infinite; }
         .ia-strip { scrollbar-width: none; -ms-overflow-style: none; -webkit-overflow-scrolling: touch; }
+        body.has-ia-strip .leaflet-control-attribution { margin-bottom: calc(62px + env(safe-area-inset-bottom)) !important; }
         .ia-strip::-webkit-scrollbar { display: none; }
         .fab-pill { animation: fab-attract 6s 1s infinite; transition: transform .15s ease, box-shadow .15s ease; }
         .fab-pill:hover { transform: translateY(-2px) scale(1.04) !important; box-shadow: 0 6px 22px rgba(0,0,0,.28) !important; animation-play-state: paused; }
