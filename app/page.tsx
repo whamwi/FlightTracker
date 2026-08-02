@@ -262,7 +262,7 @@ function InAirPanel({ selectedFlight, open, setOpen, onSelect, onClear }: { sele
   // ── Closed: pill FAB ─────────────────────────────────────────────────────
   if (!open) {
     return (
-      <div style={{ position: 'absolute', left: 12, top: 12, zIndex: 1000, display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ position: 'absolute', left: 12, bottom: 'calc(30px + env(safe-area-inset-bottom))', zIndex: 1000, display: 'flex', alignItems: 'center', gap: 8 }}>
       <button
         onClick={() => setOpen(true)}
         className="fab-pill"
@@ -311,9 +311,9 @@ function InAirPanel({ selectedFlight, open, setOpen, onSelect, onClear }: { sele
   // ── Open: side panel ─────────────────────────────────────────────────────
   return (
     <div style={{
-      position: 'absolute', left: 12, top: 12, zIndex: 999,
+      position: 'absolute', left: 12, bottom: 'calc(30px + env(safe-area-inset-bottom))', zIndex: 999,
       width: 'min(308px, calc(88vw - 12px))',
-      maxHeight: 'calc(100% - 24px)',
+      maxHeight: 'calc(100% - 54px - env(safe-area-inset-bottom))',
       display: 'flex', flexDirection: 'column',
       background: 'rgba(237,235,224,0.97)',
       backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
