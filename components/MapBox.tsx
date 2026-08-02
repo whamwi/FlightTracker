@@ -42,7 +42,8 @@ export const actionBtn: CSSProperties = {
 }
 
 export default function MapBox({
-  title, subtitle, pillLabel, icon, actions, children, onOpenChange,
+  title, subtitle, pillLabel, icon, actions, children, onOpenChange, externalTrigger,
+  open: openProp, onToggle,
 }: {
   title:     string
   subtitle?: ReactNode
@@ -51,10 +52,24 @@ export default function MapBox({
   actions?:  ReactNode
   children:  ReactNode
   onOpenChange?: (open: boolean) => void
+  /**
+   * The collapsed pill is this box's own open button. On phones the trigger lives in the
+   * site header instead, so the pill would be a second, redundant control sitting on the
+   * map — exactly the clutter moving it was meant to remove. With this set the box renders
+   * its panel or nothing at all, and whoever owns the header button drives it via
+   * `openRef` below.
+   */
+  externalTrigger?: boolean
+  /** Controlled mode. Omit to keep the box's own breakpoint-driven behaviour. */
+  open?: boolean
+  onToggle?: (next: boolean) => void
 }) {
-  const [open,   setOpen]   = useState(false)
+  const [selfOpen, setSelfOpen] = useState(false)
   const [ready,  setReady]  = useState(false)
   const [pinned, setPinned] = useState(false)
+
+  const controlled = openProp !== undefined
+  const open = controlled ? openProp : selfOpen
 
   // Autoplaying media is welcome on a desktop map but intrusive on a phone, where it
   // would cover a large share of the viewport. Mobile starts collapsed to a pill.
@@ -64,7 +79,7 @@ export default function MapBox({
   // has toggled the box themselves, their choice wins over the breakpoint.
   useEffect(() => {
     const mq = window.matchMedia('(min-width: 768px)')
-    const apply = () => setOpen((prev) => (pinned ? prev : mq.matches))
+    const apply = () => setSelfOpen((prev) => (pinned ? prev : mq.matches))
     apply()
     setReady(true)
     mq.addEventListener('change', apply)
@@ -75,9 +90,13 @@ export default function MapBox({
 
   if (!ready) return null
 
-  const toggle = (next: boolean) => { setPinned(true); setOpen(next) }
+  const toggle = (next: boolean) => {
+    if (controlled) { onToggle?.(next); return }
+    setPinned(true); setSelfOpen(next)
+  }
 
   if (!open) {
+    if (externalTrigger) return null
     return (
       <button
         onClick={() => toggle(true)}

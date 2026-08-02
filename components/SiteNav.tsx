@@ -53,12 +53,14 @@ export default function SiteNav({ active, right }: { active: string; right?: Rea
         .sn-bar   { display: flex; align-items: center; width: 100%; padding: 0 40px; height: 68px; gap: 14px; }
         .sn-tabs  { display: flex; align-items: center; gap: 4px; margin-left: 14px; }
         .sn-right { display: flex; margin-left: auto; align-items: center; }
+        .sn-actions { display: none; }
         .sn-burger{ display: none; }
         @media (max-width: 767px) {
           .sn-bar    { padding: 0 12px; padding-top: env(safe-area-inset-top); height: calc(58px + env(safe-area-inset-top)); gap: 0; }
           .sn-tabs   { display: none; }
           .sn-right  { display: none; }
-          .sn-burger { display: flex; margin-left: auto; }
+          .sn-actions{ display: flex; align-items: center; gap: 8px; margin-left: auto; margin-right: 10px; }
+          .sn-burger { display: flex; }
         }
       `}</style>
 
@@ -84,6 +86,10 @@ export default function SiteNav({ active, right }: { active: string; right?: Rea
         </div>
 
         {right && <div className="sn-right">{right}</div>}
+
+        {/* Filled by the Track map, which portals its media buttons here on phones. Empty
+            and zero-width everywhere else, so it costs nothing on the other pages. */}
+        <div id="sn-page-actions" className="sn-actions" />
 
         <button
           className="sn-burger"

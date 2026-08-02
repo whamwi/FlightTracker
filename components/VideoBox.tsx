@@ -56,7 +56,7 @@ const PlayIcon = () => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill={PANEL.forest}><path d="M8 5v14l11-7z"/></svg>
 )
 
-export default function VideoBox() {
+export default function VideoBox({ open: openProp, onToggle, externalTrigger }: { open?: boolean; onToggle?: (next: boolean) => void; externalTrigger?: boolean } = {}) {
   const [videos, setVideos] = useState<Video[]>([])
   const [muted,  setMuted]  = useState(true)
   const [open,   setOpen]   = useState(false)
@@ -150,6 +150,9 @@ export default function VideoBox() {
       pillLabel="Videos"
       icon={<PlayIcon />}
       onOpenChange={setOpen}
+      open={openProp}
+      onToggle={onToggle}
+      externalTrigger={externalTrigger}
       actions={
         <>
           <button onClick={toggleMute} style={actionBtn} title={muted ? 'Unmute' : 'Mute'}>

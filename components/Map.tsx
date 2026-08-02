@@ -2,6 +2,7 @@
 
 import 'leaflet/dist/leaflet.css'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { FlightPredictor } from '@/lib/flight-predictor'
 import type { LivePosition as PredictorLivePos } from '@/lib/flight-predictor'
 import { airlineLogo, LOGO_WHITE_BG } from '@/lib/airlines'
@@ -659,6 +660,17 @@ function isInSyria(lat: number, lon: number, geo: any): boolean {
   return false
 }
 
+// Header buttons for the media boxes: sized to the hamburger beside them so the row reads
+// as one set of controls rather than two.
+const headerActionBtn = (active: boolean): React.CSSProperties => ({
+  width: 40, height: 40, borderRadius: 10,
+  border: `1px solid ${active ? PANEL.forest : PANEL.border}`,
+  background: active ? PANEL.forest : '#FFFFFF',
+  color: active ? '#FFFFFF' : PANEL.forest,
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  cursor: 'pointer', flexShrink: 0, padding: 0,
+})
+
 export default function Map({ embed = false, targetFlight, panelOpen }: { embed?: boolean; targetFlight?: string; panelOpen?: boolean }) {
   const mapRef          = useRef<HTMLDivElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -741,6 +753,28 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
 
   // ── Over-Syria feature state ─────────────────────────────────────────────
   const [overSyriaOn, setOverSyriaOn]       = useState(false)
+
+  // Media boxes on phones. Their triggers move into the site header — the only chrome on
+  // this page that is not covering the map — so the map surface stays clear until you ask
+  // for something. The buttons are portalled rather than passed down as props: the header
+  // is rendered by the page, well outside this tree, and threading two booleans and their
+  // setters up through it would put map state in a component with no other use for it.
+  const [videoOpen, setVideoOpen] = useState(false)
+  const [photoOpen, setPhotoOpen] = useState(false)
+  const [isPhone, setIsPhone] = useState(false)
+  const [actionSlot, setActionSlot] = useState<HTMLElement | null>(null)
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)')
+    const apply = () => setIsPhone(mq.matches)
+    apply()
+    mq.addEventListener('change', apply)
+    return () => mq.removeEventListener('change', apply)
+  }, [])
+
+  // The header mounts before this map does, but look it up after paint rather than during
+  // render so a slower first paint cannot leave the buttons homeless.
+  useEffect(() => { setActionSlot(document.getElementById('sn-page-actions')) }, [])
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const syriaGeoRef                          = useRef<any>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2157,9 +2191,40 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           position: 'absolute', top: 10, right: 10, zIndex: 1000,
           display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8,
         }}>
-        <VideoBox />
-        <PhotoBox />
+        <VideoBox
+          open={isPhone ? videoOpen : undefined}
+          onToggle={setVideoOpen}
+          externalTrigger={isPhone}
+        />
+        <PhotoBox
+          open={isPhone ? photoOpen : undefined}
+          onToggle={setPhotoOpen}
+          externalTrigger={isPhone}
+        />
         </div>
+      )}
+      {!embed && isPhone && actionSlot && createPortal(
+        <>
+          <button
+            onClick={() => { setVideoOpen(v => !v); setPhotoOpen(false) }}
+            aria-label="Aviation Authority videos"
+            aria-pressed={videoOpen}
+            style={headerActionBtn(videoOpen)}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          </button>
+          <button
+            onClick={() => { setPhotoOpen(v => !v); setVideoOpen(false) }}
+            aria-label="Aviation Authority photos"
+            aria-pressed={photoOpen}
+            style={headerActionBtn(photoOpen)}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.8"/><path d="m3 17 5-4.5 4 3.5 3.5-3L21 17"/>
+            </svg>
+          </button>
+        </>,
+        actionSlot,
       )}
       {/* Over Syria is a filter — it changes what the map shows — while Videos and Photos
           open content. Stacking the three together made that corner read as a wall of

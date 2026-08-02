@@ -36,7 +36,7 @@ const PhotoIcon = () => (
   </svg>
 )
 
-export default function PhotoBox() {
+export default function PhotoBox({ open: openProp, onToggle, externalTrigger }: { open?: boolean; onToggle?: (next: boolean) => void; externalTrigger?: boolean } = {}) {
   const [photos, setPhotos] = useState<Photo[]>([])
   const [idx,    setIdx]    = useState(0)
   const [open,   setOpen]   = useState(false)
@@ -101,6 +101,9 @@ export default function PhotoBox() {
       pillLabel="Photos"
       icon={<PhotoIcon />}
       onOpenChange={setOpen}
+      open={openProp}
+      onToggle={onToggle}
+      externalTrigger={externalTrigger}
       actions={
         <>
           <button onClick={() => step(-1)} style={actionBtn} title="Previous">
