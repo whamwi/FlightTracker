@@ -279,11 +279,19 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
   const setRef      = useRef<HTMLDivElement>(null)
   const [looping, setLooping] = useState(false)
 
-  // Selecting a flight stops the ticker and drops the duplicate copy. Both matter: a moving
-  // strip is hard to read once you have picked something out of it, and with the list
-  // rendered twice the selected card is highlighted in both copies, so wrapping made the
-  // highlight appear to jump between first and second position.
-  const loop = looping && !selectedFlight
+  // Three conditions before the strip is allowed to move.
+  //
+  // Overflow alone is not enough: two cards that overrun by 40px make it crawl back and
+  // forth over almost nothing, which costs attention and shows nothing the half-visible
+  // second card does not already advertise. Under three flights the peek is the affordance.
+  //
+  // Count alone is not enough either — three cards fit outright on a tablet, and moving
+  // them there would be motion for its own sake.
+  //
+  // Selecting stops it too. A moving strip is hard to read once you have picked something
+  // out of it, and with the list rendered twice the selected flight is highlighted in both
+  // copies, so wrapping made the highlight appear to jump between first and second position.
+  const loop = looping && flights.length >= 3 && !selectedFlight
 
   // Only worth animating when the cards actually overrun the screen.
   useEffect(() => {
