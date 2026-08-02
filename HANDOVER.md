@@ -7,6 +7,24 @@ live flight positions.
 
 ## 1. The core finding
 
+> **⚠ LARGELY WRONG — corrected 2026-08-02. Read this before trusting anything below.**
+>
+> The evidence for this section was gathered against **adsb.fi's v2 `lat/lon/dist`
+> endpoint, which is deprecated and answers `200` with an empty `ac` array** — not an
+> error. adsb.lol, the fallback, also returns 200-empty over this region, so every call
+> reported success while delivering nothing. Measured side by side:
+> **v2 IST/250 → 0 aircraft, v3 IST/250 → 88, v3 DAM/250 → 31.**
+>
+> v3 also caps `dist` at **250 NM**, so the 700 and 400 NM circles below were over the
+> limit and could not have worked either. The feeds were never dark; we were asking a dead
+> endpoint. A second cause was compounding it: `airlines` mapped `DN → JOC` while the
+> aircraft broadcast `DNA541`, so Dan Air flights never matched their live contact at all.
+>
+> The one claim here that survives is the *design* conclusion — the path-anchored model
+> must not depend on continuous fixes. That remains right, and is why nothing visibly
+> broke while the feed was silently empty. **Re-measure coverage before planning around
+> scarcity.**
+
 **ADS-B delivers nothing for large stretches of time.** Verified repeatedly:
 
 - `/api/airspace` returns `aircraft: []` while flights are visibly airborne
