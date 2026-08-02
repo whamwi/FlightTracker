@@ -2235,6 +2235,13 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
               <rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.8"/><path d="m3 17 5-4.5 4 3.5 3.5-3L21 17"/>
             </svg>
           </button>
+          {/* Straight to the board. The map is the entry point most people land on, and the
+              full schedule was otherwise two taps away behind the menu. */}
+          <a href="/board" aria-label="Flight board" style={{ ...headerActionBtn(false), textDecoration: 'none' }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
+            </svg>
+          </a>
         </>,
         actionSlot,
       )}

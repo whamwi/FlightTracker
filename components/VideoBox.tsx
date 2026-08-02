@@ -1,8 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import Link from 'next/link'
-import MapBox, { PANEL, actionBtn } from './MapBox'
+import MapBox, { PANEL } from './MapBox'
 
 /**
  * Plays the Syrian Civil Aviation Authority's YouTube videos back to back in the Track
@@ -50,6 +49,16 @@ function loadYouTubeApi(): Promise<any> {
       document.head.appendChild(s)
     }
   })
+}
+
+// Legible over any frame of video: translucent black rather than the panel's beige, which
+// disappeared against bright shots.
+const overlayBtn: React.CSSProperties = {
+  width: 28, height: 28, borderRadius: 8,
+  border: '1px solid rgba(255,255,255,.25)', background: 'rgba(0,0,0,.55)',
+  backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)',
+  color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+  flexShrink: 0, padding: 0,
 }
 
 const PlayIcon = () => (
@@ -133,29 +142,43 @@ export default function VideoBox({ open: openProp, onToggle, externalTrigger }: 
     setMuted((m) => !m)
   }, [muted])
 
+  // iOS Safari exposes no Element.requestFullscreen — only video elements can go fullscreen
+  // there, and a YouTube embed is an iframe — so the button silently did nothing on a large
+  // share of phones. It is hidden where the API is absent rather than left as dead chrome.
+  const [canExpand, setCanExpand] = useState(false)
+  useEffect(() => {
+    const el = document.createElement('div') as HTMLElement & { webkitRequestFullscreen?: unknown }
+    setCanExpand(!!(el.requestFullscreen || el.webkitRequestFullscreen))
+  }, [])
+
   const expand = useCallback(() => {
-    playerRef.current?.getIframe?.()?.requestFullscreen?.()
+    const frame = playerRef.current?.getIframe?.() as (HTMLIFrameElement & { webkitRequestFullscreen?: () => void }) | undefined
+    if (!frame) return
+    if (frame.requestFullscreen) frame.requestFullscreen().catch(() => {})
+    else frame.webkitRequestFullscreen?.()
   }, [])
 
   if (videos.length === 0) return null
 
   return (
     <MapBox
+      bare
       title="Aviation Authority"
-      subtitle={
-        <>
-          {videos.length} videos · <Link href="/news" style={{ color: PANEL.forestMid, fontWeight: 600, textDecoration: 'none' }}>view all ↗</Link>
-        </>
-      }
       pillLabel="Videos"
       icon={<PlayIcon />}
       onOpenChange={setOpen}
       open={openProp}
       onToggle={onToggle}
       externalTrigger={externalTrigger}
-      actions={
-        <>
-          <button onClick={toggleMute} style={actionBtn} title={muted ? 'Unmute' : 'Mute'}>
+    >
+      <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 9', background: '#000' }}>
+        {/* The API replaces this node with its own iframe. */}
+        <div ref={hostRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />
+
+        {/* Controls sit on the picture rather than in a header above it. Bottom-right, over
+            the darkest part of most shots, and small enough not to fight the video. */}
+        <div style={{ position: 'absolute', right: 8, bottom: 8, display: 'flex', gap: 6 }}>
+          <button onClick={toggleMute} style={overlayBtn} title={muted ? 'Unmute' : 'Mute'}>
             {muted ? (
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M11 5 6 9H2v6h4l5 4z"/><path d="M22 9l-6 6M16 9l6 6"/>
@@ -166,17 +189,14 @@ export default function VideoBox({ open: openProp, onToggle, externalTrigger }: 
               </svg>
             )}
           </button>
-          <button onClick={expand} style={actionBtn} title="Expand">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 3H3v6M21 9V3h-6M15 21h6v-6M3 15v6h6"/>
-            </svg>
-          </button>
-        </>
-      }
-    >
-      <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 9', background: '#000' }}>
-        {/* The API replaces this node with its own iframe. */}
-        <div ref={hostRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />
+          {canExpand && (
+            <button onClick={expand} style={overlayBtn} title="Expand">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 3H3v6M21 9V3h-6M15 21h6v-6M3 15v6h6"/>
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
     </MapBox>
   )

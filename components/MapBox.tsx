@@ -43,7 +43,7 @@ export const actionBtn: CSSProperties = {
 
 export default function MapBox({
   title, subtitle, pillLabel, icon, actions, children, onOpenChange, externalTrigger,
-  open: openProp, onToggle,
+  open: openProp, onToggle, bare,
 }: {
   title:     string
   subtitle?: ReactNode
@@ -63,6 +63,12 @@ export default function MapBox({
   /** Controlled mode. Omit to keep the box's own breakpoint-driven behaviour. */
   open?: boolean
   onToggle?: (next: boolean) => void
+  /**
+   * Drop the header and the padded inner card, leaving the panel shell around the content
+   * alone. For media that fills its own frame the header is a second title bar above
+   * something already captioned, and the padding is a border around a border.
+   */
+  bare?: boolean
 }) {
   const [selfOpen, setSelfOpen] = useState(false)
   const [ready,  setReady]  = useState(false)
@@ -111,6 +117,14 @@ export default function MapBox({
         {icon}
         {pillLabel}
       </button>
+    )
+  }
+
+  if (bare) {
+    return (
+      <div style={{ ...panelShell, width: 'min(308px, calc(88vw - 12px))', position: 'relative' }}>
+        {children}
+      </div>
     )
   }
 

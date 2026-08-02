@@ -401,7 +401,7 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
           >
             <MiniLogo iata={f.airline_iata} name={f.airline_name} />
             <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-              <span style={{ display: 'flex', alignItems: 'baseline', gap: 6, whiteSpace: 'nowrap' }}>
+              <span style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, whiteSpace: 'nowrap' }}>
                 <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11.5, fontWeight: 700, color: C.ink, letterSpacing: '.04em' }}>
                   {f.iata_number}
                 </span>
