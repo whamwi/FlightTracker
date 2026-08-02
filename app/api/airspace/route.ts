@@ -792,9 +792,10 @@ export async function GET() {
     // Include any board flight with a confirmed departure (or arrival) that is
     // not covered by a live ADS-B signal.  Flights with actual_arr_utc within
     // the last 4 h are included so the Map can show the ARRIVED state briefly.
-    // For inbound flights without a departure confirmation (FR24 only updates the
-    // arrival-airport row, which stays "Estimated" until landing), we synthesize
-    // actual_dep_utc from sched_dep so the ESTIMATED ghost marker still appears.
+    // This block does NOT synthesize a departure — it requires f.actual_dep_utc, which
+    // comes from FR24's real_dep or a "Departed HH:MM" status. The only synthesis is in
+    // the annotate loop above (inferDepartureTs), and it derives from position, not from
+    // the scheduled time.
     const NOW_MS = Date.now()
     // Syria midnight = start of today's Syria date in UTC (e.g. 21:00 UTC yesterday)
     const syriaToday       = new Date(NOW_MS + 3 * 3_600_000).toISOString().slice(0, 10)
