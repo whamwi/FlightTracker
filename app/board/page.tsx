@@ -494,7 +494,7 @@ function FlightCard({ f, view, isPinned, onTogglePin }: { f: Flight; view: View;
         </div>
         {showTrack && (
           <Link
-            href={`/?flight=${encodeURIComponent(f.iata_number)}`}
+            href={`/map?flight=${encodeURIComponent(f.iata_number)}`}
             style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 11px', borderRadius: 99, background: C.forest, color: '#fff', fontSize: 11, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap', fontFamily: "'Instrument Sans', system-ui" }}
           >
             <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
@@ -1119,7 +1119,7 @@ export default function BoardPage() {
                 <span style={{ font: `600 13.5px/1 'Instrument Sans', system-ui`, color: C.ink }}>Live map</span>
                 <span style={{ font: `500 11px/1 'Instrument Sans', system-ui`, color: C.muted }}>Leaflet · light tiles</span>
               </div>
-              <Link href="/" style={{
+              <Link href="/map" style={{
                 display: 'flex', alignItems: 'center', gap: 7, padding: '8px 13px', borderRadius: 9,
                 background: C.forest, textDecoration: 'none',
               }}>

@@ -26,7 +26,7 @@ const C = {
 
 export const NAV_ITEMS = [
   { label: 'Flights',      href: '/board'        },
-  { label: 'Track',        href: '/'             },
+  { label: 'Track',        href: '/map'          },
   { label: 'Destinations', href: '/destinations' },
   { label: 'Airlines',     href: '/airlines'     },
   { label: 'News',         href: '/news'         },

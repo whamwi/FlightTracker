@@ -122,7 +122,7 @@ export default function SchedulePage() {
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <header className="flex items-center gap-3 px-4 py-3 border-b border-gray-800 shrink-0">
         <Link
-          href="/"
+          href="/map"
           className="text-gray-400 hover:text-white text-sm transition-colors"
         >
           ← Map

@@ -400,7 +400,7 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
               Share
             </button>
             {/* Track → live map */}
-            <Link href={`/?flight=${encodeURIComponent(flight.iata_number)}`} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#EBF3EF', color: C.forest, border: `1px solid #B8D8CC`, borderRadius: 10, padding: '10px 8px', fontSize: 12, fontWeight: 600, textDecoration: 'none' }}>
+            <Link href={`/map?flight=${encodeURIComponent(flight.iata_number)}`} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#EBF3EF', color: C.forest, border: `1px solid #B8D8CC`, borderRadius: 10, padding: '10px 8px', fontSize: 12, fontWeight: 600, textDecoration: 'none' }}>
               <svg width={12} height={12} viewBox="0 0 16 16" fill="none">
                 <circle cx="8" cy="6.5" r="3" stroke="currentColor" strokeWidth="1.5"/>
                 <path d="M8 15C8 15 2.5 10 2.5 6.5a5.5 5.5 0 0 1 11 0C13.5 10 8 15 8 15z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
