@@ -344,6 +344,25 @@ Basic auth is no longer accepted by OpenSky at all.
    right answer the whole time and `/api/airspace` never read it. When a data source looks
    empty, check that you are asking for the right key before concluding the source is dry.
 
+### Added 2026-08-02 (evening)
+
+**Next's App Router will not clear a query string via `<Link>` or `router.replace`.**
+The in-air panel's flight selection lived in the URL (`/?flight=XX123`). Adding a Clear
+button as `<Link href="/">` looked correct and passed every check on the dev server. In
+production it did nothing — `location.search` stayed `?flight=3L505`. Swapping to
+`router.replace('/', { scroll: false })` behaved identically. The App Router keys its
+client-side cache on the pathname, so a query-only change back to the bare route is
+treated as the same navigation and skipped; dev disables that caching, which is why the
+two spellings diverge between environments.
+
+Fix: selection now lives in `HomeInner` state, seeded once from `useSearchParams` so deep
+links still work, with the URL kept in sync by `window.history.replaceState`. Cards call
+`preventDefault()` and set state directly, keeping their `href` only for open-in-new-tab.
+
+The lesson is the testing one, not the Next one: **a UI change that passes on `localhost`
+is not verified.** Both broken versions were committed and deployed on the strength of a
+local pass. Only a click on the deployed site caught it.
+
 ## 8. Commands
 
 ```bash
