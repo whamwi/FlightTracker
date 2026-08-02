@@ -288,6 +288,26 @@ function schedToLocal(hhmm: string, offset: number): string {
 
 const fmtHm = (m: number) => m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`
 
+/**
+ * The flight number and the broadcast callsign are two different identifiers for the same
+ * flight — 3L505 is what a passenger sees on a ticket and what FR24 publishes; ADY505 is
+ * what the aircraft actually transmits and what every ADS-B tracker keys on. They are often
+ * unrelated strings (RB444/SYR444, XQ808/SXS808, DN541/DNA541), so showing only one leaves
+ * a user unable to reconcile our card with what they see elsewhere.
+ *
+ * Rendered as "3L505 · ADY505 · A320", callsign omitted when it is identical to the flight
+ * number so the line does not read "ADY505 · ADY505".
+ */
+function identityLine(flightNum: string | null | undefined, callsign: string | null | undefined, acType: string | null): string {
+  const fn = (flightNum ?? '').trim()
+  const cs = (callsign  ?? '').trim()
+  const parts: string[] = []
+  if (fn) parts.push(fn)
+  if (cs && cs.toUpperCase() !== fn.toUpperCase()) parts.push(cs)
+  if (acType) parts.push(acType)
+  return parts.join(' · ')
+}
+
 // One progress bar for both popup builders.
 //
 // They had drifted into two designs: a flex layout with an 18px circled SVG marker, and an
@@ -462,7 +482,7 @@ function buildPopup(
       ${logoHtml}
       <div style="flex:1;min-width:0">
         <div style="font-size:14px;font-weight:700;color:#f9fafb;line-height:1.25">${alName}</div>
-        <div style="font-size:12px;color:#9ca3af;margin-top:2px">${flightNum}${acType ? ` · ${acType}` : ''}</div>
+        <div style="font-size:12px;color:#9ca3af;margin-top:2px">${identityLine(flightNum, callsign, acType)}</div>
       </div>
       <span style="background:${statusBg};color:${statusFg};font-size:10px;font-weight:600;padding:3px 8px;border-radius:99px;flex-shrink:0;margin-top:1px">${statusLabel}</span>
     </div>
@@ -571,7 +591,7 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
       ${logoHtml}
       <div style="flex:1;min-width:0">
         <div style="font-size:14px;font-weight:700;color:#f9fafb;line-height:1.25">${alName}</div>
-        <div style="font-size:12px;color:#9ca3af;margin-top:2px">${fs?.flight_number ?? e.callsign}${acType ? ` · ${acType}` : ''}</div>
+        <div style="font-size:12px;color:#9ca3af;margin-top:2px">${identityLine(fs?.flight_number, e.callsign, acType)}</div>
       </div>
       <span style="background:${statusBg};color:${statusFg};font-size:10px;font-weight:600;padding:3px 8px;border-radius:99px;flex-shrink:0;margin-top:1px">${statusLabel}</span>
     </div>
