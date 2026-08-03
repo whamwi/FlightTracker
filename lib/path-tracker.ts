@@ -233,6 +233,12 @@ export interface PathConfig {
   /** Implied ground speed above this between two fixes means one of them is wrong. */
   maxImpliedGsKts: number
   /** Backward disagreement tolerated without corroboration, as a path fraction. */
+  /**
+   * How long after a tracker is created its position may still be replaced by the first
+   * real fix that disagrees backwards. Beyond this the seeded guess has been on screen long
+   * enough that moving it would be a visible reversal.
+   */
+  initialSnapWindowMs: number
   backwardToleranceS: number
   /** Consecutive agreeing fixes needed before a backward correction is believed. */
   backwardConfirmCount: number
@@ -263,6 +269,7 @@ export const DEFAULT_PATH_CONFIG: Readonly<PathConfig> = {
   maxRateFactor:         1.6,
   maxOffPathKm:          40,
   maxImpliedGsKts:       700,
+  initialSnapWindowMs:   5 * 60_000,
   backwardToleranceS:    0.01,
   backwardConfirmCount:  2,
   divergenceCount:       3,
@@ -309,6 +316,8 @@ export class PathTracker {
   private lastAcceptedMs: number | null = null
   private lastAltitudeFt: number | null = null
 
+  private hasAcceptedFix = false
+  private readonly createdAtMs: number
   private backwardStreak = 0
   private offPathStreak  = 0
   private mode: PathMode = 'path'
@@ -340,6 +349,7 @@ export class PathTracker {
     this.cfg = cfg
     this.ctx = ctx
     this.lastAdvanceMs = nowMs
+    this.createdAtMs   = nowMs
 
     // Fall back to a great circle rather than going path-less, so routes with no stored
     // waypoints still get projection and rate correction instead of rejecting every fix.
@@ -426,6 +436,21 @@ export class PathTracker {
   }
 
   /** Rate clamps: relative to nominal, but never above what the aircraft could fly. */
+  /**
+   * Path fraction per ms implied by the aircraft's reported ground speed.
+   *
+   * Null when the fix carries no speed, or the geometry has no length to divide by, in which
+   * case the caller falls back to the schedule-derived nominal rate.
+   */
+  private measuredRate(fix: PathFix): number | null {
+    const gs = fix.gs_kts
+    if (gs == null || !Number.isFinite(gs) || gs <= 0) return null
+    const totalKm = this.geo.totalKm
+    if (!(totalKm > 0)) return null
+    const kmPerMs = (gs * 1.852) / 3_600_000
+    return Math.min(kmPerMs / totalKm, this.maxPhysicalRate())
+  }
+
   private rateBounds(nominal: number): [number, number] {
     const lo = nominal * this.cfg.minRateFactor
     const hi = Math.max(lo, Math.min(nominal * this.cfg.maxRateFactor, this.maxPhysicalRate()))
@@ -497,10 +522,41 @@ export class PathTracker {
     this.lastAcceptedMs  = fix.at_ms
     if (fix.altitude_ft != null) this.lastAltitudeFt = fix.altitude_ft
 
+    // The first fix may pull the aircraft BACK, once.
+    //
+    // Until a fix arrives, `s` is only the elapsed-time fraction the constructor seeded,
+    // which assumes the whole route is flown at the average speed. A departing aircraft is
+    // nowhere near that — measured 315 kts against a ~450 kt average on a DAM–AMS climb — so
+    // a tracker created shortly after departure starts tens of km ahead of the real
+    // aircraft, and can never recover: progress is monotonic and the correction below only
+    // adjusts the rate. Reversing there is not really a reversal, because the value being
+    // discarded was a guess and no position had been observed yet.
+    //
+    // Deliberately one-directional. Letting the first fix pull the aircraft FORWARD would
+    // mean a single wrong or spoofed position teleporting it down the route, which is what
+    // the rate-only design exists to prevent — so a forward disagreement is still worked off
+    // gradually, through the rate.
+    const withinStartup = nowMs - this.createdAtMs <= this.cfg.initialSnapWindowMs
+    if (!this.hasAcceptedFix) {
+      this.hasAcceptedFix = true
+      if (errorS < 0 && withinStartup) this.s = clamp(sLive, 0, 1)
+    }
+
     // The correction itself: close the disagreement over the horizon, never by moving.
+    //
+    // The baseline is the aircraft's own measured ground speed when it reports one, rather
+    // than the route average. `gs_kts` has always been carried on the fix and never read, so
+    // the rate was the schedule's opinion even while the aircraft was telling us otherwise —
+    // which is what let it run ahead during climb faster than the correction could claw back.
     const nominal  = this.nominalRate(nowMs)
-    const target   = nominal + errorS / this.cfg.correctionHorizonMs
-    const [lo, hi] = this.rateBounds(nominal)
+    const measured = this.measuredRate(fix)
+    const base     = measured ?? nominal
+    const target   = base + errorS / this.cfg.correctionHorizonMs
+    // Bounds follow whichever baseline is in use: tying a measured rate to a fraction of the
+    // nominal one would reimpose the schedule we just stopped trusting.
+    const [lo, hi] = measured != null
+      ? [0, this.maxPhysicalRate()] as [number, number]
+      : this.rateBounds(nominal)
     this.v = clamp(target, lo, hi)
 
     return { accepted: true, reason: null, errorS }

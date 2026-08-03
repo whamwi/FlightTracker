@@ -345,3 +345,67 @@ describe('resumption and reporting', () => {
     }
   })
 })
+
+describe('a newly created tracker defers to its first real fix', () => {
+  // The constructor seeds `s` from elapsed time, which assumes the route is flown at its
+  // average speed. A climbing aircraft is well short of that, so a tracker created shortly
+  // after departure starts ahead of the aeroplane and — progress being monotonic and the
+  // correction being rate-only — could never get back. Measured 52 km of drift on a
+  // DAM–AMS departure before this.
+  test('the first fix may pull it back while the position is still only a guess', () => {
+    // Created an hour in, so the seeded guess is s = 0.25.
+    const born = T0 + HOUR
+    const t = new PathTracker(ctx(), born)
+    assert.ok(Math.abs(t.position(born).routeFraction - 0.25) < 1e-6)
+
+    // The aircraft is really at 0.20 — behind the schedule's opinion. A lone backward fix
+    // is not believed, so corroborate it the way the live feed does: another fix seconds
+    // later, still well inside the startup window.
+    let now = born, out
+    for (let i = 0; i < DEFAULT_PATH_CONFIG.backwardConfirmCount; i++) {
+      now += 10_000
+      out = t.applyFix({ ...onPath(0.20), at_ms: now }, now)
+    }
+    assert.equal(out?.accepted, true)
+    assert.ok(
+      Math.abs(t.position(now).routeFraction - 0.20) < 1e-3,
+      'first accepted fix should place the aircraft, not just adjust the rate',
+    )
+  })
+
+  test('but only backwards — a first fix ahead must not teleport it', () => {
+    const born = T0 + HOUR
+    const t = new PathTracker(ctx(), born)
+    const before = t.position(born).routeFraction
+
+    t.applyFix({ ...onPath(0.60), at_ms: born }, born)
+    assert.equal(t.position(born).routeFraction, before,
+      'a forward disagreement is still worked off through the rate')
+  })
+
+  test('and only while it is new — a late first fix cannot reverse it', () => {
+    const born = T0 + HOUR
+    const t = new PathTracker(ctx(), born)
+    const late = born + DEFAULT_PATH_CONFIG.initialSnapWindowMs + 60_000
+    const before = t.position(late).routeFraction
+
+    t.applyFix({ ...onPath(0.20), at_ms: late }, late)
+    assert.ok(t.position(late).routeFraction >= before,
+      'past the startup window the seeded position has been on screen too long to move')
+  })
+
+  test('the rate follows the reported ground speed once one is known', () => {
+    const born = T0 + HOUR
+    const slow = new PathTracker(ctx(), born)
+    const fast = new PathTracker(ctx(), born)
+
+    slow.applyFix({ ...onPath(0.25), at_ms: born, gs_kts: 200 }, born)
+    fast.applyFix({ ...onPath(0.25), at_ms: born, gs_kts: 500 }, born)
+
+    const later = born + 10 * 60_000
+    assert.ok(
+      fast.position(later).routeFraction > slow.position(later).routeFraction,
+      'a slower aircraft must advance more slowly than a faster one on the same route',
+    )
+  })
+})
