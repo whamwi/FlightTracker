@@ -28,10 +28,14 @@ const SB_URL     = process.env.SUPABASE_URL!
 const SB_KEY     = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY!
 const SB_HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 
-// Four sweeps at ~14s leaves headroom inside maxDuration: each sweep itself takes about
-// 4.5s of deliberate spacing (five circles, 1.1s apart) plus request time.
-const SWEEPS      = 4
-const SWEEP_GAP_MS = 14_000
+// No gap between sweeps: a sweep already takes ~14s on its own — five circles spaced 1.1s
+// apart, plus request time — so back-to-back sweeps produce a ~14s cadence by themselves.
+// Adding a 14s gap on top made the first version run ~98s and time out.
+//
+// Bounded by a deadline rather than a count, so a slow feed cannot push the invocation past
+// its limit: a run that manages two sweeps is fine, one that gets killed writes nothing.
+const MAX_SWEEPS   = 4
+const DEADLINE_MS  = 45_000
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 async function writePositions(aircraft: any[]): Promise<number> {
@@ -76,8 +80,8 @@ export async function GET() {
   const started = Date.now()
   const sweeps: { aircraft: number; written: number; circlesOk: number; live: boolean }[] = []
 
-  for (let i = 0; i < SWEEPS; i++) {
-    if (i > 0) await new Promise(r => setTimeout(r, SWEEP_GAP_MS))
+  for (let i = 0; i < MAX_SWEEPS; i++) {
+    if (Date.now() - started > DEADLINE_MS) break
     try {
       const { aircraft, live, circlesOk } = await sweepAllCircles()
       const written = await writePositions(aircraft)
