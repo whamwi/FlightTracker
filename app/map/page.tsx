@@ -321,6 +321,9 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
     // same integer every frame and adds to it again — the strip sits at zero and never
     // moves. Time-based rather than per-frame so the speed does not double on a 120Hz screen.
     let pos = el.scrollLeft
+    // The value we last wrote, read back after writing so it matches the browser's rounding.
+    // Needed to tell our own scroll events apart from the user's — see onScroll below.
+    let selfScrollTo = -1
     const PX_PER_MS = 0.022
     const tick = (t: number) => {
       const width = setRef.current?.offsetWidth ?? 0
@@ -330,6 +333,7 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
         pos += PX_PER_MS * dt
         if (pos >= width) pos -= width
         el.scrollLeft = pos
+        selfScrollTo = el.scrollLeft
       } else {
         // The user is driving; pick up from wherever they left it.
         pos = el.scrollLeft
@@ -344,9 +348,16 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
     el.addEventListener('pointerup', release)
     el.addEventListener('pointercancel', release)
     el.addEventListener('pointerleave', release)
-    // A swipe is momentum scrolling that keeps firing after the finger is gone, so the
-    // timer restarts on every scroll event rather than only on release.
-    el.addEventListener('scroll', () => { if (!held) resumeAt = performance.now() + 3500 }, { passive: true })
+    // A swipe is momentum scrolling that keeps firing after the finger is gone, so the timer
+    // restarts on scroll rather than only on release — but writing scrollLeft fires this same
+    // event. Without the guard the loop re-armed its own cooldown every frame and advanced
+    // ~0.4px every 3.5s, which reads as completely still.
+    const onScroll = () => {
+      if (held) return
+      if (Math.abs(el.scrollLeft - selfScrollTo) <= 2) return
+      resumeAt = performance.now() + 3500
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
 
     return () => {
       cancelAnimationFrame(raf)
@@ -354,6 +365,7 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
       el.removeEventListener('pointerup', release)
       el.removeEventListener('pointercancel', release)
       el.removeEventListener('pointerleave', release)
+      el.removeEventListener('scroll', onScroll)
     }
   }, [loop, flights.length])
 
