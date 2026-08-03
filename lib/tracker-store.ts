@@ -85,8 +85,34 @@ export class TrackerStore {
         this.trackers.set(f.callsign, t)
         this.lastEta.set(f.callsign, f.eta_ms)
       } else if (f.eta_ms !== this.lastEta.get(f.callsign)) {
-        // A revised arrival is a rate change, not a position change.
-        t.setEta(f.eta_ms, nowMs)
+        const prevEta = this.lastEta.get(f.callsign)
+        // A revised arrival is normally a rate change, not a position change.
+        //
+        // Unless the arrival moved so far that the progress built on the old one is
+        // meaningless. A flight arrived carrying an ETA a day late: the rate was remaining
+        // path over remaining time, so the marker crawled from its origin while the aircraft
+        // flew, and when the feed was corrected setEta could only speed it up — progress is
+        // monotonic, so hours of bad accumulation could not be undone and the aircraft stayed
+        // near its departure airport until the page was reloaded. A correction of that size
+        // means the tracker should start over rather than carry the error forward.
+        const shifted = prevEta != null && f.eta_ms != null
+          ? Math.abs(f.eta_ms - prevEta)
+          : 0
+        if (shifted > this.cfg.etaRebuildMs) {
+          this.trackers.set(f.callsign, new PathTracker({
+            variants:       f.variants,
+            dep_coords:     f.dep_coords,
+            arr_coords:     f.arr_coords,
+            departed_at_ms: f.departed_at_ms,
+            eta_ms:         f.eta_ms,
+            duration_ms:    f.duration_ms,
+          }, nowMs, this.cfg))
+          this.lastFixAt.delete(f.callsign)
+          this.lastOutcome.delete(f.callsign)
+          t = this.trackers.get(f.callsign)!
+        } else {
+          t.setEta(f.eta_ms, nowMs)
+        }
         this.lastEta.set(f.callsign, f.eta_ms)
       }
 

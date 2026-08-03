@@ -239,6 +239,16 @@ export interface PathConfig {
    * enough that moving it would be a visible reversal.
    */
   initialSnapWindowMs: number
+  /**
+   * An arrival estimate moving further than this is treated as a correction rather than a
+   * revision, and the tracker is rebuilt: progress accumulated against the old estimate is
+   * not worth carrying, and monotonic progress cannot unwind it.
+   *
+   * Set well above any legitimate revision — a four-hour slip is a bad day, not bad data —
+   * and below the ~24 hours a date error moves an arrival by, which is the case this exists
+   * for.
+   */
+  etaRebuildMs: number
   backwardToleranceS: number
   /** Consecutive agreeing fixes needed before a backward correction is believed. */
   backwardConfirmCount: number
@@ -270,6 +280,7 @@ export const DEFAULT_PATH_CONFIG: Readonly<PathConfig> = {
   maxOffPathKm:          40,
   maxImpliedGsKts:       700,
   initialSnapWindowMs:   5 * 60_000,
+  etaRebuildMs:          12 * 3_600_000,
   backwardToleranceS:    0.01,
   backwardConfirmCount:  2,
   divergenceCount:       3,

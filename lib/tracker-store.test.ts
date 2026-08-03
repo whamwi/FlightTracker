@@ -132,3 +132,50 @@ describe('feeding the store', () => {
     assert.ok(p!.routeFraction > 0, 'and should be making progress')
   })
 })
+
+describe('a large arrival correction rebuilds the tracker', () => {
+  // A flight arrived carrying an ETA a day late. The rate is remaining path over remaining
+  // time, so the marker crawled from its origin while the aircraft flew; correcting the ETA
+  // could then only change the rate, and monotonic progress meant the accumulated error
+  // could never be unwound. Such a correction has to start the tracker over.
+  test('progress is discarded when the arrival estimate moves by hours', () => {
+    const store = new TrackerStore()
+    const dep = T0
+    const badEta = dep + 26 * HOUR          // a day-wrapped arrival
+    const input = (eta: number) => ([{
+      callsign: 'RB1', variants: [PATH],
+      dep_coords: [33.0, 36.0] as [number, number],
+      arr_coords: [33.0, 52.0] as [number, number],
+      departed_at_ms: dep, eta_ms: eta, duration_ms: eta - dep,
+    }])
+
+    store.update(input(badEta), dep)
+    // An hour in, the bad ETA has barely moved it.
+    const crawled = store.position('RB1', dep + HOUR)!.routeFraction
+    assert.ok(crawled < 0.1, `expected a crawl, got ${crawled}`)
+
+    // The feed corrects to a sane three-hour block.
+    store.update(input(dep + 3 * HOUR), dep + HOUR)
+    const after = store.position('RB1', dep + HOUR)!.routeFraction
+    assert.ok(after > crawled,
+      'a corrected arrival should reset progress, not leave it stranded behind')
+  })
+
+  test('an ordinary revision still only changes the rate', () => {
+    const store = new TrackerStore()
+    const dep = T0
+    const input = (eta: number) => ([{
+      callsign: 'RB2', variants: [PATH],
+      dep_coords: [33.0, 36.0] as [number, number],
+      arr_coords: [33.0, 52.0] as [number, number],
+      departed_at_ms: dep, eta_ms: eta, duration_ms: eta - dep,
+    }])
+
+    store.update(input(dep + 4 * HOUR), dep)
+    const before = store.position('RB2', dep + HOUR)!.routeFraction
+    // Twenty minutes late — a normal delay, not a correction.
+    store.update(input(dep + 4 * HOUR + 20 * 60_000), dep + HOUR)
+    const after = store.position('RB2', dep + HOUR)!.routeFraction
+    assert.equal(after, before, 'position must not move on a routine revision')
+  })
+})
