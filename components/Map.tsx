@@ -816,6 +816,15 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
   const predictorRef      = useRef<Record<string, FlightPredictor>>({})
   // Path-anchored trackers, one per airborne flight, driving the animation loop.
   const storeRef          = useRef<TrackerStore>(new TrackerStore())
+  /**
+   * Flights held at their last real fix this cycle.
+   *
+   * They keep feeding the tracker — withholding them dropped it, and the next poll built a
+   * fresh one seeded from elapsed time, which jumped the aircraft onto the schedule position
+   * and back again as the pin engaged and disengaged. The tracker keeps running; it just
+   * does not own the marker while the pin holds.
+   */
+  const pinnedRef = useRef<Set<string>>(new Set())
   const storeInputsRef    = useRef<FlightInput[]>([])
   const lastFedPosRef     = useRef<Record<string, string>>({})
 
@@ -1018,6 +1027,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
   useEffect(() => {
     const fetchAndUpdate = async () => {
       storeInputsRef.current = []
+      pinnedRef.current = new Set()
       const L   = (await import('leaflet')).default
       const map = mapInstanceRef.current
       if (!map) return
@@ -1969,7 +1979,8 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         // an arrival estimate is everything they get, which is precisely what the rate
         // channel was built for. These are also the flights that step once per poll today,
         // since ADS-B is frequently returning nothing for the region.
-        if (RAF_MOTION && !arrived && !pinToLastPos) {
+        if (pinToLastPos) pinnedRef.current.add(callsign)
+        if (RAF_MOTION && !arrived) {
           const depAt = fs?.actual_dep_utc ? Date.parse(fs.actual_dep_utc) : null
           if (depAt && Number.isFinite(depAt)) {
             const revised = fs?.revised_arr_utc ? Date.parse(fs.revised_arr_utc) : null
@@ -2131,6 +2142,9 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
       for (const cs of store.callsigns()) {
         const m = markersRef.current[cs] ?? schedMarkersRef.current[cs]
         if (!m) continue
+        // Pinned to a real fix on final approach — the tracker still runs, but moving the
+        // marker here would put it back on the stored path, which is what the pin prevents.
+        if (pinnedRef.current.has(cs)) continue
         const p = store.position(cs, now)
         if (!p) continue
         m.setLatLng([p.lat, p.lon])
