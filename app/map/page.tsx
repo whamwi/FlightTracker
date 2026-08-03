@@ -395,6 +395,10 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
         const outbound = (apFlag[f.dep_iata] ?? '') === '🇸🇾'
         const otherIata = outbound ? f.arr_iata : f.dep_iata
         const otherCity = airportCity[otherIata] ?? otherIata
+        // Same rule as the desktop card and the map's plane markers: an Aleppo leg is orange,
+        // everything else green — so the strip and the map agree at a glance.
+        const isAlp = f.dep_iata === 'ALP' || f.arr_iata === 'ALP'
+        const railColor = isAlp ? '#f97316' : C.forestMid
         return (
           <button
             key={`${ghost ? 'g' : ''}${f.iata_number}-${f.dep_iata}-${f.arr_iata}`}
@@ -402,14 +406,16 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
             aria-label={`${f.iata_number}, ${f.dep_iata} to ${f.arr_iata}`}
             data-flight={ghost ? undefined : f.iata_number}
             style={{
-              flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8,
-              padding: '8px 11px', borderRadius: 12, cursor: 'pointer', textAlign: 'left',
+              flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'stretch',
+              padding: 0, borderRadius: 12, overflow: 'hidden', cursor: 'pointer', textAlign: 'left',
               background: selected ? '#D4EBD4' : 'rgba(255,255,255,0.94)',
               border: `${selected ? 2 : 1}px solid ${selected ? C.forest : C.border}`,
               backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
               boxShadow: '0 2px 10px rgba(0,0,0,.12)',
-              }}
+            }}
           >
+            <span style={{ height: 3, background: railColor, display: 'block', flexShrink: 0 }} />
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 11px 8px' }}>
             <MiniLogo iata={f.airline_iata} name={f.airline_name} />
             <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
               <span style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, whiteSpace: 'nowrap' }}>
@@ -423,6 +429,7 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
               <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, fontWeight: 600, color: C.muted, whiteSpace: 'nowrap' }}>
                 {f.dep_iata} {depTime} <span style={{ color: C.forestLight }}>→</span> {f.arr_iata} {arrTime}
               </span>
+            </span>
             </span>
           </button>
         )
