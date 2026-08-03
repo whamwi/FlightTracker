@@ -28,6 +28,14 @@
     {
       "path": "/api/cron/prune-positions",
       "schedule": "30 3 * * *"
+    },
+    {
+      "path": "/api/cron/path-samples",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/prune-path-samples",
+      "schedule": "45 3 * * *"
     }
   ]
 }

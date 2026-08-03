@@ -28,6 +28,20 @@ export function middleware(request: NextRequest) {
   return NextResponse.next()
 }
 
+// Debug routes are behind the same gate as admin. They were reachable unauthenticated in
+// production: /api/debug-live spends ~53 FR24 credits per call with no rate limit and
+// echoes the upstream URL back, so anyone who found it could drain the credit balance in a
+// loop. Protected rather than deleted — they are useful, they just should not be open.
+// `app/api/debug-*` is untracked, so these ship with the working tree on every deploy.
 export const config = {
-  matcher: ['/admin/:path*', '/api/admin/:path*'],
+  matcher: [
+    '/admin/:path*',
+    '/api/admin/:path*',
+    '/api/debug-hex/:path*',
+    '/api/debug-live/:path*',
+    '/api/debug-summary/:path*',
+    '/api/debug-hex',
+    '/api/debug-live',
+    '/api/debug-summary',
+  ],
 }
