@@ -882,7 +882,6 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         [40.1281, 32.9951], // ESB
         [41.2608, 28.7418], // IST
         [21.6796, 39.1565], // JED
-        [15.5895, 32.5532], // KRT
         [29.2267, 47.9689], // KWI
         [23.5933, 58.2844], // MCT
         [32.8942, 13.2759], // MJI
