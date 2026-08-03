@@ -324,7 +324,7 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
     // The value we last wrote, read back after writing so it matches the browser's rounding.
     // Needed to tell our own scroll events apart from the user's — see onScroll below.
     let selfScrollTo = -1
-    const PX_PER_MS = 0.022
+    const PX_PER_MS = 0.03
     const tick = (t: number) => {
       const width = setRef.current?.offsetWidth ?? 0
       const dt = last ? t - last : 0
@@ -408,8 +408,7 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
               border: `${selected ? 2 : 1}px solid ${selected ? C.forest : C.border}`,
               backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
               boxShadow: '0 2px 10px rgba(0,0,0,.12)',
-              scrollSnapAlign: 'start',
-            }}
+              }}
           >
             <MiniLogo iata={f.airline_iata} name={f.airline_name} />
             <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -439,7 +438,7 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
       <div
         ref={scrollerRef}
         className="ia-strip"
-        style={{ display: 'flex', overflowX: 'auto', padding: '0 12px', scrollSnapType: 'x proximity' }}
+        style={{ display: 'flex', overflowX: 'auto', padding: '0 12px' }}
       >
         {cards(false)}
         {loop && cards(true)}
