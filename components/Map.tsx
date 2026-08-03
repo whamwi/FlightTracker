@@ -101,6 +101,14 @@ const AIRPORT_COORDS: Record<string, [number, number]> = {
 }
 
 const STALE_TTL_MS       = 30 * 60 * 1000
+/**
+ * How long a confirmed arrival stays on the map.
+ *
+ * The comment below this constant's old inline value said 30 minutes while the code said 90,
+ * and mobile independently used 90 — so an arrived flight lingered far longer than intended
+ * on both. One constant now, and both surfaces use 30.
+ */
+const ARRIVED_HOLD_MS    = 30 * 60 * 1000
 const STALE_TTL_SYRIA_MS = 6  * 60 * 60 * 1000
 
 // ── Geometry helpers ──────────────────────────────────────────────────────────
@@ -1327,7 +1335,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           // flightStatusRef is updated from boardDeparted which reflects FR24 status;
           // a.actual_arr_utc (last live snapshot) may still be null when the plane just landed.
           const fsArrUtc = flightStatusRef.current[cs]?.actual_arr_utc
-          if (fsArrUtc && now - new Date(fsArrUtc).getTime() > 90 * 60_000) {
+          if (fsArrUtc && now - new Date(fsArrUtc).getTime() > ARRIVED_HOLD_MS) {
             expired = true
           } else if (a.actual_dep_utc && a.duration_min) {
             const expectedArrMs = new Date(a.actual_dep_utc).getTime() + a.duration_min * 60_000
