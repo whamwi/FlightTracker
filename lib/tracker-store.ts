@@ -35,6 +35,8 @@ export interface FlightInput {
   duration_ms:    number | null
   /** Latest observed position, if one has been seen. */
   fix?:           PathFix | null
+  /** Diagnostic only: which code path produced this input. Ignored by the store. */
+  src?:           'live' | 'sched'
 }
 
 export class TrackerStore {

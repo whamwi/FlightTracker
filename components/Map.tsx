@@ -229,6 +229,7 @@ function logTrackerState(store: any, inputs: any[], now: number) {
     const drift = (f.fix && p) ? greatCircleKm(f.fix.lat, f.fix.lon, p.lat, p.lon) : null
     return {
       cs:        f.callsign,
+      src:       f.src ?? '?',
       driftKm:   drift === null ? null : +drift.toFixed(1),
       drawn:     p ? `${p.lat.toFixed(2)},${p.lon.toFixed(2)}` : '—',
       lastFix:   f.fix ? `${f.fix.lat.toFixed(2)},${f.fix.lon.toFixed(2)}` : '—',
@@ -1654,7 +1655,14 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
                 gs_kts: a.gs ?? null, track_deg: a.track ?? null,
                 altitude_ft: typeof a.alt_baro === 'number' ? a.alt_baro : null,
               } : null,
+              src: 'live',
             })
+          } else if (posDebugOn()) {
+            // A live flight that never reaches the store has no fix to correct it, so its
+            // tracker runs on the schedule alone and drifts ahead of the aircraft. Note
+            // _apCoords is populated by an async loadGeoData(), so an early poll can find it
+            // empty and skip the push entirely.
+            console.warn(`[pos] ${cs} LIVE PUSH SKIPPED — dep=${dep} depC=${!!depC} arr=${arr} arrC=${!!arrC} depAt=${a.actual_dep_utc ?? 'null'}`)
           }
         }
 
@@ -1968,6 +1976,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
                                 : entry.duration_min ? depAt + entry.duration_min * 60_000 : null,
               duration_ms:    entry.duration_min ? entry.duration_min * 60_000 : null,
               fix:            null,
+              src:            'sched',
             })
           }
         }
