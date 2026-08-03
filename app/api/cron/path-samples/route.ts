@@ -31,6 +31,17 @@ const SELF = process.env.NEXT_PUBLIC_SITE_URL
   || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://www.flysyria.app')
 
 export async function GET() {
+  try {
+    return await run()
+  } catch (e) {
+    // An uncaught throw here returns an empty 500, which says nothing. Surface it.
+    const msg = e instanceof Error ? `${e.message}\n${e.stack?.slice(0, 400) ?? ''}` : String(e)
+    console.error('[path-samples] threw', msg)
+    return NextResponse.json({ ok: false, step: 'threw', error: msg }, { status: 500 })
+  }
+}
+
+async function run() {
   const started = Date.now()
 
   const [airspaceRes, pathsRes] = await Promise.all([
