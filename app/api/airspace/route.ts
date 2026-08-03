@@ -253,13 +253,27 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>, lookup: Cal
           ?? (f.est_arr ? new Date(f.est_arr * 1000).toISOString() : null)
         // Prefer computed duration (actual_dep → revised_arr) over stale scheduled block time.
         const effectiveDurationMin = (() => {
+          const sched = f.duration_min ?? null
           if (actual_dep_utc && revised_arr_utc) {
             const c = Math.round(
               (new Date(revised_arr_utc).getTime() - new Date(actual_dep_utc).getTime()) / 60_000
             )
-            if (c > 30) return c
+            // The lower bound alone was not enough. A revised arrival stamped with the wrong
+            // DATE lands exactly 1440 minutes out and was believed: SYR522 DOH-DAM came
+            // through as a 1578-minute block against a scheduled 180, which put its ETA a day
+            // away. Every consumer derives from this — the path tracker's rate is remaining
+            // path over remaining time, so the marker crawled while the aircraft flew, and
+            // drift grew without limit.
+            //
+            // Nothing on this network is close to 12 hours, and a real en-route delay does
+            // not add four. Either bound catches the day-wrap; both are cheap.
+            const plausible = c > 30
+              && c <= MAX_BLOCK_MIN
+              && (sched == null || c <= sched + MAX_DELAY_OVER_SCHED_MIN)
+            if (plausible) return c
+            console.warn(`[airspace] ${num}: implausible revised block ${c}min (sched ${sched}) — using schedule`)
           }
-          return f.duration_min ?? null
+          return sched
         })()
         // Infer actual arrival when dep is confirmed + expected arr time is in the past.
         // When FR24 has its own ETA (revised_arr_utc), trust it — use a tight 15-min window.
@@ -440,6 +454,11 @@ async function upsertPositions(aircraft: any[]): Promise<void> {
 // `board_match: false` and left dep/arr null, which made the whole fallback a no-op: the
 // client drops any aircraft without `board_match`, so the rows were queried, serialised,
 // sent, and discarded on arrival. The enrichment is not cosmetic either — without
+/** Longest credible block time on this network; AMS-DAM, the longest, is under 5 hours. */
+const MAX_BLOCK_MIN = 12 * 60
+/** How far a real en-route delay may stretch a scheduled block before we stop believing it. */
+const MAX_DELAY_OVER_SCHED_MIN = 4 * 60
+
 // dep_iata/arr_iata/duration_min/actual_dep_utc the ghost predictor and the path tracker
 // have nothing to advance a marker along.
 //
