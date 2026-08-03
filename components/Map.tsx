@@ -2124,7 +2124,22 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
     fetchUpdateRef.current = fetchAndUpdate
     fetchAndUpdate()
     const interval = setInterval(fetchAndUpdate, 10_000)
-    return () => { clearInterval(interval); fetchUpdateRef.current = null }
+
+    // Refresh the moment the tab comes back.
+    //
+    // Browsers throttle setInterval in a background tab to roughly once a minute and stop
+    // requestAnimationFrame altogether, so a map left in the background falls behind: aircraft
+    // sit still and a flight that has landed keeps showing en route. Without this the tab then
+    // waits for the next throttled tick before catching up, which is why the same flight can
+    // read as arrived in one window and still flying in another.
+    const onVisible = () => { if (document.visibilityState === 'visible') fetchAndUpdate() }
+    document.addEventListener('visibilitychange', onVisible)
+
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisible)
+      fetchUpdateRef.current = null
+    }
   }, [])
 
   // ── Animation loop ─────────────────────────────────────────────────────────
