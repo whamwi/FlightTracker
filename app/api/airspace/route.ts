@@ -249,8 +249,26 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>, lookup: Cal
         const raw_actual_arr_utc = f.real_arr
           ? new Date(f.real_arr * 1000).toISOString()
           : extractActualArrUtc(status, rowDate)
-        const revised_arr_utc = extractRevisedArrUtc(status, rowDate)
+        // Discarded when it implies an impossible block time, rather than only being
+        // distrusted for the duration below. Both clients use this field DIRECTLY as the
+        // arrival estimate that drives the tracker's rate — remaining path over remaining
+        // time — so a revised arrival stamped a day late makes the marker crawl and the
+        // aircraft appears to sit near its origin. Sanitising duration_min alone left that
+        // path open: SYR522 read 180 minutes while still carrying a 2026-08-04 ETA.
+        const revised_arr_raw = extractRevisedArrUtc(status, rowDate)
           ?? (f.est_arr ? new Date(f.est_arr * 1000).toISOString() : null)
+        const revised_arr_utc = (() => {
+          if (!revised_arr_raw || !actual_dep_utc) return revised_arr_raw
+          const mins = Math.round(
+            (new Date(revised_arr_raw).getTime() - new Date(actual_dep_utc).getTime()) / 60_000)
+          const sched = f.duration_min ?? null
+          const plausible = mins > 0
+            && mins <= MAX_BLOCK_MIN
+            && (sched == null || mins <= sched + MAX_DELAY_OVER_SCHED_MIN)
+          if (plausible) return revised_arr_raw
+          console.warn(`[airspace] ${num}: discarding revised arrival ${revised_arr_raw} — implies ${mins}min (sched ${sched})`)
+          return null
+        })()
         // Prefer computed duration (actual_dep → revised_arr) over stale scheduled block time.
         const effectiveDurationMin = (() => {
           const sched = f.duration_min ?? null
