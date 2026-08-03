@@ -24,6 +24,10 @@
     {
       "path": "/api/cron/fr24-sync",
       "schedule": "0 */2 * * *"
+    },
+    {
+      "path": "/api/cron/prune-positions",
+      "schedule": "30 3 * * *"
     }
   ]
 }
