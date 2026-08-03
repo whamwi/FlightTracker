@@ -93,8 +93,27 @@ export async function GET() {
   }
 
   const totalSeen = sweeps.reduce((n, s) => n + s.aircraft, 0)
-  const blind     = sweeps.every(s => !s.live)
+  const totalWrit = sweeps.reduce((n, s) => n + s.written, 0)
+  const blind     = sweeps.length === 0 || sweeps.every(s => !s.live)
   if (blind) console.error('[airspace-poll] every sweep blind — all circles failed')
+
+  // One row per invocation. aircraft_last_seen cannot answer "did the poller run?" — it is
+  // upserted by hex, so it only ever holds an aircraft's latest sighting, and a minute that
+  // never ran looks identical to a minute whose aircraft were all seen again later. Absence
+  // is the failure worth catching, so it gets its own record. Best-effort: a failed log write
+  // must not fail the poll that actually matters.
+  await fetch(`${SB_URL}/rest/v1/airspace_poll_log`, {
+    method:  'POST',
+    headers: { ...SB_HEADERS, 'Content-Type': 'application/json' },
+    body:    JSON.stringify({
+      sweeps:     sweeps.length,
+      aircraft:   totalSeen,
+      written:    totalWrit,
+      circles_ok: sweeps.length ? sweeps[sweeps.length - 1].circlesOk : 0,
+      blind,
+      elapsed_ms: Date.now() - started,
+    }),
+  }).catch(e => console.error('[airspace-poll] log write failed', String(e)))
 
   return NextResponse.json({
     ok: !blind,
