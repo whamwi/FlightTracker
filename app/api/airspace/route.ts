@@ -259,13 +259,30 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>, lookup: Cal
           ?? (f.est_arr ? new Date(f.est_arr * 1000).toISOString() : null)
         const revised_arr_utc = (() => {
           if (!revised_arr_raw || !actual_dep_utc) return revised_arr_raw
-          const mins = Math.round(
-            (new Date(revised_arr_raw).getTime() - new Date(actual_dep_utc).getTime()) / 60_000)
+          const depMs = new Date(actual_dep_utc).getTime()
           const sched = f.duration_min ?? null
-          const plausible = mins > 0
+          const implausible = (mins: number) => !(mins > 0
             && mins <= MAX_BLOCK_MIN
-            && (sched == null || mins <= sched + MAX_DELAY_OVER_SCHED_MIN)
-          if (plausible) return revised_arr_raw
+            && (sched == null || mins <= sched + MAX_DELAY_OVER_SCHED_MIN))
+
+          // Repair the date, do not discard the time.
+          //
+          // The failure is a whole-day offset: RB522's estimate arrived as 2026-08-04T20:35Z,
+          // which is 23:35 in Damascus — the right time on the wrong day, and within two
+          // minutes of the 23:33 the flight board shows. Dropping it lost a good ETA and sent
+          // the map back to departure plus scheduled block, so the popup read 00:14 while the
+          // board read 23:33. Shifting whole days keeps the estimate and its accuracy.
+          let t = new Date(revised_arr_raw).getTime()
+          for (let i = 0; i < 2 && (t - depMs) / 60_000 > MAX_BLOCK_MIN; i++) t -= 86_400_000
+          for (let i = 0; i < 2 && t <= depMs; i++) t += 86_400_000
+
+          const mins = Math.round((t - depMs) / 60_000)
+          if (!implausible(mins)) {
+            if (t !== new Date(revised_arr_raw).getTime()) {
+              console.warn(`[airspace] ${num}: revised arrival re-dated ${revised_arr_raw} → ${new Date(t).toISOString()} (${mins}min after departure)`)
+            }
+            return new Date(t).toISOString()
+          }
           console.warn(`[airspace] ${num}: discarding revised arrival ${revised_arr_raw} — implies ${mins}min (sched ${sched})`)
           return null
         })()
