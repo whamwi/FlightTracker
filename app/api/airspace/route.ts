@@ -1,4 +1,5 @@
 import { NextResponse, after } from 'next/server'
+import { sweepAllCircles } from '@/lib/adsb-feed'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,35 +22,6 @@ const SB_HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 // v3 caps `dist` at 250 NM (400 returns HTTP 400) and the public rate limit is 1 req/s,
 // so the circles are queried sequentially with a gap — see fetchAllFeeds. The old 700 and
 // 400 NM radii were over the cap and could never have succeeded on v3.
-const FEEDS_SYRIA: string[] = [
-  'https://opendata.adsb.fi/api/v3/lat/33.41/lon/36.52/dist/250',
-  'https://api.adsb.lol/v2/lat/33.41/lon/36.52/dist/250',
-]
-const FEEDS_UAE: string[] = [
-  'https://opendata.adsb.fi/api/v3/lat/25.0/lon/55.0/dist/250',
-  'https://api.adsb.lol/v2/lat/25.0/lon/55.0/dist/250',
-]
-// Istanbul — both IST–DAM corridors originate here, and it is the densest airspace the
-// board touches (v3 returned 88 aircraft at 02:15 UTC).
-const FEEDS_TURKEY: string[] = [
-  'https://opendata.adsb.fi/api/v3/lat/41.0/lon/29.0/dist/250',
-  'https://api.adsb.lol/v2/lat/41.0/lon/29.0/dist/250',
-]
-// Central Anatolia. At 250 NM the Damascus and Istanbul circles no longer meet, and the
-// gap falls squarely across the middle of both IST–DAM corridors. This closes it.
-const FEEDS_ANATOLIA: string[] = [
-  'https://opendata.adsb.fi/api/v3/lat/38.0/lon/33.5/dist/250',
-  'https://api.adsb.lol/v2/lat/38.0/lon/33.5/dist/250',
-]
-// Northern Arabia. Centred between Riyadh and Kuwait so one circle reaches both (133 nm
-// each), plus Dammam and Basra — four airports otherwise invisible. It also fills most of
-// the DAM–Gulf corridor, which was 54% uncovered: ADY505 (DAM→AUH) was tracked leaving
-// Damascus, vanished over this gap, and only the schedule carried it onward.
-const FEEDS_ARABIA: string[] = [
-  'https://opendata.adsb.fi/api/v3/lat/27.1/lon/47.3/dist/250',
-  'https://api.adsb.lol/v2/lat/27.1/lon/47.3/dist/250',
-]
-
 // Syria's extent (32.31–37.32 N, 35.61–42.38 E) padded a little. Used only to drop
 // non-board aircraft from the response — the client applies the exact polygon, so this
 // deliberately errs wide.
@@ -57,29 +29,6 @@ const SYRIA_BOX = { latMin: 32.0, latMax: 37.7, lonMin: 35.3, lonMax: 42.7 }
 function inSyriaBox(lat: number, lon: number): boolean {
   return lat >= SYRIA_BOX.latMin && lat <= SYRIA_BOX.latMax
       && lon >= SYRIA_BOX.lonMin && lon <= SYRIA_BOX.lonMax
-}
-
-// A feed that answered with an empty list and a feed that never answered are different
-// facts, and every caller downstream needs to tell them apart: one means quiet airspace,
-// the other means we are blind. Returning [] for both is what kept the DB fallback from
-// ever firing — the map simply cleared.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-interface FeedResult { ok: boolean; aircraft: any[] }
-
-async function fetchRadiusFeed(feeds: string[]): Promise<FeedResult> {
-  for (const url of feeds) {
-    try {
-      const res = await fetch(url, {
-        headers: { 'User-Agent': 'FlightTracker/1.0' },
-        signal: AbortSignal.timeout(8000),
-      })
-      if (!res.ok) continue
-      const json = await res.json()
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return { ok: true, aircraft: (json.ac ?? []).filter((a: any) => a.lat != null && a.lon != null) }
-    } catch { /* try next */ }
-  }
-  return { ok: false, aircraft: [] }
 }
 
 function haversineNm(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -655,35 +604,15 @@ async function writeOutboundDep(info: BoardFlight, depTs: number): Promise<void>
   })
 }
 
-// One sweep of every circle, sequentially. adsb.fi's public limit is 1 request/second, so
-// firing them together earns a 429 on most. Shared by the blocking path (cold cache) and the
-// background refresh, and guarded by feedInflight so concurrent callers share one sweep.
+// Emergency fallback only: the cron owns the sweep now and writes to Supabase. This stays
+// so a cron outage degrades to the old behaviour rather than a dark map, and it calls the
+// shared sweep so the two can never disagree about which circles exist.
 function refreshFeeds(): Promise<{ aircraft: unknown[]; live: boolean }> {
   const p = (async () => {
-    const circles = [FEEDS_SYRIA, FEEDS_UAE, FEEDS_TURKEY, FEEDS_ANATOLIA, FEEDS_ARABIA]
-    const results: FeedResult[] = []
-    for (let i = 0; i < circles.length; i++) {
-      if (i > 0) await new Promise(r => setTimeout(r, 1_100))
-      results.push(await fetchRadiusFeed(circles[i]))
-    }
-    // One surviving circle still gives a real picture; only a clean sweep of failures
-    // means we are blind.
-    const live = results.some(r => r.ok)
-    const seenHex = new Set<string>()
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const merged: any[] = []
-    // Syria first: on an overlapping aircraft its entry wins, keeping the home circle's
-    // fix rather than a neighbouring circle's copy.
-    for (const a of results.flatMap(r => r.aircraft)) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if (seenHex.has((a as any).hex)) continue
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      seenHex.add((a as any).hex)
-      merged.push(a)
-    }
-    feedCache = { aircraft: merged, live, ts: Date.now() }
+    const { aircraft, live } = await sweepAllCircles()
+    feedCache = { aircraft, live, ts: Date.now() }
     feedInflight = null
-    return { aircraft: merged, live }
+    return { aircraft, live }
   })().catch(err => { feedInflight = null; throw err })
   return p
 }

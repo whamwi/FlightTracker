@@ -50,7 +50,20 @@ const FEEDS_ARABIA: string[] = [
   'https://api.adsb.lol/v2/lat/27.1/lon/47.3/dist/250',
 ]
 
-export const CIRCLES: string[][] = [FEEDS_SYRIA, FEEDS_UAE, FEEDS_TURKEY, FEEDS_ANATOLIA, FEEDS_ARABIA]
+// Northwest Europe. Centred between Amsterdam and Berlin so one circle reaches all three
+// European destinations — AMS 160 nm, DUS 108 nm, BER 160 nm — which only works because
+// AMS and BER are 320 nm apart and the centre sits between them. Roughly 19 legs a week
+// end here (RB271/272 to Amsterdam, KK to Düsseldorf, SR to Berlin) and until now every
+// one of them ran on schedule alone for its whole flight, with no live fix at either end.
+//
+// SYR271 was the case that prompted it: visible on OpenSky over Germany, invisible here,
+// because it overflies Germany en route from Amsterdam rather than landing there.
+const FEEDS_EUROPE: string[] = [
+  'https://opendata.adsb.fi/api/v3/lat/52.34/lon/9.13/dist/250',
+  'https://api.adsb.lol/v2/lat/52.34/lon/9.13/dist/250',
+]
+
+export const CIRCLES: string[][] = [FEEDS_SYRIA, FEEDS_UAE, FEEDS_TURKEY, FEEDS_ANATOLIA, FEEDS_ARABIA, FEEDS_EUROPE]
 
 /**
  * A feed that answered with an empty list and a feed that never answered are different
