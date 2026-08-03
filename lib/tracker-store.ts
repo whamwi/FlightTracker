@@ -19,6 +19,7 @@ import {
   type PathContext,
   type PathFix,
   type PathPosition,
+  type FixOutcome,
 } from './path-tracker.ts'
 import type { Waypoint } from './flight-predictor.ts'
 
@@ -42,6 +43,16 @@ export class TrackerStore {
   private lastFixAt = new Map<string, number>()
   private lastEta   = new Map<string, number | null>()
   private cfg: PathConfig
+  /**
+   * Outcome of the most recent fix offered per flight.
+   *
+   * applyFix already reports whether it accepted the fix and by how much the fix disagreed,
+   * but update() had no way to surface it, so a rejected fix was silent. That matters because
+   * progress is monotonic: once a tracker runs ahead of the aircraft, every subsequent real
+   * fix is behind it and gets rejected as 'backward', and the error is locked in until the
+   * tracker is rebuilt. This is what makes that visible.
+   */
+  private lastOutcome = new Map<string, FixOutcome & { at_ms: number }>()
 
   constructor(cfg: PathConfig = DEFAULT_PATH_CONFIG) {
     this.cfg = cfg
@@ -80,7 +91,8 @@ export class TrackerStore {
       // Only offer genuinely new fixes; the poll returns the same one until it moves.
       if (f.fix && f.fix.at_ms !== this.lastFixAt.get(f.callsign)) {
         this.lastFixAt.set(f.callsign, f.fix.at_ms)
-        t.applyFix(f.fix, nowMs)
+        const outcome = t.applyFix(f.fix, nowMs)
+        this.lastOutcome.set(f.callsign, { ...outcome, at_ms: f.fix.at_ms })
       }
     }
 
@@ -106,12 +118,19 @@ export class TrackerStore {
     this.trackers.delete(callsign)
     this.lastFixAt.delete(callsign)
     this.lastEta.delete(callsign)
+    this.lastOutcome.delete(callsign)
   }
 
   clear(): void {
     this.trackers.clear()
     this.lastFixAt.clear()
     this.lastEta.clear()
+    this.lastOutcome.clear()
+  }
+
+  /** How the last offered fix was handled: accepted, or rejected and by how far. */
+  outcome(callsign: string) {
+    return this.lastOutcome.get(callsign) ?? null
   }
 
   /** Per-flight diagnostics — rejection tallies, corridor choice, synthesised paths. */

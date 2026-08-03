@@ -188,6 +188,70 @@ function bearingAlongPath(lat1: number, lon1: number, lat2: number, lon2: number
   return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360
 }
 
+/**
+ * Position diagnostics, for chasing markers that run ahead of the aircraft.
+ *
+ * Off unless you ask for it, because it prints every poll:
+ *   localStorage.fs_debug_pos = '1'   (then reload; '0' or remove to stop)
+ *
+ * The column that matters is driftKm — how far what we DRAW is from the last real fix the
+ * feed gave us. Everything else explains it:
+ *
+ *   s          progress along the path, 0–1. Monotonic by construction: it can never go
+ *              backwards, which is why a tracker that gets ahead cannot recover on its own.
+ *   fix        accepted, or the reason it was rejected. 'backward' on a live fix means the
+ *              tracker believes the aircraft is behind where it has already drawn it — the
+ *              signature of the drift locking itself in.
+ *   errorS     signed disagreement in path fraction. NEGATIVE = the fix is behind us.
+ *   departed   the departure time the tracker was seeded with. Compare against the schedule:
+ *              if a delayed flight was seeded from its scheduled time it starts ahead, which
+ *              is the "flight starting earlier" case.
+ *   rejects    running tally per reason, so a flight rejecting fix after fix is obvious.
+ */
+declare global { interface Window { __posDebug?: boolean } }
+
+function posDebugOn(): boolean {
+  if (typeof window === 'undefined') return false
+  if (window.__posDebug !== undefined) return window.__posDebug
+  try { return window.localStorage?.getItem('fs_debug_pos') === '1' } catch { return false }
+}
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function logTrackerState(store: any, inputs: any[], now: number) {
+  if (!posDebugOn() || !inputs?.length) return
+  const hhmm = (ms: number | null | undefined) =>
+    ms ? new Date(ms).toISOString().slice(11, 19) : null
+
+  const rows = inputs.map((f: any) => {
+    const snap = store.snapshot(f.callsign)
+    const out  = store.outcome(f.callsign)
+    const p    = store.position(f.callsign, now)
+    const drift = (f.fix && p) ? greatCircleKm(f.fix.lat, f.fix.lon, p.lat, p.lon) : null
+    return {
+      cs:        f.callsign,
+      driftKm:   drift === null ? null : +drift.toFixed(1),
+      drawn:     p ? `${p.lat.toFixed(2)},${p.lon.toFixed(2)}` : '—',
+      lastFix:   f.fix ? `${f.fix.lat.toFixed(2)},${f.fix.lon.toFixed(2)}` : '—',
+      fixAge_s:  f.fix ? Math.round((now - f.fix.at_ms) / 1000) : null,
+      s:         snap ? +snap.s.toFixed(4) : null,
+      mode:      snap?.mode ?? null,
+      fix:       out ? (out.accepted ? 'accepted' : `REJECTED:${out.reason}`) : 'none',
+      errorS:    out?.errorS == null ? null : +out.errorS.toFixed(4),
+      departed:  hhmm(f.departed_at_ms),
+      eta:       hhmm(f.eta_ms),
+      synth:     snap?.synthesized ?? null,
+      rejects:   snap ? JSON.stringify(snap.rejects) : null,
+    }
+  })
+
+  const worst = rows.reduce((a, b) => ((b.driftKm ?? -1) > (a.driftKm ?? -1) ? b : a), rows[0])
+  console.groupCollapsed(
+    `[pos] ${new Date(now).toISOString().slice(11, 19)}Z — ${rows.length} tracked, worst drift ${worst?.driftKm ?? '—'} km (${worst?.cs ?? '—'})`)
+  console.table(rows)
+  console.groupEnd()
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
 // Returns fraction (0–1) of flight elapsed (second precision), or null if not active right now
 function isFlightActiveNow(depUtc: string, arrUtc: string, days: string[], nowMs: number): number | null {
   if (!depUtc || !arrUtc || depUtc === '—' || arrUtc === '—') return null
@@ -2022,7 +2086,11 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
 
       // Reconcile the trackers with this poll: new flights start, landed ones are
       // dropped, fixes and revised arrivals are handed over. Nothing here moves a marker.
-      if (RAF_MOTION) storeRef.current.update(storeInputsRef.current, Date.now())
+      if (RAF_MOTION) {
+        const tNow = Date.now()
+        storeRef.current.update(storeInputsRef.current, tNow)
+        logTrackerState(storeRef.current, storeInputsRef.current, tNow)
+      }
     }
 
     fetchUpdateRef.current = fetchAndUpdate
