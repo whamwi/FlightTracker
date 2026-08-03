@@ -27,8 +27,10 @@ const SB_URL     = process.env.SUPABASE_URL!
 const SB_KEY     = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY!
 const SB_HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 
-const SELF = process.env.NEXT_PUBLIC_SITE_URL
-  || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://www.flysyria.app')
+// The canonical public domain, deliberately not VERCEL_URL. Per-deployment URLs sit behind
+// deployment protection, which answers 200 with an HTML login page — so the fetch succeeds,
+// res.ok is true, and only JSON.parse fails, several steps from the cause.
+const SELF = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.flysyria.app'
 
 export async function GET() {
   try {
@@ -54,6 +56,13 @@ async function run() {
   }
   if (!pathsRes.ok) {
     return NextResponse.json({ ok: false, step: 'route_paths', status: pathsRes.status }, { status: 502 })
+  }
+
+  // Guard the content type as well as the status, for the same reason.
+  const ctype = airspaceRes.headers.get('content-type') ?? ''
+  if (!ctype.includes('application/json')) {
+    return NextResponse.json(
+      { ok: false, step: 'airspace', reason: `expected JSON, got ${ctype}`, url: SELF }, { status: 502 })
   }
 
   const airspace = await airspaceRes.json()
