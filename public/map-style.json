@@ -1,0 +1,56 @@
+{
+  "version": 8,
+  "name": "FlySyria Light",
+  "metadata": {
+    "flysyria:note": "Shared basemap style for the native app (MapLibre). The web map is Leaflet and cannot read this file — it renders the same CARTO raster tiles and the same Syria polygon through its own API, so the two match by using identical sources rather than by sharing a renderer. Keep the tile URLs and the #4a7a30 boundary styling in step with components/Map.tsx if either changes.",
+    "flysyria:raster-not-vector": "Raster rather than CARTO's vector basemap, deliberately. Vector would look crisper and rotate properly, but it is a different renderer with a different look and needs a CARTO account. These are the exact tiles the web map already draws, so the basemap is identical by construction.",
+    "flysyria:no-glyphs-or-sprite": "Neither is declared: nothing in this style renders text or icons. Aircraft symbols are added at runtime by the app, which registers its own images."
+  },
+  "sources": {
+    "carto-light": {
+      "type": "raster",
+      "tiles": [
+        "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png",
+        "https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png",
+        "https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png",
+        "https://d.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"
+      ],
+      "tileSize": 256,
+      "maxzoom": 19,
+      "attribution": "© <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors © <a href=\"https://carto.com/\">CARTO</a>"
+    },
+    "syria": {
+      "type": "geojson",
+      "data": "https://www.flysyria.app/syria_adm0.geojson",
+      "attribution": ""
+    }
+  },
+  "layers": [
+    {
+      "id": "carto-light",
+      "type": "raster",
+      "source": "carto-light",
+      "minzoom": 0,
+      "maxzoom": 22
+    },
+    {
+      "id": "syria-fill",
+      "type": "fill",
+      "source": "syria",
+      "paint": {
+        "fill-color": "#4a7a30",
+        "fill-opacity": 0.06
+      }
+    },
+    {
+      "id": "syria-line",
+      "type": "line",
+      "source": "syria",
+      "paint": {
+        "line-color": "#4a7a30",
+        "line-width": 1.5,
+        "line-opacity": 0.6
+      }
+    }
+  ]
+}
