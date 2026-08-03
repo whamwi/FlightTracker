@@ -477,7 +477,7 @@ function InAirPanel({ selectedFlight, open, setOpen, onSelect, onClear }: { sele
   // ── Closed: pill FAB ─────────────────────────────────────────────────────
   if (!open) {
     return (
-      <div style={{ position: 'absolute', left: 12, bottom: 'calc(30px + env(safe-area-inset-bottom))', zIndex: 1000, display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ position: 'absolute', left: 12, bottom: 96, zIndex: 1000, display: 'flex', alignItems: 'center', gap: 8 }}>
       <button
         onClick={() => setOpen(true)}
         className="fab-pill"
