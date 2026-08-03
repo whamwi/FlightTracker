@@ -870,6 +870,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         [35.4011, 35.9488], // LTK
         [35.2854, 40.1760], // DEZ
         // Active destinations (last 7 days)
+        [38.2924, 27.1570], // ADB
         [31.7226, 35.9930], // AMM
         [52.3086,  4.7639], // AMS
         [24.4330, 54.6511], // AUH
