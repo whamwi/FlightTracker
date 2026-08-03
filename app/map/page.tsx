@@ -438,6 +438,21 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
   )
 
   return (
+    <>
+      {/* Just the count. The old pill carried "N in air" beside it, but the strip below now
+          says what these are, so the words were repeating themselves. Sits top-left, the
+          corner the map credit vacated on phones. */}
+      <div style={{
+        position: 'absolute', left: 12, top: 12, zIndex: 1000,
+        minWidth: 30, height: 26, paddingLeft: 9, paddingRight: 9, borderRadius: 99,
+        background: C.forest, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        boxShadow: '0 2px 10px rgba(0,0,0,.18)',
+      }}>
+        <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: '#fff', lineHeight: 1 }}>
+          {flights.length}
+        </span>
+      </div>
+
     <div style={{
       position: 'absolute', left: 0, right: 0, zIndex: 1000,
       bottom: 'env(safe-area-inset-bottom)',
@@ -451,6 +466,7 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
         {loop && cards(true)}
       </div>
     </div>
+    </>
   )
 }
 

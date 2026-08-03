@@ -752,6 +752,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
   const firstLoadDoneRef      = useRef(false)
 
   // ── Over-Syria feature state ─────────────────────────────────────────────
+  const attrCleanupRef = useRef<(() => void) | null>(null)
   const [overSyriaOn, setOverSyriaOn]       = useState(false)
 
   // Media boxes on phones. Their triggers move into the site header — the only chrome on
@@ -818,10 +819,16 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
       // control.
       map.attributionControl.setPrefix(false)
       // Top-left, out of the way of everything: the flight strip owns the bottom edge on
-      // phones, and on desktop the media boxes hold the top-right while zoom and Over Syria
-      // hold the bottom-right. Position is not something the licence dictates — only that
-      // the credit stays visible — and up here nothing has to be nudged around it.
-      map.attributionControl.setPosition('topleft')
+      // Side depends on width, because the free corner does. On phones the media buttons
+      // moved to the site header, so the top-right is empty and the top-left is wanted for
+      // the flight-count badge. On desktop the media boxes still hold the top-right, so the
+      // credit stays left. Position is not something the licence dictates — only that the
+      // credit stays visible.
+      const attrMq = window.matchMedia('(max-width: 767px)')
+      const placeAttribution = () => map.attributionControl.setPosition(attrMq.matches ? 'topright' : 'topleft')
+      placeAttribution()
+      attrMq.addEventListener('change', placeAttribution)
+      attrCleanupRef.current = () => attrMq.removeEventListener('change', placeAttribution)
       // Added before the tile layer so it lands above the attribution in the bottom-right
       // corner. Desktop-only, but gated in CSS rather than on innerWidth — a one-shot
       // width read here can fire before the viewport settles and silently drop the control.
@@ -916,7 +923,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         })
         .catch(() => {})
     })
-    return () => { mapInstanceRef.current?.remove(); mapInstanceRef.current = null }
+    return () => { attrCleanupRef.current?.(); mapInstanceRef.current?.remove(); mapInstanceRef.current = null }
   }, [])
 
   // ── Load route paths once on mount ─────────────────────────────────────────
