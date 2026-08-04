@@ -545,7 +545,7 @@ function buildPopup(
         <div style="flex:1;text-align:right">
           <div style="font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:3px">Arrival</div>
           <div style="display:flex;align-items:baseline;justify-content:flex-end">
-            ${delayBadge(fs?.arr_delay_min ?? schedArrDeltaMin(a.arr_time_utc, arrISO), true)}<span style="font-size:20px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums">${arrTimeLocal || '—'}</span>
+            ${delayBadge(fs?.arr_delay_min ?? schedArrDeltaMin(a.arr_time_utc, fs?.actual_arr_utc ?? fs?.revised_arr_utc ?? null), true)}<span style="font-size:20px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums">${arrTimeLocal || '—'}</span>
           </div>
         </div>
       </div>`
@@ -649,11 +649,25 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
     ? popupToLocal(bestArrISO, arrOffset)
     : schedToLocal(e.arr_time_utc, arrOffset)
 
-  // Measured against the arrival actually shown above, so the badge and the time agree.
+  /**
+   * Only ever measured against an arrival somebody reported — never against one we invented.
+   *
+   * bestArrISO falls back to actual_dep + duration_min. That is a projection, not an
+   * observation, and its variance from schedule is simply the departure delay restated: the
+   * badge is redundant when it happens to be right, and free to be wrong when it is not. A
+   * card reading "-246m" beside "Schedule projection · no live signal" is the visible form of
+   * that, and the figure corrected itself the moment a real ADS-B arrival appeared.
+   *
+   * So the projected branch shows the ETA and no badge. An actual or revised arrival still
+   * gets one, because then there is something real to compare.
+   */
+  const observedArrISO = fs?.actual_arr_utc ?? fs?.revised_arr_utc ?? null
   const arrDelayMin = fs?.arr_delay_min
     ?? (fs?.revised_arr_utc && fs?.scheduled_arr_utc
         ? Math.round((new Date(fs.revised_arr_utc).getTime() - new Date(fs.scheduled_arr_utc).getTime()) / 60_000)
-        : schedArrDeltaMin(e.arr_time_utc, bestArrISO))
+        : observedArrISO
+          ? schedArrDeltaMin(e.arr_time_utc, observedArrISO)
+          : null)
 
   // `before` puts the gap on the correct side. The arrival column is right-aligned so its
   // badge sits to the LEFT of the time, where a margin-left pushed the space outward and
