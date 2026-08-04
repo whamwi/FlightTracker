@@ -134,3 +134,47 @@ export async function photoForReg(reg: string, origin: string): Promise<string |
   }
   return toClientUrl(row, origin)
 }
+
+/**
+ * Registration last known to have operated a callsign.
+ *
+ * Every live source of a registration is unreliable at any given moment: the feed's `r` is
+ * frequently absent, the FR24 board's aircraft_reg is often null, and aircraft_last_seen is
+ * pruned after three days. A flight that showed a photo in the morning could therefore show
+ * none in the afternoon, having lost the only link to its airframe — which is exactly what
+ * happened to THY848 once a page reload cleared the browser's in-session cache.
+ *
+ * Remembering the mapping the first time it is seen makes the photo stick.
+ */
+export async function rememberRegistration(callsign: string, reg: string, source: string): Promise<void> {
+  if (!callsign || !reg) return
+  try {
+    await fetch(`${SB_URL}/rest/v1/callsign_registration`, {
+      method: 'POST',
+      headers: {
+        ...SB_HEADERS,
+        'Content-Type': 'application/json',
+        Prefer: 'resolution=merge-duplicates,return=minimal',
+      },
+      body: JSON.stringify({
+        callsign: callsign.toUpperCase(),
+        registration: reg.toUpperCase(),
+        source,
+        updated_at: new Date().toISOString(),
+      }),
+      signal: AbortSignal.timeout(4000),
+    })
+  } catch { /* remembering is best-effort */ }
+}
+
+export async function recallRegistration(callsign: string): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `${SB_URL}/rest/v1/callsign_registration?callsign=eq.${encodeURIComponent(callsign.toUpperCase())}&select=registration&limit=1`,
+      { headers: SB_HEADERS, signal: AbortSignal.timeout(4000) },
+    )
+    if (!res.ok) return null
+    const rows: { registration: string }[] = await res.json()
+    return rows[0]?.registration ?? null
+  } catch { return null }
+}
