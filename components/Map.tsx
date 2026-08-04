@@ -279,6 +279,28 @@ function logTrackerState(store: any, inputs: any[], now: number) {
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 // Returns fraction (0–1) of flight elapsed (second precision), or null if not active right now
+/**
+ * The timetable row for a callsign ON THE DAY BEING FLOWN.
+ *
+ * route_master holds one row per operating day, and they are not the same flight in any
+ * useful sense: XH525 leaves Aleppo at 16:00 on a Friday and 18:00 on a Tuesday. Ten call
+ * sites took the first row matching the callsign, so on a Tuesday the map had an even chance
+ * of reasoning from Friday's timetable — two hours out, silently.
+ *
+ * Days are compared UTC, matching isFlightActiveNow, and normalised because stored rows use
+ * 'tue' while synthesised ones use 'Tue'.
+ *
+ * Falls back to the first row when no day matches: a flight the board says is airborne is
+ * airborne whatever the timetable claims, and a wrong-day row still carries the right
+ * airports and a usable block time.
+ */
+function pickSchedule(entries: ScheduleEntry[], cs: string, nowMs: number): ScheduleEntry | undefined {
+  const rows = entries.filter(e => e.callsign === cs)
+  if (rows.length < 2) return rows[0]
+  const today = ['sun','mon','tue','wed','thu','fri','sat'][new Date(nowMs).getUTCDay()]
+  return rows.find(e => e.days_of_week?.some(d => d.toLowerCase().slice(0, 3) === today)) ?? rows[0]
+}
+
 function isFlightActiveNow(depUtc: string | null, arrUtc: string | null, days: string[], nowMs: number): number | null {
   if (!depUtc || !arrUtc || depUtc === '—' || arrUtc === '—') return null
   const toSec = (s: string) => { const [h, m] = s.split(':').map(Number); return h * 3600 + m * 60 }
@@ -1263,7 +1285,10 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
             }
             // Cache the effective duration so schedule reloads can re-apply it
             durationOverridesRef.current[cs] = duration_min
-            const existingSchedIdx = scheduleRef.current.findIndex(e => e.callsign === cs)
+            // Day-aware on the write side too, or the board's times would be applied to
+            // whichever row happened to come first — quite possibly another day's.
+            const existingSched    = pickSchedule(scheduleRef.current, cs, now)
+            const existingSchedIdx = existingSched ? scheduleRef.current.indexOf(existingSched) : -1
             if (existingSchedIdx === -1) {
               scheduleRef.current.push({
                 callsign: cs, dep_iata, arr_iata,
@@ -1416,7 +1441,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         // is not a valid trigger — GPS jamming in the region causes multi-hour outages
         // while the plane is still airborne, so we must trust route progress over confidence.
         if (!isFr24 && lostAt > 0 && now - lostAt > STALE_HAND_OFF_MS) {
-          const sched = scheduleRef.current.find(e => e.callsign === cs)
+          const sched = pickSchedule(scheduleRef.current, cs, now)
           const pred  = predictorRef.current[cs]
           // Hand off only when no predictor, or predictor says the plane has arrived.
           const canHandOff = !pred || pred.getDisplay(now).routeFraction >= 0.99
@@ -1467,7 +1492,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
             const [ah, am] = a.arr_time_utc.split(':').map(Number)
             const sinceArr = (nowSec - (ah * 3600 + am * 60) + 86400) % 86400
             if (sinceArr > bufMs / 1000 && sinceArr < 22 * 3600) {
-              const se_ = scheduleRef.current.find(e => e.callsign === cs)
+              const se_ = pickSchedule(scheduleRef.current, cs, now)
               const activeFrac = se_ ? isFlightActiveNow(se_.dep_time_utc, se_.arr_time_utc, se_.days_of_week, now) : null
               const schedInactive = !(activeFrac !== null && activeFrac <= 1.0)
               const predArr2  = predictorRef.current[cs]
@@ -1486,7 +1511,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
 
         // ── Path-based DR for non-live entries ────────────────────────────────
         if (!isLive) {
-          const schedEntry = scheduleRef.current.find(e => e.callsign === cs)
+          const schedEntry = pickSchedule(scheduleRef.current, cs, now)
           const pathKey = schedEntry
             ? `${schedEntry.dep_iata}|${schedEntry.arr_iata}`
             : (a.dep_iata && a.arr_iata ? `${a.dep_iata}|${a.arr_iata}` : '')
@@ -1687,7 +1712,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
 
         // On-ground: pin to arrival airport
         if (isOnGround && !arrSnapped) {
-          const se_ = scheduleRef.current.find(e => e.callsign === cs)
+          const se_ = pickSchedule(scheduleRef.current, cs, now)
           const arrIata_ = se_?.arr_iata ?? a.arr_iata ?? null
           const arrC_ = arrIata_ ? _apCoords[arrIata_] : null
           if (arrC_) { dispLat = arrC_[0]; dispLon = arrC_[1]; arrSnapped = true; projected = true }
@@ -1697,7 +1722,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         if (!arrSnapped) {
           const fsFix = flightStatusRef.current[cs]
           if (fsFix?.actual_arr_utc && now - new Date(fsFix.actual_arr_utc).getTime() < 4 * 3_600_000) {
-            const seFix = scheduleRef.current.find(e => e.callsign === cs)
+            const seFix = pickSchedule(scheduleRef.current, cs, now)
             const arrFix = (seFix ? _apCoords[seFix.arr_iata] : null)
                         ?? (fsFix.arr_iata ? _apCoords[fsFix.arr_iata] : null)
                         ?? (a.arr_iata    ? _apCoords[a.arr_iata]    : null)
@@ -1707,7 +1732,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
 
         // Stale un-projected: park pre-departure or post-arrival
         if (a.stale && !projected) {
-          const se = scheduleRef.current.find(e => e.callsign === cs)
+          const se = pickSchedule(scheduleRef.current, cs, now)
           // Times are required here, not just an inactive result: isFlightActiveNow returns
           // null both for "not flying now" and for "no timetable at all", and only the first
           // has hours to reason about.
@@ -1794,7 +1819,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           markersRef.current[cs].setIcon(icon)
           if (!embed) markersRef.current[cs].setPopupContent(popup)
           if (cs === highlightedCSRef.current || cs === selectedCSRef.current) {
-            const se_ = scheduleRef.current.find(e => e.callsign === cs)
+            const se_ = pickSchedule(scheduleRef.current, cs, now)
             drawTrackRoute(markersRef.current[cs], se_?.dep_iata ?? a.dep_iata ?? null, se_?.arr_iata ?? a.arr_iata ?? null)
           }
         } else {
@@ -1802,7 +1827,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           if (embed) {
             m.on('click', () => {
               const fs  = flightStatusRef.current[cs]
-              const se  = scheduleRef.current.find(e => e.callsign === cs)
+              const se  = pickSchedule(scheduleRef.current, cs, now)
               const reg = fs?.aircraft_reg ?? a.r ?? null
               const ph  = reg ? photoCacheRef.current[reg] ?? null : null
               selectedCSRef.current = cs
@@ -1857,7 +1882,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
               }
               if (url && selectedCSRef.current === capturedCS) {
                 const fsNow = flightStatusRef.current[capturedCS]
-                const seNow = scheduleRef.current.find(e => e.callsign === capturedCS) ?? null
+                const seNow = pickSchedule(scheduleRef.current, capturedCS, now) ?? null
                 rnPost({ type: 'SELECT', flight: buildEmbedFlight(capturedCS, seNow, fsNow ?? null, url) })
               }
             })
