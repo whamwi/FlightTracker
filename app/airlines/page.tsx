@@ -74,6 +74,12 @@ interface ScheduleRow {
   airline_iata: string; airline_name: string; country_flag: string
 }
 interface DestChip { iata: string; name: string; flag: string }
+interface AirlineLinks {
+  website:   string | null
+  facebook:  string | null
+  instagram: string | null
+}
+
 interface AirlineInfo {
   prefix: string; name: string; flag: string; region: 'gulf' | 'europe'
   routes: ScheduleRow[]
@@ -134,8 +140,44 @@ function AirportHero({ airport, totalAirlines, totalFlights }: { airport: string
 }
 
 // ── Airline card ──────────────────────────────────────────────────────────────
-function AirlineCard({ info, onView, imageUrl, onImageUploaded }: {
-  info: AirlineInfo; onView: () => void; imageUrl?: string; onImageUploaded: (prefix: string, url: string) => void
+/**
+ * Website, Facebook and Instagram for an airline.
+ *
+ * Only the links that exist are drawn — coverage is good but not complete (Emirates has a
+ * website and no socials), and an icon that goes nowhere is worse than no icon.
+ *
+ * stopPropagation because the card itself is clickable: without it, opening an airline's
+ * Instagram would also open the routes panel behind it.
+ */
+function AirlineLinks({ links }: { links?: AirlineLinks }) {
+  if (!links) return null
+  const items = [
+    { href: links.website,   label: 'Website',
+      path: <><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18"/></> },
+    { href: links.facebook,  label: 'Facebook',
+      path: <path d="M14 8h2V5h-2a4 4 0 0 0-4 4v2H8v3h2v7h3v-7h2.2l.8-3H13V9a1 1 0 0 1 1-1z"/> },
+    { href: links.instagram, label: 'Instagram',
+      path: <><rect x="3.5" y="3.5" width="17" height="17" rx="5"/><circle cx="12" cy="12" r="3.8"/><circle cx="17" cy="7" r="1.1" fill="currentColor" stroke="none"/></> },
+  ].filter(i => !!i.href)
+  if (!items.length) return null
+
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+      {items.map(i => (
+        <a key={i.label} href={i.href!} target="_blank" rel="noopener noreferrer"
+           title={i.label} aria-label={i.label}
+           onClick={e => e.stopPropagation()}
+           style={{ display: 'inline-flex', color: C.muted, lineHeight: 0 }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{i.path}</svg>
+        </a>
+      ))}
+    </span>
+  )
+}
+
+function AirlineCard({ info, links, onView, imageUrl, onImageUploaded }: {
+  info: AirlineInfo; links?: AirlineLinks; onView: () => void; imageUrl?: string; onImageUploaded: (prefix: string, url: string) => void
 }) {
   const badge = info.weeklyCount >= 14 ? C.forest : C.gold
   const fileRef = useRef<HTMLInputElement>(null)
@@ -202,6 +244,7 @@ function AirlineCard({ info, onView, imageUrl, onImageUploaded }: {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
             <AirlineLogo prefix={info.prefix} name={info.name} size={32} />
             <span style={{ font: `700 15px/1.2 'Instrument Sans',system-ui`, color: C.ink, letterSpacing: '-.01em' }}>{info.name}</span>
+            <AirlineLinks links={links} />
           </div>
           {info.minDuration > 0 && <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: C.muted, flexShrink: 0 }}>{fmtDur(info.minDuration)}</span>}
         </div>
@@ -362,8 +405,25 @@ export default function AirlinesPage() {
   const [region, setRegion]         = useState<'all'|'gulf'|'europe'>('all')
   const [selected, setSelected]     = useState<AirlineInfo|null>(null)
   const [airlineImages, setAirlineImages] = useState<Record<string,string>>({})
+  // Kept apart from the schedule-derived cards: the page builds airlines from /api/schedule,
+  // which knows nothing about an airline's own web presence.
+  const [airlineLinks, setAirlineLinks] = useState<Record<string, AirlineLinks>>({})
 
   useEffect(() => { loadGeoData() }, [])
+
+  useEffect(() => {
+    fetch('/api/airlines')
+      .then(r => r.ok ? r.json() : [])
+      .then((rows: { iata: string; website_url: string | null; facebook_url: string | null; instagram_url: string | null }[]) => {
+        const map: Record<string, AirlineLinks> = {}
+        for (const r of rows ?? []) {
+          if (!r.iata) continue
+          map[r.iata] = { website: r.website_url, facebook: r.facebook_url, instagram: r.instagram_url }
+        }
+        setAirlineLinks(map)
+      })
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     fetch('/api/airline-images')
@@ -524,7 +584,7 @@ export default function AirlinesPage() {
                   </div>
                   <div className="al-grid">
                     {group.map(a => (
-                      <AirlineCard key={a.prefix} info={a} onView={() => setSelected(a)} imageUrl={airlineImages[a.prefix]} onImageUploaded={handleImageUploaded} />
+                      <AirlineCard key={a.prefix} info={a} links={airlineLinks[a.prefix]} onView={() => setSelected(a)} imageUrl={airlineImages[a.prefix]} onImageUploaded={handleImageUploaded} />
                     ))}
                   </div>
                 </div>

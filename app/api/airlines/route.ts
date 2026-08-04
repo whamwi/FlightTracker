@@ -7,7 +7,7 @@ const SB_KEY = process.env.SUPABASE_ANON_KEY!
 
 export async function GET() {
   const res = await fetch(
-    `${SB_URL}/rest/v1/airlines?select=iata,icao,name_en,country_flag&order=iata`,
+    `${SB_URL}/rest/v1/airlines?select=iata,icao,name_en,country_flag,website_url,facebook_url,instagram_url&order=iata`,
     { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }, next: { revalidate: 3600 } }
   )
   if (!res.ok) return NextResponse.json([], { status: 502 })
