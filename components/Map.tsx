@@ -1231,11 +1231,12 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           for (const bd of (data.boardDeparted ?? []) as {
             callsign: string; dep_iata: string; arr_iata: string
             duration_min: number
+            dep_time_utc: string | null; arr_time_utc: string | null
             actual_dep_utc: string | null; actual_arr_utc: string | null
             revised_arr_utc: string | null
             iata_number: string; dep_delay_min: number | null; airline_iata: string | null
           }[]) {
-            const { callsign: cs, dep_iata, arr_iata, duration_min,
+            const { callsign: cs, dep_iata, arr_iata, duration_min, dep_time_utc, arr_time_utc,
                     actual_dep_utc, actual_arr_utc, revised_arr_utc, iata_number, dep_delay_min, airline_iata } = bd
             if (!cs || !dep_iata || !arr_iata) continue
             const existing = flightStatusRef.current[cs]
@@ -1266,11 +1267,10 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
             if (existingSchedIdx === -1) {
               scheduleRef.current.push({
                 callsign: cs, dep_iata, arr_iata,
-                // No timetable row for this callsign — say so, rather than claiming midnight.
-                // '00:00' here is what produced a "-246m" arrival badge: the ETA was 19:53Z,
-                // schedArrDeltaMin picked the nearer midnight (tomorrow's, 4h06m away) and
-                // reported the gap as a delay.
-                dep_time_utc: null, arr_time_utc: null,
+                // The board's own scheduled times, which it has always known — this entry no
+                // longer invents any. Still nullable: a flight the board has no timetable for
+                // reports null, and null is measured against by nothing.
+                dep_time_utc, arr_time_utc,
                 duration_min, days_of_week: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],
               })
             } else {
@@ -1279,6 +1279,11 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
               scheduleRef.current[existingSchedIdx] = {
                 ...scheduleRef.current[existingSchedIdx],
                 duration_min,
+                // The board is filed against the day actually being flown; a stored row is a
+                // weekly pattern and can be the wrong day's. Prefer the board where it has an
+                // answer, keep what is stored where it does not.
+                dep_time_utc: dep_time_utc ?? scheduleRef.current[existingSchedIdx].dep_time_utc,
+                arr_time_utc: arr_time_utc ?? scheduleRef.current[existingSchedIdx].arr_time_utc,
               }
             }
           }

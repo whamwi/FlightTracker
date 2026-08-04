@@ -905,6 +905,12 @@ export async function GET() {
           dep_iata:        f.dep_iata,
           arr_iata:        f.arr_iata,
           duration_min:    f.duration_min,
+          // The timetable this flight was actually filed against. Without these the map had
+          // to invent a schedule for any callsign it could not match to route_master, and
+          // the placeholder it invented ('00:00') was then measured against — producing an
+          // arrival "delay" of -246 minutes, which is simply the distance to midnight.
+          dep_time_utc:    f.sched_dep ? unixToHHMM(f.sched_dep) : null,
+          arr_time_utc:    f.sched_arr ? unixToHHMM(f.sched_arr) : null,
           actual_dep_utc,
           actual_arr_utc:  f.actual_arr_utc,
           revised_arr_utc: f.revised_arr_utc,
