@@ -567,6 +567,34 @@ function buildPopup(
   </div>`
 }
 
+/**
+ * Minutes an arrival differs from its scheduled time — negative when early.
+ *
+ * Computed here because neither source the popups reach for is ever populated:
+ * scheduled_arr_utc is only carried forward from an existing entry and never set, and
+ * arr_delay_min is never derived in the API at all. So the badge could not appear, and the
+ * map card showed a bare arrival time while the flight board showed the same arrival with
+ * its variance beside it.
+ *
+ * The scheduled time is a bare HH:MM, so the day is chosen as whichever puts it nearest the
+ * actual arrival — otherwise an overnight leg reads as a 24-hour delay.
+ */
+function schedArrDeltaMin(arrTimeUtc: string | null | undefined, arrIso: string | null): number | null {
+  if (!arrTimeUtc || !arrIso) return null
+  const arrMs = Date.parse(arrIso)
+  const [h, m] = arrTimeUtc.split(':').map(Number)
+  if (!Number.isFinite(arrMs) || !Number.isFinite(h) || !Number.isFinite(m)) return null
+
+  const base = new Date(arrMs)
+  base.setUTCHours(h, m, 0, 0)
+  let best = base.getTime()
+  for (const shift of [-86_400_000, 86_400_000]) {
+    const cand = base.getTime() + shift
+    if (Math.abs(cand - arrMs) < Math.abs(best - arrMs)) best = cand
+  }
+  return Math.round((arrMs - best) / 60_000)
+}
+
 function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus | null, fraction?: number, photoUrl?: string | null): string {
   const acType  = fs?.aircraft_type ?? null
   const aiata   = airlineIataFor(e.callsign, fs)
@@ -607,10 +635,11 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
     ? popupToLocal(bestArrISO, arrOffset)
     : schedToLocal(e.arr_time_utc, arrOffset)
 
-  const arrDelayMin = fs?.arr_delay_min != null ? fs.arr_delay_min
-    : (fs?.revised_arr_utc && fs?.scheduled_arr_utc
+  // Measured against the arrival actually shown above, so the badge and the time agree.
+  const arrDelayMin = fs?.arr_delay_min
+    ?? (fs?.revised_arr_utc && fs?.scheduled_arr_utc
         ? Math.round((new Date(fs.revised_arr_utc).getTime() - new Date(fs.scheduled_arr_utc).getTime()) / 60_000)
-        : null)
+        : schedArrDeltaMin(e.arr_time_utc, bestArrISO))
 
   const delayBadge = (min: number | null | undefined) => min != null && Math.abs(min) >= 2
     ? `<span style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;padding:2px 5px;border-radius:99px;margin-left:5px;line-height:1.4">${min > 0 ? '+' : ''}${min}m</span>`
