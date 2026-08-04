@@ -98,7 +98,19 @@ export async function GET(req: Request) {
   const flightMap: Record<string, any> = {}
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function addFlight(f: any, keyOverride?: string, skipArrFilter = false) {
+  /**
+   * Which flights the DESTINATION's own arrivals board has spoken about.
+   *
+   * FR24 publishes the same flight twice: once on the origin's departures board and once on
+   * the destination's arrivals board. Both carry real_arr, but only the destination is
+   * authoritative about a landing — G9375 SHJ-DAM had real_arr 09:57 on the Sharjah
+   * departures row while Damascus said "Delayed 14:44" with no arrival at all, and the
+   * aircraft was over Jordan at the time. The stale value was within four minutes of the
+   * previous day's landing.
+   */
+  const arrivalsSeen = new Set<string>()
+
+  function addFlight(f: any, keyOverride?: string, skipArrFilter = false, fromArrivals = false) {
     const num      = f.num       ?? ''
     const depIata  = f.dep_iata  ?? ''
     const arrIata  = f.arr_iata  ?? ''
@@ -152,7 +164,12 @@ export async function GET(req: Request) {
       && effectiveDuration > 0
       && new Date(f.fr24_actual_dep as string).getTime() + effectiveDuration * 60_000 < Date.now() - 15 * 60_000
 
-    const effectiveStatus = f.fr24_actual_arr ? 'Arrived'
+    // An arrival off a departures row is only believed while the destination has said
+    // nothing. Once its arrivals board is in, that wins — including when it reports none.
+    const arrConfirmed = !!f.fr24_actual_arr && (fromArrivals || !arrivalsSeen.has(key))
+    if (fromArrivals) arrivalsSeen.add(key)
+
+    const effectiveStatus = arrConfirmed ? 'Arrived'
       : inferredArrived ? 'Arrived'
       : (f.fr24_actual_dep && (STATUS_RANK[status] ?? 0) < STATUS_RANK['Departed'] ? 'Departed' : status)
 
@@ -170,7 +187,16 @@ export async function GET(req: Request) {
         flightMap[key].duration_min = f.duration_min
       }
       if (f.fr24_actual_dep)  flightMap[key].actual_dep_utc  = f.fr24_actual_dep
-      if (f.fr24_actual_arr)  flightMap[key].actual_arr_utc  = f.fr24_actual_arr
+      if (fromArrivals) {
+        // Authoritative either way: an arrivals row with no landing clears one a departures
+        // row asserted, and demotes the status it produced.
+        flightMap[key].actual_arr_utc = f.fr24_actual_arr ?? null
+        if (!f.fr24_actual_arr && flightMap[key].status === 'Arrived' && !inferredArrived) {
+          flightMap[key].status = effectiveStatus
+        }
+      } else if (f.fr24_actual_arr && !arrivalsSeen.has(key)) {
+        flightMap[key].actual_arr_utc = f.fr24_actual_arr
+      }
       if (f.fr24_revised_dep) flightMap[key].revised_dep_utc = f.fr24_revised_dep
       if (f.fr24_revised_arr) flightMap[key].revised_arr_utc = f.fr24_revised_arr
       if (f.dep_terminal) flightMap[key].dep_terminal = f.dep_terminal
@@ -255,7 +281,7 @@ export async function GET(req: Request) {
           : (t.startsWith('estimated') || t.startsWith('expect') || t.startsWith('delayed') ? extractStatusUtc(f.status, date) : null),
         fr24_actual_dep:  f.real_dep ? new Date(f.real_dep * 1000).toISOString() : null,
         fr24_revised_dep: f.est_dep  ? new Date(f.est_dep  * 1000).toISOString() : null,
-      })
+      }, undefined, false, true)   // from the destination's own arrivals board
       // Collect origin for second pass
       const dep = (f.dep_iata || '') as string
       if (dep && !SYRIAN_AIRPORTS.has(dep)) originSet.add(dep)
