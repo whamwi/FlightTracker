@@ -517,8 +517,11 @@ function buildPopup(
   const arrTimeLocal = popupToLocal(arrISO, arrOffset)
                     || (a.arr_time_utc ? schedToLocal(a.arr_time_utc, arrOffset) : '')
 
-  const delayBadge = (min: number | null | undefined) => min != null && Math.abs(min) >= 2
-    ? `<span style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;padding:2px 5px;border-radius:99px;margin-left:5px;line-height:1.4">${min > 0 ? '+' : ''}${min}m</span>`
+  // `before` puts the gap on the correct side. The arrival column is right-aligned so its
+  // badge sits to the LEFT of the time, where a margin-left pushed the space outward and
+  // left the badge touching the number.
+  const delayBadge = (min: number | null | undefined, before = false) => min != null && Math.abs(min) >= 2
+    ? `<span style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;padding:2px 5px;border-radius:99px;margin-${before ? 'right' : 'left'}:5px;line-height:1.4">${min > 0 ? '+' : ''}${min}m</span>`
     : ''
 
   const progressHtml = progressBarHtml(dep, arr, fraction, etaStr)
@@ -534,7 +537,7 @@ function buildPopup(
         <div style="flex:1;text-align:right">
           <div style="font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:3px">Arrival</div>
           <div style="display:flex;align-items:baseline;justify-content:flex-end">
-            ${delayBadge(fs?.arr_delay_min ?? schedArrDeltaMin(a.arr_time_utc, arrISO))}<span style="font-size:20px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums">${arrTimeLocal || '—'}</span>
+            ${delayBadge(fs?.arr_delay_min ?? schedArrDeltaMin(a.arr_time_utc, arrISO), true)}<span style="font-size:20px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums">${arrTimeLocal || '—'}</span>
           </div>
         </div>
       </div>`
@@ -644,8 +647,11 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
         ? Math.round((new Date(fs.revised_arr_utc).getTime() - new Date(fs.scheduled_arr_utc).getTime()) / 60_000)
         : schedArrDeltaMin(e.arr_time_utc, bestArrISO))
 
-  const delayBadge = (min: number | null | undefined) => min != null && Math.abs(min) >= 2
-    ? `<span style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;padding:2px 5px;border-radius:99px;margin-left:5px;line-height:1.4">${min > 0 ? '+' : ''}${min}m</span>`
+  // `before` puts the gap on the correct side. The arrival column is right-aligned so its
+  // badge sits to the LEFT of the time, where a margin-left pushed the space outward and
+  // left the badge touching the number.
+  const delayBadge = (min: number | null | undefined, before = false) => min != null && Math.abs(min) >= 2
+    ? `<span style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;padding:2px 5px;border-radius:99px;margin-${before ? 'right' : 'left'}:5px;line-height:1.4">${min > 0 ? '+' : ''}${min}m</span>`
     : ''
 
   // Route progress bar
@@ -681,7 +687,7 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
     <div style="flex:1;text-align:right">
       <div style="font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:3px">Arrival</div>
       <div style="display:flex;align-items:baseline;justify-content:flex-end">
-        ${delayBadge(arrDelayMin)}<span style="font-size:20px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums">${arrTimeLocal}</span>
+        ${delayBadge(arrDelayMin, true)}<span style="font-size:20px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums">${arrTimeLocal}</span>
       </div>
     </div>
   </div>`
