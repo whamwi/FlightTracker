@@ -240,6 +240,11 @@ export interface PathConfig {
    */
   initialSnapWindowMs: number
   /**
+   * How far the first fix may move the aircraft. Comfortably larger than the error the
+   * elapsed-time seed produces in cruise, and far smaller than a spoofed position would be.
+   */
+  maxInitialSnapS: number
+  /**
    * An arrival estimate moving further than this is treated as a correction rather than a
    * revision, and the tracker is rebuilt: progress accumulated against the old estimate is
    * not worth carrying, and monotonic progress cannot unwind it.
@@ -280,6 +285,7 @@ export const DEFAULT_PATH_CONFIG: Readonly<PathConfig> = {
   maxOffPathKm:          40,
   maxImpliedGsKts:       700,
   initialSnapWindowMs:   5 * 60_000,
+  maxInitialSnapS:       0.15,
   etaRebuildMs:          12 * 3_600_000,
   backwardToleranceS:    0.01,
   backwardConfirmCount:  2,
@@ -550,7 +556,20 @@ export class PathTracker {
     const withinStartup = nowMs - this.createdAtMs <= this.cfg.initialSnapWindowMs
     if (!this.hasAcceptedFix) {
       this.hasAcceptedFix = true
-      if (errorS < 0 && withinStartup) this.s = clamp(sLive, 0, 1)
+      // Either direction now, not just backwards.
+      //
+      // The seed is elapsed/duration, and block time includes taxi and approach — so a
+      // cruising aircraft is normally AHEAD of it, not behind. A tracker created mid-flight
+      // therefore starts short: SYR503 was seeded at 0.646 while its own live fix projected
+      // to 0.74, and being forward-disagreement it could never be placed, only chased
+      // through the rate. That is 200km of drift on a flight the feed could see perfectly.
+      //
+      // Bounded, because the reason this was backward-only still stands: a wrong or spoofed
+      // fix must not teleport an aircraft down its route. A disagreement this size is the
+      // seed being approximate; a large one is not to be trusted on a single sample.
+      if (withinStartup && Math.abs(errorS) <= this.cfg.maxInitialSnapS) {
+        this.s = clamp(sLive, 0, 1)
+      }
     }
 
     // The correction itself: close the disagreement over the horizon, never by moving.

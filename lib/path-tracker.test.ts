@@ -409,3 +409,35 @@ describe('a newly created tracker defers to its first real fix', () => {
     )
   })
 })
+
+describe('the first fix may place the aircraft forward as well as back', () => {
+  // The seed is elapsed/duration, but block time includes taxi and approach, so a cruising
+  // aircraft is normally AHEAD of it. SYR503 was seeded at 0.646 while its own live fix
+  // projected to 0.74 — and being a forward disagreement it could never be placed, only
+  // chased through the rate, leaving 200km of drift the feed could see perfectly well.
+  test('a modest forward disagreement places it', () => {
+    const born = T0 + HOUR
+    const t = new PathTracker(ctx(), born)
+    const before = t.position(born).routeFraction
+
+    const out = t.applyFix({ ...onPath(before + 0.09), at_ms: born }, born)
+    assert.equal(out.accepted, true)
+    assert.ok(t.position(born).routeFraction > before + 0.08,
+      'a first fix modestly ahead should place the aircraft, not just raise the rate')
+  })
+
+  test('a large forward disagreement still does not teleport it', () => {
+    const born = T0 + HOUR
+    const t = new PathTracker(ctx(), born)
+    const before = t.position(born).routeFraction
+
+    t.applyFix({ ...onPath(0.90), at_ms: born }, born)
+    assert.equal(t.position(born).routeFraction, before,
+      'a wrong or spoofed position must not move the aircraft down its route')
+  })
+
+  test('the bound is what separates them', () => {
+    assert.ok(DEFAULT_PATH_CONFIG.maxInitialSnapS > 0.09, 'must admit a seed-sized error')
+    assert.ok(DEFAULT_PATH_CONFIG.maxInitialSnapS < 0.5, 'must reject a spoofed position')
+  })
+})
