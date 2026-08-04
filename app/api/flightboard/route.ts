@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { fetchCallsignLookup, fetchIataToIcao, resolveCallsign } from '@/lib/callsign'
+import { fetchCallsignLookup, fetchIataToIcao, resolveCallsign, resolveIata } from '@/lib/callsign'
 
 export const dynamic = 'force-dynamic'
 
@@ -194,7 +194,7 @@ export async function GET(req: Request) {
     const al = airlineMap[airlineIata]
 
     flightMap[key] = {
-      iata_number:     num,
+      iata_number:     resolveIata(num, lookup),
       callsign:        resolveCallsign(num, lookup, iataToIcao),
       airline_name:    al.name,
       airline_iata:    airlineIata,

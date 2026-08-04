@@ -62,6 +62,23 @@ export async function fetchCallsignLookup(): Promise<CallsignLookup> {
 }
 
 /** Table first, prefix rule only for flights the table has never seen. */
+/**
+ * The ticketed IATA number for whatever identifier FR24 published.
+ *
+ * The mirror of resolveCallsign, and needed for the same reason: for the 38 flights with
+ * fr24_uses_callsign, FR24's `num` IS the callsign, so passing it through as the IATA number
+ * publishes FYC525 where a passenger's booking says XH525. The board did exactly that, which
+ * left it disagreeing with /api/airspace about the same flight — the map card showed a single
+ * code instead of the pair, and a lookup keyed on one endpoint's value missed rows from the
+ * other.
+ *
+ * Falls back to the input: an unknown flight is better described by the code we received than
+ * by nothing.
+ */
+export function resolveIata(num: string, lookup: CallsignLookup): string {
+  return lookup.toIata[num.toUpperCase()] ?? num
+}
+
 export function resolveCallsign(num: string, lookup: CallsignLookup, iataToIcao: Record<string, string>): string {
   const up = num.toUpperCase()
   return lookup.byIata[up] ?? lookup.byCallsign[up] ?? toCallsign(up, iataToIcao)
