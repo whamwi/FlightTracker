@@ -1,39 +1,16 @@
 import { NextResponse } from 'next/server'
+import { photoForReg } from '@/lib/aircraft-photo'
 
+/**
+ * Photo for a known registration.
+ *
+ * The upstream calls and the caching both live in lib/aircraft-photo, because the callsign
+ * route needs exactly the same thing and the two had drifted into separate copies.
+ */
 export const dynamic = 'force-dynamic'
-
-const UA = 'FlightTrackerSY/1.0 (+https://flighttracker-sy.vercel.app)'
 
 export async function GET(req: Request, { params }: { params: Promise<{ reg: string }> }) {
   const { reg } = await params
-  const origin = new URL(req.url).origin
-
-  // Primary: jetapi.dev — full-res JetPhotos CDN (proxied to bypass hotlink protection)
-  try {
-    const res = await fetch(
-      `https://www.jetapi.dev/api?reg=${encodeURIComponent(reg)}&photos=1&only_jp=true`,
-      { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(5000) }
-    )
-    if (res.ok) {
-      const data = await res.json()
-      const cdnUrl: string | null = data?.Images?.[0]?.Image ?? null
-      if (cdnUrl) return NextResponse.json({ url: `${origin}/api/photo-img?u=${encodeURIComponent(cdnUrl)}` })
-    }
-  } catch {}
-
-  // Fallback: Planespotters thumbnail_large
-  try {
-    const res = await fetch(
-      `https://api.planespotters.net/pub/photos/reg/${encodeURIComponent(reg)}`,
-      { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(5000) }
-    )
-    if (res.ok) {
-      const data = await res.json()
-      const url: string | null =
-        data?.photos?.[0]?.thumbnail_large?.src ?? data?.photos?.[0]?.thumbnail?.src ?? null
-      if (url) return NextResponse.json({ url })
-    }
-  } catch {}
-
-  return NextResponse.json({ url: null })
+  const origin  = new URL(req.url).origin
+  return NextResponse.json({ url: await photoForReg(reg, origin) })
 }
