@@ -247,6 +247,14 @@ function logTrackerState(store: any, inputs: any[], now: number) {
       fixAge_s:  f.fix ? Math.round((now - f.fix.at_ms) / 1000) : null,
       s:         snap ? +snap.s.toFixed(4) : null,
       mode:      snap?.mode ?? null,
+      // Which corridor it settled on, and how often it has changed its mind. IST-DAM has two
+      // stored routes 87nm apart in length, and `s` is a fraction of DISTANCE — so being on
+      // the wrong one displaces the aircraft even when its progress is right. A flight that
+      // keeps switching is one where neither corridor fits.
+      variant:   snap?.variant ?? null,
+      variants:  snap?.variantCount ?? null,
+      switches:  snap?.variantSwitches ?? null,
+      offPathKm: snap?.variantMeanOffPathKm?.map((v: number | null) => v == null ? null : +v.toFixed(1)) ?? null,
       fix:       out ? (out.accepted ? 'accepted' : `REJECTED:${out.reason}`) : 'none',
       errorS:    out?.errorS == null ? null : +out.errorS.toFixed(4),
       departed:  hhmm(f.departed_at_ms),
