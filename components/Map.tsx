@@ -109,6 +109,9 @@ const STALE_TTL_MS       = 30 * 60 * 1000
  * on both. One constant now, and both surfaces use 30.
  */
 const ARRIVED_HOLD_MS    = 30 * 60 * 1000
+
+// Flights to and from these are "ours", and decide which half of a leg is worth drawing.
+const HOME_AIRPORTS = new Set(['DAM', 'ALP', 'LTK', 'DEZ'])
 const STALE_TTL_SYRIA_MS = 6  * 60 * 60 * 1000
 
 // ── Geometry helpers ──────────────────────────────────────────────────────────
@@ -824,8 +827,22 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
   const panelOpenRef      = useRef(panelOpen ?? true)
   panelOpenRef.current    = panelOpen ?? true
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const trackLinesRef     = useRef<any[]>([])
+
   useEffect(() => {
-    if (!targetFlight) return
+    if (!targetFlight) {
+      // Selection cleared from the side panel. Without this the effect simply returned, so
+      // the red highlight and the drawn leg stayed on the map with nothing selected.
+      highlightedCSRef.current = null
+      selectedCSRef.current    = null
+      trackLinesRef.current.forEach(l => l.remove())
+      trackLinesRef.current = []
+      // Re-render: marker colour is decided during the poll, so the red icon only reverts
+      // once the markers are rebuilt.
+      fetchUpdateRef.current?.()
+      return
+    }
     autoOpenDoneRef.current = false
     highlightedCSRef.current = null
     setLoading(true)
@@ -834,8 +851,6 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
     const t = setTimeout(() => setLoading(false), 3000)
     return () => clearTimeout(t)
   }, [targetFlight])
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const trackLinesRef     = useRef<any[]>([])
   // Last confirmed ADS-B lat/lon per callsign — kept alive through stale hand-off
   // so the schedule overlay GPS floor still works after trackedRef is cleared.
   const lastADSBPosRef    = useRef<Record<string, { lat: number; lon: number; lostAt: number }>>({})
@@ -1065,15 +1080,25 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
 
       // Draw completed + remaining route lines for the tracked flight
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      /**
+       * Draw the half of the leg that is not obvious from context.
+       *
+       * An aircraft approaching Damascus is plainly going to Damascus; what the click is
+       * really asking is where it came from. So an arrival into one of our airports draws
+       * back to its origin, and a departure draws ahead to its destination. A leg between
+       * two of our own airports counts as a departure, which is how it reads on the board.
+       */
       const drawTrackRoute = (marker: any, depIata: string | null, arrIata: string | null) => {
         trackLinesRef.current.forEach(l => l.remove())
         trackLinesRef.current = []
         const pos      = marker.getLatLng()
-        const depCoord = depIata ? _apCoords[depIata] : null
-        const arrCoord = arrIata ? _apCoords[arrIata] : null
-        if (arrCoord) {
+        const inbound  = !!arrIata && HOME_AIRPORTS.has(arrIata)
+                      && !(depIata && HOME_AIRPORTS.has(depIata))
+        const otherEnd = inbound ? depIata : arrIata
+        const coord    = otherEnd ? _apCoords[otherEnd] : null
+        if (coord) {
           trackLinesRef.current.push(
-            L.polyline([[pos.lat, pos.lng], [arrCoord[0], arrCoord[1]]], {
+            L.polyline([[pos.lat, pos.lng], [coord[0], coord[1]]], {
               color: '#054239', weight: 1.5, opacity: 0.55, dashArray: '6 9',
             }).addTo(map)
           )
