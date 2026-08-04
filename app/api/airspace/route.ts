@@ -293,9 +293,14 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>, lookup: Cal
   // exists to supply what Syria does not know, not to arbitrate between two sources that
   // disagree, which today's evidence says cannot be done by preferring one airport.
   const counterparts = new Set<string>()
+  // Keyed like the first pass, on number AND scheduled departure. The cache spans three
+  // dates, and a flight number repeats daily: keyed on the number alone, yesterday's Sharjah
+  // row matched today's leg and handed ABY375 an arrival from the day before. sched_dep is a
+  // unix instant, so both ends of the same leg agree on it.
   const byNum = new Map<string, BoardFlight>()
   for (const f of flights) {
-    if (!byNum.has(f.num)) byNum.set(f.num, f)
+    const k = `${f.num}|${f.sched_dep ?? ''}`
+    if (!byNum.has(k)) byNum.set(k, f)
     const dep = f.dep_iata ?? '', arr = f.arr_iata ?? ''
     const other = SYRIA_AIRPORTS.has(arr) ? dep : SYRIA_AIRPORTS.has(dep) ? arr : ''
     if (other && !SYRIA_AIRPORTS.has(other)) counterparts.add(other)
@@ -316,7 +321,7 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>, lookup: Cal
         for (const section of ['departures', 'arrivals'] as const) {
           for (const f of (row[section] ?? [])) {
             const num = (f.num ?? '').toString()
-            const hit = num && byNum.get(num)
+            const hit = num && byNum.get(`${num}|${f.sched_dep ?? ''}`)
             if (!hit) continue
             const st = (f.status ?? '').toLowerCase()
 
@@ -324,7 +329,13 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>, lookup: Cal
               const arr = f.real_arr
                 ? new Date(f.real_arr * 1000).toISOString()
                 : extractActualArrUtc(st, rowDate)
-              if (arr) { hit.actual_arr_utc = arr; filled++ }
+              // An arrival before its own departure belongs to another leg. The key should
+              // already prevent that; this catches it when a row carries no sched_dep to key
+              // on, which is how yesterday's landing reached today's flight.
+              const sane = arr && hit.actual_dep_utc
+                ? Date.parse(arr) > Date.parse(hit.actual_dep_utc)
+                : !!arr
+              if (arr && sane) { hit.actual_arr_utc = arr; filled++ }
             }
             if (!hit.actual_dep_utc) {
               const dep = f.real_dep
