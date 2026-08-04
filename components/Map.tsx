@@ -576,7 +576,7 @@ function buildPopup(
         <div style="flex:1;text-align:right">
           <div style="font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:3px">Arrival</div>
           <div style="display:flex;align-items:baseline;justify-content:flex-end">
-            ${delayBadge(fs?.arr_delay_min ?? schedArrDeltaMin(a.arr_time_utc, fs?.actual_arr_utc ?? fs?.revised_arr_utc ?? null), true)}<span style="font-size:20px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums">${arrTimeLocal || '—'}</span>
+            ${delayBadge(fs?.arr_delay_min ?? schedArrDeltaMin(a.arr_time_utc, arrISO), true)}<span style="font-size:20px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums">${arrTimeLocal || '—'}</span>
           </div>
         </div>
       </div>`
