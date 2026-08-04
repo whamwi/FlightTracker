@@ -11,7 +11,8 @@ const PREFIX_TO_IATA: Record<string, string> = { FYC: 'XH', SYR: 'RB', HST: 'RB'
 const SYRIAN_AIRPORTS = new Set(['DAM', 'ALP', 'LTK'])
 
 const STATUS_RANK: Record<string, number> = {
-  Arrived: 8, Landed: 8, Approaching: 7, 'En Route': 6,
+  // Terminal, like Arrived — see normaliseStatus in the flightboard route.
+  Arrived: 8, Landed: 8, Diverted: 8, Approaching: 7, 'En Route': 6,
   Departed: 5, Cancelled: 5, Delayed: 4, GateClosed: 3, Boarding: 3,
   Expected: 2, Scheduled: 1, Unknown: 0,
 }

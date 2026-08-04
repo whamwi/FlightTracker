@@ -41,6 +41,11 @@ function normaliseStatus(raw: string | null): string {
   if (t.includes('en route') || t.includes('in flight'))      return 'En Route'
   if (t.includes('approach'))                                  return 'Approaching'
   if (t.includes('landed') || t.includes('arrived'))          return 'Arrived'
+  // "Diverted to AMM" — the flight is going somewhere else entirely and will never reach
+  // the destination on its ticket. Left unrecognised it fell through to Unknown, which
+  // outranks nothing, so the flight kept its Departed status and both maps carried on
+  // predicting it toward an airport it had already turned away from.
+  if (t.includes('divert'))                                   return 'Diverted'
   if (t.includes('cancel'))                                    return 'Cancelled'
   return 'Unknown'
 }
@@ -89,7 +94,9 @@ export async function GET(req: Request) {
 
   // Status priority: higher rank wins when the same flight appears in multiple airport caches.
   const STATUS_RANK: Record<string, number> = {
-    Arrived: 8, Landed: 8, Approaching: 7, 'En Route': 6,
+    // Diverted ranks with Arrived: both are terminal for this flight, and a later Departed
+    // or Delayed row must not pull it back to looking airborne.
+    Arrived: 8, Landed: 8, Diverted: 8, Approaching: 7, 'En Route': 6,
     Departed: 5, Cancelled: 5, Delayed: 4, GateClosed: 3, Boarding: 3,
     Expected: 2, Scheduled: 1, Unknown: 0,
   }

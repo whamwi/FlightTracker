@@ -795,6 +795,11 @@ export async function GET() {
       .filter(f => {
         if (!f.dep_iata || !f.arr_iata || !f.duration_min) return false
         if (seenCallsigns.has(f.callsign)) return false
+        // A diverted flight is going somewhere else and will never reach the destination on
+        // its ticket, so predicting it along that route draws an aircraft on a path it has
+        // already turned off. G9375 was over Jordan bound for Amman while both maps carried
+        // it toward Damascus. Terminal here, like an arrival.
+        if ((f.status ?? '').toLowerCase().includes('divert')) return false
         if (f.actual_dep_utc) {
           const depMs = new Date(f.actual_dep_utc).getTime()
           // Detect yesterday's flights: scheduled (or actual) departure is before Syria midnight
