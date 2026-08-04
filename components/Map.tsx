@@ -53,8 +53,14 @@ interface ScheduleEntry {
   callsign:     string
   dep_iata:     string
   arr_iata:     string
-  dep_time_utc: string   // "HH:MM"
-  arr_time_utc: string   // "HH:MM"
+  /**
+   * "HH:MM", or null when this entry was synthesised for a flight the board reported as
+   * departed but which has no timetable row. Nullable rather than a placeholder: '00:00' was
+   * indistinguishable from a real midnight departure, and anything measuring against it got a
+   * silent, plausible-looking answer.
+   */
+  dep_time_utc: string | null
+  arr_time_utc: string | null
   duration_min: number
   days_of_week: string[]
 }
@@ -273,7 +279,7 @@ function logTrackerState(store: any, inputs: any[], now: number) {
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 // Returns fraction (0–1) of flight elapsed (second precision), or null if not active right now
-function isFlightActiveNow(depUtc: string, arrUtc: string, days: string[], nowMs: number): number | null {
+function isFlightActiveNow(depUtc: string | null, arrUtc: string | null, days: string[], nowMs: number): number | null {
   if (!depUtc || !arrUtc || depUtc === '—' || arrUtc === '—') return null
   const toSec = (s: string) => { const [h, m] = s.split(':').map(Number); return h * 3600 + m * 60 }
   const depSec = toSec(depUtc)
@@ -364,7 +370,10 @@ function popupToLocal(iso: string | null, offset: number): string {
   return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`
 }
 // Convert UTC "HH:MM" schedule time to local using airport UTC offset
-function schedToLocal(hhmm: string, offset: number): string {
+function schedToLocal(hhmm: string | null, offset: number): string {
+  // A synthesised schedule entry has no times. An em dash is the honest render; the old
+  // '00:00' placeholder made a flight with no timetable look like a midnight departure.
+  if (!hhmm) return '—'
   const [h, m] = hhmm.split(':').map(Number)
   const total = h * 60 + m + Math.round(offset * 60)
   const lh = Math.floor(((total % 1440) + 1440) % 1440 / 60)
@@ -1257,7 +1266,11 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
             if (existingSchedIdx === -1) {
               scheduleRef.current.push({
                 callsign: cs, dep_iata, arr_iata,
-                dep_time_utc: '00:00', arr_time_utc: '00:00',
+                // No timetable row for this callsign — say so, rather than claiming midnight.
+                // '00:00' here is what produced a "-246m" arrival badge: the ETA was 19:53Z,
+                // schedArrDeltaMin picked the nearer midnight (tomorrow's, 4h06m away) and
+                // reported the gap as a delay.
+                dep_time_utc: null, arr_time_utc: null,
                 duration_min, days_of_week: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],
               })
             } else {
@@ -1690,7 +1703,11 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         // Stale un-projected: park pre-departure or post-arrival
         if (a.stale && !projected) {
           const se = scheduleRef.current.find(e => e.callsign === cs)
-          if (se && isFlightActiveNow(se.dep_time_utc, se.arr_time_utc, se.days_of_week, now) === null) {
+          // Times are required here, not just an inactive result: isFlightActiveNow returns
+          // null both for "not flying now" and for "no timetable at all", and only the first
+          // has hours to reason about.
+          if (se && se.dep_time_utc && se.arr_time_utc
+              && isFlightActiveNow(se.dep_time_utc, se.arr_time_utc, se.days_of_week, now) === null) {
             const toSec2 = (s: string) => { const [h, m] = s.split(':').map(Number); return h * 3600 + m * 60 }
             const d2 = new Date(now)
             const todayDay2 = ['sun','mon','tue','wed','thu','fri','sat'][d2.getUTCDay()]
@@ -1866,6 +1883,9 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
       for (const entry of scheduleRef.current) {
         const fss = flightStatusRef.current[entry.callsign]
         if (!fss?.actual_dep_utc) continue
+        // A synthesised entry has no timetable row to match against. It previously carried
+        // '00:00', which made midnight a candidate scheduled departure for any flight.
+        if (!entry.dep_time_utc) continue
         // Infer scheduled departure = actual − delay so we can match to the right timetable row
         const refMs = new Date(fss.actual_dep_utc).getTime() - (fss.dep_delay_min ?? 0) * 60_000
         const refMin = new Date(refMs).getUTCHours() * 60 + new Date(refMs).getUTCMinutes()
