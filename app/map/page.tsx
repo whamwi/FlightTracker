@@ -182,7 +182,7 @@ function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelecte
           <MiniLogo iata={f.airline_iata} name={f.airline_name} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11.5, fontWeight: 700, color: C.ink, letterSpacing: '.05em' }}>
-              {f.iata_number}{f.callsign && f.callsign !== f.iata_number ? ` · ${f.callsign}` : ''}{f.aircraft_type ? ` · ${f.aircraft_type}` : ''}
+              {f.iata_number}{f.callsign && f.callsign !== f.iata_number ? ` · ${f.callsign}` : ''}
             </div>
             <div style={{ font: `500 10.5px/1 'Instrument Sans',system-ui`, color: C.muted, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {f.airline_name}
