@@ -26,6 +26,16 @@ const HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, 'Content-Ty
 /** Movement in the arrival estimate worth telling someone about. */
 const ETA_MOVE_MIN = 15
 
+/**
+ * The public host, not this deployment's own URL.
+ *
+ * Deriving the origin from req.url gives the per-deployment hostname, which sits behind
+ * Vercel's deployment protection — so the board fetch came back 401 and every run bailed out
+ * before writing a row. The other crons here already use this constant; this one should have
+ * from the start.
+ */
+const SELF = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.flysyria.app'
+
 type Board = {
   iata_number: string
   status: string
@@ -71,9 +81,8 @@ export async function GET(req: Request) {
   }
 
   const date = new URL(req.url).searchParams.get('date') ?? syriaDate()
-  const origin = new URL(req.url).origin
 
-  const boardRes = await fetch(`${origin}/api/flightboard?date=${date}`, { cache: 'no-store' })
+  const boardRes = await fetch(`${SELF}/api/flightboard?date=${date}`, { cache: 'no-store' })
   if (!boardRes.ok) {
     return NextResponse.json({ ok: false, error: `flightboard ${boardRes.status}` }, { status: 502 })
   }
