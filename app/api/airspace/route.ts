@@ -1,5 +1,6 @@
 import { NextResponse, after } from 'next/server'
 import { sweepAllCircles } from '@/lib/adsb-feed'
+import { fetchIataToIcao, fetchCallsignLookup, resolveCallsign, type CallsignLookup } from '@/lib/callsign'
 
 export const dynamic = 'force-dynamic'
 
@@ -59,19 +60,6 @@ async function fetchAirportCoords(): Promise<Record<string, [number, number]>> {
 }
 
 // ── IATA → ICAO airline prefix (1h cache) ─────────────────────────────────────
-let iataToIcaoCache: { map: Record<string, string>; ts: number } | null = null
-
-async function fetchIataToIcao(): Promise<Record<string, string>> {
-  if (iataToIcaoCache && Date.now() - iataToIcaoCache.ts < 3_600_000)
-    return iataToIcaoCache.map
-  const res = await fetch(`${SB_URL}/rest/v1/airlines?select=iata,icao`, { headers: SB_HEADERS })
-  if (!res.ok) return iataToIcaoCache?.map ?? {}
-  const rows: { iata: string; icao: string }[] = await res.json()
-  const map: Record<string, string> = {}
-  for (const r of rows) if (r.iata && r.icao) map[r.iata.toUpperCase()] = r.icao.toUpperCase()
-  iataToIcaoCache = { map, ts: Date.now() }
-  return map
-}
 
 // Extract actual dep/arr UTC from FR24 status string ("Departed 01:55" → ISO).
 // Times in status are Syria local (UTC+3); date is the Syria operating date.
@@ -91,70 +79,6 @@ function extractActualArrUtc(status: string, date: string): string | null {
 }
 function extractRevisedArrUtc(status: string, date: string): string | null {
   return extractStatusUtc(status, ['estimated', 'expect', 'delayed'], date)
-}
-
-// ── Per-flight callsign lookup (1h cache) ─────────────────────────────────────
-// `flight_lookup` is the authoritative iata_number → broadcast_callsign mapping, kept by
-// the admin tooling and the damairport sync. It is what /api/schedule and route-reconcile
-// read, and it is right where the prefix rule below is only a guess.
-//
-// That guess fails whenever an airline's callsign is not <ICAO><same digits>: DN541 is
-// broadcast as DNA541, and `airlines` said DN→JOC, so every Dan Air flight failed to match
-// its own ADS-B contact for two weeks with no error anywhere — indistinguishable from an
-// aircraft simply not being seen.
-//
-// FR24's `num` arrives in either form — IATA (XQ808) or already the callsign (FYC455, where
-// flight_lookup.fr24_uses_callsign is true) — so both are indexed.
-interface CallsignLookup {
-  byIata:     Record<string, string>   // XQ808  → SXS808
-  byCallsign: Record<string, string>   // FYC455 → FYC455
-  // Either identifier → the real IATA number. FR24 publishes the callsign as `num` for the
-  // 38 flights with fr24_uses_callsign, so `num` alone cannot tell you the ticketed number:
-  // Fly Cham arrives as FYC727 when a passenger's booking says XH727.
-  toIata:     Record<string, string>   // FYC727 → XH727,  XQ808 → XQ808
-}
-let lookupCache: { map: CallsignLookup; ts: number } | null = null
-
-async function fetchCallsignLookup(): Promise<CallsignLookup> {
-  if (lookupCache && Date.now() - lookupCache.ts < 3_600_000) return lookupCache.map
-  const res = await fetch(
-    `${SB_URL}/rest/v1/flight_lookup?select=iata_number,broadcast_callsign&broadcast_callsign=not.is.null`,
-    { headers: SB_HEADERS },
-  )
-  if (!res.ok) return lookupCache?.map ?? { byIata: {}, byCallsign: {}, toIata: {} }
-  const rows: { iata_number: string; broadcast_callsign: string }[] = await res.json()
-  const map: CallsignLookup = { byIata: {}, byCallsign: {}, toIata: {} }
-  for (const r of rows) {
-    if (!r.iata_number || !r.broadcast_callsign) continue
-    map.byIata[r.iata_number.toUpperCase()]            = r.broadcast_callsign.toUpperCase()
-    map.byCallsign[r.broadcast_callsign.toUpperCase()] = r.broadcast_callsign.toUpperCase()
-    map.toIata[r.iata_number.toUpperCase()]            = r.iata_number
-    map.toIata[r.broadcast_callsign.toUpperCase()]     = r.iata_number
-  }
-  lookupCache = { map, ts: Date.now() }
-  return map
-}
-
-/** Table first, prefix rule only for flights the table has never seen. */
-function resolveCallsign(num: string, lookup: CallsignLookup, iataToIcao: Record<string, string>): string {
-  const up = num.toUpperCase()
-  return lookup.byIata[up] ?? lookup.byCallsign[up] ?? toCallsign(up, iataToIcao)
-}
-
-// Convert FR24 flight number → ADS-B broadcast callsign.
-// FR24 uses IATA format (TK849, G9434, FZ1234) or already-ICAO (FYC490, SYR123).
-// ADS-B always broadcasts ICAO prefix (THY849, ABY434, FDB1234, FYC490).
-// Fallback only — prefer resolveCallsign above.
-function toCallsign(num: string, iataToIcao: Record<string, string>): string {
-  const up = num.toUpperCase()
-  // 2-char alphanumeric IATA prefix: "TK"→THY, "G9"→ABY, "FZ"→FDB
-  const m2 = up.match(/^([A-Z][A-Z0-9])(\d+)$/)
-  if (m2) {
-    const icao = iataToIcao[m2[1]]
-    if (icao) return icao + m2[2]
-  }
-  // 3-char alpha — already ICAO (FYC490, SYR123) or unknown; return as-is
-  return up
 }
 
 // ── Board flights (fr24_daily_cache, Syria op date = UTC+3, 60s cache) ────────

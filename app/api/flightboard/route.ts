@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { fetchCallsignLookup, fetchIataToIcao, resolveCallsign } from '@/lib/callsign'
 
 export const dynamic = 'force-dynamic'
 
@@ -48,6 +49,12 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
   const date = searchParams.get('date')
   if (!date) return NextResponse.json({ ok: false, error: 'date required' }, { status: 400 })
+
+  // The broadcast callsign for every row. The board carried none, so the map's side panel
+  // could only show the ticketed number while the map labelled the same aircraft by
+  // callsign — G9434 in the panel, ABY434 on the plane beside it. Both caches are hourly and
+  // shared with /api/airspace, so this costs nothing per request.
+  const [lookup, iataToIcao] = await Promise.all([fetchCallsignLookup(), fetchIataToIcao()])
 
   // Build airline map from DB (1-hour Next.js cache)
   const alRes = await fetch(
@@ -181,6 +188,7 @@ export async function GET(req: Request) {
 
     flightMap[key] = {
       iata_number:     num,
+      callsign:        resolveCallsign(num, lookup, iataToIcao),
       airline_name:    al.name,
       airline_iata:    airlineIata,
       country_flag:    al.flag,
