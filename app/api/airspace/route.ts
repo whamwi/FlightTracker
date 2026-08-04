@@ -26,6 +26,8 @@ const SB_HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 // Syria's extent (32.31–37.32 N, 35.61–42.38 E) padded a little. Used only to drop
 // non-board aircraft from the response — the client applies the exact polygon, so this
 // deliberately errs wide.
+const SYRIA_AIRPORTS = new Set(['DAM', 'ALP', 'LTK'])
+
 const SYRIA_BOX = { latMin: 32.0, latMax: 37.7, lonMin: 35.3, lonMax: 42.7 }
 function inSyriaBox(lat: number, lon: number): boolean {
   return lat >= SYRIA_BOX.latMin && lat <= SYRIA_BOX.latMax
@@ -271,6 +273,72 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>, lookup: Cal
           airline_iata:   icaoToIata[icaoPrefix] ?? null,
         })
       }
+    }
+  }
+
+  // ── Second pass: the other end of each flight ──────────────────────────────
+  //
+  // Everything above comes from DAM, ALP and LTK only, which is why the map disagreed with
+  // the flight board about G9375: Damascus still read "Delayed 14:44" while Sharjah had
+  // recorded the landing at 09:57:48, twelve seconds from the truth VariFlight confirmed.
+  // The board reads origin airports in its own second pass; the map never did, so it went on
+  // predicting an aircraft that had been on stand for an hour.
+  //
+  // Both directions, not just origins. For an arrival into Syria the origin's departures row
+  // is the counterpart; for a departure out of Syria it is the destination's arrivals row —
+  // and that is the row that knows when it landed. Airports elsewhere are also better
+  // instrumented than ours, so their estimates tend to be fresher too.
+  //
+  // Fills gaps only. Where both ends report something, the first pass keeps its value: this
+  // exists to supply what Syria does not know, not to arbitrate between two sources that
+  // disagree, which today's evidence says cannot be done by preferring one airport.
+  const counterparts = new Set<string>()
+  const byNum = new Map<string, BoardFlight>()
+  for (const f of flights) {
+    if (!byNum.has(f.num)) byNum.set(f.num, f)
+    const dep = f.dep_iata ?? '', arr = f.arr_iata ?? ''
+    const other = SYRIA_AIRPORTS.has(arr) ? dep : SYRIA_AIRPORTS.has(dep) ? arr : ''
+    if (other && !SYRIA_AIRPORTS.has(other)) counterparts.add(other)
+  }
+
+  if (counterparts.size) {
+    const codes = [...counterparts].join(',')
+    const res2 = await fetch(
+      `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=in.(${yesterday},${date},${tomorrow})&airport_iata=in.(${codes})&select=airport_iata,flight_date,departures,arrivals`,
+      { headers: SB_HEADERS },
+    )
+    if (res2.ok) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rows2: any[] = await res2.json()
+      let filled = 0
+      for (const row of rows2) {
+        const rowDate = (row.flight_date as string) || date
+        for (const section of ['departures', 'arrivals'] as const) {
+          for (const f of (row[section] ?? [])) {
+            const num = (f.num ?? '').toString()
+            const hit = num && byNum.get(num)
+            if (!hit) continue
+            const st = (f.status ?? '').toLowerCase()
+
+            if (!hit.actual_arr_utc) {
+              const arr = f.real_arr
+                ? new Date(f.real_arr * 1000).toISOString()
+                : extractActualArrUtc(st, rowDate)
+              if (arr) { hit.actual_arr_utc = arr; filled++ }
+            }
+            if (!hit.actual_dep_utc) {
+              const dep = f.real_dep
+                ? new Date(f.real_dep * 1000).toISOString()
+                : extractActualDepUtc(st, rowDate)
+              if (dep) hit.actual_dep_utc = dep
+            }
+            if (!hit.revised_arr_utc && f.est_arr) {
+              hit.revised_arr_utc = new Date(f.est_arr * 1000).toISOString()
+            }
+          }
+        }
+      }
+      if (filled) console.log(`[airspace] second pass supplied ${filled} arrival(s) Syria had not recorded`)
     }
   }
 
