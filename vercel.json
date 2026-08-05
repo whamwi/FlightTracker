@@ -48,6 +48,10 @@
     {
       "path": "/api/cron/daily-stats",
       "schedule": "20 2 * * *"
+    },
+    {
+      "path": "/api/cron/alert-send",
+      "schedule": "1-59/5 * * * *"
     }
   ]
 }
