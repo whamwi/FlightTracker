@@ -22,6 +22,11 @@ export const metadata: Metadata = {
     title: 'FlySyria',
     description: 'Live flight status for Damascus & Aleppo.',
   },
+  // Search Console ownership proof. Public by design — it only says who controls the domain,
+  // and Google re-checks it, so it has to stay in place rather than be removed once verified.
+  verification: {
+    google: 'dW-YPSBWEBDjdXU-FRF0sTWKwbcm6zuLxNVVBynUpz8',
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
