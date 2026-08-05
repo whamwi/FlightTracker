@@ -1,3 +1,4 @@
+import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
@@ -37,7 +38,19 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
         <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
       </head>
-      <body className="bg-gray-950 text-white">{children}</body>
+      <body className="bg-gray-950 text-white">
+        {children}
+        {/*
+          Vercel Web Analytics. Cookieless and with no cross-site identifiers, so it needs no
+          consent banner and adds nothing to the App Privacy disclosures — which matters with
+          a store submission pending.
+
+          Enabling it in the dashboard is not enough on its own: for a Next.js app the events
+          come from this component, so without it the project would show zero traffic and look
+          broken rather than empty.
+        */}
+        <Analytics />
+      </body>
     </html>
   )
 }
