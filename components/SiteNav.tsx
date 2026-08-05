@@ -55,12 +55,14 @@ export default function SiteNav({ active, right }: { active: string; right?: Rea
         .sn-right { display: flex; margin-left: auto; align-items: center; }
         .sn-actions { display: none; }
         .sn-burger{ display: none; }
+        .sn-track { display: none; }
         @media (max-width: 767px) {
           .sn-bar    { padding: 0 12px; padding-top: env(safe-area-inset-top); height: calc(58px + env(safe-area-inset-top)); gap: 0; }
           .sn-tabs   { display: none; }
           .sn-right  { display: none; }
           .sn-actions{ display: flex; align-items: center; gap: 8px; margin-left: auto; margin-right: 10px; }
           .sn-burger { display: flex; }
+          .sn-track  { display: inline-flex; }
         }
       `}</style>
 
@@ -90,6 +92,36 @@ export default function SiteNav({ active, right }: { active: string; right?: Rea
         {/* Filled by the Track map, which portals its media buttons here on phones. Empty
             and zero-width everywhere else, so it costs nothing on the other pages. */}
         <div id="sn-page-actions" className="sn-actions" />
+
+        {/*
+          * Track, promoted out of the drawer on the board.
+          *
+          * On a phone every tab lives behind the hamburger, which is fine for Destinations and
+          * News but wrong for the live map: it is the second thing people come for, and going
+          * from a flight on the board to watching it fly is the app's most natural step. Behind
+          * a menu it reads as a settings page.
+          *
+          * Only on the board — the drawer is the right home for the rest, and on the map itself
+          * this would point at the page you are already on, where the media buttons portal into
+          * the slot beside it.
+          */}
+        {active === 'Flights' && (
+          <Link
+            href="/map"
+            className="sn-track"
+            aria-label="Track flights on the live map"
+            style={{
+              alignItems: 'center', gap: 6, height: 40, padding: '0 12px', marginRight: 8,
+              borderRadius: 10, border: `1px solid ${C.forest}`, background: C.forest,
+              textDecoration: 'none', flexShrink: 0,
+            }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="#fff" aria-hidden>
+              <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
+            </svg>
+            <span style={{ font: `700 13.5px/1 'Instrument Sans',system-ui`, color: '#fff' }}>Track</span>
+          </Link>
+        )}
 
         <button
           className="sn-burger"
