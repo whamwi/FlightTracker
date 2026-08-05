@@ -5,20 +5,22 @@ import { NextResponse } from 'next/server'
  * (@SyGACA — note the Facebook handle is @SyrGACA, with an extra "r") into
  * `syrgaca_media` as source='youtube'.
  *
- * Two paths, picked by whether YOUTUBE_API_KEY is set:
+ * Requires YOUTUBE_API_KEY. Every channel's uploads live in a playlist whose id is the
+ * channel id with "UC" swapped for "UU", so the full backlog is readable with plain
+ * `playlistItems.list` calls at 1 quota unit each against 10,000 a day — one run costs
+ * single digits.
  *
- *   api  — every channel's uploads live in a playlist whose id is the channel id with
- *          "UC" swapped for "UU", so the full backlog is readable with plain
- *          `playlistItems.list` calls at 1 quota unit each against 10,000/day.
- *   rss  — the public feed needs no key or account at all, but returns only the latest
- *          15 uploads and cannot paginate. After Shorts are dropped that leaves well
- *          under TARGET, so reaching a full 30 requires the key.
+ * There was a keyless RSS fallback. It is gone because it no longer works: YouTube now
+ * answers 404 for this channel's feed in every form — channel_id, playlist_id and user,
+ * with and without a browser User-Agent. Since it only ran when the key was ABSENT, it
+ * would have failed at precisely the moment it was meant to help, and silently: the
+ * gallery keeps serving the videos already stored, so nothing looks wrong. A fallback
+ * that cannot work is worse than none, because it stops anyone looking for a real one.
  *
- * Shorts are excluded. Neither feed flags them, but YouTube's own routing does: a
+ * Shorts are excluded. The feed does not flag them, but YouTube's own routing does: a
  * request to /shorts/<id> stays there for a real Short and 303s to /watch?v= for a
- * normal upload. That is one cheap HEAD per video and needs no key, so it works on
- * both paths — unlike a duration cutoff, which would need the API and would still
- * misfile genuinely short normal uploads.
+ * normal upload. That is one cheap HEAD per video — unlike a duration cutoff, which
+ * would still misfile genuinely short normal uploads.
  *
  * Nothing is rehosted either way: i.ytimg.com thumbnails are stable and permanent, and
  * playback is an embedded player rather than a stored file.
@@ -162,36 +164,6 @@ async function fetchViaApi(): Promise<{ rows: VideoRow[]; pages: number; dropped
   return { rows: kept.slice(0, TARGET), pages, dropped }
 }
 
-// ── Keyless RSS path ──────────────────────────────────────────────────────────
-const XML_ENTITIES: Record<string, string> = {
-  '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'", '&#39;': "'",
-}
-const decodeXml = (s: string) =>
-  s.replace(/&(?:amp|lt|gt|quot|apos|#39);/g, (m) => XML_ENTITIES[m] ?? m)
-
-async function fetchViaRss(): Promise<{ rows: VideoRow[]; pages: number; dropped: number }> {
-  const res = await fetch(
-    `https://www.youtube.com/feeds/videos.xml?channel_id=${CHANNEL_ID}`,
-    { cache: 'no-store' },
-  )
-  if (!res.ok) throw new Error(`YouTube RSS ${res.status}`)
-  const xml = await res.text()
-
-  const all: VideoRow[] = []
-  // Split on <entry> so the feed-level <published> (the channel's own creation date)
-  // is never mistaken for a video's.
-  for (const entry of xml.split('<entry>').slice(1)) {
-    const videoId = entry.match(/<yt:videoId>([^<]+)<\/yt:videoId>/)?.[1]
-    if (!videoId) continue
-    const title     = entry.match(/<title>([\s\S]*?)<\/title>/)?.[1] ?? ''
-    const published = entry.match(/<published>([^<]+)<\/published>/)?.[1] ?? null
-    all.push(row(videoId, decodeXml(title), published))
-  }
-
-  const { kept, dropped } = await dropShorts(all)
-  return { rows: kept.slice(0, TARGET), pages: 1, dropped }
-}
-
 // ── Handler ───────────────────────────────────────────────────────────────────
 export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET
@@ -199,10 +171,18 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
   }
 
-  const mode = YT_KEY ? 'api' : 'rss'
+  // Loud rather than quiet. Without this the run would fail deep inside the fetch with a
+  // YouTube error about a missing key, and the only symptom anyone would notice is a
+  // gallery that stopped gaining videos — weeks later.
+  if (!YT_KEY) {
+    return NextResponse.json(
+      { ok: false, error: 'YOUTUBE_API_KEY is not set — this sync has no keyless path since YouTube stopped serving the channel RSS feed' },
+      { status: 500 },
+    )
+  }
 
   try {
-    const { rows, pages, dropped } = mode === 'api' ? await fetchViaApi() : await fetchViaRss()
+    const { rows, pages, dropped } = await fetchViaApi()
 
     // Nothing is downloaded, so upserting the whole batch is cheap and idempotent — it
     // also repairs titles and thumbnails that changed upstream.
@@ -218,14 +198,14 @@ export async function GET(req: Request) {
     }
 
     // Trim anything outside the newest TARGET — including Shorts stored before this
-    // filter existed. Only in api mode: the RSS feed sees just the latest 15 uploads,
-    // so "not in this batch" there would wrongly delete perfectly good older rows.
+    // filter existed. Safe because the API pages the full backlog, so "not in this batch"
+    // genuinely means "no longer among the newest TARGET".
     //
     // Pinned rows are exempt. A pin can point at a video this sync never returns — an
     // older one, or one from a different channel entirely — and without this guard the
     // next run would quietly delete it.
     let pruned = 0
-    if (mode === 'api' && rows.length > 0) {
+    if (rows.length > 0) {
       const keep = rows.map((r) => `"${r.media_id}"`).join(',')
       const res  = await fetch(
         `${SB_URL}/rest/v1/syrgaca_media?source=eq.youtube&pinned=is.false&media_id=not.in.(${keep})`,
@@ -234,8 +214,8 @@ export async function GET(req: Request) {
       if (res.ok) pruned = ((await res.json()) as unknown[]).length
     }
 
-    return NextResponse.json({ ok: true, mode, pages, videos: rows.length, shortsSkipped: dropped, upserted, pruned })
+    return NextResponse.json({ ok: true, pages, videos: rows.length, shortsSkipped: dropped, upserted, pruned })
   } catch (e) {
-    return NextResponse.json({ ok: false, mode, error: String(e) }, { status: 500 })
+    return NextResponse.json({ ok: false, error: String(e) }, { status: 500 })
   }
 }
