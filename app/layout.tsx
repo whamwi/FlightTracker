@@ -1,4 +1,5 @@
 import { Analytics } from '@vercel/analytics/next'
+import ErrorReporter from '@/components/ErrorReporter'
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
@@ -49,6 +50,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           come from this component, so without it the project would show zero traffic and look
           broken rather than empty.
         */}
+        {/* Reports browser errors to /admin/errors. Vercel's logs stop at the server, and a
+            fault on a visitor's phone is otherwise invisible. */}
+        <ErrorReporter />
         <Analytics />
       </body>
     </html>
