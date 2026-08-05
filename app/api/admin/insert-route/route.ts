@@ -54,16 +54,41 @@ export async function POST(req: Request) {
       }, { status: 422 })
     }
 
-    // 2. Find or create flight_lookup
-    const existing = await sb(`/flight_lookup?iata_number=eq.${encodeURIComponent(iata_number)}&select=id&limit=1`)
+    /*
+     * 2. Find or create flight_lookup.
+     *
+     * Matched on EITHER identifier. This searched iata_number alone, so entering a callsign —
+     * which is what the unfiled feed and FR24 both show for the 38 flights with
+     * fr24_uses_callsign — found nothing and created a second flight. FYC521 and FYC522 were
+     * added that way on 4 Aug, each with a null broadcast_callsign and the callsign sitting in
+     * the iata_number column, alongside the real XH521/XH522 rows from July. The route rows
+     * then attached to the impostor, so a new Monday service was filed against a flight
+     * nothing else in the system knew about.
+     *
+     * or= covers both columns in one request, which also means a callsign typed here resolves
+     * to the ticketed number the rest of the system uses.
+     */
+    const identifier = String(iata_number).toUpperCase()
+    const existing = await sb(
+      `/flight_lookup?or=(iata_number.eq.${encodeURIComponent(identifier)},broadcast_callsign.eq.${encodeURIComponent(identifier)})&select=id,iata_number&limit=1`
+    )
     let flightId: number
     if (existing?.length) {
       flightId = existing[0].id
     } else {
+      // Genuinely new. Record the callsign when the number looks like one — a 3-letter ICAO
+      // prefix — so the row is complete rather than half-filled, and so the resolver, which
+      // ignores rows with no callsign, can see it.
+      const looksLikeCallsign = /^[A-Z]{3}\d/.test(identifier)
       const created = await sb('/flight_lookup', {
         method: 'POST',
         headers: { Prefer: 'return=representation' },
-        body: JSON.stringify({ iata_number, airline_id: airline.id, source: 'admin_insert' }),
+        body: JSON.stringify({
+          iata_number: identifier,
+          broadcast_callsign: looksLikeCallsign ? identifier : null,
+          airline_id: airline.id,
+          source: 'admin_insert',
+        }),
       })
       flightId = created[0].id
     }
