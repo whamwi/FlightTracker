@@ -680,15 +680,36 @@ async function writeOutboundDep(info: BoardFlight, depTs: number): Promise<void>
  */
 const POSITION_MAX_AGE_MS = 75_000
 
+const PAGE = 1_000
+
 async function readStoredPositions(): Promise<{ aircraft: any[]; live: boolean; ts: number } | null> {
   const since = new Date(Date.now() - POSITION_MAX_AGE_MS).toISOString()
-  const res = await fetch(
-    `${SB_URL}/rest/v1/aircraft_last_seen?seen_at=gte.${since}&select=raw,seen_at&raw=not.is.null`,
-    { headers: SB_HEADERS, cache: 'no-store' },
-  )
-  if (!res.ok) return null
-  const rows: { raw: any; seen_at: string }[] = await res.json()
+
+  /*
+   * Paged, because PostgREST caps a response at 1000 rows and says so only by returning
+   * exactly 1000. The first version of this read did not page, and the sky quietly shrank
+   * from 1166 aircraft to 1000 — no error, no warning, just aircraft that stopped existing.
+   * Whether the truncated set happens to contain the board's flights is luck.
+   */
+  const rows: { raw: any; seen_at: string }[] = []
+  for (let from = 0; ; from += PAGE) {
+    const res = await fetch(
+      `${SB_URL}/rest/v1/aircraft_last_seen?seen_at=gte.${since}&select=raw,seen_at&raw=not.is.null&order=seen_at.desc`,
+      { headers: { ...SB_HEADERS, Range: `${from}-${from + PAGE - 1}` }, cache: 'no-store' },
+    )
+    if (!res.ok) return rows.length ? finish(rows) : null
+    const page: { raw: any; seen_at: string }[] = await res.json()
+    rows.push(...page)
+    if (page.length < PAGE) break
+    // A guard, not a limit anyone should reach: the feed runs to a few thousand aircraft, and
+    // an unbounded loop against a table that is upserted continuously is not worth the risk.
+    if (from >= 9 * PAGE) break
+  }
   if (!rows.length) return null
+  return finish(rows)
+}
+
+function finish(rows: { raw: any; seen_at: string }[]): { aircraft: any[]; live: boolean; ts: number } | null {
 
   const aircraft = rows.map(r => r.raw).filter(a => a && typeof a.lat === 'number')
   if (!aircraft.length) return null
