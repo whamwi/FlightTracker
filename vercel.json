@@ -43,7 +43,7 @@
     },
     {
       "path": "/api/cron/alert-shadow",
-      "schedule": "*/5 * * * *"
+      "schedule": "* * * * *"
     },
     {
       "path": "/api/cron/daily-stats",
@@ -51,7 +51,7 @@
     },
     {
       "path": "/api/cron/alert-send",
-      "schedule": "1-59/5 * * * *"
+      "schedule": "*/15 * * * *"
     }
   ]
 }

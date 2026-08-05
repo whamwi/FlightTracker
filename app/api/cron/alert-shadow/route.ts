@@ -1,19 +1,28 @@
 import { NextResponse } from 'next/server'
+import { deliver, type Transition } from '@/lib/alert-delivery'
 
 /**
- * Alert rules running in shadow: detect the transitions a push notification would be sent
- * for, and write them down instead of sending anything.
+ * Detect the transitions worth a push notification, record them, and send them.
  *
- * Nothing here delivers a notification. The point is to read back several days of decisions
- * before a single one reaches a phone, because a wrong alert is far worse than a missing one
- * — it wakes someone at 04:00 to tell them a flight landed that has not. This project has
- * already produced every ingredient for that mistake: a board reporting `Arrived` with no
- * arrival timestamp, FR24 labelling flights "Diverted to AMM" off spoofed ADS-B, and a
- * route_master departure time 25 minutes wrong that FR24 agreed with.
+ * This began as shadow mode: the rules ran and wrote down what they would have sent, without
+ * sending anything, because a wrong alert is far worse than a missing one — it wakes someone
+ * at 04:00 to tell them a flight landed that has not. This project has already produced every
+ * ingredient for that mistake: a board reporting `Arrived` with no arrival timestamp, FR24
+ * labelling flights "Diverted to AMM" off spoofed ADS-B, and a route_master departure time 25
+ * minutes wrong that FR24 agreed with.
  *
- * So every rule below fires on a CONFIRMED transition — an actual timestamp — and anything
- * inferred is recorded with would_send=false and a reason. Those withheld rows are the
- * interesting output: they measure how often the data would have lied.
+ * Every rule below still fires only on a CONFIRMED transition — an actual timestamp — and
+ * anything inferred is recorded with would_send=false and a reason. Those withheld rows are
+ * the interesting output: they measure how often the data would have lied.
+ *
+ * Delivery now happens here rather than in a second cron five minutes later. The transitions
+ * are in hand the moment they are computed, and handing them to a table so another job could
+ * pick them up cost every user up to ten minutes: the board knew a flight had landed long
+ * before the phone did. alert-send remains as an hourly-window sweep for anything this pass
+ * failed to deliver.
+ *
+ * Runs every minute. The board fetch is the same one the site serves, so the detection is
+ * only ever as stale as what a visitor would see.
  */
 
 export const dynamic     = 'force-dynamic'
@@ -52,6 +61,15 @@ type Snapshot = {
   actual_dep_utc: string | null
   actual_arr_utc: string | null
   eta_utc: string | null
+  /**
+   * What ETA drift is measured against — not the previous run.
+   *
+   * Comparing consecutive runs worked when they were five minutes apart, but at one-minute
+   * granularity a flight slipping two minutes per run would never cross the 15-minute
+   * threshold, and the delay alert people most want would quietly stop firing. Held steady
+   * until an alert fires, so gradual slippage accumulates and reports once.
+   */
+  eta_baseline_utc: string | null
 }
 
 type ShadowRow = {
@@ -103,6 +121,7 @@ export async function GET(req: Request) {
     if (!num) continue
 
     const eta = f.actual_arr_utc ?? f.revised_arr_utc ?? f.arr_time_utc ?? null
+    const was = prevByNum.get(num)
     const now: Snapshot = {
       iata_number: num,
       flight_date: date,
@@ -110,10 +129,11 @@ export async function GET(req: Request) {
       actual_dep_utc: f.actual_dep_utc ?? null,
       actual_arr_utc: f.actual_arr_utc ?? null,
       eta_utc: eta,
+      // Carried forward untouched; only an ETA_MOVED below resets it.
+      eta_baseline_utc: was?.eta_baseline_utc ?? eta,
     }
     snapshots.push(now)
 
-    const was = prevByNum.get(num)
     // First sighting establishes a baseline. Emitting on it would announce every flight's
     // current state the first time the cron ran, which is history, not news.
     if (!was) continue
@@ -136,10 +156,15 @@ export async function GET(req: Request) {
     }
 
     // ── Arrival estimate moved ──────────────────────────────────────────────
+    // Measured against the baseline rather than the previous run, so a flight slipping a
+    // couple of minutes at a time still reports once it has slipped enough to matter.
     if (!now.actual_arr_utc) {
-      const moved = minutesBetween(now.eta_utc, was.eta_utc)
+      const moved = minutesBetween(now.eta_utc, was.eta_baseline_utc ?? was.eta_utc)
       if (moved !== null && Math.abs(moved) >= ETA_MOVE_MIN) {
         push('ETA_MOVED', `${moved > 0 ? '+' : ''}${moved}m → ${now.eta_utc}`)
+        // Drift is now measured from here, so a flight that keeps slipping alerts on each
+        // further 15 minutes rather than on every run once it has crossed the threshold.
+        now.eta_baseline_utc = now.eta_utc
       }
     }
 
@@ -168,13 +193,22 @@ export async function GET(req: Request) {
     })
   }
 
+  // Send straight away rather than leaving it for another job. The snapshot is written first
+  // so a failure here cannot make the next run re-detect the same transition and buzz twice.
+  const sendable: Transition[] = shadow
+    .filter(s => s.would_send)
+    .map(({ iata_number, flight_date, event, detail }) => ({ iata_number, flight_date, event, detail }))
+
+  const delivery = await deliver(sendable)
+
   return NextResponse.json({
     ok: true,
     date,
     flights: flights.length,
     detected: shadow.length,
-    would_send: shadow.filter(s => s.would_send).length,
+    would_send: sendable.length,
     withheld: shadow.filter(s => !s.would_send).length,
+    delivery,
     events: shadow,
   })
 }
