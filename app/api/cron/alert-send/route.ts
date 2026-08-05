@@ -36,12 +36,14 @@ export async function GET(req: Request) {
   const since = new Date(Date.now() - 60 * 60_000).toISOString()
   const shRes = await fetch(
     `${SB_URL}/rest/v1/alert_shadow?created_at=gte.${since}&would_send=is.true`
-    + `&select=iata_number,flight_date,event,detail&order=created_at.asc`,
+    + `&select=iata_number,flight_date,event,detail,created_at&order=created_at.asc`,
     { headers: HEADERS, cache: 'no-store' },
   )
   if (!shRes.ok) return NextResponse.json({ ok: false, error: `shadow ${shRes.status}` }, { status: 502 })
 
-  const events: Transition[] = await shRes.json()
+  // created_at is the shadow row's own timestamp; deliver() reads it as detected_at.
+  const rows: (Transition & { created_at: string })[] = await shRes.json()
+  const events: Transition[] = rows.map(r => ({ ...r, detected_at: r.created_at }))
   const delivery = await deliver(events)
 
   return NextResponse.json({ ok: true, mode: 'retry-sweep', ...delivery })

@@ -195,9 +195,11 @@ export async function GET(req: Request) {
 
   // Send straight away rather than leaving it for another job. The snapshot is written first
   // so a failure here cannot make the next run re-detect the same transition and buzz twice.
+  const detectedAt = new Date().toISOString()
   const sendable: Transition[] = shadow
     .filter(s => s.would_send)
-    .map(({ iata_number, flight_date, event, detail }) => ({ iata_number, flight_date, event, detail }))
+    .map(({ iata_number, flight_date, event, detail }) =>
+      ({ iata_number, flight_date, event, detail, detected_at: detectedAt }))
 
   const delivery = await deliver(sendable)
 

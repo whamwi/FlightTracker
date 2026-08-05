@@ -33,9 +33,14 @@ export type Transition = {
   flight_date: string
   event: string
   detail: string | null
+  /** When the transition was detected. Compared against each subscription's own age below. */
+  detected_at: string
 }
 
-type Sub = { token: string; iata_number: string; flight_date: string; events: string[] }
+type Sub = {
+  token: string; iata_number: string; flight_date: string; events: string[]
+  created_at: string
+}
 
 export type DeliveryResult = {
   events: number
@@ -103,7 +108,7 @@ export async function deliver(events: Transition[]): Promise<DeliveryResult> {
   const nums = [...new Set(events.map(e => e.iata_number))]
   const subRes = await fetch(
     `${SB_URL}/rest/v1/flight_alerts?active=is.true&iata_number=in.(${nums.map(encodeURIComponent).join(',')})`
-    + `&select=token,iata_number,flight_date,events`,
+    + `&select=token,iata_number,flight_date,events,created_at`,
     { headers: HEADERS, cache: 'no-store' },
   )
   const subs: Sub[] = subRes.ok ? await subRes.json() : []
@@ -129,6 +134,18 @@ export async function deliver(events: Transition[]): Promise<DeliveryResult> {
     for (const s of subs) {
       if (s.iata_number !== e.iata_number || s.flight_date !== e.flight_date) continue
       if (!s.events.includes(e.event)) continue
+      /*
+       * Nothing that happened before the bell was tapped.
+       *
+       * The sweep re-offers the last hour of transitions so a failed delivery can be retried,
+       * and that window does not know when anyone subscribed. Someone following a flight that
+       * departed forty minutes ago would be told it had just departed — an alert that is not
+       * merely late but wrong, and the exact kind that destroys trust in the feature.
+       *
+       * Observed rather than theorised: RB443's departure was detected at 16:58 and a
+       * subscription arrived at 18:00. It missed the window by three minutes.
+       */
+      if (Date.parse(e.detected_at) < Date.parse(s.created_at)) continue
       const key = `${s.token}|${e.iata_number}|${e.flight_date}|${e.event}`
       if (already.has(key)) continue
       already.add(key)   // guards against two rows for the same transition in one call
