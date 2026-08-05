@@ -561,7 +561,7 @@ function unixToHHMM(unix: number): string {
 // `live` is false only when every mirror of every circle failed to answer — the signal
 // that we are blind rather than looking at quiet sky.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let feedCache: { aircraft: any[]; live: boolean; ts: number } | null = null
+let feedCache: { aircraft: any[]; live: boolean; ts: number; fromStorage: boolean } | null = null
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let feedInflight: Promise<{ aircraft: any[]; live: boolean }> | null = null
 
@@ -662,13 +662,51 @@ async function writeOutboundDep(info: BoardFlight, depTs: number): Promise<void>
   })
 }
 
+/**
+ * The cron's positions, read back.
+ *
+ * This is the point of the whole arrangement: /api/airspace answers from a table instead of
+ * querying adsb.fi itself. Upstream traffic becomes a function of the cron's schedule rather
+ * than of how many people have the map open, and a caller never waits for a sweep — measured
+ * at ~13s when a lambda's in-process cache was cold, against ~2s warm.
+ *
+ * `raw` is the entire feed object, which is why this can stand in for a sweep at all: the
+ * response ships fields the table has no columns for — t, r, track, true_heading — and a
+ * reconstruction from the typed columns would quietly drop them.
+ *
+ * Bounded by seen_at, and that bound is load-bearing. aircraft_last_seen is upserted by hex,
+ * so it holds every aircraft ever seen; without the window, one that left coverage hours ago
+ * would still be drawn.
+ */
+const POSITION_MAX_AGE_MS = 75_000
+
+async function readStoredPositions(): Promise<{ aircraft: any[]; live: boolean; ts: number } | null> {
+  const since = new Date(Date.now() - POSITION_MAX_AGE_MS).toISOString()
+  const res = await fetch(
+    `${SB_URL}/rest/v1/aircraft_last_seen?seen_at=gte.${since}&select=raw,seen_at&raw=not.is.null`,
+    { headers: SB_HEADERS, cache: 'no-store' },
+  )
+  if (!res.ok) return null
+  const rows: { raw: any; seen_at: string }[] = await res.json()
+  if (!rows.length) return null
+
+  const aircraft = rows.map(r => r.raw).filter(a => a && typeof a.lat === 'number')
+  if (!aircraft.length) return null
+
+  // Newest row, not now: the age reported to callers should be the age of the data.
+  const newest = rows.reduce((t, r) => Math.max(t, Date.parse(r.seen_at)), 0)
+  // Rows this recent mean the cron swept and at least one circle answered. Liveness is not
+  // stored per row, and inferring it from their presence is exactly what it means.
+  return { aircraft, live: true, ts: newest }
+}
+
 // Emergency fallback only: the cron owns the sweep now and writes to Supabase. This stays
 // so a cron outage degrades to the old behaviour rather than a dark map, and it calls the
 // shared sweep so the two can never disagree about which circles exist.
 function refreshFeeds(): Promise<{ aircraft: unknown[]; live: boolean }> {
   const p = (async () => {
     const { aircraft, live } = await sweepAllCircles()
-    feedCache = { aircraft, live, ts: Date.now() }
+    feedCache = { aircraft, live, ts: Date.now(), fromStorage: false }
     feedInflight = null
     return { aircraft, live }
   })().catch(err => { feedInflight = null; throw err })
@@ -708,26 +746,48 @@ export async function GET() {
     let feedsLive: boolean
     const cacheAge = feedCache ? Date.now() - feedCache.ts : Infinity
 
+    /**
+     * Three sources, in order of cost. A caller never sweeps unless the cron has stopped.
+     *
+     * `fromStorage` decides whether the positions are written back below. Re-upserting rows
+     * that were just read would stamp seen_at with now, and an aircraft that left coverage
+     * would then look freshly seen on every request — permanently.
+     */
+    let fromStorage = false
+
     if (feedCache && cacheAge < FRESH_MS) {
       visualAircraft = feedCache.aircraft
       feedsLive      = feedCache.live
-    } else if (feedCache && cacheAge < STALE_MS) {
-      // Serve now, refresh after the response is sent. `after()` keeps the function alive
-      // past the response on Vercel; without it the work would be frozen mid-flight.
-      visualAircraft = feedCache.aircraft
-      feedsLive      = feedCache.live
-      if (!feedInflight) after(() => refreshFeeds().catch(() => {}))
+      fromStorage    = feedCache.fromStorage
     } else {
-      if (!feedInflight) feedInflight = refreshFeeds()
-      const feed     = await feedInflight
-      visualAircraft = feed.aircraft
-      feedsLive      = feed.live
+      const stored = await readStoredPositions()
+      if (stored) {
+        visualAircraft = stored.aircraft
+        feedsLive      = stored.live
+        fromStorage    = true
+        feedCache      = { ...stored, fromStorage: true }
+      } else if (feedCache && cacheAge < STALE_MS) {
+        // The cron has gone quiet but this instance still holds something recent. Serve it and
+        // refresh behind the response rather than making this caller wait.
+        visualAircraft = feedCache.aircraft
+        feedsLive      = feedCache.live
+        fromStorage    = feedCache.fromStorage
+        if (!feedInflight) after(() => refreshFeeds().catch(() => {}))
+      } else {
+        // Nothing stored, nothing cached: the cron is down and this request is all there is.
+        // The slow path survives for exactly this case.
+        if (!feedInflight) feedInflight = refreshFeeds()
+        const feed     = await feedInflight
+        visualAircraft = feed.aircraft
+        feedsLive      = feed.live
+      }
     }
 
-    // Confirmed-airborne hex list, fetched in parallel with the position persist
+    // Confirmed-airborne hex list, fetched in parallel with the position persist.
+    // Nothing is persisted when the positions came out of the table: see fromStorage above.
     const [signalFlights] = await Promise.all([
       fetchSignalFlights(),
-      upsertPositions(visualAircraft),
+      fromStorage ? Promise.resolve() : upsertPositions(visualAircraft),
     ] as const)
 
     // Annotate visual radius aircraft
