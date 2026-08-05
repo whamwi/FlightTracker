@@ -44,6 +44,22 @@ export class TrackerStore {
   /** Timestamp of the last fix applied per flight, so a repeated poll is not re-applied. */
   private lastFixAt = new Map<string, number>()
   private lastEta   = new Map<string, number | null>()
+  /**
+   * Departure timestamp of the leg each tracker was built for.
+   *
+   * A callsign identifies a ROUTE, not a leg: RB502 flies most days. Trackers were keyed on
+   * the callsign alone and only rebuilt when the ETA moved more than etaRebuildMs, which
+   * silently failed for any flight with no revised arrival — eta_ms is null on both days, and
+   * `null !== null` is false, so the check never ran and the new leg inherited yesterday's
+   * tracker with its progress already at 1.0. It was then drawn as arrived, or not at all.
+   *
+   * It only surfaced on a page left open overnight, because update() drops absent flights and
+   * would have removed the old tracker — but a sleeping machine runs no updates. Twelve
+   * flights in the panel, two markers on the map, and a reload put it right.
+   *
+   * The departure time is what actually distinguishes one leg from the next.
+   */
+  private lastDeparted = new Map<string, number | null>()
   private cfg: PathConfig
   /**
    * Outcome of the most recent fix offered per flight.
@@ -84,6 +100,23 @@ export class TrackerStore {
         t = new PathTracker(ctx, nowMs, this.cfg)
         this.trackers.set(f.callsign, t)
         this.lastEta.set(f.callsign, f.eta_ms)
+        this.lastDeparted.set(f.callsign, f.departed_at_ms)
+      } else if (this.lastDeparted.has(f.callsign)
+                 && f.departed_at_ms !== this.lastDeparted.get(f.callsign)) {
+        // A different leg on the same callsign. Nothing about the previous one carries over:
+        // progress is monotonic and would start this flight wherever the last one finished.
+        this.trackers.set(f.callsign, new PathTracker({
+          variants:       f.variants,
+          dep_coords:     f.dep_coords,
+          arr_coords:     f.arr_coords,
+          departed_at_ms: f.departed_at_ms,
+          eta_ms:         f.eta_ms,
+          duration_ms:    f.duration_ms,
+        }, nowMs, this.cfg))
+        this.lastFixAt.delete(f.callsign)
+        this.lastOutcome.delete(f.callsign)
+        this.lastEta.set(f.callsign, f.eta_ms)
+        this.lastDeparted.set(f.callsign, f.departed_at_ms)
       } else if (f.eta_ms !== this.lastEta.get(f.callsign)) {
         const prevEta = this.lastEta.get(f.callsign)
         // A revised arrival is normally a rate change, not a position change.
@@ -109,6 +142,7 @@ export class TrackerStore {
           }, nowMs, this.cfg))
           this.lastFixAt.delete(f.callsign)
           this.lastOutcome.delete(f.callsign)
+          this.lastDeparted.set(f.callsign, f.departed_at_ms)
           t = this.trackers.get(f.callsign)!
         } else {
           t.setEta(f.eta_ms, nowMs)
@@ -146,6 +180,7 @@ export class TrackerStore {
     this.trackers.delete(callsign)
     this.lastFixAt.delete(callsign)
     this.lastEta.delete(callsign)
+    this.lastDeparted.delete(callsign)
     this.lastOutcome.delete(callsign)
   }
 

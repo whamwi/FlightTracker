@@ -178,4 +178,32 @@ describe('a large arrival correction rebuilds the tracker', () => {
     const after = store.position('RB2', dep + HOUR)!.routeFraction
     assert.equal(after, before, 'position must not move on a routine revision')
   })
+
+  test("tomorrow's leg does not inherit today's progress", () => {
+    const store = new TrackerStore()
+    const dep = T0
+    // No revised arrival, which is the ordinary case — and the one that broke. eta_ms stays
+    // null on both legs, so the ETA-change guard never fires: null !== null is false.
+    const leg = (departedAt: number) => ([{
+      callsign: 'RB3', variants: [PATH],
+      dep_coords: [33.0, 36.0] as [number, number],
+      arr_coords: [33.0, 52.0] as [number, number],
+      departed_at_ms: departedAt, eta_ms: null, duration_ms: 4 * HOUR,
+    }])
+
+    // Today's flight runs its course.
+    store.update(leg(dep), dep)
+    const landed = store.position('RB3', dep + 5 * HOUR)!.routeFraction
+    assert.ok(landed > 0.99, `expected today's flight to finish, got ${landed}`)
+
+    // The page is left open overnight, so update() never runs to drop it. Tomorrow the same
+    // callsign departs again — a different leg, and the store must not carry the old one
+    // forward: progress is monotonic, so an inherited tracker starts at the destination and
+    // the aircraft is drawn as already arrived, or not drawn at all.
+    const tomorrow = dep + 24 * HOUR
+    store.update(leg(tomorrow), tomorrow)
+    const fresh = store.position('RB3', tomorrow + 6 * 60_000)!.routeFraction
+    assert.ok(fresh < 0.1,
+      `a new leg must start near its origin, got ${fresh} — yesterday's tracker was reused`)
+  })
 })
