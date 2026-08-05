@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { SYRIA_AIRPORTS, SYRIA_ICAO } from '@/lib/syria-airports'
 
 export const dynamic = 'force-dynamic'
 
@@ -6,8 +7,8 @@ const SB_URL      = process.env.SUPABASE_URL!
 const SB_KEY      = process.env.SUPABASE_ANON_KEY!
 const FR24_TOKEN  = process.env.FR24_API_KEY
 const HEADERS     = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
-const SYRIAN_AIRPORTS = ['DAM', 'ALP']
-const IATA_TO_ICAO: Record<string, string> = { DAM: 'OSDI', ALP: 'OSAP' }
+const SYRIAN_AIRPORTS = [...SYRIA_AIRPORTS]
+const IATA_TO_ICAO = SYRIA_ICAO
 
 function syriaDate(offsetDays = 0): string {
   const ms = Date.now() + 3 * 3_600_000 + offsetDays * 86_400_000

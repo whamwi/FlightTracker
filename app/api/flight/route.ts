@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { SYRIA_AIRPORT_SET, SYRIA_AIRPORTS_CSV } from '@/lib/syria-airports'
 
 export const dynamic = 'force-dynamic'
 
@@ -8,7 +9,7 @@ const HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 
 const PREFIX_TO_IATA: Record<string, string> = { FYC: 'XH', SYR: 'RB', HST: 'RB' }
 
-const SYRIAN_AIRPORTS = new Set(['DAM', 'ALP', 'LTK'])
+const SYRIAN_AIRPORTS = SYRIA_AIRPORT_SET
 
 const STATUS_RANK: Record<string, number> = {
   // Terminal, like Arrived — see normaliseStatus in the flightboard route.
@@ -124,7 +125,7 @@ function buildFlight(f: any, num: string, status: string, airlineMap: Record<str
 
 async function fetchCaches(date: string): Promise<{ airport_iata: string; arrivals: unknown[]; departures: unknown[] }[]> {
   const res = await fetch(
-    `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${date}&airport_iata=in.(DAM,ALP,LTK)&select=airport_iata,arrivals,departures`,
+    `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${date}&airport_iata=in.(${SYRIA_AIRPORTS_CSV})&select=airport_iata,arrivals,departures`,
     { headers: HEADERS }
   )
   if (!res.ok) return []

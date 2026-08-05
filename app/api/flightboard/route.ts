@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { fetchCallsignLookup, fetchIataToIcao, resolveCallsign, resolveIata } from '@/lib/callsign'
+import { SYRIA_AIRPORTS_CSV } from '@/lib/syria-airports'
 
 export const dynamic = 'force-dynamic'
 
@@ -74,7 +75,7 @@ export async function GET(req: Request) {
 
   // Only fetch Syrian airport rows — origin-airport caches (IST, DXB…) are excluded;
   // they bloated the response to 2950 flights and added no unique data for the board.
-  const syriaCodes = ['DAM', 'ALP', 'LTK'].join(',')
+  const syriaCodes = SYRIA_AIRPORTS_CSV
   const cacheRes = await fetch(
     `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${date}&airport_iata=in.(${syriaCodes})&select=airport_iata,arrivals,departures`,
     { headers: HEADERS }

@@ -1,6 +1,7 @@
 import { NextResponse, after } from 'next/server'
 import { sweepAllCircles } from '@/lib/adsb-feed'
 import { fetchIataToIcao, fetchCallsignLookup, resolveCallsign, type CallsignLookup } from '@/lib/callsign'
+import { SYRIA_AIRPORT_SET, SYRIA_AIRPORTS_CSV } from '@/lib/syria-airports'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,7 +27,10 @@ const SB_HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 // Syria's extent (32.31–37.32 N, 35.61–42.38 E) padded a little. Used only to drop
 // non-board aircraft from the response — the client applies the exact polygon, so this
 // deliberately errs wide.
-const SYRIA_AIRPORTS = new Set(['DAM', 'ALP', 'LTK'])
+// Deir ez-Zor opened to scheduled traffic on 5 Aug 2026. It has to be here for a DEZ flight
+// to be recognised as Syrian at all: this set decides which end of a leg is "ours", and so
+// which counterpart airport gets its board read for the arrival.
+const SYRIA_AIRPORTS = SYRIA_AIRPORT_SET
 
 const SYRIA_BOX = { latMin: 32.0, latMax: 37.7, lonMin: 35.3, lonMax: 42.7 }
 function inSyriaBox(lat: number, lon: number): boolean {
@@ -121,7 +125,7 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>, lookup: Cal
   const tomorrowMidnightMs = new Date(tomorrow + 'T00:00:00+03:00').getTime()
 
   const res = await fetch(
-    `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=in.(${yesterday},${date},${tomorrow})&airport_iata=in.(DAM,ALP,LTK)&select=airport_iata,flight_date,departures,arrivals`,
+    `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=in.(${yesterday},${date},${tomorrow})&airport_iata=in.(${SYRIA_AIRPORTS_CSV})&select=airport_iata,flight_date,departures,arrivals`,
     { headers: SB_HEADERS },
   )
   if (!res.ok) return boardCache?.flights ?? []
@@ -571,7 +575,7 @@ let feedInflight: Promise<{ aircraft: any[]; live: boolean }> | null = null
 //   to the departure-airport (Syrian) cache row so the ghost marker appears once
 //   the plane leaves the radius.
 // One write per callsign per Vercel instance lifetime (depSynced guard).
-const SYRIAN_AIRPORTS_SET = new Set(['DAM', 'ALP', 'LTK'])
+const SYRIAN_AIRPORTS_SET = SYRIA_AIRPORT_SET
 const depSynced = new Set<string>()
 
 /**

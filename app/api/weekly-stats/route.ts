@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { SYRIA_AIRPORT_SET } from '@/lib/syria-airports'
 
 export const dynamic = 'force-dynamic'
 
@@ -6,7 +7,7 @@ const SB_URL = process.env.SUPABASE_URL!
 const SB_KEY = process.env.SUPABASE_ANON_KEY!
 const HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 
-const SYRIAN = new Set(['DAM', 'ALP', 'LTK'])
+const SYRIAN = SYRIA_AIRPORT_SET
 
 const PREFIX_TO_IATA: Record<string, string> = { FYC: 'XH', SYR: 'RB', HST: 'RB', SXS: 'XQ' }
 

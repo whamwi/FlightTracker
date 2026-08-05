@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { SYRIA_AIRPORT_SET } from '@/lib/syria-airports'
 
-const SYRIA = new Set(['DAM', 'ALP'])
+const SYRIA = SYRIA_AIRPORT_SET
 
 const DAY_ORDER = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
 const DAY_SHORT: Record<string, string> = {
