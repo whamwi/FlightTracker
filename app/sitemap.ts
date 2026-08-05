@@ -30,6 +30,7 @@ const STATIC: { path: string; changeFrequency: MetadataRoute.Sitemap[number]['ch
   { path: '/airlines',     changeFrequency: 'weekly', priority: 0.7 },
   { path: '/schedule',     changeFrequency: 'weekly', priority: 0.6 },
   { path: '/news',         changeFrequency: 'daily',  priority: 0.5 },
+  { path: '/privacy',      changeFrequency: 'yearly', priority: 0.3 },
 ]
 
 async function flightNumbers(): Promise<string[]> {
