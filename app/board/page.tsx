@@ -67,6 +67,8 @@ const LOCAL_LOGOS = AIRLINE_LOGOS
 // ── Types ────────────────────────────────────────────────────────────────────
 type Flight = {
   iata_number: string
+  /** ADS-B broadcast callsign (SYR516) — what the aircraft transmits, not what the ticket says. */
+  callsign: string | null
   airline_name: string
   airline_iata: string
   country_flag: string
@@ -386,8 +388,24 @@ function FlightCard({ f, view, isPinned, onTogglePin }: { f: Flight; view: View;
           }}>
             {f.airline_name}
           </span>
+          {/*
+            * Ticket number, then callsign, then the airframe in brackets:
+            *
+            *   RB516 · SYR516 (A320)
+            *
+            * The two identifiers are genuinely different things and both get looked up. The
+            * IATA number is on the boarding pass; the callsign is what the aircraft transmits
+            * and what every tracking site keys on, so it is the one to type into FR24. The
+            * mismatch between them has been the root of several bugs here, which is a decent
+            * sign it is worth showing rather than hiding.
+            *
+            * Omitted when it merely repeats the flight number — some operators broadcast the
+            * IATA number verbatim, and "XY592 · XY592" reads as a rendering fault.
+            */}
           <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: C.muted, letterSpacing: '.07em' }}>
-            {f.iata_number}{f.aircraft_type ? ` · ${f.aircraft_type}` : ''}
+            {f.iata_number}
+            {f.callsign && f.callsign !== f.iata_number ? ` · ${f.callsign}` : ''}
+            {f.aircraft_type ? ` (${f.aircraft_type})` : ''}
           </span>
         </div>
 
