@@ -1,4 +1,5 @@
 'use client'
+import { reportHandledError } from './ErrorReporter'
 
 import 'leaflet/dist/leaflet.css'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -1169,7 +1170,12 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
       try {
         const res  = await fetch('/api/airspace')
         const data = await res.json()
-        if (!data.ok) { setError(data.warn ?? 'feed error'); return }
+        if (!data.ok) {
+          const warn = data.warn ?? 'feed error'
+          setError(warn)
+          reportHandledError(`airspace not ok: ${warn}`, { endpoint: '/api/airspace' })
+          return
+        }
 
         if (data.from_db) {
           // DB fallback: seed trackedRef without overwriting existing entries
@@ -1323,7 +1329,19 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           )
         }
       } catch (e) {
+        /*
+         * Recorded as well as shown.
+         *
+         * A user sent a screenshot of "TypeError: Failed to fetch" here tonight, and nothing
+         * about it existed anywhere we could read — the catch showed a toast and moved on, so
+         * the only evidence was a photograph of a phone. `online` is the first question worth
+         * answering about a failed fetch, and it cannot be recovered afterwards.
+         */
         setError(String(e))
+        reportHandledError(`map poll: ${String(e)}`, {
+          endpoint: '/api/airspace',
+          tracked: Object.keys(trackedRef.current).length,
+        })
       }
 
       // ── 2. Mark callsigns that dropped from the live feed ─────────────────

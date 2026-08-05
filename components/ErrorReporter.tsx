@@ -30,7 +30,22 @@ let sent = 0
  */
 const sessionId = Math.random().toString(36).slice(2, 10)
 
-function report(kind: 'ERROR', message: string, stack?: string | null) {
+/**
+ * Report an error the code already caught.
+ *
+ * The listeners below only see what nothing handled, and the errors that matter most are
+ * precisely the ones the app *does* handle — it catches them, shows the user a message, and
+ * carries on, leaving no trace anywhere we can read. A user sent a screenshot of "TypeError:
+ * Failed to fetch" on the map tonight and there was no matching row, because the map catches
+ * that one and renders it as a toast.
+ *
+ * So anywhere a user is shown an error, call this too.
+ */
+export function reportHandledError(message: string, context?: Record<string, unknown>) {
+  report('ERROR', message, null, context)
+}
+
+function report(kind: 'ERROR', message: string, stack?: string | null, extra?: Record<string, unknown>) {
   if (sent >= MAX_PER_SESSION) return
   const key = `${message}|${(stack ?? '').slice(0, 120)}`
   if (seen.has(key)) return
@@ -52,6 +67,10 @@ function report(kind: 'ERROR', message: string, stack?: string | null) {
       context: {
         ua: navigator.userAgent.slice(0, 300),
         viewport: `${window.innerWidth}x${window.innerHeight}`,
+        // Distinguishes "our server failed" from "this phone lost its connection", which is
+        // the first question to ask about a failed fetch and cannot be answered afterwards.
+        online: navigator.onLine,
+        ...extra,
       },
     }),
   }).catch(() => {
