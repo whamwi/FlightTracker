@@ -75,6 +75,9 @@ interface ScheduleRow {
   airline_iata: string; airline_name: string; country_flag: string
 }
 interface DestChip { iata: string; name: string; flag: string }
+
+/** Lowercased and stripped of accents, so "dusseldorf" finds Düsseldorf. */
+const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
 interface AirlineLinks {
   website:   string | null
   facebook:  string | null
@@ -472,6 +475,23 @@ export default function AirlinesPage() {
       .sort((a, b) => b.weeklyCount - a.weeklyCount || a.name.localeCompare(b.name))
   }, [rows, airport])
 
+  const [search, setSearch] = useState('')
+
+  /**
+   * Airlines matching the text, by name, IATA prefix, or somewhere they fly.
+   *
+   * The destination match is the one worth having: "who flies to Dubai" is a more natural
+   * question than the airline's name, and it is why this searches dests as well as the carrier.
+   */
+  const visible = useMemo(() => {
+    const q = norm(search)
+    if (!q) return airlines
+    return airlines.filter(a =>
+      norm(a.name).includes(q)
+      || norm(a.prefix).includes(q)
+      || a.dests.some(d => norm(d.name).includes(q) || norm(d.iata).includes(q)))
+  }, [airlines, search])
+
   const totalFlights = useMemo(() => airlines.reduce((s, a) => s + a.weeklyCount, 0), [airlines])
   const handleClose = useCallback(() => setSelected(null), [])
 
@@ -480,7 +500,17 @@ export default function AirlinesPage() {
       <SiteNav active="Airlines" right={
         <div style={{ display: 'flex', width: 260, height: 38, borderRadius: 10, background: C.sunken, border: `1px solid ${C.border}`, alignItems: 'center', gap: 9, padding: '0 12px' }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth="1.9" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4.3-4.3"/></svg>
-          <span style={{ font: `500 12.5px/1 'Instrument Sans',system-ui`, color: C.muted }}>Search airlines</span>
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search airlines or a city"
+            aria-label="Search airlines"
+            style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', font: `500 12.5px/1 'Instrument Sans',system-ui`, color: C.ink }}
+          />
+          {search && (
+            <button onClick={() => setSearch('')} aria-label="Clear search"
+              style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: C.muted, font: `600 15px/1 'Instrument Sans',system-ui`, padding: 0 }}>×</button>
+          )}
         </div>
       } />
 
@@ -569,13 +599,15 @@ export default function AirlinesPage() {
         {/* Airline cards */}
         {loading ? (
           <div style={{ textAlign: 'center', padding: '60px 0', color: C.muted, font: `500 14px/1 'Instrument Sans',system-ui` }}>Loading airlines…</div>
-        ) : airlines.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '60px 0', color: C.muted, font: `500 14px/1 'Instrument Sans',system-ui` }}>No airlines found</div>
+        ) : visible.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '60px 0', color: C.muted, font: `500 14px/1 'Instrument Sans',system-ui` }}>
+            {search ? `No airline matches “${search}”.` : 'No airlines found'}
+          </div>
         ) : (
           <>
             {(['gulf', 'europe'] as const).map(r => {
               if (region !== 'all' && region !== r) return null
-              const group = airlines.filter(a => a.region === r)
+              const group = visible.filter(a => a.region === r)
               if (!group.length) return null
               const label = r === 'gulf' ? 'Middle East & Gulf' : 'Europe & Turkey'
               return (

@@ -32,6 +32,9 @@ const DEST_NAME: Record<string, string> = {
 }
 const destName = (iata: string) => DEST_NAME[iata] ?? city(iata)
 
+/** Lowercased and stripped of accents, so "dusseldorf" finds Düsseldorf. */
+const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+
 // ── Region classification ─────────────────────────────────────────────────────
 type RegionId = 'all' | 'gulf' | 'europe'
 const REGION_MAP: Record<string, RegionId> = {
@@ -471,7 +474,28 @@ export default function DestinationsPage() {
     }).sort((a,b) => (b.weeklyCount - a.weeklyCount) || city(a.iata).localeCompare(city(b.iata)))
   }, [rows, airport, weeklyCounts])
 
-  const filtered = useMemo(() => region === 'all' ? destinations : destinations.filter(d => d.region === region), [destinations, region])
+  const [search, setSearch] = useState('')
+
+  /**
+   * Region and text together.
+   *
+   * Matched against the city, the airport code and the airlines that fly there, because those
+   * are the three things someone actually knows: "Dubai", "DXB", or "who flies Emirates". The
+   * country is not stored per destination, so searching one falls to the city name — worth
+   * saying, since the placeholder used to promise it.
+   *
+   * Case- and accent-insensitive: "dusseldorf" should find Düsseldorf, and nobody types the
+   * umlaut on a phone.
+   */
+  const filtered = useMemo(() => {
+    const byRegion = region === 'all' ? destinations : destinations.filter(d => d.region === region)
+    const q = norm(search)
+    if (!q) return byRegion
+    return byRegion.filter(d =>
+      norm(destName(d.iata)).includes(q)
+      || norm(d.iata).includes(q)
+      || d.airlines.some(a => norm(a.name).includes(q) || norm(a.prefix).includes(q)))
+  }, [destinations, region, search])
 
   const totalDests  = destinations.length
   const totalFlights = Object.values(weeklyCounts).reduce((s,v) => s+v, 0)
@@ -483,10 +507,21 @@ export default function DestinationsPage() {
 
   return (
     <div style={{ minHeight: '100vh', background: C.bg, fontFamily: "'Instrument Sans',system-ui,sans-serif" }}>
+      {/* This was a span inside a styled box — it looked like a search field and did nothing. */}
       <SiteNav active="Destinations" right={
         <div style={{ display: 'flex', width: 260, height: 38, borderRadius: 10, background: C.sunken, border: `1px solid ${C.border}`, alignItems: 'center', gap: 9, padding: '0 12px' }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth="1.9" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4.3-4.3"/></svg>
-          <span style={{ font: `500 12.5px/1 'Instrument Sans',system-ui`, color: C.muted }}>Search a city or country</span>
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search a city or airline"
+            aria-label="Search destinations"
+            style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', font: `500 12.5px/1 'Instrument Sans',system-ui`, color: C.ink }}
+          />
+          {search && (
+            <button onClick={() => setSearch('')} aria-label="Clear search"
+              style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: C.muted, font: `600 15px/1 'Instrument Sans',system-ui`, padding: 0 }}>×</button>
+          )}
         </div>
       } />
 
@@ -575,6 +610,13 @@ export default function DestinationsPage() {
         {/* Cards */}
         {loading ? (
           <div style={{ textAlign: 'center', padding: '60px 0', color: C.muted, font: `500 14px/1 'Instrument Sans',system-ui` }}>Loading destinations…</div>
+        ) : filtered.length === 0 ? (
+          /* Said out loud. Every section returns null when it has no matches, so without this
+             a search that finds nothing renders a blank page — indistinguishable from a load
+             that failed. */
+          <div style={{ textAlign: 'center', padding: '60px 0', color: C.muted, font: `500 14px/1 'Instrument Sans',system-ui` }}>
+            No destination matches “{search}”.
+          </div>
         ) : (
           REGION_SECTIONS
             .filter(s => region === 'all' || region === s.id)
