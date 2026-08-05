@@ -2,6 +2,7 @@ import { NextResponse, after } from 'next/server'
 import { sweepAllCircles } from '@/lib/adsb-feed'
 import { fetchIataToIcao, fetchCallsignLookup, resolveCallsign, type CallsignLookup } from '@/lib/callsign'
 import { SYRIA_AIRPORT_SET, SYRIA_AIRPORTS_CSV } from '@/lib/syria-airports'
+import { inSyria } from '@/lib/syria-airspace'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,11 +33,7 @@ const SB_HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 // which counterpart airport gets its board read for the arrival.
 const SYRIA_AIRPORTS = SYRIA_AIRPORT_SET
 
-const SYRIA_BOX = { latMin: 32.0, latMax: 37.7, lonMin: 35.3, lonMax: 42.7 }
-function inSyriaBox(lat: number, lon: number): boolean {
-  return lat >= SYRIA_BOX.latMin && lat <= SYRIA_BOX.latMax
-      && lon >= SYRIA_BOX.lonMin && lon <= SYRIA_BOX.lonMax
-}
+
 
 function haversineNm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 3440.065
@@ -931,7 +928,7 @@ export async function GET() {
     // aircraft are always kept, wherever they are. upsertPositions above already saw the
     // unfiltered set, so aircraft_last_seen is unaffected.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const visible = annotated.filter((a: any) => a.board_match || inSyriaBox(a.lat, a.lon))
+    const visible = annotated.filter((a: any) => a.board_match || inSyria(a.lat, a.lon))
 
     return NextResponse.json({
       ok:           true,
