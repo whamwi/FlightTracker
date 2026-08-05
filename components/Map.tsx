@@ -1,4 +1,5 @@
 'use client'
+import { PHONE_MQ } from '@/lib/breakpoints'
 import { reportHandledError } from './ErrorReporter'
 
 import 'leaflet/dist/leaflet.css'
@@ -354,10 +355,11 @@ function bestHeading(a: Aircraft): number {
   return diff > 45 ? hdg : trk
 }
 
+
 // ── Icon & popup ──────────────────────────────────────────────────────────────
 
 function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, stale: boolean, label?: string, alp = false, estimated = false, colorOverride?: string) {
-  const mobile  = typeof window !== 'undefined' && window.innerWidth < 768
+  const mobile  = typeof window !== 'undefined' && window.matchMedia(PHONE_MQ).matches
   const size    = syria ? (mobile ? 36 : 40) : (mobile ? 26 : 30)
   const color   = colorOverride ?? (stale ? '#9ca3af' : alp ? '#f97316' : syria ? '#16a34a' : '#1d4ed8')
   const opacity = stale ? 0.5 : 1
@@ -952,7 +954,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
   const [actionSlot, setActionSlot] = useState<HTMLElement | null>(null)
 
   useEffect(() => {
-    const mq = window.matchMedia('(max-width: 767px)')
+    const mq = window.matchMedia(PHONE_MQ)
     const apply = () => setIsPhone(mq.matches)
     apply()
     mq.addEventListener('change', apply)
@@ -1010,7 +1012,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
       // the flight-count badge. On desktop the media boxes still hold the top-right, so the
       // credit stays left. Position is not something the licence dictates — only that the
       // credit stays visible.
-      const attrMq = window.matchMedia('(max-width: 767px)')
+      const attrMq = window.matchMedia(PHONE_MQ)
       const placeAttribution = () => map.attributionControl.setPosition(attrMq.matches ? 'topright' : 'topleft')
       placeAttribution()
       attrMq.addEventListener('change', placeAttribution)

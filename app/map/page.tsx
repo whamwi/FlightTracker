@@ -1,4 +1,5 @@
 'use client'
+import { PHONE_MQ } from '@/lib/breakpoints'
 
 import dynamic from 'next/dynamic'
 import Link from 'next/link'
@@ -624,7 +625,7 @@ function HomeInner() {
   // land before the viewport settles at its real width.
   const [isPhone, setIsPhone] = useState(false)
   useEffect(() => {
-    const mq = window.matchMedia('(max-width: 767px)')
+    const mq = window.matchMedia(PHONE_MQ)
     const apply = () => setIsPhone(mq.matches)
     apply()
     mq.addEventListener('change', apply)
