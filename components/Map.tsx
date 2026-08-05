@@ -1172,7 +1172,6 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         const data = await res.json()
         if (!data.ok) {
           const warn = data.warn ?? 'feed error'
-          setError(warn)
           reportHandledError(`airspace not ok: ${warn}`, { endpoint: '/api/airspace' })
           return
         }
@@ -1330,18 +1329,24 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         }
       } catch (e) {
         /*
-         * Recorded as well as shown.
+         * Recorded, never shown.
          *
-         * A user sent a screenshot of "TypeError: Failed to fetch" here tonight, and nothing
-         * about it existed anywhere we could read — the catch showed a toast and moved on, so
-         * the only evidence was a photograph of a phone. `online` is the first question worth
-         * answering about a failed fetch, and it cannot be recovered afterwards.
+         * A user photographed "TypeError: Failed to fetch" on this map and sent it in. Nothing
+         * was wrong: iOS Safari freezes a backgrounded tab and aborts its in-flight requests,
+         * so the rejection surfaces when the page resumes. The map recovers on the next tick
+         * and the user was shown a red banner about the browser's own housekeeping.
+         *
+         * A single failed poll is not news either way. The map keeps the last positions, and on
+         * a phone network a dropped request every so often is ordinary. It goes to
+         * /admin/errors, where a real outage shows up as a rate rather than as one person
+         * noticing a banner.
          */
-        setError(String(e))
-        reportHandledError(`map poll: ${String(e)}`, {
-          endpoint: '/api/airspace',
-          tracked: Object.keys(trackedRef.current).length,
-        })
+        if (document.visibilityState === 'visible') {
+          reportHandledError(`map poll: ${String(e)}`, {
+            endpoint: '/api/airspace',
+            tracked: Object.keys(trackedRef.current).length,
+          })
+        }
       }
 
       // ── 2. Mark callsigns that dropped from the live feed ─────────────────
@@ -2273,7 +2278,12 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
 
     fetchUpdateRef.current = fetchAndUpdate
     fetchAndUpdate()
-    const interval = setInterval(fetchAndUpdate, 10_000)
+    const interval = setInterval(() => {
+      // Skip the tick entirely while hidden: nothing is on screen to update, it spends a
+      // backgrounded phone's data and battery, and it is precisely the request iOS aborts
+      // when it freezes the tab — which is what put a red banner in front of a user.
+      if (document.visibilityState === 'visible') fetchAndUpdate()
+    }, 10_000)
 
     // Refresh the moment the tab comes back.
     //
