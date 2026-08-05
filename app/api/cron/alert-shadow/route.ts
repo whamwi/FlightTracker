@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { deliver, type Transition } from '@/lib/alert-delivery'
+import { deliver, type Transition, type AlertContext } from '@/lib/alert-delivery'
 
 /**
  * Detect the transitions worth a push notification, record them, and send them.
@@ -52,6 +52,11 @@ type Board = {
   actual_arr_utc: string | null
   revised_arr_utc: string | null
   arr_time_utc: string | null
+  // Route and timetable, for the notification copy rather than for the rules.
+  dep_iata: string | null
+  arr_iata: string | null
+  dep_time_utc: string | null
+  airline_name: string | null
 }
 
 type Snapshot = {
@@ -78,6 +83,52 @@ type ShadowRow = {
   event: string
   detail: string
   would_send: boolean
+  context: AlertContext | null
+}
+
+type Airport = { city: string | null; utc_offset: number | null }
+
+/**
+ * City names and UTC offsets, cached for an hour.
+ *
+ * The same source the site and the app read, so a notification cannot name a city differently
+ * from the board that produced it.
+ */
+let airportCache: { map: Record<string, Airport>; ts: number } | null = null
+
+async function fetchAirports(): Promise<Record<string, Airport>> {
+  if (airportCache && Date.now() - airportCache.ts < 3_600_000) return airportCache.map
+  try {
+    const res = await fetch(`${SB_URL}/rest/v1/airports?select=iata,city,utc_offset`, {
+      headers: HEADERS, cache: 'no-store',
+    })
+    if (!res.ok) return airportCache?.map ?? {}
+    const rows: { iata: string; city: string | null; utc_offset: number | null }[] = await res.json()
+    const map: Record<string, Airport> = {}
+    for (const r of rows) if (r.iata) map[r.iata.toUpperCase()] = { city: r.city, utc_offset: r.utc_offset }
+    airportCache = { map, ts: Date.now() }
+    return map
+  } catch {
+    return airportCache?.map ?? {}
+  }
+}
+
+/**
+ * Minutes late against the timetable.
+ *
+ * The board publishes the schedule as "HH:MM" UTC and the actual as a full ISO timestamp, so
+ * the two are combined on the flight's own date. Crossing midnight is folded to the nearer
+ * side: a flight scheduled 23:50 that left at 00:05 is 15 minutes late, not 1425.
+ */
+function delayMinutes(actualIso: string | null, schedHHMM: string | null, date: string): number | null {
+  if (!actualIso || !schedHHMM) return null
+  const actual = Date.parse(actualIso)
+  const sched  = Date.parse(`${date}T${schedHHMM}:00Z`)
+  if (!Number.isFinite(actual) || !Number.isFinite(sched)) return null
+  let diff = Math.round((actual - sched) / 60_000)
+  if (diff >  720) diff -= 1440
+  if (diff < -720) diff += 1440
+  return diff
 }
 
 function minutesBetween(a: string | null, b: string | null): number | null {
@@ -105,6 +156,8 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: `flightboard ${boardRes.status}` }, { status: 502 })
   }
   const flights: Board[] = (await boardRes.json()).flights ?? []
+
+  const airports = await fetchAirports()
 
   const prevRes = await fetch(
     `${SB_URL}/rest/v1/flight_state_snapshot?flight_date=eq.${date}&select=*`,
@@ -138,8 +191,25 @@ export async function GET(req: Request) {
     // current state the first time the cron ran, which is history, not news.
     if (!was) continue
 
+    // Built once per flight, not per transition: every event for a flight describes the same
+    // route, and a departure and an ETA move should never name it differently.
+    const dep = f.dep_iata ? airports[f.dep_iata.toUpperCase()] : undefined
+    const arr = f.arr_iata ? airports[f.arr_iata.toUpperCase()] : undefined
+    const context: AlertContext = {
+      dep_iata:   f.dep_iata ?? null,
+      arr_iata:   f.arr_iata ?? null,
+      dep_city:   dep?.city ?? null,
+      arr_city:   arr?.city ?? null,
+      dep_offset: dep?.utc_offset ?? null,
+      arr_offset: arr?.utc_offset ?? null,
+      airline:    f.airline_name ?? null,
+      dep_delay_min: delayMinutes(f.actual_dep_utc, f.dep_time_utc, date),
+      arr_delay_min: delayMinutes(f.actual_arr_utc, f.arr_time_utc, date),
+      eta_utc:    f.actual_arr_utc ?? f.revised_arr_utc ?? null,
+    }
+
     const push = (event: string, detail: string, would_send = true) =>
-      shadow.push({ iata_number: num, flight_date: date, event, detail, would_send })
+      shadow.push({ iata_number: num, flight_date: date, event, detail, would_send, context })
 
     // ── Departed ────────────────────────────────────────────────────────────
     if (!was.actual_dep_utc && now.actual_dep_utc) {
@@ -198,8 +268,8 @@ export async function GET(req: Request) {
   const detectedAt = new Date().toISOString()
   const sendable: Transition[] = shadow
     .filter(s => s.would_send)
-    .map(({ iata_number, flight_date, event, detail }) =>
-      ({ iata_number, flight_date, event, detail, detected_at: detectedAt }))
+    .map(({ iata_number, flight_date, event, detail, context }) =>
+      ({ iata_number, flight_date, event, detail, context, detected_at: detectedAt }))
 
   const delivery = await deliver(sendable)
 
