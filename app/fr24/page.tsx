@@ -179,7 +179,9 @@ function parseFlights(data: any, dir: 'arrivals' | 'departures') {
   return { byDate, total }
 }
 
-const AIRPORTS = ['DAM', 'ALP', 'LTK']
+// Latakia has no scheduled service; Deir ez-Zor opened 5 Aug 2026 and does. This page exists
+// to warm a board by hand, so it should list the airports that actually have one to warm.
+const AIRPORTS = ['DAM', 'ALP', 'DEZ']
 const DIRS = ['arrivals', 'departures'] as const
 
 export default function Fr24DumpPage() {
