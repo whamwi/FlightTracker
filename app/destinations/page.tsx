@@ -1,4 +1,5 @@
 'use client'
+import { PHOTO_UPLOAD_VISIBLE } from '@/lib/ui-flags'
 
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import Link from 'next/link'
@@ -205,11 +206,13 @@ function DestCardDesktop({ dest, onView, weeklyCount, imageUrl, onImageUploaded 
           : <span style={{ fontSize: 40, opacity: .35 }}>{apFlag(dest.iata)}</span>
         }
         {showImg && <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,.35) 0%, transparent 55%)' }} />}
+        {PHOTO_UPLOAD_VISIBLE && (<>
         <button onClick={() => fileRef.current?.click()} disabled={uploading}
           style={{ position: 'absolute', right: 10, bottom: 10, display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 8, background: 'rgba(0,0,0,.38)', backdropFilter: 'blur(8px)', border: '1px solid rgba(255,255,255,.18)', cursor: 'pointer', color: '#fff', font: `600 11px/1 'Instrument Sans',system-ui`, opacity: uploading ? .6 : 1 }}>
           {uploading ? 'Uploading…' : 'Photo'}
         </button>
         <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleFile} />
+        </>)}
       </div>
       {/* Info */}
       <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 9, flex: 1 }}>
