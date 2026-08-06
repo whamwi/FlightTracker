@@ -69,6 +69,13 @@ export async function POST(req: Request) {
      * to the ticketed number the rest of the system uses.
      */
     const identifier = String(iata_number).toUpperCase()
+    /** Real UTC offsets for both ends, so the stored local times match each airport's clock. */
+    const offsets: Record<string, number> = {}
+    try {
+      const aps = await sb(`/airports?iata=in.(${dep_iata},${arr_iata})&select=iata,utc_offset`)
+      for (const a of aps ?? []) if (a.utc_offset != null) offsets[a.iata] = Number(a.utc_offset)
+    } catch { /* falls back to +3, the previous behaviour */ }
+
     const existing = await sb(
       `/flight_lookup?or=(iata_number.eq.${encodeURIComponent(identifier)},broadcast_callsign.eq.${encodeURIComponent(identifier)})&select=id,iata_number&limit=1`
     )
@@ -113,8 +120,11 @@ export async function POST(req: Request) {
           flight_id:   flightId,
           airline_id:  airline.id,
           dep_iata,   arr_iata,
-          dep_time:     addHours(dep_time_utc, 3),
-          arr_time:     addHours(arr_time_utc, 3),
+          // Each end in its own clock. A flat +3 is right for the Syrian side and an hour
+          // out for the Gulf: DAM→AUH was stored with arr_time 17:40 against 14:40 UTC when
+          // Abu Dhabi is +4, so the admin board showed an arrival an hour before it happens.
+          dep_time:     addHours(dep_time_utc, offsets[dep_iata] ?? 3),
+          arr_time:     addHours(arr_time_utc, offsets[arr_iata] ?? 3),
           dep_time_utc, arr_time_utc,
           duration_min: duration_min ?? null,
           days_of_week: days,
