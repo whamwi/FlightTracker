@@ -151,15 +151,31 @@ export default function ReconcilePage() {
   const [, setGeoTick] = useState(0)
   useEffect(() => { loadGeoData().then(() => setGeoTick(t => t + 1)).catch(() => {}) }, [])
 
+  /**
+   * The response was previously ignored and the row marked reviewed locally regardless — the
+   * same fault already fixed for delete below. A rejected update looked like a success until
+   * the next refresh brought the row back, which is exactly how this was reported.
+   */
   async function markReviewed(id: number) {
     setSaving(id)
-    await fetch('/api/admin/reconcile', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, reviewed: true }),
-    })
-    setRows(prev => prev.map(r => r.id === id ? { ...r, reviewed: true } : r))
-    setSaving(null)
+    try {
+      const res = await fetch('/api/admin/reconcile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, reviewed: true }),
+      })
+      const body = await res.json().catch(() => null)
+      if (!res.ok || body?.ok === false) {
+        window.alert(`Could not apply this change.\n\n${body?.error ?? `HTTP ${res.status}`}\n\n`
+                   + `route_master was not modified and the row stays on the list.`)
+        return
+      }
+      setRows(prev => prev.map(r => r.id === id ? { ...r, reviewed: true } : r))
+    } catch (e) {
+      window.alert(`Could not apply this change: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setSaving(null)
+    }
   }
 
   // Delete is permanent and sits immediately beside "+ Add Route". These rows are the only
