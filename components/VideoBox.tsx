@@ -33,7 +33,8 @@ declare global {
 const FEED_LIMIT = 100 // the read endpoint's own ceiling
 const SCRIPT_ID  = 'yt-iframe-api'
 
-type Video = { media_id: string; video_id: string | null }
+// posted_at is used to order the rotation newest-first; the API always returns it.
+type Video = { media_id: string; video_id: string | null; posted_at: string | null }
 
 // Resolves once the API is usable. Chains onto any existing callback so several boxes
 // loading at once can't clobber each other's handler.
@@ -81,9 +82,26 @@ export default function VideoBox({ open: openProp, onToggle, externalTrigger }: 
         .then((j) => ((j.media ?? []) as Video[]).filter((v) => v.video_id))
         .catch(() => [] as Video[])
 
+    /**
+     * Newest first, pinned or not.
+     *
+     * The feed sorts pinned items above everything else, which is right for the gallery — a
+     * pin is an editorial choice about what to show. It is wrong for a rotation whose job is
+     * to lead with the latest: one pinned clip from June was opening the reel while the
+     * newest video sat behind it, so the authority's most recent post was the one nobody saw.
+     *
+     * Sorted here rather than by asking the API for a different order, so the gallery keeps
+     * its pinning and only the reel changes.
+     */
+    const newestFirst = (list: Video[]) =>
+      [...list].sort((a, b) =>
+        Date.parse(b.posted_at ?? '') - Date.parse(a.posted_at ?? '') || 0)
+
     Promise.all([get(`source=curated&limit=${FEED_LIMIT}`), get(`limit=${FEED_LIMIT}`)])
-      .then(([curated, all]) => {
+      .then(([curatedRaw, allRaw]) => {
         if (cancelled) return
+        const curated = newestFirst(curatedRaw)
+        const all     = newestFirst(allRaw)
         // Interleave rather than concatenate: a curated clip every third slot, so the mix
         // shows up early instead of after a dozen channel videos nobody waits through.
         const seen = new Set(curated.map((v) => v.video_id))
