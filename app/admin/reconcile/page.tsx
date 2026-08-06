@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useEffect, useState, useCallback } from 'react'
+import { airportOffset, loadGeoData } from '@/lib/geo-data'
 
 interface UnfiledRow {
   id:              number
@@ -31,10 +32,25 @@ function hhmm(t: string | null): string {
   return t.slice(0, 5)
 }
 
-function localTime(utc: string | null): string {
+/**
+ * The time at the airport it belongs to.
+ *
+ * This assumed +3 for everything, which is right for Syria and wrong for a third of the
+ * network. An Abu Dhabi departure showed as 09:45 when the airport clock said 10:45, so
+ * reviewing an AUH or DXB row meant comparing a number against a timetable that disagreed
+ * with it by an hour — on a page whose entire purpose is spotting an hour-sized mistake.
+ *
+ * The drift figures were never affected: those are computed in UTC. Only the review column
+ * was lying.
+ *
+ * Falls back to +3 when the offset is unknown, which is the old behaviour and correct for the
+ * Syrian ends — but the airports table has the real value for every airport we serve.
+ */
+function localTime(utc: string | null, iata?: string): string {
   if (!utc) return '—'
   const [h, m] = utc.slice(0, 5).split(':').map(Number)
-  const local = ((h * 60 + m) + 3 * 60) % 1440
+  const offset = (iata ? airportOffset[iata] : undefined) ?? 3
+  const local = (((h * 60 + m) + offset * 60) % 1440 + 1440) % 1440
   return `${String(Math.floor(local / 60)).padStart(2, '0')}:${String(local % 60).padStart(2, '0')}`
 }
 
@@ -124,6 +140,16 @@ export default function ReconcilePage() {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  /**
+   * Airport timezones, for the local-time columns.
+   *
+   * airportOffset is a module-level object that loadGeoData fills in place, so React has no
+   * way to know it changed — hence the counter. Without it the table renders once with the
+   * +3 fallback and never corrects itself, which is the bug this was meant to fix.
+   */
+  const [, setGeoTick] = useState(0)
+  useEffect(() => { loadGeoData().then(() => setGeoTick(t => t + 1)).catch(() => {}) }, [])
 
   async function markReviewed(id: number) {
     setSaving(id)
@@ -295,11 +321,11 @@ export default function ReconcilePage() {
                 <td style={{ ...s.td, color: '#fff' }}>{r.dep_iata} → {r.arr_iata}</td>
                 <td style={s.tdDim}>{DOW[r.day_of_week ?? ''] ?? r.day_of_week}</td>
                 <td style={{ ...s.td, color: '#2563eb', fontWeight: 600 }}>
-                  {localTime(r.sched_dep_utc)}
+                  {localTime(r.sched_dep_utc, r.dep_iata)}
                   <span style={{ color: '#999', fontWeight: 400 }}> ({hhmm(r.sched_dep_utc)} UTC)</span>
                 </td>
                 <td style={s.tdDim}>
-                  {localTime(r.rm_dep_time_utc)}
+                  {localTime(r.rm_dep_time_utc, r.dep_iata)}
                   <span style={{ color: '#ccc' }}> ({hhmm(r.rm_dep_time_utc)} UTC)</span>
                 </td>
                 <td style={s.td}>{diffBadge(r.diff_minutes)}</td>
@@ -356,8 +382,8 @@ export default function ReconcilePage() {
                       ))}
                     </div>
                   </td>
-                  <td style={{ ...s.td, color: '#2563eb', fontWeight: 600 }}>{localTime(g.dep_utc)}</td>
-                  <td style={{ ...s.td, color: '#2563eb', fontWeight: 600 }}>{localTime(g.arr_utc)}</td>
+                  <td style={{ ...s.td, color: '#2563eb', fontWeight: 600 }}>{localTime(g.dep_utc, g.dep_iata)}</td>
+                  <td style={{ ...s.td, color: '#2563eb', fontWeight: 600 }}>{localTime(g.arr_utc, g.arr_iata)}</td>
                   <td style={s.tdDim}>{g.duration_min ? `${Math.floor(g.duration_min / 60)}h ${g.duration_min % 60}m` : '—'}</td>
                   <td style={{ ...s.td, display: 'flex', gap: 6, alignItems: 'center' }}>
                     {g.reviewed
