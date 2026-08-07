@@ -1,5 +1,6 @@
 'use client'
 import { PHONE_MQ } from '@/lib/breakpoints'
+import { carryArrival } from '@/lib/flight-leg'
 import { reportHandledError } from './ErrorReporter'
 
 import 'leaflet/dist/leaflet.css'
@@ -1236,17 +1237,23 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
             const cs = (a.flight ?? '').trim()
             if (!cs) continue
             const existing = flightStatusRef.current[cs]
+            const legDep   = a.actual_dep_utc ?? existing?.actual_dep_utc ?? null
+            const arrUtc   = a.actual_arr_utc ?? carryArrival(existing?.actual_arr_utc, legDep)
             flightStatusRef.current[cs] = {
               callsign:          cs,
-              status:            a.actual_arr_utc ? 'Arrived' : 'Departed',
-              actual_dep_utc:    a.actual_dep_utc    ?? existing?.actual_dep_utc    ?? null,
-              actual_arr_utc:    a.actual_arr_utc    ?? existing?.actual_arr_utc    ?? null,
+              // From the resolved arrival, not the incoming one — otherwise a flight whose
+              // arrival is carried forward reads "Departed" while its card reads "Arrived".
+              status:            arrUtc ? 'Arrived' : 'Departed',
+              actual_dep_utc:    legDep,
+              actual_arr_utc:    arrUtc,
               scheduled_dep_utc: existing?.scheduled_dep_utc ?? null,
-              scheduled_arr_utc: existing?.scheduled_arr_utc ?? null,
+              // Same leg test as the arrival: these feed the card's ARRIVAL column and its
+              // countdown, so a stale one is just as visible as a stale "Arrived".
+              scheduled_arr_utc: carryArrival(existing?.scheduled_arr_utc, legDep),
               revised_dep_utc:   existing?.revised_dep_utc   ?? null,
-              revised_arr_utc:   existing?.revised_arr_utc   ?? null,
+              revised_arr_utc:   carryArrival(existing?.revised_arr_utc, legDep),
               dep_delay_min:     a.dep_delay_min ?? existing?.dep_delay_min ?? null,
-              arr_delay_min:     existing?.arr_delay_min      ?? null,
+              arr_delay_min:     arrUtc ? existing?.arr_delay_min ?? null : null,
               aircraft_reg:      a.r ?? existing?.aircraft_reg   ?? null,
               aircraft_type:     a.t ?? existing?.aircraft_type  ?? null,
               flight_number:     a.iata_number ?? existing?.flight_number ?? null,
@@ -1274,17 +1281,18 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
             const estimatedArr = !actual_arr_utc && !revised_arr_utc && effectiveDep && duration_min > 0
               ? new Date(new Date(effectiveDep).getTime() + duration_min * 60_000).toISOString()
               : null
+            const carriedArr = actual_arr_utc ?? carryArrival(existing?.actual_arr_utc, effectiveDep)
             flightStatusRef.current[cs] = {
               callsign:          cs,
-              status:            actual_arr_utc ? 'Arrived' : 'Departed',
-              actual_dep_utc:    actual_dep_utc ?? existing?.actual_dep_utc ?? null,
-              actual_arr_utc:    actual_arr_utc ?? existing?.actual_arr_utc ?? null,
+              status:            carriedArr ? 'Arrived' : 'Departed',
+              actual_dep_utc:    effectiveDep,
+              actual_arr_utc:    carriedArr,
               scheduled_dep_utc: existing?.scheduled_dep_utc ?? null,
-              scheduled_arr_utc: existing?.scheduled_arr_utc ?? null,
+              scheduled_arr_utc: carryArrival(existing?.scheduled_arr_utc, effectiveDep),
               revised_dep_utc:   existing?.revised_dep_utc   ?? null,
-              revised_arr_utc:   revised_arr_utc ?? estimatedArr ?? existing?.revised_arr_utc ?? null,
+              revised_arr_utc:   revised_arr_utc ?? estimatedArr ?? carryArrival(existing?.revised_arr_utc, effectiveDep),
               dep_delay_min:     dep_delay_min ?? existing?.dep_delay_min ?? null,
-              arr_delay_min:     existing?.arr_delay_min ?? null,
+              arr_delay_min:     carriedArr ? existing?.arr_delay_min ?? null : null,
               aircraft_reg:      existing?.aircraft_reg  ?? null,
               aircraft_type:     existing?.aircraft_type ?? null,
               flight_number:     iata_number,
