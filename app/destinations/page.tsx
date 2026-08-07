@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { airportCity, airportFlag as _apFlag, loadGeoData } from '@/lib/geo-data'
 import SiteNav from '@/components/SiteNav'
+import { BOARD_AIRPORTS, type BoardAirport } from '@/lib/syria-airports'
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 const C = {
@@ -134,6 +135,9 @@ function AirlineLogo({ prefix, name, size = 22 }: { prefix: string; name: string
 const AIRPORT_HERO: Record<string, { src: string; fallback: string; label: string }> = {
   DAM: { src: '/dam-hero.jpg', fallback: 'linear-gradient(135deg,#2E4A3E 0%,#1A2E28 100%)', label: 'Damascus' },
   ALP: { src: '/alp-hero.jpg', fallback: 'linear-gradient(135deg,#4A3828 0%,#2C2018 100%)', label: 'Aleppo'   },
+  // No photo yet — the img's onError drops to the gradient, so this reads correctly
+  // until one is added. Without an entry it would fall through to Damascus's hero.
+  DEZ: { src: '/dez-hero.jpg', fallback: 'linear-gradient(135deg,#3A4436 0%,#1F261C 100%)', label: 'Deir ez-Zor' },
 }
 
 function AirportHero({ airport, totalDests, totalFlights }: { airport: string; totalDests: number; totalFlights: number }) {
@@ -483,7 +487,7 @@ function BottomSheet({ dest, airport, onClose, imageUrl }: { dest: Destination |
 export default function DestinationsPage() {
   const [rows, setRows]       = useState<ScheduleRow[]>([])
   const [loading, setLoading] = useState(true)
-  const [airport, setAirport] = useState<'DAM'|'ALP'>('DAM')
+  const [airport, setAirport] = useState<BoardAirport>('DAM')
   const [region, setRegion]   = useState<RegionId>('all')
   const [selected, setSelected] = useState<Destination|null>(null)
   const [weeklyCounts, setWeeklyCounts] = useState<Record<string,number>>({})
@@ -510,7 +514,7 @@ export default function DestinationsPage() {
       .then(d => {
         if (!d?.ok) return
         const map: Record<string,number> = {}
-        const src = airport === 'DAM' ? d.departures : d.arrivals
+        const src = d.departures
         for (const { iata, count } of (src ?? [])) map[iata] = count
         setWeeklyCounts(map)
       })
@@ -646,7 +650,7 @@ export default function DestinationsPage() {
             )}
           </div>
           <div className="dst-toggle" style={{ display: 'flex', padding: 3, background: '#E4E1D2', borderRadius: 9, gap: 2, width: 'fit-content' }}>
-            {([['DAM','Damascus'],['ALP','Aleppo']] as const).map(([code, label]) => (
+            {BOARD_AIRPORTS.map(({ iata: code, city: label }) => (
               <button key={code} onClick={() => setAirport(code)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 7, border: 'none', cursor: 'pointer', background: airport===code ? C.forest : 'transparent', color: airport===code ? '#fff' : C.muted, transition: 'all .15s' }}>
                 <span style={{ font: `${airport===code?700:600} 12px/1 'Instrument Sans',system-ui` }}>{label}</span>
                 <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 9.5, opacity: .7, lineHeight: 1 }}>{code}</span>

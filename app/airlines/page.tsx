@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { airportCity, airportFlag as _apFlag, loadGeoData } from '@/lib/geo-data'
 import SiteNav from '@/components/SiteNav'
+import { BOARD_AIRPORTS, type BoardAirport } from '@/lib/syria-airports'
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 const C = {
@@ -114,6 +115,9 @@ function AirlineLogo({ prefix, name, size = 22 }: { prefix: string; name: string
 const AIRPORT_HERO: Record<string, { src: string; fallback: string; label: string }> = {
   DAM: { src: '/dam-hero.jpg', fallback: 'linear-gradient(135deg,#2E4A3E 0%,#1A2E28 100%)', label: 'Damascus' },
   ALP: { src: '/alp-hero.jpg', fallback: 'linear-gradient(135deg,#4A3828 0%,#2C2018 100%)', label: 'Aleppo'   },
+  // No photo yet — the img's onError drops to the gradient. Without an entry the `?? DAM`
+  // fallback below showed Damascus's photo and name under the Deir ez-Zor tab.
+  DEZ: { src: '/dez-hero.jpg', fallback: 'linear-gradient(135deg,#3A4436 0%,#1F261C 100%)', label: 'Deir ez-Zor' },
 }
 function AirportHero({ airport, totalAirlines, totalFlights }: { airport: string; totalAirlines: number; totalFlights: number }) {
   const cfg = AIRPORT_HERO[airport] ?? AIRPORT_HERO.DAM
@@ -518,7 +522,7 @@ function AirlineSheet({ info, airport, onClose, imageUrl }: { info: AirlineInfo 
 export default function AirlinesPage() {
   const [rows, setRows]             = useState<ScheduleRow[]>([])
   const [loading, setLoading]       = useState(true)
-  const [airport, setAirport]       = useState<'DAM'|'ALP'>('DAM')
+  const [airport, setAirport]       = useState<BoardAirport>('DAM')
   const [region, setRegion]         = useState<'all'|'gulf'|'europe'>('all')
   const [selected, setSelected]     = useState<AirlineInfo|null>(null)
   const [airlineImages, setAirlineImages] = useState<Record<string,string>>({})
@@ -675,7 +679,7 @@ export default function AirlinesPage() {
             )}
           </div>
           <div className="al-toggle" style={{ display: 'flex', padding: 3, background: '#E4E1D2', borderRadius: 9, gap: 2, width: 'fit-content' }}>
-            {([['DAM','Damascus'],['ALP','Aleppo']] as const).map(([code, label]) => (
+            {BOARD_AIRPORTS.map(({ iata: code, city: label }) => (
               <button key={code} onClick={() => setAirport(code)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 7, border: 'none', cursor: 'pointer', background: airport===code ? C.forest : 'transparent', color: airport===code ? '#fff' : C.muted, transition: 'all .15s' }}>
                 <span style={{ font: `${airport===code?700:600} 12px/1 'Instrument Sans',system-ui` }}>{label}</span>
                 <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 9.5, opacity: .7, lineHeight: 1 }}>{code}</span>

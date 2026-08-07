@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { airportCity, airportFlag as _apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
 import SiteNav from '@/components/SiteNav'
+import { BOARD_AIRPORTS, type BoardAirport } from '@/lib/syria-airports'
 
 const city = (iata: string) => airportCity[iata] ?? iata
 const airportFlag = (iata: string) => _apFlag[iata] ?? ''
@@ -94,11 +95,11 @@ type Flight = {
 
 type Tab     = -1 | 0 | 1
 type View    = 'arr' | 'dep'
-// Deir ez-Zor opened to scheduled traffic on 8 Aug 2026. The board filters purely on
-// dep_iata/arr_iata, so a new airport is this list plus the warm loop below — nothing else.
-type Airport = 'DAM' | 'ALP' | 'DEZ'
+// The board filters purely on dep_iata/arr_iata, so the shared list drives both the tabs
+// and the cache warm loop below. Destinations and airlines read the same list.
+type Airport = BoardAirport
 
-const AIRPORTS: Airport[] = ['DAM', 'ALP', 'DEZ']
+const AIRPORTS: readonly Airport[] = BOARD_AIRPORTS.map(a => a.iata)
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function syriaDate(offsetDays: number): string {

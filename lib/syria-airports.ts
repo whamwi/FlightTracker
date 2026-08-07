@@ -25,6 +25,21 @@ export function isSyrianAirport(iata: string | null | undefined): boolean {
 }
 
 /**
+ * The airports offered as a tab in the UI, with the city name shown beside the code.
+ *
+ * Deliberately narrower than SYRIA_AIRPORTS: Latakia is recognised everywhere in the data
+ * layer but has no scheduled traffic, so a tab for it would only ever be empty. Adding it
+ * back is one line here, and the board, destinations and airlines pages all follow.
+ */
+export const BOARD_AIRPORTS = [
+  { iata: 'DAM', city: 'Damascus'    },
+  { iata: 'ALP', city: 'Aleppo'      },
+  { iata: 'DEZ', city: 'Deir ez-Zor' },
+] as const
+
+export type BoardAirport = typeof BOARD_AIRPORTS[number]['iata']
+
+/**
  * ICAO codes, needed where an external API identifies airports that way — FR24's
  * flight-summary endpoint, for one.
  */
