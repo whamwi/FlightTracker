@@ -302,6 +302,32 @@ function AirlineSheet({ info, airport, onClose, imageUrl }: { info: AirlineInfo 
   useEffect(() => { setDir('from') }, [info?.prefix])
 
   const flights = dir === 'from' ? (info?.routes ?? []) : (info?.reverseRoutes ?? [])
+
+  /**
+   * Grouped by destination, then by departure time within each.
+   *
+   * The list was ordered by time alone, so Fly Cham's three Erbil services sat at 17:00, 19:00
+   * and 20:00 with Dubai, Dammam, Baghdad and Istanbul scattered between them. Someone reading
+   * an airline page is asking "where does it fly, and when" — the destination is the question
+   * and the time is the answer, so the destination has to come first.
+   *
+   * Groups are alphabetical by city rather than by frequency: this is a reference list, and a
+   * reader scanning for one city should not have to know how often it is served to find it.
+   */
+  const grouped = useMemo(() => {
+    const map = new Map<string, ScheduleRow[]>()
+    for (const f of flights) {
+      const iata = (dir === 'from' ? f.arr_iata : f.dep_iata) ?? ''
+      if (!map.has(iata)) map.set(iata, [])
+      map.get(iata)!.push(f)
+    }
+    return [...map.entries()]
+      .map(([iata, rows]) => ({
+        iata,
+        rows: [...rows].sort((a, b) => (a.dep_time ?? '').localeCompare(b.dep_time ?? '')),
+      }))
+      .sort((a, b) => city(a.iata).localeCompare(city(b.iata)))
+  }, [flights, dir])
   const hasReverse = (info?.reverseRoutes.length ?? 0) > 0
   const airportLabel = city(airport)
 
@@ -361,18 +387,27 @@ function AirlineSheet({ info, airport, onClose, imageUrl }: { info: AirlineInfo 
 
             {/* Route cards */}
             <div style={{ overflowY: 'auto', flex: 1, padding: '12px 16px 26px' }}>
-              {flights.map((f, i) => {
-                const destIata = dir === 'from' ? f.arr_iata : f.dep_iata
+              {grouped.map(g => (
+                <div key={g.iata} style={{ marginBottom: 18 }}>
+                  {/* One heading per destination, so the flag and city are said once rather
+                      than repeated on every service to the same place. */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '0 2px 8px' }}>
+                    <span style={{ fontSize: 20 }}>{apFlag(g.iata)}</span>
+                    <span style={{ font: `700 15px/1 'Instrument Sans',system-ui`, color: C.ink }}>{city(g.iata)}</span>
+                    <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: C.muted, letterSpacing: '.06em' }}>{g.iata}</span>
+                    {g.rows.length > 1 && (
+                      <span style={{ font: `600 11px/1 'Instrument Sans',system-ui`, color: C.muted, marginLeft: 'auto' }}>
+                        {g.rows.length} services
+                      </span>
+                    )}
+                  </div>
+                  {g.rows.map((f, i) => {
                 const activeDays = new Set(f.days_of_week)
                 return (
                   <div key={i} style={{ border: `1px solid ${C.border}`, borderRadius: 14, background: C.surface, marginBottom: 8 }}>
                     <div style={{ padding: '14px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <div style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0, background: C.sunken, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>
-                        {apFlag(destIata)}
-                      </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ font: `600 14px/1.2 'Instrument Sans',system-ui`, color: C.ink, marginBottom: 3 }}>{city(destIata)}</div>
-                        <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, fontWeight: 500, color: C.muted, letterSpacing: '.06em' }}>{f.iata_number}</div>
+                        <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 600, color: C.ink, letterSpacing: '.06em' }}>{f.iata_number}</div>
                       </div>
                       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', gap: 5 }}>
                         <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 15, fontWeight: 700, color: C.ink }}>{f.dep_time}</span>
@@ -391,7 +426,9 @@ function AirlineSheet({ info, airport, onClose, imageUrl }: { info: AirlineInfo 
                     </div>
                   </div>
                 )
-              })}
+                  })}
+                </div>
+              ))}
               {flights.length === 0 && (
                 <div style={{ padding: '32px 0', textAlign: 'center', color: C.muted, font: `500 13px/1.5 'Instrument Sans',system-ui` }}>No scheduled flights found</div>
               )}
