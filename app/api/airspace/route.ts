@@ -250,9 +250,21 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>, lookup: Cal
         })()
         const schedDepMs   = f.sched_dep ? f.sched_dep * 1000 : null
         const actualDepMs  = actual_dep_utc ? new Date(actual_dep_utc).getTime() : null
-        const dep_delay_min = (schedDepMs && actualDepMs)
+        /*
+         * A delay, or nothing — never a number this large.
+         *
+         * The same day-mismatch that put FYC781 on the wrong row produces delays measured
+         * against a departure on another date. Four hours is already generous for this
+         * network; beyond it the schedule is more likely wrong than the aircraft, and a
+         * plainly absurd badge does more harm than an absent one. Same reasoning as the block
+         * time bound above, which was added after SYR522 came through 1440 minutes out.
+         */
+        const rawDelay = (schedDepMs && actualDepMs)
           ? Math.round((actualDepMs - schedDepMs) / 60_000)
           : null
+        const dep_delay_min = rawDelay !== null && Math.abs(rawDelay) > MAX_DELAY_OVER_SCHED_MIN
+          ? null
+          : rawDelay
         const callsignCs   = resolveCallsign(num, lookup, iataToIcao)
         const icaoPrefix   = callsignCs.replace(/\d/g, '')
         // FR24 cache omits the implicit airport — fill dep_iata for departures
@@ -826,7 +838,29 @@ export async function GET() {
       //    so the ghost marker appears once the plane leaves the Syria ADS-B radius.
       let actual_dep_utc = info?.actual_dep_utc ?? null
       const isAirborne = (a.alt_baro ?? 0) > 500 && (a.gs ?? 0) > 80
-      if (!actual_dep_utc && info && isAirborne) {
+
+      /*
+       * An aircraft cannot be operating a flight that has not been scheduled to leave yet.
+       *
+       * The board is keyed by callsign across yesterday, today and tomorrow, and today's row
+       * wins the dedup. When yesterday's row is missing — FR24 files nothing for a flight it
+       * never saw depart — a late aircraft still broadcasting that callsign matches TONIGHT's
+       * row instead.
+       *
+       * FYC781 did exactly that on 6 Aug: yesterday's Damascus–Muscat ran about seven hours
+       * late and was airborne at 04:18, while the only FYC781 in the cache was tonight's
+       * 21:15. It was drawn en route with a +424 minute delay measured against a departure
+       * still seventeen hours away, and worse, the writeback below would have stamped
+       * tonight's row with a real departure — putting a flight on the board as departed, then
+       * arrived, hours before it boards.
+       *
+       * An hour of tolerance, because a flight that leaves slightly early is ordinary and a
+       * flight that leaves a day early is not.
+       */
+      const schedDepMs   = info?.sched_dep ? info.sched_dep * 1000 : null
+      const notYetDue    = schedDepMs !== null && schedDepMs > Date.now() + 60 * 60_000
+
+      if (!actual_dep_utc && info && isAirborne && !notYetDue) {
         if (info.arr_iata && SYRIAN_AIRPORTS_SET.has(info.arr_iata)
             && !SYRIAN_AIRPORTS_SET.has(info.dep_iata ?? '')) {
           // Inbound
