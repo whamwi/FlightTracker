@@ -37,7 +37,6 @@ export const config = {
   matcher: [
     '/admin/:path*',
     '/api/admin/:path*',
-    '/api/debug-widget',
     '/api/debug-hex/:path*',
     '/api/debug-live/:path*',
     '/api/debug-summary/:path*',
