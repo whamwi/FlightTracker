@@ -474,18 +474,20 @@ function AirlineSheet({ info, airport, onClose, imageUrl }: { info: AirlineInfo 
                                   aria-label={active ? `${f.num} on ${d}, departs ${f.byDay[d]?.dep}` : undefined}
                                   onClick={() => setPickedDay(p => ({ ...p, [key]: p[key] === d ? '' : d }))}
                                   style={{
-                                    // Selected is beige with a forest outline rather than
-                                    // black: the chips already run forest for "operates", and
-                                    // a black fill read as a third, heavier state instead of
-                                    // simply the one being looked at. box-sizing keeps the row
-                                    // from shifting when the border appears.
+                                    // Gold for the selected day. The chips run forest for
+                                    // "operates", so the highlight has to be a different hue
+                                    // rather than a lighter one — beige read as absence
+                                    // against a row of green, and black read as a heavier
+                                    // third state. Gold is the brand's second colour and sits
+                                    // apart from both.
+                                    //
+                                    // box-sizing keeps the row from shifting by the width of
+                                    // the border when a day is picked.
                                     flex: 1, height: 24, borderRadius: 7, padding: 0,
                                     boxSizing: 'border-box',
-                                    background: on ? C.bg : active ? C.forest : C.surface,
-                                    border: on ? `1px solid ${C.forest}`
-                                          : active ? '1px solid transparent'
-                                          : `1px solid ${C.border}`,
-                                    color: on ? C.ink : active ? '#fff' : '#B5AFA0',
+                                    background: on ? C.gold : active ? C.forest : C.surface,
+                                    border: `1px solid ${on ? C.gold : active ? 'transparent' : C.border}`,
+                                    color: on ? '#fff' : active ? '#fff' : '#B5AFA0',
                                     font: `700 10px/22px 'Instrument Sans',system-ui`, textAlign: 'center',
                                     cursor: active ? 'pointer' : 'default',
                                   }}
