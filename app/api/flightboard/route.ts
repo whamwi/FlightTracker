@@ -51,6 +51,77 @@ function normaliseStatus(raw: string | null): string {
   return 'Unknown'
 }
 
+
+/**
+ * Flights the timetable says should exist, so an unknown status is not a reason to hide them.
+ *
+ * FR24 marks a scheduled flight "Unknown" when it has no live information for it, and the
+ * board dropped those outright as noise. Mostly they are — but not always: FYC781's Damascus–
+ * Muscat sat at Unknown all Thursday evening, was filtered off the board, and then departed
+ * seven hours late. The aircraft appeared on the map with no row behind it, and anyone looking
+ * at Thursday saw a flight that never happened.
+ *
+ * route_master knows better. If our own timetable has this flight, on this weekday, at about
+ * this time, then it is scheduled — so it is relabelled Scheduled rather than left Unknown.
+ * Relabelling rather than exempting means both the API filter and the board's own filter pass
+ * it without either needing to know about this case.
+ *
+ * Half an hour of tolerance: route_master times drift against FR24 by a few minutes routinely,
+ * and the reconcile page exists to close exactly that gap.
+ */
+const DOW = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
+const SCHEDULE_MATCH_MIN = 30
+
+type RmRow = {
+  dep_iata: string; arr_iata: string; dep_time_utc: string | null
+  days_of_week: string[] | null
+  flight_lookup: { iata_number: string | null; broadcast_callsign: string | null } | null
+}
+
+async function scheduledSet(date: string): Promise<Set<string>> {
+  const dow = DOW[new Date(date + 'T12:00:00Z').getUTCDay()]
+  const out = new Set<string>()
+  try {
+    const res = await fetch(
+      `${SB_URL}/rest/v1/route_master?active=is.true` +
+      `&select=dep_iata,arr_iata,dep_time_utc,days_of_week,flight_lookup(iata_number,broadcast_callsign)`,
+      { headers: HEADERS, cache: 'no-store' },
+    )
+    if (!res.ok) return out
+    const rows: RmRow[] = await res.json()
+    for (const r of rows) {
+      if (!(r.days_of_week ?? []).includes(dow)) continue
+      if (!r.dep_time_utc) continue
+      const [h, m] = r.dep_time_utc.slice(0, 5).split(':').map(Number)
+      const mins = h * 60 + m
+      for (const num of [r.flight_lookup?.iata_number, r.flight_lookup?.broadcast_callsign]) {
+        if (num) out.add(`${num.toUpperCase()}|${r.dep_iata}|${r.arr_iata}|${mins}`)
+      }
+    }
+  } catch { /* an empty set means the old behaviour: Unknown is dropped */ }
+  return out
+}
+
+/** Does the timetable have this flight, this weekday, within half an hour of this time? */
+function onSchedule(set: Set<string>, f: {
+  iata_number?: string | null; callsign?: string | null
+  dep_iata?: string | null; arr_iata?: string | null; dep_time_utc?: string | null
+}): boolean {
+  if (!f.dep_time_utc || !f.dep_iata || !f.arr_iata) return false
+  const [h, m] = f.dep_time_utc.slice(0, 5).split(':').map(Number)
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return false
+  const mins = h * 60 + m
+  for (const num of [f.iata_number, f.callsign]) {
+    if (!num) continue
+    for (let d = -SCHEDULE_MATCH_MIN; d <= SCHEDULE_MATCH_MIN; d++) {
+      // Wrapped, so a flight scheduled near midnight still matches across the boundary.
+      const t = ((mins + d) % 1440 + 1440) % 1440
+      if (set.has(`${num.toUpperCase()}|${f.dep_iata}|${f.arr_iata}|${t}`)) return true
+    }
+  }
+  return false
+}
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
   const date = searchParams.get('date')
@@ -482,6 +553,13 @@ export async function GET(req: Request) {
         }
       }
     }
+  }
+
+  // Unknown, unless our own timetable says otherwise — see scheduledSet above.
+  const scheduled = await scheduledSet(date)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const f of Object.values(flightMap) as any[]) {
+    if (f.status === 'Unknown' && onSchedule(scheduled, f)) f.status = 'Scheduled'
   }
 
   return NextResponse.json(
