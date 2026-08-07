@@ -188,9 +188,28 @@ export async function GET(req: Request) {
 
   const applied: string[] = []
 
+  /*
+   * Pick the record that carries the field being asked for, not the first one with a matching
+   * callsign.
+   *
+   * FR24 returns one record per attempt. FYC781 came back as two: 410ba815 with no takeoff and
+   * no landing — the 21:15 that never left — and 410c3070 with both. `.find()` on the callsign
+   * takes the first, which is the empty one, so the cron would have made the call, received
+   * the right answer in the same response, and written nothing.
+   *
+   * Falls back to any callsign match, so a record that is genuinely incomplete is still
+   * returned rather than silently skipped.
+   */
+  const pick = (num: string, field: 'datetime_takeoff' | 'datetime_landed') => {
+    const mine = items.filter(i => i.callsign === num || i.flight === num)
+    return mine.find(i => i[field])
+        ?? (field === 'datetime_landed' ? mine.find(i => i.flight_ended && i.last_seen) : undefined)
+        ?? mine[0]
+  }
+
   for (const w of wanted) {
     const num = w.row.callsign ?? w.row.iata_number
-    const item = items.find(i => i.callsign === num || i.flight === num)
+    const item = pick(num, w.need === 'dep' ? 'datetime_takeoff' : 'datetime_landed')
     if (!item) continue
 
     if (w.need === 'dep' && item.datetime_takeoff) {
@@ -206,13 +225,16 @@ export async function GET(req: Request) {
       applied.push(`${num} dep ${item.datetime_takeoff}${ok ? '' : ' (board not updated)'}`)
     }
 
-    if (w.need === 'arr' && item.datetime_landed) {
-      const ts = Math.floor(new Date(item.datetime_landed).getTime() / 1000)
+    // Same fallback as landing-confirm: over Syria the track ends before touchdown, so a
+    // finished flight's last_seen is the best arrival available.
+    const landedStamp = item.datetime_landed ?? (item.flight_ended ? item.last_seen : null)
+    if (w.need === 'arr' && landedStamp) {
+      const ts = Math.floor(new Date(landedStamp).getTime() / 1000)
       const ap = w.row.arr_iata && SYRIA_AIRPORT_SET.has(w.row.arr_iata) ? w.row.arr_iata : null
       const ok = ap ? await writeActual(ap, w.row.flight_date, w.row.iata_number, 'real_arr', ts) : false
       await fetch(`${SB_URL}/rest/v1/flight_signal_log?callsign=eq.${encodeURIComponent(num)}&flight_date=eq.${today}`, {
         method: 'PATCH', headers: { ...HEADERS, Prefer: 'return=minimal' },
-        body: JSON.stringify({ real_arr_synced: true, actual_arr_at: item.datetime_landed }),
+        body: JSON.stringify({ real_arr_synced: true, actual_arr_at: landedStamp }),
       })
       // The flight flew, late. Closing the row is what distinguishes it from one that never
       // operated at all.
@@ -220,10 +242,11 @@ export async function GET(req: Request) {
         method: 'PATCH', headers: { ...HEADERS, Prefer: 'return=minimal' },
         body: JSON.stringify({
           resolved_at: new Date().toISOString(),
-          resolved_reason: `flew late — landed ${item.datetime_landed}`,
+          resolved_reason: `flew late — landed ${landedStamp}`
+            + (item.datetime_landed ? '' : ' (from last_seen, no published landing)'),
         }),
       })
-      applied.push(`${num} arr ${item.datetime_landed}${ok ? '' : ' (board not updated)'}`)
+      applied.push(`${num} arr ${landedStamp}${ok ? '' : ' (board not updated)'}`)
     }
   }
 
