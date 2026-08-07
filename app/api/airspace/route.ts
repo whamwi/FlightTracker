@@ -860,13 +860,16 @@ export async function GET() {
       const schedDepMs   = info?.sched_dep ? info.sched_dep * 1000 : null
       const notYetDue    = schedDepMs !== null && schedDepMs > Date.now() + 60 * 60_000
 
-      if (!actual_dep_utc && info && isAirborne && !notYetDue) {
+      if (!actual_dep_utc && info && isAirborne) {
         if (info.arr_iata && SYRIAN_AIRPORTS_SET.has(info.arr_iata)
             && !SYRIAN_AIRPORTS_SET.has(info.dep_iata ?? '')) {
           // Inbound
           const depTs    = inferDepartureTs(info, a.lat, a.lon, apCoords, Math.floor(Date.now() / 1000))
           actual_dep_utc = new Date(depTs * 1000).toISOString()
-          if (!depSynced.has(cs)) {
+          // Not written back when the matched row is still in the future: stamping real_dep
+          // there would put tonight's flight on the board as departed, then arrived, hours
+          // before it boards. The marker is drawn either way — the aircraft is real.
+          if (!depSynced.has(cs) && !notYetDue) {
             depSynced.add(cs)
             writeInboundDep(info, depTs).catch(() => {})
           }
@@ -875,7 +878,8 @@ export async function GET() {
           // Outbound
           const depTs    = inferDepartureTs(info, a.lat, a.lon, apCoords, Math.floor(Date.now() / 1000))
           actual_dep_utc = new Date(depTs * 1000).toISOString()
-          if (!depSynced.has(cs)) {
+          // See above — no writeback onto a flight that has not left yet.
+          if (!depSynced.has(cs) && !notYetDue) {
             depSynced.add(cs)
             writeOutboundDep(info, depTs).catch(() => {})
           }
