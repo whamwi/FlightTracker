@@ -108,12 +108,28 @@ export async function GET(req: Request) {
     })
   }
 
+  /*
+   * Checked, not fire-and-forget.
+   *
+   * The table was created with RLS on and no policy, so every insert was refused while the run
+   * reported success — for a whole day this read as "the cron never fired" when it had fired,
+   * been rejected, and said nothing. A recorder that cannot tell a refused write from a
+   * successful one is worse than no recorder, because absence looks like good news.
+   */
+  let written = 0
+  let writeError: string | null = null
   if (idle.length) {
-    await fetch(`${SB_URL}/rest/v1/flight_no_activity`, {
+    const res = await fetch(`${SB_URL}/rest/v1/flight_no_activity`, {
       method: 'POST',
       headers: { ...HEADERS, Prefer: 'resolution=merge-duplicates,return=minimal' },
       body: JSON.stringify(idle),
     })
+    if (res.ok) {
+      written = idle.length
+    } else {
+      writeError = `${res.status} ${(await res.text()).slice(0, 200)}`
+      console.error('[no-activity] insert failed', writeError)
+    }
   }
 
   /*
@@ -135,19 +151,24 @@ export async function GET(req: Request) {
       .filter(o => active.has(`${o.iata_number}|${o.dep_iata ?? ''}|${o.arr_iata ?? ''}`))
       .map(o => o.id)
     if (ids.length) {
-      await fetch(`${SB_URL}/rest/v1/flight_no_activity?id=in.(${ids.join(',')})`, {
+      const res = await fetch(`${SB_URL}/rest/v1/flight_no_activity?id=in.(${ids.join(',')})`, {
         method: 'PATCH', headers: { ...HEADERS, Prefer: 'return=minimal' },
         body: JSON.stringify({
           resolved_at: new Date().toISOString(),
           resolved_reason: 'activity appeared after flagging',
         }),
       })
-      resolved = ids.length
+      if (res.ok) resolved = ids.length
+      else {
+        writeError = writeError ?? `resolve ${res.status} ${(await res.text()).slice(0, 200)}`
+        console.error('[no-activity] resolve failed', writeError)
+      }
     }
   }
 
   return NextResponse.json({
-    ok: true, date, checked: flights.length, flagged: idle.length, resolved,
+    ok: !writeError, date, checked: flights.length,
+    flagged: idle.length, written, resolved, error: writeError,
     flights: idle.map(f => `${f.iata_number} ${f.dep_iata}→${f.arr_iata} +${f.hours_overdue}h`),
   })
 }
