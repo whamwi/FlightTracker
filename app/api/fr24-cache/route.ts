@@ -101,7 +101,15 @@ function mergeList(existing: any[], incoming: any[], keyFn: (e: any) => string):
        * A departure is evidence and a schedule is not. Merging it onto the incoming row rather
        * than replacing wholesale keeps whatever the incoming row knows that we do not.
        */
-      merged.set(key, { ...inc, real_dep: e.real_dep, fr24_id: inc.fr24_id ?? e.fr24_id ?? null, reg: inc.reg || e.reg || null })
+      merged.set(key, {
+        ...inc,
+        real_dep:   e.real_dep,
+        // Carried with the value, or the provenance is lost on the next harvest and an
+        // estimate quietly becomes indistinguishable from a published time.
+        dep_source: e.dep_source ?? null,
+        fr24_id:    inc.fr24_id ?? e.fr24_id ?? null,
+        reg:        inc.reg || e.reg || null,
+      })
     }
   }
 

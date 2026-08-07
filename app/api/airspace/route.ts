@@ -656,8 +656,11 @@ async function writeInboundDep(info: BoardFlight, depTs: number): Promise<void> 
   const rows: any[] = await rowRes.json()
   if (!rows.length) return
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // dep_source records that this is our estimate, not a published time. Without it a value
+  // we invented is indistinguishable from one FR24 gave us, which makes "no departure yet"
+  // impossible to ask and leaves a drifting number looking authoritative.
   const list = ((rows[0].arrivals ?? []) as any[]).map((f: any) =>
-    f.num === info.num ? { ...f, real_dep: depTs } : f,
+    f.num === info.num ? { ...f, real_dep: depTs, dep_source: 'adsb' } : f,
   )
   await fetch(`${SB_URL}/rest/v1/fr24_daily_cache`, {
     method:  'POST',
@@ -680,8 +683,9 @@ async function writeOutboundDep(info: BoardFlight, depTs: number): Promise<void>
   const rows: any[] = await rowRes.json()
   if (!rows.length) return
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // See writeInboundDep — this is an estimate from position, not a published departure.
   const list = ((rows[0].departures ?? []) as any[]).map((f: any) =>
-    f.num === info.num ? { ...f, real_dep: depTs } : f,
+    f.num === info.num ? { ...f, real_dep: depTs, dep_source: 'adsb' } : f,
   )
   await fetch(`${SB_URL}/rest/v1/fr24_daily_cache`, {
     method:  'POST',

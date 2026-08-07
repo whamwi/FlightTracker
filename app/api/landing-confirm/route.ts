@@ -162,6 +162,8 @@ export async function GET() {
             fr24_id:  match.fr24_id,
             real_arr: landedAt,
             real_dep: f.real_dep ?? tookOff ?? null,
+            // Published by FR24, so it supersedes anything we estimated from position.
+            dep_source: f.real_dep ? (f.dep_source ?? 'fr24') : tookOff ? 'fr24' : (f.dep_source ?? null),
             reg:      f.reg || match.reg || null,
             status:   arrStatus,
           }

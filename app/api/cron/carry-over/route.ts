@@ -92,7 +92,11 @@ async function writeActual(
   if (!rows.length) return false
 
   const patch = (list: any[]) =>
-    (list ?? []).map((f: any) => (f.num === num ? { ...f, [field]: value } : f))
+    (list ?? []).map((f: any) =>
+      f.num === num
+        // Published by FR24 — supersedes any position estimate already on the row.
+        ? { ...f, [field]: value, ...(field === 'real_dep' ? { dep_source: 'fr24' } : {}) }
+        : f)
 
   const body = {
     airport_iata: airport,
