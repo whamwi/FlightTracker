@@ -303,6 +303,43 @@ function BottomSheet({ dest, airport, onClose, imageUrl }: { dest: Destination |
   useEffect(() => { if (dest) document.body.style.overflow = 'hidden'; else document.body.style.overflow = ''; return () => { document.body.style.overflow = '' } }, [dest])
   useEffect(() => { setDir('to'); setImgFailed(false) }, [dest?.iata])
   const flights = dir === 'to' ? (dest?.flights ?? []) : (dest?.reverseFlights ?? [])
+
+  /**
+   * One entry per flight number, not per timetable row.
+   *
+   * The same service appears several times when its departure shifts by day — XH485 to
+   * Istanbul was three rows ten minutes apart. Read as three flights that is misleading; read
+   * as one flight whose time moves it is the truth, and the day chips already carried what was
+   * needed to say so. Same treatment as the airline panel.
+   *
+   * The earliest departure is the headline; any day can be tapped for its own time.
+   */
+  const collapsed = useMemo(() => {
+    const byNum = new Map<string, ScheduleRow[]>()
+    for (const f of flights) {
+      if (!byNum.has(f.iata_number)) byNum.set(f.iata_number, [])
+      byNum.get(f.iata_number)!.push(f)
+    }
+    return [...byNum.entries()]
+      .map(([num, rows]) => {
+        const byDay: Record<string, { dep: string; arr: string }> = {}
+        for (const r of rows) for (const d of r.days_of_week ?? []) byDay[d] = { dep: r.dep_time, arr: r.arr_time }
+        const earliest = [...rows].sort((a, b) => (a.dep_time ?? '').localeCompare(b.dep_time ?? ''))[0]
+        return {
+          num,
+          row: earliest,
+          byDay,
+          days: new Set(Object.keys(byDay)),
+          dep: earliest.dep_time,
+          arr: earliest.arr_time,
+          varies: new Set(rows.map(r => r.dep_time)).size > 1,
+        }
+      })
+      .sort((a, b) => (a.dep ?? '').localeCompare(b.dep ?? ''))
+  }, [flights])
+
+  /** Which day is being inspected, per flight number. */
+  const [pickedDay, setPickedDay] = useState<Record<string, string>>({})
   const hasReverse = (dest?.reverseFlights.length ?? 0) > 0
 
   const subtitle = dest ? [
@@ -369,32 +406,63 @@ function BottomSheet({ dest, airport, onClose, imageUrl }: { dest: Destination |
             )}
             {/* Flight cards */}
             <div style={{ overflowY: 'auto', flex: 1, padding: '12px 16px 26px' }}>
-              {flights.map((f, i) => {
-                const prefix = f.airline_iata || f.iata_number.slice(0, 2)
-                const activeDays = new Set(f.days_of_week)
+              {collapsed.map(fl => {
+                const f       = fl.row
+                const prefix  = f.airline_iata || f.iata_number.slice(0, 2)
+                const picked  = pickedDay[fl.num]
+                const shown   = picked && fl.byDay[picked] ? fl.byDay[picked] : { dep: fl.dep, arr: fl.arr }
                 return (
-                  <div key={i} style={{ border: `1px solid ${C.border}`, borderRadius: 14, background: C.surface, marginBottom: 8 }}>
+                  <div key={fl.num} style={{ border: `1px solid ${C.border}`, borderRadius: 14, background: C.surface, marginBottom: 8 }}>
                     <div style={{ padding: '14px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
                       <div style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0, background: C.sunken, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <AirlineLogo prefix={prefix} name={f.airline_name} size={36} />
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ font: `600 14px/1.2 'Instrument Sans',system-ui`, color: C.ink, marginBottom: 3 }}>{f.airline_name}</div>
-                        <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, fontWeight: 500, color: C.muted, letterSpacing: '.06em' }}>{f.iata_number}</div>
+                        <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, fontWeight: 500, color: C.muted, letterSpacing: '.06em' }}>{fl.num}</div>
+                        {/* Said out loud rather than hidden: one headline time on a flight that
+                            leaves at three different minutes is wrong on most days. */}
+                        {fl.varies && (
+                          <div style={{ font: `500 10.5px/1.4 'Instrument Sans',system-ui`, color: C.muted, marginTop: 2 }}>
+                            {picked ? 'time for the selected day' : 'time varies by day — tap a day'}
+                          </div>
+                        )}
                       </div>
                       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', gap: 5 }}>
-                        <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 15, fontWeight: 700, color: C.ink }}>{f.dep_time}</span>
+                        <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 15, fontWeight: 700, color: C.ink }}>{shown.dep}</span>
                         <span style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>→</span>
-                        <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 15, fontWeight: 700, color: C.ink }}>{f.arr_time}</span>
+                        <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 15, fontWeight: 700, color: C.ink }}>{shown.arr}</span>
                       </div>
                     </div>
                     <div style={{ borderTop: `1px solid #E8E4D8`, background: C.sunken, borderRadius: '0 0 14px 14px', padding: '10px 14px' }}>
                       <div style={{ display: 'flex', gap: 5 }}>
-                        {DOW_ORDER.map(d => (
-                          <div key={d} style={{ flex: 1, height: 24, borderRadius: 7, background: activeDays.has(d) ? C.forest : C.surface, border: activeDays.has(d) ? 'none' : `1px solid ${C.border}`, color: activeDays.has(d) ? '#fff' : '#B5AFA0', font: `700 10px/24px 'Instrument Sans',system-ui`, textAlign: 'center' }}>
-                            {DOW_LABEL[d]}
-                          </div>
-                        ))}
+                        {DOW_ORDER.map(d => {
+                          const active = fl.days.has(d)
+                          const on     = picked === d
+                          return (
+                            <button
+                              key={d}
+                              disabled={!active}
+                              aria-pressed={on}
+                              aria-label={active ? `${fl.num} on ${d}, departs ${fl.byDay[d]?.dep}` : undefined}
+                              onClick={() => setPickedDay(p => ({ ...p, [fl.num]: p[fl.num] === d ? '' : d }))}
+                              style={{
+                                // Gold selected, forest operates, outline for no service —
+                                // three hues rather than three weights. Matches the airline
+                                // panel so the two read as the same control.
+                                flex: 1, height: 24, borderRadius: 7, padding: 0,
+                                boxSizing: 'border-box',
+                                background: on ? C.gold : active ? C.forest : C.surface,
+                                border: `1px solid ${on ? C.gold : active ? 'transparent' : C.border}`,
+                                color: active ? '#fff' : '#B5AFA0',
+                                font: `700 10px/22px 'Instrument Sans',system-ui`, textAlign: 'center',
+                                cursor: active ? 'pointer' : 'default',
+                              }}
+                            >
+                              {DOW_LABEL[d]}
+                            </button>
+                          )
+                        })}
                       </div>
                     </div>
                   </div>
