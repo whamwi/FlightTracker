@@ -89,19 +89,38 @@ export async function GET() {
     const destIcao = IATA_TO_ICAO[p.airport]
     if (!destIcao) continue
 
-    // Match by callsign (FYC728) or commercial flight number (TK848), destination, and ETA proximity
+    /*
+     * Match by callsign (FYC728) or commercial flight number (TK848), destination, and ETA
+     * proximity.
+     *
+     * datetime_landed is no longer required, and that is the point. FR24 derives a landing
+     * from the track reaching the destination, and over Syria the track ends before touchdown
+     * — coverage drops on the last leg. RB516 on 6 August had a full track, KML and CSV on
+     * FR24's own site and no landing time at all. Requiring datetime_landed meant asking FR24
+     * for something it structurally cannot know about arrivals into Syrian airspace, which is
+     * most of what this cron exists to confirm.
+     *
+     * So a finished flight with a last_seen is accepted too. last_seen is where coverage
+     * stopped, which for an arrival into Syria is close to the airport — minutes out rather
+     * than unknown.
+     */
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const match = items.find((item: any) => {
       if (item.callsign !== p.num && item.flight !== p.num) return false
       if (item.dest_icao_actual !== destIcao && item.dest_icao !== destIcao) return false
-      if (!item.datetime_landed) return false
-      const landedAt = Math.floor(new Date(item.datetime_landed).getTime() / 1000)
+      const stamp = item.datetime_landed ?? (item.flight_ended ? item.last_seen : null)
+      if (!stamp) return false
+      const landedAt = Math.floor(new Date(stamp).getTime() / 1000)
       return Math.abs(landedAt - p.eta) <= 6 * 3600
     })
 
     if (!match) continue
 
-    const landedAt = Math.floor(new Date(match.datetime_landed).getTime() / 1000)
+    // Recorded which of the two it was, because they are not the same claim: one is a landing
+    // FR24 computed, the other is the last point at which anyone could see the aircraft.
+    const fromTrack  = !!match.datetime_landed
+    const landedStamp = match.datetime_landed ?? match.last_seen
+    const landedAt    = Math.floor(new Date(landedStamp).getTime() / 1000)
 
     const rowRes = await fetch(
       `${SB_URL}/rest/v1/fr24_daily_cache?airport_iata=eq.${p.airport}&flight_date=eq.${p.date}&select=arrivals,departures`,
@@ -115,9 +134,38 @@ export async function GET() {
     const d    = new Date(landedAt * 1000)
     const hhmm = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
 
+    /*
+     * The departure comes from the same response and was being thrown away.
+     *
+     * flight-summary returns datetime_takeoff beside the landing, and this cron ignored it
+     * because it was written to confirm arrivals. RB516 on 6 August had its takeoff — 09:20Z —
+     * sitting in a response we had already paid for and discarded, while the board showed the
+     * flight as Scheduled with no departure at all.
+     *
+     * Only filled in, never overwritten: a departure already on the row came from the widget
+     * or from a live ADS-B confirmation, and both are closer to the source than a summary
+     * fetched hours later.
+     */
+    const tookOff = match.datetime_takeoff
+      ? Math.floor(new Date(match.datetime_takeoff).getTime() / 1000)
+      : null
+
+    // Status says what is actually known. A track-derived arrival is not a published landing,
+    // and labelling it as one would put a precise time behind a claim FR24 never made.
+    const arrStatus = fromTrack ? `Landed ${hhmm}` : `Arrived ${hhmm}`
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const arrivals = (rows[0].arrivals ?? [] as any[]).map((f: any) =>
-      f.num === p.num ? { ...f, fr24_id: match.fr24_id, real_arr: landedAt, status: `Landed ${hhmm}` } : f
+      f.num === p.num
+        ? {
+            ...f,
+            fr24_id:  match.fr24_id,
+            real_arr: landedAt,
+            real_dep: f.real_dep ?? tookOff ?? null,
+            reg:      f.reg || match.reg || null,
+            status:   arrStatus,
+          }
+        : f
     )
 
     const writeRes = await fetch(`${SB_URL}/rest/v1/fr24_daily_cache`, {

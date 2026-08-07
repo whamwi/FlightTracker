@@ -27,18 +27,44 @@ function statusRank(s: string | null | undefined): number {
 //   2. If incoming has real_arr and existing doesn't → use incoming
 //   3. Otherwise take whichever has the higher status rank
 //   4. Flights that aged out of the FR24 feed but have real_arr are preserved
+/**
+ * How much this row proves the flight is real, for breaking a tie between two rows with the
+ * same status. A timetable stub carries none of these; only a flight FR24 actually tracked
+ * gains a tail number, an id, or a time.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function evidence(e: any): number {
+  return (e.real_arr ? 8 : 0) + (e.real_dep ? 4 : 0) + (e.fr24_id ? 2 : 0) + (e.reg ? 1 : 0)
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mergeList(existing: any[], incoming: any[], keyFn: (e: any) => string): any[] {
   const merged = new Map<string, any>()
   const nowSec = Math.floor(Date.now() / 1000)
 
-  // Seed with incoming (fresh FR24 data is the baseline).
-  // When FR24 returns two entries for the same flight (e.g. one "Unknown" placeholder
-  // and one "Departed" entry with a real fr24_id), keep the higher-ranked status.
+  /*
+   * Seed with incoming (fresh FR24 data is the baseline).
+   *
+   * FR24 publishes two rows for the same flight: a bare timetable stub and the operated
+   * flight. Usually the operated one carries a better status — FYC485 was "Departed 01:37"
+   * against the stub's "Unknown" — and rank alone picks it.
+   *
+   * But both rows can be "Unknown". RB516 DXB–DAM on 6 August was exactly that: the operated
+   * row had a registration, an fr24_id and a real departure of 09:20Z, the stub had nothing,
+   * and both said Unknown. Ranks tied, `>=` kept whichever arrived last, the stub won, and the
+   * board showed a flight that had actually flown as merely Scheduled.
+   *
+   * So a tie is broken on evidence rather than order. A stub can never acquire a tail number.
+   */
   for (const e of incoming) {
     const key = keyFn(e)
     const prev = merged.get(key)
-    if (!prev || statusRank(e.status) >= statusRank(prev.status)) merged.set(key, e)
+    if (!prev) { merged.set(key, e); continue }
+
+    const rank = statusRank(e.status) - statusRank(prev.status)
+    if (rank > 0) { merged.set(key, e); continue }
+    if (rank < 0) continue
+    if (evidence(e) > evidence(prev)) merged.set(key, e)
   }
 
   // Walk existing; override incoming where existing data is richer
