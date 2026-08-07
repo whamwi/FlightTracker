@@ -87,6 +87,16 @@ function extractRevisedArrUtc(status: string, date: string): string | null {
 // ── Board flights (fr24_daily_cache, Syria op date = UTC+3, 60s cache) ────────
 interface BoardFlight {
   num:            string        // raw FR24 value — used to match rows back into fr24_daily_cache
+  /**
+   * The cache date this flight was read from — yesterday, today or tomorrow.
+   *
+   * The board is assembled from three dates and this was being discarded, so the departure
+   * writebacks had nothing to go on and assumed today. That is right for a flight that departs
+   * on its own date and wrong for the case that matters: FYC781 left at 04:15 on the 7th
+   * against a schedule on the 6th, so the write went looking for it in a list that does not
+   * contain it, matched nothing, and wrote the list back unchanged. Silently.
+   */
+  flight_date:    string
   iata_num:       string        // the ticketed IATA number (XH727), resolved via flight_lookup
   callsign:       string        // ADS-B broadcast callsign derived from num
   dep_iata:       string | null
@@ -274,6 +284,7 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>, lookup: Cal
         // and arr_iata for arrivals from the row's airport_iata.
         flights.push({
           num,
+          flight_date:    rowDate,
           iata_num:       lookup.toIata[num.toUpperCase()] ?? num,
           callsign:       callsignCs,
           dep_iata:       f.dep_iata || (section === 'departures' ? ap : null) || null,
@@ -634,7 +645,8 @@ function inferDepartureTs(
 async function writeInboundDep(info: BoardFlight, depTs: number): Promise<void> {
   const arrAp = info.arr_iata
   if (!arrAp || !SYRIAN_AIRPORTS_SET.has(arrAp)) return
-  const date = new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10)
+  // The flight's own date, not today's — see BoardFlight.flight_date.
+  const date = info.flight_date
   const rowRes = await fetch(
     `${SB_URL}/rest/v1/fr24_daily_cache?airport_iata=eq.${arrAp}&flight_date=eq.${date}&select=arrivals,departures`,
     { headers: SB_HEADERS },
@@ -657,7 +669,8 @@ async function writeInboundDep(info: BoardFlight, depTs: number): Promise<void> 
 async function writeOutboundDep(info: BoardFlight, depTs: number): Promise<void> {
   const depAp = info.dep_iata
   if (!depAp || !SYRIAN_AIRPORTS_SET.has(depAp)) return
-  const date = new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10)
+  // The flight's own date, not today's — see BoardFlight.flight_date.
+  const date = info.flight_date
   const rowRes = await fetch(
     `${SB_URL}/rest/v1/fr24_daily_cache?airport_iata=eq.${depAp}&flight_date=eq.${date}&select=arrivals,departures`,
     { headers: SB_HEADERS },
