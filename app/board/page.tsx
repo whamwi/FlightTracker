@@ -94,7 +94,11 @@ type Flight = {
 
 type Tab     = -1 | 0 | 1
 type View    = 'arr' | 'dep'
-type Airport = 'DAM' | 'ALP'
+// Deir ez-Zor opened to scheduled traffic on 8 Aug 2026. The board filters purely on
+// dep_iata/arr_iata, so a new airport is this list plus the warm loop below — nothing else.
+type Airport = 'DAM' | 'ALP' | 'DEZ'
+
+const AIRPORTS: Airport[] = ['DAM', 'ALP', 'DEZ']
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function syriaDate(offsetDays: number): string {
@@ -699,15 +703,13 @@ export default function BoardPage() {
     if (tab !== 0) return
     const loadTimer = setInterval(() => load(0, true), 60_000)
     const warmTimer = setInterval(() => {
-      warmFR24Cache('DAM')
-      warmFR24Cache('ALP')
+      AIRPORTS.forEach(ap => warmFR24Cache(ap))
     }, 5 * 60_000)
     return () => { clearInterval(loadTimer); clearInterval(warmTimer) }
   }, [tab, load, warmFR24Cache])
 
   useEffect(() => {
-    warmFR24Cache('DAM')
-    warmFR24Cache('ALP')
+    AIRPORTS.forEach(ap => warmFR24Cache(ap))
   }, [warmFR24Cache])
 
   const mountedRef = useRef(false)
@@ -966,7 +968,7 @@ export default function BoardPage() {
             </div>
 
             <div style={{ display: 'flex', padding: 3, background: C.border, borderRadius: 11, gap: 3 }}>
-              {(['DAM', 'ALP'] as Airport[]).map(ap => (
+              {AIRPORTS.map(ap => (
                 <button key={ap} onClick={() => setAirport(ap)} className="ft-airport-btn" style={{
                   padding: '8px 32px', borderRadius: 9, cursor: 'pointer',
                   background: airport === ap ? C.forest : 'transparent',

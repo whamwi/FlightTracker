@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { fetchCallsignLookup, fetchIataToIcao, resolveCallsign, resolveIata } from '@/lib/callsign'
-import { SYRIA_AIRPORTS_CSV } from '@/lib/syria-airports'
+import { SYRIA_AIRPORTS_CSV, SYRIA_AIRPORT_SET } from '@/lib/syria-airports'
 
 export const dynamic = 'force-dynamic'
 
@@ -162,7 +162,10 @@ export async function GET(req: Request) {
   // Damascus-day bounds — flights arriving at Syrian airports must land within this window.
   const dayStartMs = new Date(date + 'T00:00:00+03:00').getTime()
   const dayEndMs   = dayStartMs + 24 * 60 * 60 * 1000
-  const SYRIAN_AIRPORTS = new Set(['DAM', 'ALP', 'LTK'])
+  // The shared set, not another hand-written copy. This line held its own list of three and
+  // silently dropped every Deir ez-Zor flight: the cache above was fetched for DEZ, then
+  // addFlight discarded each row because neither end looked Syrian.
+  const SYRIAN_AIRPORTS = SYRIA_AIRPORT_SET
 
   // Status priority: higher rank wins when the same flight appears in multiple airport caches.
   const STATUS_RANK: Record<string, number> = {

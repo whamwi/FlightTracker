@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { airportCity, airportFlag as apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
+import { isSyrianAirport } from '@/lib/syria-airports'
 
 const cityOf = (iata: string) => airportCity[iata] ?? iata
 const flagOf = (iata: string) => apFlag[iata] ?? ''
@@ -238,8 +239,11 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
   const remainingMin = elapsedMin != null && flight?.duration_min
     ? Math.max(0, flight.duration_min - elapsedMin) : null
 
+  // Which board this flight belongs to — its Syrian end. Checked against the shared list, so
+  // a Deir ez-Zor or Latakia arrival resolves to that airport instead of falling through to
+  // the foreign origin.
   const boardAirport = flight
-    ? (['DAM', 'ALP'].includes(flight.arr_iata) ? flight.arr_iata : flight.dep_iata) || 'DAM'
+    ? (isSyrianAirport(flight.arr_iata) ? flight.arr_iata : flight.dep_iata) || 'DAM'
     : 'DAM'
 
   function handleShare() {

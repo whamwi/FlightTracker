@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { SYRIA_AIRPORTS } from '@/lib/syria-airports'
 
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 60
@@ -7,7 +8,8 @@ const SB_URL = process.env.SUPABASE_URL!
 const SB_KEY = process.env.SUPABASE_ANON_KEY!
 const HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 
-const SYRIAN_AIRPORTS = ['DAM', 'ALP', 'LTK']
+// Shared list — a local copy here is how Deir ez-Zor went unreconciled.
+const SYRIAN_AIRPORTS: readonly string[] = SYRIA_AIRPORTS
 
 function unixToUtcHHMM(unix: number): string {
   const d = new Date(unix * 1000)

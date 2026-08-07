@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { SYRIA_AIRPORTS } from '@/lib/syria-airports'
 
 /**
  * Roll the board cache up into one row per airport per day.
@@ -21,7 +22,7 @@ const SB_URL = process.env.SUPABASE_URL!
 const SB_KEY = process.env.SUPABASE_ANON_KEY!
 const HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, 'Content-Type': 'application/json' }
 
-const AIRPORTS = ['DAM', 'ALP']
+const AIRPORTS: readonly string[] = SYRIA_AIRPORTS
 /** Days back to recompute each run. Comfortably longer than late arrivals take to settle. */
 const WINDOW_DAYS = 5
 /** The industry convention: a departure inside fifteen minutes counts as on time. */
