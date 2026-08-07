@@ -86,6 +86,14 @@ const s: Record<string, React.CSSProperties> = {
   chip:    { display: 'inline-block', borderRadius: 4, padding: '2px 7px', fontSize: 11, fontWeight: 600 },
 }
 
+/** A flight that was scheduled yesterday and produced no departure and no arrival. */
+interface IdleRow {
+  id: number; flight_date: string; iata_number: string; callsign: string | null
+  dep_iata: string | null; arr_iata: string | null
+  sched_dep_utc: string | null; status: string | null
+  hours_overdue: number | null; resolved_at: string | null; resolved_reason: string | null
+}
+
 interface RouteGroup {
   key: string
   iata_number: string
@@ -148,6 +156,21 @@ export default function ReconcilePage() {
    * way to know it changed — hence the counter. Without it the table renders once with the
    * +3 fallback and never corrects itself, which is the bug this was meant to fix.
    */
+  /**
+   * Yesterday's flights that were scheduled and then did nothing.
+   *
+   * Read straight from the table rather than through the reconcile feed: it is a different
+   * question from a schedule mismatch — not "the timetable is wrong" but "the timetable was
+   * right and nothing happened".
+   */
+  const [idle, setIdle] = useState<IdleRow[] | null>(null)
+  useEffect(() => {
+    fetch('/api/admin/no-activity')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setIdle(d?.rows ?? []))
+      .catch(() => setIdle([]))
+  }, [])
+
   const [, setGeoTick] = useState(0)
   useEffect(() => { loadGeoData().then(() => setGeoTick(t => t + 1)).catch(() => {}) }, [])
 
@@ -263,6 +286,41 @@ export default function ReconcilePage() {
         Flights from <code>fr24_daily_cache</code> that differ from <code>route_master</code>.
         Review daily before automating any updates.
       </p>
+
+      {/* No activity — scheduled, then nothing */}
+      {idle !== null && idle.length > 0 && (
+        <div style={{ marginBottom: 22, border: '1px solid #30363d', borderRadius: 10, overflow: 'hidden' }}>
+          <div style={{ padding: '11px 14px', background: '#161b22', borderBottom: '1px solid #30363d' }}>
+            <span style={{ fontWeight: 700, fontSize: 14 }}>Scheduled, no activity</span>
+            <span style={{ color: '#8b949e', fontSize: 12, marginLeft: 10 }}>
+              {idle.filter(r => !r.resolved_at).length} open · {idle.filter(r => r.resolved_at).length} resolved
+            </span>
+            <div style={{ color: '#6e7681', fontSize: 11.5, marginTop: 4 }}>
+              A flight that never departed and never arrived. Open rows either flew very late or
+              did not fly at all; resolved rows turned out to be late.
+            </div>
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+            <tbody>
+              {idle.map(r => (
+                <tr key={r.id} style={{ borderTop: '1px solid #30363d', opacity: r.resolved_at ? 0.5 : 1 }}>
+                  <td style={{ padding: '7px 12px', color: '#8b949e' }}>{r.flight_date}</td>
+                  <td style={{ padding: '7px 12px', fontWeight: 700 }}>{r.iata_number}</td>
+                  <td style={{ padding: '7px 12px', color: '#8b949e' }}>
+                    {r.dep_iata} → {r.arr_iata}
+                  </td>
+                  <td style={{ padding: '7px 12px', color: '#8b949e' }}>{r.sched_dep_utc ?? '—'} UTC</td>
+                  <td style={{ padding: '7px 12px' }}>
+                    {r.resolved_at
+                      ? <span style={{ color: '#3fb950' }}>flew late</span>
+                      : <span style={{ color: '#d29922' }}>+{r.hours_overdue ?? '?'}h no activity</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Stats */}
       <div style={s.stats}>

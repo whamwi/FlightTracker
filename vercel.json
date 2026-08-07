@@ -52,6 +52,14 @@
     {
       "path": "/api/cron/alert-send",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/no-activity",
+      "schedule": "15 1 * * *"
+    },
+    {
+      "path": "/api/cron/no-activity",
+      "schedule": "15 9 * * *"
     }
   ]
 }
