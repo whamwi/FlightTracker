@@ -181,7 +181,19 @@ function parseFlights(data: any, dir: 'arrivals' | 'departures') {
 
 // Latakia has no scheduled service; Deir ez-Zor opened 5 Aug 2026 and does. This page exists
 // to warm a board by hand, so it should list the airports that actually have one to warm.
-const AIRPORTS = ['DAM', 'ALP', 'DEZ']
+/*
+ * The tabs this page offers, not the full set that gets harvested.
+ *
+ * The board already warms every airport that has a flight into Syria — it reads the origin of
+ * each arrival and fetches that too, which is where the other twenty in fr24_daily_cache come
+ * from. These are the ones worth being able to pull by hand.
+ *
+ * AUH and KWI are here because the outstations are the half of every flight the Syrian boards
+ * cannot see, and a manual refresh is the only way to force one now that the server cannot
+ * reach the widget: Cloudflare answers a Vercel function with a challenge page regardless of
+ * headers, so this must run in a browser.
+ */
+const AIRPORTS = ['DAM', 'ALP', 'DEZ', 'AUH', 'KWI']
 const DIRS = ['arrivals', 'departures'] as const
 
 export default function Fr24DumpPage() {
