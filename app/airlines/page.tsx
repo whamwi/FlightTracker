@@ -1,5 +1,5 @@
 'use client'
-import { PHOTO_UPLOAD_VISIBLE } from '@/lib/ui-flags'
+import { usePhotoUploadVisible } from '@/lib/ui-flags'
 
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import Link from 'next/link'
@@ -190,6 +190,7 @@ function AirlineCard({ info, links, onView, imageUrl, onImageUploaded }: {
   const badge = info.weeklyCount >= 14 ? C.forest : C.gold
   const fileRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
+  const photoUploadVisible = usePhotoUploadVisible()
   const [imgFailed, setImgFailed] = useState(false)
   const [uploadErr, setUploadErr] = useState<string | null>(null)
   useEffect(() => { setImgFailed(false) }, [imageUrl])
@@ -233,7 +234,7 @@ function AirlineCard({ info, links, onView, imageUrl, onImageUploaded }: {
         )}
         {showPhoto && <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,.45) 0%, transparent 60%)' }} />}
         {/* Upload button bottom-right */}
-        {PHOTO_UPLOAD_VISIBLE && (<>
+        {photoUploadVisible && (<>
         <button onClick={() => fileRef.current?.click()} disabled={uploading}
           style={{ position: 'absolute', right: 10, bottom: 10, display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 8, background: 'rgba(0,0,0,.38)', backdropFilter: 'blur(8px)', border: '1px solid rgba(255,255,255,.18)', cursor: 'pointer', color: '#fff', font: `600 11px/1 'Instrument Sans',system-ui`, opacity: uploading ? .6 : 1 }}>
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>

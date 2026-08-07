@@ -1,5 +1,5 @@
 'use client'
-import { PHOTO_UPLOAD_VISIBLE } from '@/lib/ui-flags'
+import { usePhotoUploadVisible } from '@/lib/ui-flags'
 
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import Link from 'next/link'
@@ -185,6 +185,7 @@ function DestCardDesktop({ dest, onView, weeklyCount, imageUrl, onImageUploaded 
 }) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
+  const photoUploadVisible = usePhotoUploadVisible()
   const bg = destBg(dest.iata)
   const badge = weeklyCount >= 14 ? C.forest : C.gold
   const [imgFailed, setImgFailed] = useState(false)
@@ -213,7 +214,7 @@ function DestCardDesktop({ dest, onView, weeklyCount, imageUrl, onImageUploaded 
           : <span style={{ fontSize: 40, opacity: .35 }}>{apFlag(dest.iata)}</span>
         }
         {showImg && <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,.35) 0%, transparent 55%)' }} />}
-        {PHOTO_UPLOAD_VISIBLE && (<>
+        {photoUploadVisible && (<>
         <button onClick={() => fileRef.current?.click()} disabled={uploading}
           style={{ position: 'absolute', right: 10, bottom: 10, display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 8, background: 'rgba(0,0,0,.38)', backdropFilter: 'blur(8px)', border: '1px solid rgba(255,255,255,.18)', cursor: 'pointer', color: '#fff', font: `600 11px/1 'Instrument Sans',system-ui`, opacity: uploading ? .6 : 1 }}>
           {uploading ? 'Uploading…' : 'Photo'}
