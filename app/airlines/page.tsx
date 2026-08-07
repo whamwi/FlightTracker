@@ -315,19 +315,54 @@ function AirlineSheet({ info, airport, onClose, imageUrl }: { info: AirlineInfo 
    * reader scanning for one city should not have to know how often it is served to find it.
    */
   const grouped = useMemo(() => {
-    const map = new Map<string, ScheduleRow[]>()
+    const byDest = new Map<string, Map<string, ScheduleRow[]>>()
     for (const f of flights) {
       const iata = (dir === 'from' ? f.arr_iata : f.dep_iata) ?? ''
-      if (!map.has(iata)) map.set(iata, [])
-      map.get(iata)!.push(f)
+      if (!byDest.has(iata)) byDest.set(iata, new Map())
+      const byNum = byDest.get(iata)!
+      const num = f.iata_number
+      if (!byNum.has(num)) byNum.set(num, [])
+      byNum.get(num)!.push(f)
     }
-    return [...map.entries()]
-      .map(([iata, rows]) => ({
+
+    return [...byDest.entries()]
+      .map(([iata, byNum]) => ({
         iata,
-        rows: [...rows].sort((a, b) => (a.dep_time ?? '').localeCompare(b.dep_time ?? '')),
+        /*
+         * One entry per flight number, not per timetable row.
+         *
+         * XH485 to Istanbul was three cards at 01:20, 01:30 and 01:40 — the same service on
+         * different days, ten minutes apart. Read as three flights it is misleading; read as
+         * one flight whose time shifts by day it is the truth, and the day chips already had
+         * the information needed to say so.
+         *
+         * The earliest departure is the headline, and any day can be tapped for its own time.
+         */
+        flights: [...byNum.entries()]
+          .map(([num, rows]) => {
+            const byDay: Record<string, { dep: string; arr: string }> = {}
+            for (const r of rows) {
+              for (const d of r.days_of_week ?? []) byDay[d] = { dep: r.dep_time, arr: r.arr_time }
+            }
+            const sorted = [...rows].sort((a, b) => (a.dep_time ?? '').localeCompare(b.dep_time ?? ''))
+            const earliest = sorted[0]
+            const varies = new Set(rows.map(r => r.dep_time)).size > 1
+            return {
+              num,
+              byDay,
+              days: new Set(Object.keys(byDay)),
+              dep: earliest.dep_time,
+              arr: earliest.arr_time,
+              varies,
+            }
+          })
+          .sort((a, b) => (a.dep ?? '').localeCompare(b.dep ?? '')),
       }))
       .sort((a, b) => city(a.iata).localeCompare(city(b.iata)))
   }, [flights, dir])
+
+  /** Which day is being inspected, per destination and flight number. */
+  const [pickedDay, setPickedDay] = useState<Record<string, string>>({})
   const hasReverse = (info?.reverseRoutes.length ?? 0) > 0
   const airportLabel = city(airport)
 
@@ -395,37 +430,66 @@ function AirlineSheet({ info, airport, onClose, imageUrl }: { info: AirlineInfo 
                     <span style={{ fontSize: 20 }}>{apFlag(g.iata)}</span>
                     <span style={{ font: `700 15px/1 'Instrument Sans',system-ui`, color: C.ink }}>{city(g.iata)}</span>
                     <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: C.muted, letterSpacing: '.06em' }}>{g.iata}</span>
-                    {g.rows.length > 1 && (
+                    {g.flights.length > 1 && (
                       <span style={{ font: `600 11px/1 'Instrument Sans',system-ui`, color: C.muted, marginLeft: 'auto' }}>
-                        {g.rows.length} services
+                        {g.flights.length} flights
                       </span>
                     )}
                   </div>
-                  {g.rows.map((f, i) => {
-                const activeDays = new Set(f.days_of_week)
-                return (
-                  <div key={i} style={{ border: `1px solid ${C.border}`, borderRadius: 14, background: C.surface, marginBottom: 8 }}>
-                    <div style={{ padding: '14px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 600, color: C.ink, letterSpacing: '.06em' }}>{f.iata_number}</div>
-                      </div>
-                      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', gap: 5 }}>
-                        <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 15, fontWeight: 700, color: C.ink }}>{f.dep_time}</span>
-                        <span style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>→</span>
-                        <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 15, fontWeight: 700, color: C.ink }}>{f.arr_time}</span>
-                      </div>
-                    </div>
-                    <div style={{ borderTop: `1px solid #E8E4D8`, background: C.sunken, borderRadius: '0 0 14px 14px', padding: '10px 14px' }}>
-                      <div style={{ display: 'flex', gap: 5 }}>
-                        {DOW_ORDER.map(d => (
-                          <div key={d} style={{ flex: 1, height: 24, borderRadius: 7, background: activeDays.has(d) ? C.forest : C.surface, border: activeDays.has(d) ? 'none' : `1px solid ${C.border}`, color: activeDays.has(d) ? '#fff' : '#B5AFA0', font: `700 10px/24px 'Instrument Sans',system-ui`, textAlign: 'center' }}>
-                            {DOW_LABEL[d]}
+
+                  {g.flights.map(f => {
+                    const key    = `${g.iata}|${f.num}`
+                    const picked = pickedDay[key]
+                    const shown  = picked && f.byDay[picked] ? f.byDay[picked] : { dep: f.dep, arr: f.arr }
+                    return (
+                      <div key={f.num} style={{ border: `1px solid ${C.border}`, borderRadius: 14, background: C.surface, marginBottom: 8 }}>
+                        <div style={{ padding: '14px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 600, color: C.ink, letterSpacing: '.06em' }}>{f.num}</div>
+                            {/* Said out loud rather than hidden: the same flight does not leave
+                                at the same minute every day, and a single headline time would
+                                be quietly wrong on most of them. */}
+                            {f.varies && (
+                              <div style={{ font: `500 10.5px/1.4 'Instrument Sans',system-ui`, color: C.muted, marginTop: 2 }}>
+                                {picked ? 'time for the selected day' : 'time varies by day — tap a day'}
+                              </div>
+                            )}
                           </div>
-                        ))}
+                          <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', gap: 5 }}>
+                            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 15, fontWeight: 700, color: C.ink }}>{shown.dep}</span>
+                            <span style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>→</span>
+                            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 15, fontWeight: 700, color: C.ink }}>{shown.arr}</span>
+                          </div>
+                        </div>
+                        <div style={{ borderTop: `1px solid #E8E4D8`, background: C.sunken, borderRadius: '0 0 14px 14px', padding: '10px 14px' }}>
+                          <div style={{ display: 'flex', gap: 5 }}>
+                            {DOW_ORDER.map(d => {
+                              const active = f.days.has(d)
+                              const on     = picked === d
+                              return (
+                                <button
+                                  key={d}
+                                  disabled={!active}
+                                  aria-pressed={on}
+                                  aria-label={active ? `${f.num} on ${d}, departs ${f.byDay[d]?.dep}` : undefined}
+                                  onClick={() => setPickedDay(p => ({ ...p, [key]: p[key] === d ? '' : d }))}
+                                  style={{
+                                    flex: 1, height: 24, borderRadius: 7, padding: 0,
+                                    background: on ? C.ink : active ? C.forest : C.surface,
+                                    border: active ? 'none' : `1px solid ${C.border}`,
+                                    color: active ? '#fff' : '#B5AFA0',
+                                    font: `700 10px/24px 'Instrument Sans',system-ui`, textAlign: 'center',
+                                    cursor: active ? 'pointer' : 'default',
+                                  }}
+                                >
+                                  {DOW_LABEL[d]}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                )
+                    )
                   })}
                 </div>
               ))}
