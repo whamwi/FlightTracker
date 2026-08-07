@@ -474,11 +474,19 @@ function AirlineSheet({ info, airport, onClose, imageUrl }: { info: AirlineInfo 
                                   aria-label={active ? `${f.num} on ${d}, departs ${f.byDay[d]?.dep}` : undefined}
                                   onClick={() => setPickedDay(p => ({ ...p, [key]: p[key] === d ? '' : d }))}
                                   style={{
+                                    // Selected is beige with a forest outline rather than
+                                    // black: the chips already run forest for "operates", and
+                                    // a black fill read as a third, heavier state instead of
+                                    // simply the one being looked at. box-sizing keeps the row
+                                    // from shifting when the border appears.
                                     flex: 1, height: 24, borderRadius: 7, padding: 0,
-                                    background: on ? C.ink : active ? C.forest : C.surface,
-                                    border: active ? 'none' : `1px solid ${C.border}`,
-                                    color: active ? '#fff' : '#B5AFA0',
-                                    font: `700 10px/24px 'Instrument Sans',system-ui`, textAlign: 'center',
+                                    boxSizing: 'border-box',
+                                    background: on ? C.bg : active ? C.forest : C.surface,
+                                    border: on ? `1px solid ${C.forest}`
+                                          : active ? '1px solid transparent'
+                                          : `1px solid ${C.border}`,
+                                    color: on ? C.ink : active ? '#fff' : '#B5AFA0',
+                                    font: `700 10px/22px 'Instrument Sans',system-ui`, textAlign: 'center',
                                     cursor: active ? 'pointer' : 'default',
                                   }}
                                 >
