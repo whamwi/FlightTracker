@@ -251,18 +251,21 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>, lookup: Cal
         const schedDepMs   = f.sched_dep ? f.sched_dep * 1000 : null
         const actualDepMs  = actual_dep_utc ? new Date(actual_dep_utc).getTime() : null
         /*
-         * A delay, or nothing — never a number this large.
+         * Bounded only against a day wrap, not against being very late.
          *
-         * The same day-mismatch that put FYC781 on the wrong row produces delays measured
-         * against a departure on another date. Four hours is already generous for this
-         * network; beyond it the schedule is more likely wrong than the aircraft, and a
-         * plainly absurd badge does more harm than an absent one. Same reasoning as the block
-         * time bound above, which was added after SYR522 came through 1440 minutes out.
+         * This was briefly capped at four hours, which was wrong: real delays on this network
+         * go well past it. RB516 ran 296 minutes late on 5 Aug and FYC781's Thursday
+         * Damascus–Muscat left 424 minutes late, departing 04:14 the following morning — both
+         * true, and the four-hour cap hid the second one.
+         *
+         * Twelve hours is the point at which a difference is more plausibly a date error than
+         * a delay, which is the only thing worth rejecting here. Same reasoning as the block
+         * time bound above, added after SYR522 came through 1440 minutes out.
          */
         const rawDelay = (schedDepMs && actualDepMs)
           ? Math.round((actualDepMs - schedDepMs) / 60_000)
           : null
-        const dep_delay_min = rawDelay !== null && Math.abs(rawDelay) > MAX_DELAY_OVER_SCHED_MIN
+        const dep_delay_min = rawDelay !== null && Math.abs(rawDelay) > MAX_BLOCK_MIN
           ? null
           : rawDelay
         const callsignCs   = resolveCallsign(num, lookup, iataToIcao)
