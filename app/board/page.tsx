@@ -712,11 +712,18 @@ export default function BoardPage() {
     AIRPORTS.forEach(ap => warmFR24Cache(ap))
   }, [warmFR24Cache])
 
+  // Read at fire time, not captured. The refresh below is armed when the airport changes and
+  // only cancelled when it changes again — so changing day inside those four seconds used to
+  // land a load() for the old day on the new day's board. On DAM that flashed today's flights
+  // under a "tomorrow" heading; on DEZ, whose only flights are tomorrow, it emptied the board.
+  const tabRef = useRef(tab)
+  useEffect(() => { tabRef.current = tab }, [tab])
+
   const mountedRef = useRef(false)
   useEffect(() => {
     if (!mountedRef.current) { mountedRef.current = true; return }
     warmFR24Cache(airport)
-    const timer = setTimeout(() => load(tab, true), 4000)
+    const timer = setTimeout(() => load(tabRef.current, true), 4000)
     return () => clearTimeout(timer)
   }, [airport]) // eslint-disable-line react-hooks/exhaustive-deps
 
