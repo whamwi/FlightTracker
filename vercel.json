@@ -55,11 +55,11 @@
     },
     {
       "path": "/api/cron/no-activity",
-      "schedule": "15 1 * * *"
+      "schedule": "15 21 * * *"
     },
     {
       "path": "/api/cron/no-activity",
-      "schedule": "15 9 * * *"
+      "schedule": "0 9 * * *"
     }
   ]
 }

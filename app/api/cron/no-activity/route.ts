@@ -16,8 +16,10 @@ import { NextResponse } from 'next/server'
  *   - a flight that genuinely did not operate. It never resolves, and that is worth knowing
  *     before a passenger asks why.
  *
- * Runs twice: once early, to catch the overnight cases while they are still moving, and once
- * later, by which time anything unresolved almost certainly did not fly.
+ * The inventory is taken at 00:15 Damascus, as the day closes: every flight scheduled that day
+ * is due by then, and nothing has to be guessed about whether it is merely early. A second
+ * pass at midday resolves anything that has since moved — a flight that departs at 04:15 is
+ * very late, not missing, and the row should say so.
  */
 
 export const dynamic     = 'force-dynamic'
@@ -29,13 +31,15 @@ const HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, 'Content-Ty
 
 const SELF = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.flysyria.app'
 
-/**
- * A flight is not judged until this long after its scheduled departure.
+/*
+ * There is no overdue threshold.
  *
- * Below it, "no activity" usually means the timetable is simply ahead of the aircraft — the
- * board is full of flights that have not left yet and are perfectly fine.
+ * An earlier version skipped anything less than three hours past its scheduled departure,
+ * which made sense while the check ran mid-morning against a day still in progress. The
+ * inventory is now taken at 00:15 Damascus, just after the day closes, so every flight in it
+ * is due by definition — and a flight scheduled at 23:50 would have been the one most likely
+ * to slip past midnight and the one that threshold would have missed.
  */
-const OVERDUE_HOURS = 3
 
 /** Statuses that already explain the absence; flagging them would be noise. */
 const EXPLAINED = new Set(['Cancelled', 'Diverted'])
@@ -85,12 +89,11 @@ export async function GET(req: Request) {
       continue
     }
 
-    // Scheduled departure, needed both to judge whether it is overdue and to record by how
-    // much. Without one there is nothing to measure against, so it is left alone.
+    // Recorded whether or not a scheduled departure time is available. Arrivals into Syria
+    // are half the board and are just as much "supposed to happen yesterday" as departures;
+    // requiring a departure timestamp quietly excluded any row that lacked one.
     const schedMs = f.sched_dep_unix ? f.sched_dep_unix * 1000 : null
-    if (!schedMs) continue
-    const hours = (now - schedMs) / 3_600_000
-    if (hours < OVERDUE_HOURS) continue
+    const hours   = schedMs ? Math.round(((now - schedMs) / 3_600_000) * 10) / 10 : null
 
     idle.push({
       flight_date:   date,
@@ -101,7 +104,7 @@ export async function GET(req: Request) {
       sched_dep_utc: f.dep_time_utc ?? null,
       sched_arr_utc: f.arr_time_utc ?? null,
       status:        f.status,
-      hours_overdue: Math.round(hours * 10) / 10,
+      hours_overdue: hours,
     })
   }
 
