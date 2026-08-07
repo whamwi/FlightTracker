@@ -56,6 +56,10 @@
     {
       "path": "/api/cron/no-activity",
       "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/carry-over",
+      "schedule": "*/10 * * * *"
     }
   ]
 }
