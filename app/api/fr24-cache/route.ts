@@ -84,6 +84,24 @@ function mergeList(existing: any[], incoming: any[], keyFn: (e: any) => string):
     } else if (!inc.real_arr && statusRank(e.status) > statusRank(inc.status) && (e.fr24_id || e.real_dep)) {
       // Existing has a higher-quality status, has been ADS-B tracked, and neither has landing proof
       merged.set(key, { ...e, fr24_id: e.fr24_id ?? inc.fr24_id ?? null })
+    } else if (!inc.real_dep && e.real_dep) {
+      /*
+       * Keep a departure the incoming row does not have, whatever the statuses say.
+       *
+       * This was the gap that made a departure appear and then vanish. The airspace route
+       * writes real_dep onto the row the moment ADS-B sees a flight airborne, but it does not
+       * change the status — so the row still read "Scheduled" while carrying a real departure.
+       * The comparison above requires the existing status to RANK HIGHER, and Scheduled does
+       * not outrank Scheduled, so the incoming timetable stub won and the departure was
+       * wiped on the next page load.
+       *
+       * FYC782 showed exactly that today: departed appeared on the board and went away again,
+       * while the aircraft was over the Gulf six hours late.
+       *
+       * A departure is evidence and a schedule is not. Merging it onto the incoming row rather
+       * than replacing wholesale keeps whatever the incoming row knows that we do not.
+       */
+      merged.set(key, { ...inc, real_dep: e.real_dep, fr24_id: inc.fr24_id ?? e.fr24_id ?? null, reg: inc.reg || e.reg || null })
     }
   }
 
