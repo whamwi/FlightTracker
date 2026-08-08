@@ -625,7 +625,7 @@ function buildPopup(
     ${photoHtml}
     <div style="display:flex;align-items:flex-start;gap:11px;padding:13px 13px 8px">
       ${logoHtml}
-      <div style="flex:1;min-width:0">
+      <div style="flex:1;min-width:0;text-align:start">
         <div style="font-size:14px;font-weight:700;color:#f9fafb;line-height:1.25">${alName}</div>
         <div style="font-size:12px;color:#9ca3af;margin-top:2px">${identityLine(flightNum, callsign)}</div>
       </div>
@@ -781,7 +781,7 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
     ${photoHtml}
     <div style="display:flex;align-items:flex-start;gap:11px;padding:13px 13px 8px">
       ${logoHtml}
-      <div style="flex:1;min-width:0">
+      <div style="flex:1;min-width:0;text-align:start">
         <div style="font-size:14px;font-weight:700;color:#f9fafb;line-height:1.25">${alName}</div>
         <div style="font-size:12px;color:#9ca3af;margin-top:2px">${identityLine(fs?.flight_number, e.callsign)}</div>
       </div>
@@ -2471,7 +2471,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
             const popup = `<div dir="${RTL() ? 'rtl' : 'ltr'}" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;width:260px">
               <div style="display:flex;align-items:flex-start;gap:11px;padding:14px 14px 11px">
                 ${logoHtml}
-                <div style="flex:1;min-width:0">${primaryLine}</div>
+                <div style="flex:1;min-width:0;text-align:start">${primaryLine}</div>
                 <span style="background:#0f172a;border:1px solid #334155;color:#94a3b8;font-size:9px;font-weight:700;padding:3px 8px;border-radius:99px;flex-shrink:0;letter-spacing:${RTL() ? 'normal' : '.04em'};white-space:nowrap;margin-top:1px">${RTL() ? T('map.overflight') : T('map.overflight').toUpperCase()}</span>
               </div>
               <div style="display:grid;grid-template-columns:1fr 1px 1fr;background:#1f2937;border-radius:0 0 14px 14px">
