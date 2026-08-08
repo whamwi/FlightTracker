@@ -478,8 +478,10 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
             </div>
             <div style={{ flex: 1, textAlign: 'end' }}>
               <div style={{ fontSize: 9, color: C.muted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: locale === 'ar' ? 'normal' : '0.6px', marginBottom: 3, display: 'flex', gap: 4, alignItems: 'baseline', justifyContent: 'flex-end' }}>
-                {!isCancelled && arrMoved && <span style={{ fontSize: 8, fontWeight: 500, opacity: .75, textTransform: 'none' }}>({t(arrKind)})</span>}
+                {/* Label then kind, matching the departure side — the block is right-aligned,
+                    which is not a reason to reverse the words inside it. */}
                 <span>{t('label.arrival')}</span>
+                {!isCancelled && arrMoved && <span style={{ fontSize: 8, fontWeight: 500, opacity: .75, textTransform: 'none' }}>({t(arrKind)})</span>}
               </div>
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end' }}>
                 {!isCancelled && <DelayBadge min={arrDelay} />}
