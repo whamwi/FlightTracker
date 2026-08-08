@@ -51,6 +51,8 @@ export const airportNameAr: Record<string, string> = { DAM: 'مطار دمشق �
  */
 let activeLocale: 'en' | 'ar' = 'en'
 export const setActiveLocale = (l: 'en' | 'ar') => { activeLocale = l }
+/** For helpers that are called outside a component and so cannot use the hook. */
+export const getActiveLocale = () => activeLocale
 
 /**
  * The airline name in the active locale.

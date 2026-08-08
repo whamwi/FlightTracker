@@ -131,6 +131,33 @@ const en: Dict = {
   // Alerts CTA
   'cta.follow_title':  'Follow a flight from anywhere',
   'cta.follow_body':   'Get delay and landing alerts for the flights your family is on — free, no account needed.',
+
+  // Destinations
+  'dest.per_week_short':  '/ wk',
+  'dest.flights_per_wk':  'flights/wk',
+  'dest.flights_week':    'flights this week',
+  'dest.routes':          'routes',
+  'dest.airline_one':     'airline',
+  'dest.airline_many':    'airlines',
+  'dest.loading':         'Loading destinations…',
+  'dest.no_match':        'No destination matches',
+  'dest.no_flights':      'No scheduled flights found',
+  'dest.time_varies':     'time varies by day — tap a day',
+  'dest.time_for_day':    'time for the selected day',
+  'dest.search':          'Search a city or airline',
+  'dest.search_aria':     'Search destinations',
+  'action.clear_search':  'Clear search',
+  'action.view':          'View',
+  'region.all_full':      'All regions',
+  'region.europe_turkey': 'Europe & Turkey',
+  // Single-letter day chips. Arabic uses the first letter of each day name.
+  'dow.sun': 'S', 'dow.mon': 'M', 'dow.tue': 'T', 'dow.wed': 'W',
+  'dow.thu': 'T', 'dow.fri': 'F', 'dow.sat': 'S',
+  // Full names, for the day buttons' aria-label — the letter alone is useless read aloud.
+  'dowfull.sun': 'Sunday',   'dowfull.mon': 'Monday', 'dowfull.tue': 'Tuesday',
+  'dowfull.wed': 'Wednesday','dowfull.thu': 'Thursday','dowfull.fri': 'Friday',
+  'dowfull.sat': 'Saturday',
+  'a11y.departs': 'departs',
 }
 
 const ar: Dict = {
@@ -231,6 +258,30 @@ const ar: Dict = {
 
   'cta.follow_title':  'تابع رحلتك من أي مكان',
   'cta.follow_body':   'تنبيهات التأخير والهبوط للرحلات التي يسافر عليها أهلك — مجاناً وبدون حساب.',
+
+  'dest.per_week_short':  '/ أسبوع',
+  'dest.flights_per_wk':  'رحلة/أسبوع',
+  'dest.flights_week':    'رحلة هذا الأسبوع',
+  'dest.routes':          'خط',
+  'dest.airline_one':     'شركة طيران',
+  'dest.airline_many':    'شركات طيران',
+  'dest.loading':         'جارٍ تحميل الوجهات…',
+  'dest.no_match':        'لا توجد وجهة تطابق',
+  'dest.no_flights':      'لا توجد رحلات مجدولة',
+  'dest.time_varies':     'الوقت يختلف حسب اليوم — اختر يوماً',
+  'dest.time_for_day':    'وقت اليوم المحدد',
+  'dest.search':          'ابحث عن مدينة أو شركة طيران',
+  'dest.search_aria':     'البحث في الوجهات',
+  'action.clear_search':  'مسح البحث',
+  'action.view':          'عرض',
+  'region.all_full':      'كل المناطق',
+  'region.europe_turkey': 'أوروبا وتركيا',
+  'dow.sun': 'ح', 'dow.mon': 'ن', 'dow.tue': 'ث', 'dow.wed': 'ر',
+  'dow.thu': 'خ', 'dow.fri': 'ج', 'dow.sat': 'س',
+  'dowfull.sun': 'الأحد',    'dowfull.mon': 'الاثنين', 'dowfull.tue': 'الثلاثاء',
+  'dowfull.wed': 'الأربعاء', 'dowfull.thu': 'الخميس',  'dowfull.fri': 'الجمعة',
+  'dowfull.sat': 'السبت',
+  'a11y.departs': 'تقلع',
 }
 
 const DICTS: Record<Locale, Dict> = { en, ar }
