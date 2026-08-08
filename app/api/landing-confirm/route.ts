@@ -56,7 +56,37 @@ export async function GET() {
 
   if (!pending.length) return NextResponse.json({ ok: true, checked: 0, confirmed: 0 })
 
-  const callsigns = [...new Set(pending.map(p => p.num))]
+  /*
+   * Ask FR24 by broadcast callsign, not by commercial flight number.
+   *
+   * `callsigns=` matches only what the transponder sends. The cache stores the commercial
+   * number — RB444 — and sending that returned zero records every run, so nothing ever matched
+   * and nothing was ever confirmed. Verified directly on 8 Aug: callsigns=RB444 gave 0 records,
+   * callsigns=SYR444 gave the flight with datetime_landed 18:59:07Z.
+   *
+   * It went unnoticed because Fly Cham is stored under its ICAO number (FYC781), which *is*
+   * the callsign — so the one carrier that worked made the cron look alive while it was
+   * failing for RB, J9, FZ, EY, 3L and every other airline whose two codes differ.
+   *
+   * Both forms are sent: the resolved callsign where flight_lookup knows one, and the number
+   * itself as a fallback for anything unmapped or already stored in ICAO form.
+   */
+  const nums = [...new Set(pending.map(p => p.num))]
+  const csRes = await fetch(
+    `${SB_URL}/rest/v1/flight_lookup?iata_number=in.(${nums.map(encodeURIComponent).join(',')})`
+    + `&select=iata_number,broadcast_callsign`,
+    { headers: HEADERS }
+  )
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const lookupRows: any[] = csRes.ok ? await csRes.json() : []
+  const numToCallsign = new Map<string, string>()
+  for (const r of lookupRows) {
+    if (r.broadcast_callsign) numToCallsign.set(r.iata_number, r.broadcast_callsign)
+  }
+  const callsigns = [...new Set(nums.flatMap(n => {
+    const cs = numToCallsign.get(n)
+    return cs && cs !== n ? [cs, n] : [n]
+  }))]
 
   // Query flight-summary for all pending callsigns in a 48-hour window
   const from = new Date(Date.now() - 8 * 3_600_000).toISOString().slice(0, 19)
@@ -105,8 +135,12 @@ export async function GET() {
      * than unknown.
      */
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const wantCs = numToCallsign.get(p.num) ?? null
     const match = items.find((item: any) => {
-      if (item.callsign !== p.num && item.flight !== p.num) return false
+      // Either identifier is acceptable: FR24 returns both, and which one is populated has
+      // varied by carrier.
+      if (item.callsign !== p.num && item.flight !== p.num
+          && (!wantCs || (item.callsign !== wantCs && item.flight !== wantCs))) return false
       if (item.dest_icao_actual !== destIcao && item.dest_icao !== destIcao) return false
       const stamp = item.datetime_landed ?? (item.flight_ended ? item.last_seen : null)
       if (!stamp) return false
