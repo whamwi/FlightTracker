@@ -197,20 +197,25 @@ export async function GET(req: Request) {
       if (arrMs < dayStartMs || arrMs >= dayEndMs) return
     }
 
-    // If FR24's estimated arrival has slipped past Syria midnight, exclude from today's board.
-    // The prev-day overflow pass will add it to tomorrow's board instead.
-    if (!skipArrFilter && arrIata && SYRIAN_AIRPORTS.has(arrIata) && f.est_arr && schedArr) {
-      if (f.est_arr > schedArr && f.est_arr * 1000 >= dayEndMs) return
-    }
+    /*
+     * A flight belongs to the day it was *due*, not the day it manages to land.
+     *
+     * This used to drop a flight from today the moment FR24's estimate slipped past Syria
+     * midnight, and a third pass re-added it to tomorrow. So XH728 — due 21:50, delayed to
+     * 00:05 — left today's board at exactly the hour people were looking for it and turned
+     * up under Tomorrow, which nobody would think to check for a flight they watched board
+     * this evening. The spill is shown instead: see arrNextDay below.
+     */
+    const schedArrMs  = schedArr ? schedArr * 1000 : null
+    const schedIsToday = schedArrMs != null && schedArrMs >= dayStartMs && schedArrMs < dayEndMs
 
-    // If the confirmed landing (real_arr unix, unambiguous UTC) falls outside today's Syria
-    // window, drop it. This catches flights stored in the wrong day's cache because their
-    // sched_arr was past midnight but actual landing was before midnight (or vice versa).
-    // Using real_arr directly avoids extractStatusUtc which anchors the time to operatingDate
-    // and would give the wrong day for cross-midnight flights.
+    // The confirmed landing still has to fall on this board's day, or a row filed under the
+    // wrong date would show up twice. The one exception is the case above: due today, landed
+    // after midnight. Landing *early*, before this day began, is still someone else's row.
     if (arrIata && SYRIAN_AIRPORTS.has(arrIata) && f.real_arr) {
       const actualMs = (f.real_arr as number) * 1000
-      if (actualMs < dayStartMs || actualMs >= dayEndMs) return
+      const spilled  = schedIsToday && actualMs >= dayEndMs
+      if (!spilled && (actualMs < dayStartMs || actualMs >= dayEndMs)) return
     }
 
     const key    = keyOverride ?? `${num}|${depIata}|${arrIata}`
@@ -245,6 +250,7 @@ export async function GET(req: Request) {
       // Always overwrite timing with the latest entry (later in array = more recent FR24 data)
       if (schedDep) { flightMap[key].dep_time_utc = unixToUtcHHMM(schedDep); flightMap[key].sched_dep_unix = schedDep }
       if (schedArr) flightMap[key].arr_time_utc = unixToUtcHHMM(schedArr)
+      flightMap[key].arr_next_day = flightMap[key].arr_next_day || arrNextDay(f, schedArr)
       // Prefer computed effective duration; only fall back to raw if no better value exists
       if (f.fr24_actual_dep && f.fr24_revised_arr) {
         flightMap[key].duration_min = effectiveDuration
@@ -292,7 +298,29 @@ export async function GET(req: Request) {
       arr_terminal:    f.arr_terminal ?? null,
       arr_gate:        f.arr_gate     ?? null,
       arr_baggage:     f.arr_baggage  ?? null,
+      /*
+       * The arrival lands on the day after this board's. Timetables have written this as
+       * +1 for decades, and it is the only honest way to show 00:05 in a column of evening
+       * times without it reading as ten past midnight this morning.
+       */
+      arr_next_day:    arrNextDay(f, schedArr),
     }
+  }
+
+  /**
+   * Whether the arrival falls on the Damascus day after this board's date.
+   *
+   * Measured against the time actually shown — an arrival that has landed shows its landing,
+   * one that is delayed shows its estimate — so the marker never contradicts the digits it
+   * sits beside.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function arrNextDay(f: any, schedArr: number | null): boolean {
+    const shownMs =
+      (f.real_arr ? (f.real_arr as number) * 1000 : null)
+      ?? (f.est_arr ? (f.est_arr as number) * 1000 : null)
+      ?? (schedArr ? schedArr * 1000 : null)
+    return shownMs != null && shownMs >= dayEndMs
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -362,52 +390,15 @@ export async function GET(req: Request) {
     }
   }
 
-  // Third pass: previous Syria day's arrivals whose est_arr falls within today's window.
-  // Catches flights delayed past Syria midnight that should appear on today's board.
-  {
-    const prev = new Date(date + 'T12:00:00Z')
-    prev.setUTCDate(prev.getUTCDate() - 1)
-    const prevDate = prev.toISOString().slice(0, 10)
-    const prevRes = await fetch(
-      `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${prevDate}&airport_iata=in.(${syriaCodes})&select=airport_iata,arrivals`,
-      { headers: HEADERS }
-    )
-    if (prevRes.ok) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const prevRows: any[] = await prevRes.json()
-      for (const row of prevRows) {
-        const ap = row.airport_iata as string
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        for (const f of (row.arrivals ?? [])) {
-          if (!f.est_arr || !f.sched_arr || f.est_arr <= f.sched_arr) continue
-          const estMs = (f.est_arr as number) * 1000
-          if (estMs < dayStartMs || estMs >= dayEndMs) continue
-          // The estimate slipped past Syria midnight, but the plane actually landed before it.
-          // real_arr is ground truth — if it landed before today's Syria midnight, skip.
-          if (f.real_arr && (f.real_arr as number) * 1000 < dayStartMs) continue
-          const arrIata = f.arr_iata || ap
-          const key = `${f.num ?? ''}|${f.dep_iata ?? ''}|${arrIata}`
-          const overflowArrUtc = unixToUtcHHMM(f.est_arr as number)
-          let useKey: string | undefined
-          if (flightMap[key]) {
-            // If the existing entry already has the same arrival time, FR24 re-indexed
-            // the overnight landing into today's cache — overflow is a duplicate, skip it.
-            if (flightMap[key].arr_time_utc === overflowArrUtc) continue
-            // A genuinely different service runs today on the same route — show both.
-            useKey = `${key}|prev`
-            if (flightMap[useKey]) continue  // |prev slot already filled
-          }
-          addFlight({
-            ...f,
-            sched_arr: f.est_arr,  // shift day-assignment to the estimated landing time
-            arr_iata: arrIata,
-            fr24_revised_arr: new Date(f.est_arr * 1000).toISOString(),
-            fr24_actual_arr:  f.real_arr ? new Date(f.real_arr * 1000).toISOString() : null,
-          }, useKey)
-        }
-      }
-    }
-  }
+  /*
+   * The previous day's delayed arrivals used to be pulled onto this board here, paired with
+   * the drop in addFlight that pushed them off their own. Both are gone: a flight stays on
+   * the day it was due and carries arr_next_day when it lands after midnight.
+   *
+   * Removing only one of the two would have been worse than either — dropped from its own
+   * board by the old rule and never re-added by this one, a delayed evening arrival would
+   * have vanished from the site entirely.
+   */
 
   // Fetch tomorrow's Syrian arrival caches once — shared by two sub-cases below.
   {

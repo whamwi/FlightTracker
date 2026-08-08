@@ -117,6 +117,7 @@ const en: Dict = {
   'map.dead_reckoning':'Dead reckoning from',
   'status.signal_lost':'Signal Lost',
   'label.flown':       'flown',
+  'label.next_day':    'Arrives the next day',
   'map.panel_title':   'Flights in air',
   // The panel only ever holds airborne flights, so Departed and En Route both say the same
   // thing here. Approaching keeps its own word — that one is telling you something new.
@@ -318,6 +319,7 @@ const ar: Dict = {
   'map.dead_reckoning':'تقدير المسار منذ',
   'status.signal_lost':'انقطعت الإشارة',
   'label.flown':       'مضت',
+  'label.next_day':    'يصل في اليوم التالي',
   'map.panel_title':   'رحلات في الجو',
   'status.in_air':     'في الجو',
   'map.until_arrival': 'باق للوصول',

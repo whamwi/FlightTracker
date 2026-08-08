@@ -94,6 +94,8 @@ type Flight = {
   arr_terminal: string | null
   arr_gate: string | null
   arr_baggage: string | null
+  /** The arrival lands on the day after this board's date — shown as +1 beside the time. */
+  arr_next_day?: boolean
 }
 
 type Tab     = -1 | 0 | 1
@@ -543,6 +545,16 @@ function FlightCard({ f, view, isPinned, onTogglePin }: { f: Flight; view: View;
               textDecoration: isCancelled ? 'line-through' : 'none',
             }}>
               {hasComputedETA && !isCancelled ? fmtLocal(computedETA(f), arrOff) : arrTime}
+              {/*
+                The timetable +1: this flight was due today and lands after midnight. Without
+                it, 00:05 sits in a column of evening times and reads as ten past midnight
+                this morning — a full day out. Superscript rather than a separate chip so it
+                stays attached to the digits it qualifies, and dir=ltr because bidi otherwise
+                throws the + to the far side of the token.
+              */}
+              {f.arr_next_day && !isCancelled && (
+                <sup dir="ltr" title={t('label.next_day')} style={{ fontSize: 11, fontWeight: 700, marginInlineStart: 1, color: C.goldenText, textDecoration: 'none', verticalAlign: 'super' }}>+1</sup>
+              )}
             </span>
           </div>
         </div>
