@@ -524,7 +524,6 @@ export default function DestinationsPage() {
   const [airport, setAirport] = useState<BoardAirport>('DAM')
   const [region, setRegion]   = useState<RegionId>('all')
   const [selected, setSelected] = useState<Destination|null>(null)
-  const [weeklyCounts, setWeeklyCounts] = useState<Record<string,number>>({})
   const [destImages, setDestImages] = useState<Record<string,string>>({})
 
   useEffect(() => { loadGeoData() }, [])
@@ -542,19 +541,6 @@ export default function DestinationsPage() {
       .finally(() => setLoading(false))
   }, [])
 
-  useEffect(() => {
-    fetch(`/api/weekly-stats?airport=${airport}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => {
-        if (!d?.ok) return
-        const map: Record<string,number> = {}
-        const src = d.departures
-        for (const { iata, count } of (src ?? [])) map[iata] = count
-        setWeeklyCounts(map)
-      })
-      .catch(() => {})
-  }, [airport])
-
   const destinations = useMemo((): Destination[] => {
     const fwd = rows.filter(r => r.dep_iata === airport)
     const rev = rows.filter(r => r.arr_iata === airport)
@@ -569,16 +555,31 @@ export default function DestinationsPage() {
         if (!seen.has(p)) { seen.add(p); airlines.push({ prefix: p, name: airlineNameFor(p, f.airline_name), flag: f.country_flag }) }
       }
       const durations = flights.map(f => f.duration_min).filter(Boolean)
+      /*
+       * Weekly frequency from route_master, not from what was observed.
+       *
+       * This used to count rows in fr24_daily_cache over the last seven days, which answers a
+       * different question from the day dots beside it — and answers it worse: a service FR24
+       * published only under its codeshare number vanished (Düsseldorf read 2 against three
+       * lit days), and Berlin read 0 outright. The timetable is the advertised schedule, which
+       * is what a badge saying "34 a week" is claiming.
+       *
+       * Distinct number-and-day pairs rather than a sum of day counts: the same flight number
+       * is split across several rows when its departure time moves by day, and those rows can
+       * repeat a day between them.
+       */
+      const slots = new Set<string>()
+      for (const f of flights) for (const d of f.days_of_week ?? []) slots.add(`${f.iata_number}|${d}`)
       return {
         iata, region: REGION_MAP[iata] ?? 'gulf',
         airlines,
         flights: [...flights].sort((a,b) => a.dep_time.localeCompare(b.dep_time)),
         reverseFlights: [...(revGrouped.get(iata) ?? [])].sort((a,b) => a.dep_time.localeCompare(b.dep_time)),
         minDuration: durations.length ? Math.min(...durations) : 0,
-        weeklyCount: weeklyCounts[iata] ?? 0,
+        weeklyCount: slots.size,
       }
     }).sort((a,b) => (b.weeklyCount - a.weeklyCount) || city(a.iata).localeCompare(city(b.iata)))
-  }, [rows, airport, weeklyCounts])
+  }, [rows, airport])
 
   const [search, setSearch] = useState('')
 
@@ -604,7 +605,7 @@ export default function DestinationsPage() {
   }, [destinations, region, search])
 
   const totalDests  = destinations.length
-  const totalFlights = Object.values(weeklyCounts).reduce((s,v) => s+v, 0)
+  const totalFlights = destinations.reduce((s,d) => s + d.weeklyCount, 0)
 
   const handleClose = useCallback(() => setSelected(null), [])
   const handleImageUploaded = useCallback((iata: string, url: string) => {
@@ -729,7 +730,7 @@ export default function DestinationsPage() {
             .map(s => {
               const dests = filtered.filter(d => d.region === s.id)
               if (dests.length === 0) return null
-              const weekTotal = dests.reduce((sum,d) => sum + (weeklyCounts[d.iata]??0), 0)
+              const weekTotal = dests.reduce((sum,d) => sum + d.weeklyCount, 0)
               return (
                 <div key={s.id} style={{ marginBottom: 36 }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 16 }}>
@@ -739,13 +740,13 @@ export default function DestinationsPage() {
                   {/* Desktop grid */}
                   <div className="dst-grid">
                     {dests.map(d => (
-                      <DestCardDesktop key={d.iata} dest={d} weeklyCount={weeklyCounts[d.iata]??0} onView={() => setSelected(d)} imageUrl={destImages[d.iata]} onImageUploaded={handleImageUploaded} />
+                      <DestCardDesktop key={d.iata} dest={d} weeklyCount={d.weeklyCount} onView={() => setSelected(d)} imageUrl={destImages[d.iata]} onImageUploaded={handleImageUploaded} />
                     ))}
                   </div>
                   {/* Mobile list */}
                   <div className="dst-mobile-row">
                     {dests.map(d => (
-                      <DestRowMobile key={d.iata} dest={d} weeklyCount={weeklyCounts[d.iata]??0} onView={() => setSelected(d)} />
+                      <DestRowMobile key={d.iata} dest={d} weeklyCount={d.weeklyCount} onView={() => setSelected(d)} />
                     ))}
                   </div>
                 </div>
