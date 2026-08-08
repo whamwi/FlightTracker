@@ -72,9 +72,10 @@ const s: Record<string, React.CSSProperties> = {
   stat:    { background: '#f4f4f4', borderRadius: 8, padding: '12px 20px', minWidth: 100 },
   statN:   { fontSize: 28, fontWeight: 700, lineHeight: 1 },
   statL:   { fontSize: 12, color: '#888', marginTop: 2, textTransform: 'uppercase' as const, letterSpacing: '0.05em' },
-  tabs:    { display: 'flex', gap: 0, borderBottom: '2px solid #e5e5e5', marginBottom: 20 },
-  tab:     { padding: '8px 20px', cursor: 'pointer', fontWeight: 600, fontSize: 14, border: 'none', background: 'none', color: '#888' },
-  tabA:    { padding: '8px 20px', cursor: 'pointer', fontWeight: 600, fontSize: 14, border: 'none', background: 'none', color: '#111', borderBottom: '2px solid #111', marginBottom: -2 },
+  tabs:    { display: 'flex', gap: 0, borderBottom: '2px solid #30363d', marginBottom: 20 },
+  tab:     { padding: '8px 20px', cursor: 'pointer', fontWeight: 600, fontSize: 14, border: 'none', background: 'none', color: '#8b949e' },
+  // Was #111 on #111 — the selected tab was the one you could not read.
+  tabA:    { padding: '8px 20px', cursor: 'pointer', fontWeight: 600, fontSize: 14, border: 'none', background: 'none', color: '#e6edf3', borderBottom: '2px solid #58a6ff', marginBottom: -2 },
   toolbar: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 },
   table:   { width: '100%', borderCollapse: 'collapse' as const, fontSize: 13 },
   th:      { background: '#eee', padding: '8px 10px', textAlign: 'left' as const, fontWeight: 600, fontSize: 12, textTransform: 'uppercase' as const, letterSpacing: '0.04em', whiteSpace: 'nowrap' as const },
@@ -92,6 +93,7 @@ interface IdleRow {
   dep_iata: string | null; arr_iata: string | null
   sched_dep_utc: string | null; status: string | null
   hours_overdue: number | null; resolved_at: string | null; resolved_reason: string | null
+  outcome: 'flew_late' | 'activity_appeared' | 'did_not_operate' | null
 }
 
 interface RouteGroup {
@@ -129,7 +131,7 @@ const DOW_ORDER_ALL = ['mon','tue','wed','thu','fri','sat','sun']
 export default function ReconcilePage() {
   const [rows, setRows]           = useState<UnfiledRow[]>([])
   const [loading, setLoading]     = useState(true)
-  const [tab, setTab]             = useState<'time_drift' | 'new_route'>('time_drift')
+  const [tab, setTab]             = useState<'time_drift' | 'new_route' | 'no_activity'>('time_drift')
   const [hideReviewed, setHide]   = useState(true)
   const [saving, setSaving]       = useState<number | null>(null)
   const [deleting, setDeleting]   = useState<string | null>(null)
@@ -287,41 +289,6 @@ export default function ReconcilePage() {
         Review daily before automating any updates.
       </p>
 
-      {/* No activity — scheduled, then nothing */}
-      {idle !== null && idle.length > 0 && (
-        <div style={{ marginBottom: 22, border: '1px solid #30363d', borderRadius: 10, overflow: 'hidden' }}>
-          <div style={{ padding: '11px 14px', background: '#161b22', borderBottom: '1px solid #30363d' }}>
-            <span style={{ fontWeight: 700, fontSize: 14 }}>Scheduled, no activity</span>
-            <span style={{ color: '#8b949e', fontSize: 12, marginLeft: 10 }}>
-              {idle.filter(r => !r.resolved_at).length} open · {idle.filter(r => r.resolved_at).length} resolved
-            </span>
-            <div style={{ color: '#6e7681', fontSize: 11.5, marginTop: 4 }}>
-              A flight that never departed and never arrived. Open rows either flew very late or
-              did not fly at all; resolved rows turned out to be late.
-            </div>
-          </div>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
-            <tbody>
-              {idle.map(r => (
-                <tr key={r.id} style={{ borderTop: '1px solid #30363d', opacity: r.resolved_at ? 0.5 : 1 }}>
-                  <td style={{ padding: '7px 12px', color: '#8b949e' }}>{r.flight_date}</td>
-                  <td style={{ padding: '7px 12px', fontWeight: 700 }}>{r.iata_number}</td>
-                  <td style={{ padding: '7px 12px', color: '#8b949e' }}>
-                    {r.dep_iata} → {r.arr_iata}
-                  </td>
-                  <td style={{ padding: '7px 12px', color: '#8b949e' }}>{r.sched_dep_utc ?? '—'} UTC</td>
-                  <td style={{ padding: '7px 12px' }}>
-                    {r.resolved_at
-                      ? <span style={{ color: '#3fb950' }}>flew late</span>
-                      : <span style={{ color: '#d29922' }}>+{r.hours_overdue ?? '?'}h no activity</span>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
       {/* Stats */}
       <div style={s.stats}>
         <div style={s.stat}>
@@ -350,22 +317,81 @@ export default function ReconcilePage() {
         <button style={tab === 'new_route' ? s.tabA : s.tab} onClick={() => setTab('new_route')}>
           New Routes ({pendingNew} pending)
         </button>
+        <button style={tab === 'no_activity' ? s.tabA : s.tab} onClick={() => setTab('no_activity')}>
+          No Activity ({(idle ?? []).filter(r => !r.outcome).length} open)
+        </button>
       </div>
 
       {/* Toolbar */}
       <div style={s.toolbar}>
-        <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-          <input type="checkbox" checked={hideReviewed} onChange={e => setHide(e.target.checked)} />
-          Hide reviewed
-        </label>
+        {/* Nothing on the no-activity tab is reviewable, so the filter would only mislead. */}
+        {tab !== 'no_activity' && (
+          <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+            <input type="checkbox" checked={hideReviewed} onChange={e => setHide(e.target.checked)} />
+            Hide reviewed
+          </label>
+        )}
         <span style={{ color: '#999', fontSize: 13 }}>
-          {tab === 'new_route' ? newGroups.length : displayed.length} {tab === 'new_route' ? 'route' : 'row'}{(tab === 'new_route' ? newGroups.length : displayed.length) !== 1 ? 's' : ''}
+          {tab === 'no_activity'
+            ? `${(idle ?? []).length} flight${(idle ?? []).length !== 1 ? 's' : ''}`
+            : `${tab === 'new_route' ? newGroups.length : displayed.length} ${tab === 'new_route' ? 'route' : 'row'}${(tab === 'new_route' ? newGroups.length : displayed.length) !== 1 ? 's' : ''}`}
         </span>
         <button style={{ ...s.btn, marginLeft: 'auto' }} onClick={load}>↻ Refresh</button>
       </div>
 
       {/* Table */}
-      {loading ? (
+      {tab === 'no_activity' ? (
+        idle === null ? (
+          <p style={{ color: '#999' }}>Loading…</p>
+        ) : idle.length === 0 ? (
+          <p style={{ color: '#999', padding: '32px 0', textAlign: 'center' }}>
+            Nothing flagged — every scheduled flight showed activity.
+          </p>
+        ) : (
+          <>
+            <p style={{ color: '#6e7681', fontSize: 12.5, margin: '0 0 12px', maxWidth: 720, lineHeight: 1.5 }}>
+              A flight that never departed and never arrived. Twelve hours past its scheduled
+              departure it gets a verdict: <strong style={{ color: '#f85149' }}>did not fly</strong> if
+              nothing was ever seen, <strong style={{ color: '#3fb950' }}>flew late</strong> if a
+              signal appeared. Until then it stays open.
+            </p>
+            <table style={s.table}>
+              <thead>
+                <tr>
+                  <th style={s.th}>Date</th><th style={s.th}>Flight</th><th style={s.th}>Route</th>
+                  <th style={s.th}>Sched dep</th><th style={s.th}>Verdict</th><th style={s.th}>Detail</th>
+                </tr>
+              </thead>
+              <tbody>
+                {idle.map(r => {
+                  /*
+                   * Read the verdict, not resolved_at. Every closed row has a resolved_at, and
+                   * treating that as "flew late" labelled EY561 — which never left Abu Dhabi —
+                   * as having flown. The distinction is the entire point of the column.
+                   */
+                  const [label, colour] =
+                    r.outcome === 'did_not_operate'   ? ['did not fly',       '#f85149'] :
+                    r.outcome === 'flew_late'         ? ['flew late',         '#3fb950'] :
+                    r.outcome === 'activity_appeared' ? ['activity appeared', '#3fb950'] :
+                    [`open · +${r.hours_overdue ?? '?'}h`, '#d29922']
+                  return (
+                    <tr key={r.id} style={{ opacity: r.outcome ? 0.75 : 1 }}>
+                      <td style={{ ...s.td, color: '#8b949e' }}>{r.flight_date}</td>
+                      {/* Explicit colour: s.td inherits the page's dark ink, which on this
+                          dark background rendered the flight number invisible. */}
+                      <td style={{ ...s.td, fontWeight: 700, color: '#e6edf3' }}>{r.iata_number}</td>
+                      <td style={{ ...s.td, color: '#8b949e' }}>{r.dep_iata ?? '?'} → {r.arr_iata ?? '?'}</td>
+                      <td style={{ ...s.td, color: '#8b949e' }}>{r.sched_dep_utc ?? '—'} UTC</td>
+                      <td style={{ ...s.td, color: colour, fontWeight: 600 }}>{label}</td>
+                      <td style={{ ...s.td, color: '#6e7681', fontSize: 12 }}>{r.resolved_reason ?? '—'}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </>
+        )
+      ) : loading ? (
         <p style={{ color: '#999' }}>Loading…</p>
       ) : displayed.length === 0 ? (
         <p style={{ color: '#999', padding: '32px 0', textAlign: 'center' }}>
