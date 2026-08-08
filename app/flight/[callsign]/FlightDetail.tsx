@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { airportCity, cityFor, airlineNameFor, airportLabelFor, airportFlag as apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
 import { isSyrianAirport } from '@/lib/syria-airports'
-import { useT, useHref } from '@/components/LocaleProvider'
+import { useT, useHref, useLocale } from '@/components/LocaleProvider'
 import { STATUS_KEY } from '@/lib/i18n'
 
 const cityOf = (iata: string) => cityFor(iata)
@@ -140,8 +140,9 @@ function PlanePin() {
 }
 
 export default function FlightDetail({ callsign }: { callsign: string }) {
-  const t    = useT()
-  const href = useHref()
+  const t      = useT()
+  const href   = useHref()
+  const locale = useLocale()
   const [flight, setFlight]   = useState<Flight | null>(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
@@ -350,15 +351,21 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
                   background: BLUE,
                   width: isArrived ? '100%' : isEnRoute && progressPct != null ? `${progressPct}%` : '0%',
                 }} />
-                {/* Scheduled/pre-departure: plane centered on bar left edge */}
+                {/*
+                  The plane rides the leading edge of the fill, so its position is measured
+                  from the origin — which is the right-hand end in Arabic. `left` is physical:
+                  at 35% flown it put the aircraft 35% in from the left while the fill ran 35%
+                  in from the right, leaving the plane behind the untravelled section rather
+                  than at the front of the travelled one.
+                */}
                 {!isEnRoute && !isArrived && (
-                  <div style={{ position: 'absolute', top: '50%', left: -9, transform: 'translateY(-50%)', zIndex: 2 }}>
+                  <div style={{ position: 'absolute', top: '50%', left: locale === 'ar' ? undefined : -9, right: locale === 'ar' ? -9 : undefined, transform: 'translateY(-50%)', zIndex: 2 }}>
                     <PlanePin />
                   </div>
                 )}
                 {/* En route: plane at progress position */}
                 {isEnRoute && progressPct != null && (
-                  <div style={{ position: 'absolute', top: '50%', left: `${progressPct}%`, transform: 'translate(-50%, -50%)', zIndex: 2 }}>
+                  <div style={{ position: 'absolute', top: '50%', left: `${locale === 'ar' ? 100 - progressPct : progressPct}%`, transform: 'translate(-50%, -50%)', zIndex: 2 }}>
                     <PlanePin />
                   </div>
                 )}
