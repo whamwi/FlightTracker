@@ -129,11 +129,19 @@ function AirlineLogo({ iata, name }: { iata: string; name: string }) {
 }
 
 function PlanePin() {
+  /*
+   * The nose points at the destination, and which way that is depends on the script.
+   *
+   * The path is drawn nose-up; rotate(90) turns it right, which is correct in English and
+   * exactly backwards in Arabic, where the journey runs right to left. A fixed rotation left
+   * the aircraft flying at the airport it had just come from.
+   */
+  const locale = useLocale()
   return (
     <div style={{ width: 18, height: 18, borderRadius: '50%', background: '#fff', border: '1px solid #D8D3BF', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
       <svg width={10} height={10} viewBox="0 0 24 24" fill="none" style={{ display: 'block', pointerEvents: 'none' }}>
         <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"
-          fill="#054239" transform="rotate(90 12 12)" />
+          fill="#054239" transform={`rotate(${locale === 'ar' ? -90 : 90} 12 12)`} />
       </svg>
     </div>
   )
