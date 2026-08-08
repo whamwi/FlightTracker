@@ -131,7 +131,24 @@ export async function generateMetadata(
     title,
     description,
     alternates: { canonical: `https://www.flysyria.app/flight/${encodeURIComponent(callsign.toUpperCase())}` },
-    openGraph: { title, description, siteName: 'FlySyria', type: 'website' },
+    openGraph: {
+      title, description, siteName: 'FlySyria', type: 'website',
+      /*
+       * Point the crawler at the /ar copy of the image route.
+       *
+       * The card is fetched as a separate request, so it carries no memory of which page was
+       * shared. Next generates this URL from the rendered path — and the rendered path is
+       * always /flight/… because /ar/… is a rewrite — so an Arabic share would otherwise get
+       * an English card. Prefixing it puts the middleware back in the loop, which is what sets
+       * the header the image reads.
+       */
+      ...(locale === 'ar' ? {
+        images: [{
+          url: `https://www.flysyria.app/ar/flight/${encodeURIComponent(callsign.toUpperCase())}/opengraph-image`,
+          width: 1200, height: 630,
+        }],
+      } : {}),
+    },
     twitter:   { card: 'summary_large_image', title, description },
   }
 }

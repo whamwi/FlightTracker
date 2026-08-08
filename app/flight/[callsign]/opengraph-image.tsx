@@ -1,4 +1,5 @@
 import { ImageResponse } from 'next/og'
+import { headers } from 'next/headers'
 
 export const runtime     = 'edge'
 export const size        = { width: 1200, height: 630 }
@@ -32,7 +33,52 @@ const CITY: Record<string, string> = {
   THR: 'Tehran',    IKA: 'Tehran',
 }
 
-function cityOf(iata: string): string { return CITY[iata] ?? iata }
+/*
+ * Arabic city names, alongside the English map above.
+ *
+ * Duplicated from the airports table rather than fetched, as the English map already is: this
+ * runs at the edge on a crawler's request, and a database round trip to render a preview card
+ * is latency the crawler may not wait for. Keep in step with airports.city_ar when a route is
+ * added.
+ */
+const CITY_AR: Record<string, string> = {
+  DAM: 'دمشق',      ALP: 'حلب',        LTK: 'اللاذقية',   DEZ: 'دير الزور',
+  IST: 'إسطنبول',   SAW: 'إسطنبول',    ESB: 'أنقرة',      ADB: 'إزمير',      AYT: 'أنطاليا',
+  AMM: 'عمّان',      BEY: 'بيروت',      BGW: 'بغداد',
+  EBL: 'أربيل',      NJF: 'النجف',      BSR: 'البصرة',
+  DXB: 'دبي',       DWC: 'دبي',        SHJ: 'الشارقة',
+  AUH: 'أبوظبي',    DOH: 'الدوحة',     KWI: 'الكويت',     BAH: 'المنامة',
+  MCT: 'مسقط',      RUH: 'الرياض',     JED: 'جدة',
+  DMM: 'الدمام',    MED: 'المدينة المنورة', CAI: 'القاهرة',  HRG: 'الغردقة',
+  KRT: 'الخرطوم',   MJI: 'طرابلس',     TIP: 'طرابلس',
+  SSH: 'شرم الشيخ', ATH: 'أثينا',      OTP: 'بوخارست',
+  VIE: 'فيينا',     FRA: 'فرانكفورت',  CDG: 'باريس',      DUS: 'دوسلدورف',   BER: 'برلين',
+  LHR: 'لندن',      AMS: 'أمستردام',   MXP: 'ميلانو',
+  FCO: 'روما',      WAW: 'وارسو',      SVO: 'موسكو',      VKO: 'موسكو',      LCA: 'لارنكا',
+  GYD: 'باكو',      TBS: 'تبليسي',     EVN: 'يريفان',     TAS: 'طشقند',      SKD: 'سمرقند',
+  THR: 'طهران',     IKA: 'طهران',      MHD: 'مشهد',       KHI: 'كراتشي',
+  ADD: 'أديس أبابا', NBO: 'نيروبي',
+}
+
+/** Status words, matched the same loose way statusStyle matches them. */
+function statusAr(s: string): string {
+  const t = s.toLowerCase()
+  if (t.includes('arrived') || t.includes('landed'))     return 'وصلت'
+  if (t.includes('en route') || t.includes('in flight')) return 'في الطريق'
+  if (t.includes('approach'))                            return 'تقترب'
+  if (t.includes('departed') || t.includes('took off'))  return 'غادرت'
+  if (t.includes('delayed'))                             return 'متأخرة'
+  if (t.includes('cancel'))                              return 'ملغاة'
+  if (t.includes('boarding'))                            return 'الصعود'
+  if (t.includes('expected') || t.includes('estimated')) return 'متوقعة'
+  if (t.includes('scheduled'))                           return 'مجدولة'
+  return s
+}
+
+function cityOf(iata: string, ar = false): string {
+  if (ar) return CITY_AR[iata] ?? CITY[iata] ?? iata
+  return CITY[iata] ?? iata
+}
 
 function cityFontSize(name: string): number {
   if (name.length <= 5) return 50
@@ -92,6 +138,25 @@ export default async function Image(
   const { callsign } = await params
   const num = callsign.replace(/\s+/g, '').toUpperCase()
 
+  /*
+   * The locale, from the same header the page reads.
+   *
+   * A crawler fetches this image as its own request, so it only arrives in Arabic if the URL
+   * it was given carried the /ar prefix — generateMetadata points openGraph.images at the
+   * prefixed path for exactly that reason. Without it this would always render English no
+   * matter which page was shared, which is the version most people would see: the card is
+   * usually all anyone looks at.
+   */
+  const h        = await headers()
+  const wantsAr  = h.get('x-flysyria-locale') === 'ar'
+  /*
+   * Arabic only if the glyphs actually arrived. Satori draws missing glyphs as empty boxes,
+   * and a card of empty boxes is worse than an English one — so the font decides the language,
+   * not the header alone.
+   */
+  const arFonts  = wantsAr ? await arabicFonts() : undefined
+  const ar       = wantsAr && !!arFonts
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let flight: any = null
   try {
@@ -125,8 +190,8 @@ export default async function Image(
 
   const dur     = fmtDur(flight?.duration_min ?? null)
   const sc      = statusStyle(status)
-  const depCity = dep ? cityOf(dep) : ''
-  const arrCity = arr ? cityOf(arr) : ''
+  const depCity = dep ? cityOf(dep, ar) : ''
+  const arrCity = arr ? cityOf(arr, ar) : ''
   const hasRoute = dep && arr
 
   return new ImageResponse(
@@ -182,7 +247,7 @@ export default async function Image(
             border: `1.5px solid ${sc.dot}44`,
           }}>
             <div style={{ width: 8, height: 8, borderRadius: '50%', background: sc.dot, marginRight: 8, display: 'flex', flexShrink: 0 }} />
-            <span style={{ fontSize: 17, fontWeight: 700, color: sc.text, display: 'flex' }}>{status}</span>
+            <span style={{ fontSize: 17, fontWeight: 700, color: sc.text, display: 'flex' }}>{ar ? statusAr(status) : status}</span>
           </div>
         </div>
 
@@ -300,6 +365,33 @@ export default async function Image(
         </div>
       </div>
     ),
-    { width: 1200, height: 630 }
+    {
+      width: 1200,
+      height: 630,
+      /*
+       * Satori ships no Arabic glyphs and cannot read woff2, so Cairo is fetched as TTF from
+       * our own origin. Only for Arabic — an English card should not pay for a 180 KB font
+       * download on a crawler's clock.
+       */
+      fonts: arFonts,
+    }
   )
+}
+
+/** Cairo, as Satori needs it: TTF, fetched from our own origin and cached at the edge. */
+async function arabicFonts() {
+  try {
+    const [r400, r700] = await Promise.all([
+      fetch('https://www.flysyria.app/fonts/cairo-400.ttf', { next: { revalidate: 86_400 } }),
+      fetch('https://www.flysyria.app/fonts/cairo-700.ttf', { next: { revalidate: 86_400 } }),
+    ])
+    if (!r400.ok || !r700.ok) return undefined
+    return [
+      { name: 'Cairo', data: await r400.arrayBuffer(), weight: 400 as const, style: 'normal' as const },
+      { name: 'Cairo', data: await r700.arrayBuffer(), weight: 700 as const, style: 'normal' as const },
+    ]
+  } catch {
+    // The caller falls back to English when this returns nothing — see `ar` above.
+    return undefined
+  }
 }
