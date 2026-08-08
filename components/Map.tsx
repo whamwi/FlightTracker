@@ -17,6 +17,17 @@ import VideoBox from './VideoBox'
 const RAF_MOTION = true
 import PhotoBox from './PhotoBox'
 import { PANEL } from './MapBox'
+import { translate } from '@/lib/i18n'
+import { getActiveLocale, cityFor } from '@/lib/geo-data'
+
+/*
+ * The popups are built as HTML strings from module-level functions, so there is no hook to
+ * read the locale from. LocaleProvider sets it on the module during render and a popup is
+ * only ever built afterwards, in response to a click or a poll — so by the time these run
+ * the value is there.
+ */
+const T   = (k: string) => translate(getActiveLocale(), k)
+const RTL = () => getActiveLocale() === 'ar'
 
 interface Aircraft {
   hex: string
@@ -87,10 +98,10 @@ interface FlightStatus {
   airline_iata:      string | null
 }
 
-import { airportCity as _apCity, airportFlag as _apFlag, airportCoords as _apCoords, airportOffset as _apOffset, airlineByIata as _alByIata, icaoToIata as _icaoToIata, loadGeoData } from '../lib/geo-data'
+import { airportFlag as _apFlag, airportCoords as _apCoords, airportOffset as _apOffset, airlineByIata as _alByIata, icaoToIata as _icaoToIata, loadGeoData } from '../lib/geo-data'
 
 function iataCity(code: string | null | undefined): string {
-  return (code && _apCity[code]) ? _apCity[code] : (code ?? '—')
+  return code ? cityFor(code) : '—'
 }
 function airlineIataFor(callsign: string, fs?: FlightStatus | null): string | null {
   if (fs?.airline_iata) return fs.airline_iata
@@ -407,7 +418,10 @@ function schedToLocal(hhmm: string | null, offset: number): string {
   return `${String(lh).padStart(2,'0')}:${String(lm).padStart(2,'0')}`
 }
 
-const fmtHm = (m: number) => m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`
+// Arabic carries no English unit letters — see the twin in FlightDetail.
+const fmtHm = (m: number) => RTL()
+  ? (m >= 60 ? `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}` : `${m} د`)
+  : (m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`)
 
 /**
  * The flight number and the broadcast callsign are two different identifiers for the same
@@ -445,7 +459,7 @@ function progressBarHtml(dep: string | null, arr: string | null, fraction: numbe
   return `<div style="padding:4px 14px 12px">
         ${etaStr ? `<div style="text-align:center;color:#9ca3af;font-size:11px;margin-bottom:8px">${etaStr}</div>` : ''}
         <div style="display:flex;align-items:center;gap:8px">
-          <div style="text-align:left">
+          <div style="text-align:start">
             <div style="font-size:12px;color:#d1d5db;white-space:nowrap">${_apFlag[dep] ?? ''} ${iataCity(dep)}</div>
             <div style="font-size:10px;color:#6b7280;font-family:monospace">${dep}</div>
           </div>
@@ -453,14 +467,14 @@ function progressBarHtml(dep: string | null, arr: string | null, fraction: numbe
             <div style="flex:${fillPct};height:4px;border-radius:99px;background:${fraction!=null?'#3b82f6':'#374151'};min-width:0"></div>
             ${fraction != null ? `
               <div style="width:18px;height:18px;border-radius:9px;background:#1e293b;flex-shrink:0;border:1.5px solid #3b82f6;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 5px rgba(59,130,246,.3)">
-                <svg width="9" height="9" viewBox="0 0 10 10" fill="#3b82f6"><path d="M.7 1.1 9.3 5 .7 8.9 2.5 5z"/></svg>
+                <svg width="9" height="9" viewBox="0 0 10 10" fill="#3b82f6"${RTL() ? ' style="transform:scaleX(-1)"' : ''}><path d="M.7 1.1 9.3 5 .7 8.9 2.5 5z"/></svg>
               </div>
               <div style="flex:${emptyPct};height:4px;border-radius:99px;background:#374151;min-width:0"></div>
             ` : ''}
           </div>
-          <div style="text-align:right">
+          <div style="text-align:end">
             <div style="font-size:12px;color:#d1d5db;white-space:nowrap">${iataCity(arr)} ${_apFlag[arr] ?? ''}</div>
-            <div style="font-size:10px;color:#6b7280;font-family:monospace;text-align:right">${arr}</div>
+            <div style="font-size:10px;color:#6b7280;font-family:monospace;text-align:end">${arr}</div>
           </div>
         </div>
       </div>`
@@ -483,10 +497,11 @@ function buildPopup(
 
   // Status badge
   const [statusLabel, statusBg, statusFg] = lostAt && !projected
-    ? ['Signal Lost', '#7f1d1d', '#f87171']
+    ? [T('status.signal_lost'), '#7f1d1d', '#f87171']
+    // The tilde marks a projected position rather than an observed one.
     : projected
-      ? ['~ En Route', '#713f12', '#fbbf24']
-      : ['En Route', '#166534', '#4ade80']
+      ? [`~ ${T('status.in_air')}`, '#713f12', '#fbbf24']
+      : [T('status.in_air'), '#166534', '#4ade80']
 
   // Airline logo
   const logoHtml = aiata
@@ -538,16 +553,16 @@ function buildPopup(
   let etaStr = ''
   if (hasArrived && Number.isFinite(depMs) && actualArrMs > depMs) {
     // Once it is down, time remaining is meaningless — how long it took is the useful number.
-    etaStr = `${fmtHm(Math.round((actualArrMs - depMs) / 60_000))} flown`
+    etaStr = `${fmtHm(Math.round((actualArrMs - depMs) / 60_000))} ${T('label.flown')}`
   } else if (!hasArrived && Number.isFinite(arrMs)) {
     const remMin = Math.round((arrMs - Date.now()) / 60_000)
-    if (remMin > 0) etaStr = `${fmtHm(remMin)} left`
+    if (remMin > 0) etaStr = `${fmtHm(remMin)} ${T('map.until_arrival')}`
   } else if (!hasArrived && arrCoord && typeof a.lat === 'number' && typeof a.lon === 'number'
              && typeof a.gs === 'number' && a.gs > 50) {
     // No arrival estimate anywhere — fall back to the geometric one. Only meaningful for a
     // genuinely live fix, which is the only case that reaches here.
     const nm = greatCircleKm(a.lat, a.lon, arrCoord[0], arrCoord[1]) / 1.852
-    etaStr = `${fmtHm(Math.round(nm / a.gs * 60))} left`
+    etaStr = `${fmtHm(Math.round(nm / a.gs * 60))} ${T('map.until_arrival')}`
   }
   // Fall back to the scheduled time carried on the aircraft when flightStatusRef has
   // nothing — the same chain buildSchedulePopup has always used. Without it the marker
@@ -560,11 +575,12 @@ function buildPopup(
   const arrTimeLocal = popupToLocal(arrISO, arrOffset)
                     || (a.arr_time_utc ? schedToLocal(a.arr_time_utc, arrOffset) : '')
 
-  // `before` puts the gap on the correct side. The arrival column is right-aligned so its
-  // badge sits to the LEFT of the time, where a margin-left pushed the space outward and
-  // left the badge touching the number.
+  // `before` puts the gap on the side facing the number, and the margin is logical: the
+  // physical one put the space on the badge's outer edge under RTL, leaving it touching the
+  // time it belongs to. dir=ltr keeps the sign attached to its digits — bidi otherwise
+  // throws a leading + to the far end of the token.
   const delayBadge = (min: number | null | undefined, before = false) => min != null && Math.abs(min) >= 2
-    ? `<span style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;padding:2px 5px;border-radius:99px;margin-${before ? 'right' : 'left'}:5px;line-height:1.4">${min > 0 ? '+' : ''}${min}m</span>`
+    ? `<span dir="ltr" style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;padding:2px 5px;border-radius:99px;margin-inline-${before ? 'end' : 'start'}:5px;line-height:1.4">${min > 0 ? '+' : ''}${min}${RTL() ? 'د' : 'm'}</span>`
     : ''
 
   const progressHtml = progressBarHtml(dep, arr, fraction, etaStr)
@@ -572,13 +588,13 @@ function buildPopup(
   const timesHtml = (depTimeLocal || arrTimeLocal)
     ? `<div style="display:flex;background:#1f2937;padding:11px 14px">
         <div style="flex:1">
-          <div style="font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:3px">Departure</div>
+          <div style="font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:${RTL() ? 'normal' : '0.6px'};margin-bottom:3px">${T('label.departure')}</div>
           <div style="display:flex;align-items:baseline">
             <span style="font-size:20px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums">${depTimeLocal || '—'}</span>${delayBadge(fs?.dep_delay_min)}
           </div>
         </div>
-        <div style="flex:1;text-align:right">
-          <div style="font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:3px">Arrival</div>
+        <div style="flex:1;text-align:end">
+          <div style="font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:${RTL() ? 'normal' : '0.6px'};margin-bottom:3px">${T('label.arrival')}</div>
           <div style="display:flex;align-items:baseline;justify-content:flex-end">
             ${delayBadge(fs?.arr_delay_min ?? schedArrDeltaMin(a.arr_time_utc, arrISO), true)}<span style="font-size:20px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums">${arrTimeLocal || '—'}</span>
           </div>
@@ -593,10 +609,10 @@ function buildPopup(
   // time beside it.
   const lostLocal = lostAt ? popupToLocal(new Date(lostAt).toISOString(), arrOffset) : ''
   const lostLine = lostAt && !projected
-    ? `<div style="color:#ef4444;font-size:11px;padding:5px 14px">⚠ Signal lost ${lostLocal}</div>`
+    ? `<div style="color:#ef4444;font-size:11px;padding:5px 14px">⚠ ${T('map.signal_lost')} ${lostLocal}</div>`
     : ''
   const drLine = projected && lostAt
-    ? `<div style="color:#9ca3af;font-size:10px;padding:2px 14px 6px">Dead reckoning from ${lostLocal}</div>`
+    ? `<div style="color:#9ca3af;font-size:10px;padding:2px 14px 6px">${T('map.dead_reckoning')} ${lostLocal}</div>`
     : ''
   const photoHtml = photoUrl
     ? `<img src="${photoUrl}" style="width:100%;height:110px;object-fit:cover;display:block">`
@@ -651,10 +667,10 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
 
   // Status badge
   const [statusLabel, statusBg, statusFg] = arrived
-    ? ['Arrived', '#1e3a5f', '#60a5fa']
+    ? [T('status.arrived'), '#1e3a5f', '#60a5fa']
     : fraction != null && fraction > 0.02
-      ? ['~ En Route', '#713f12', '#fbbf24']
-      : ['Scheduled', '#1c1917', '#a8a29e']
+      ? [`~ ${T('status.in_air')}`, '#713f12', '#fbbf24']
+      : [T('status.scheduled'), '#1c1917', '#a8a29e']
 
   // Airline logo
   const logoHtml = aiata
@@ -704,11 +720,12 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
           ? schedArrDeltaMin(e.arr_time_utc, observedArrISO)
           : null)
 
-  // `before` puts the gap on the correct side. The arrival column is right-aligned so its
-  // badge sits to the LEFT of the time, where a margin-left pushed the space outward and
-  // left the badge touching the number.
+  // `before` puts the gap on the side facing the number, and the margin is logical: the
+  // physical one put the space on the badge's outer edge under RTL, leaving it touching the
+  // time it belongs to. dir=ltr keeps the sign attached to its digits — bidi otherwise
+  // throws a leading + to the far end of the token.
   const delayBadge = (min: number | null | undefined, before = false) => min != null && Math.abs(min) >= 2
-    ? `<span style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;padding:2px 5px;border-radius:99px;margin-${before ? 'right' : 'left'}:5px;line-height:1.4">${min > 0 ? '+' : ''}${min}m</span>`
+    ? `<span dir="ltr" style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;padding:2px 5px;border-radius:99px;margin-inline-${before ? 'end' : 'start'}:5px;line-height:1.4">${min > 0 ? '+' : ''}${min}${RTL() ? 'د' : 'm'}</span>`
     : ''
 
   // Route progress bar
@@ -724,25 +741,25 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
   const sArrMs = Date.parse(fs?.actual_arr_utc ?? '')
   let etaStr = ''
   if (Number.isFinite(sArrMs) && Number.isFinite(sDepMs) && sArrMs > sDepMs) {
-    etaStr = `${fmtHm(Math.round((sArrMs - sDepMs) / 60_000))} flown`
+    etaStr = `${fmtHm(Math.round((sArrMs - sDepMs) / 60_000))} ${T('label.flown')}`
   } else if (!arrived && bestArrISO) {
     const remMin = Math.round((Date.parse(bestArrISO) - Date.now()) / 60_000)
-    if (remMin > 0) etaStr = `${fmtHm(remMin)} left`
+    if (remMin > 0) etaStr = `${fmtHm(remMin)} ${T('map.until_arrival')}`
   } else if (!arrived && pct != null && pct < 100 && e.duration_min > 0) {
-    etaStr = `${fmtHm(Math.round(e.duration_min * (1 - (pct / 100))))} left`
+    etaStr = `${fmtHm(Math.round(e.duration_min * (1 - (pct / 100))))} ${T('map.until_arrival')}`
   }
 
   const progressHtml = progressBarHtml(e.dep_iata, e.arr_iata, pct != null ? pct / 100 : null, etaStr)
 
   const timesHtml = `<div style="display:flex;background:#1f2937;padding:11px 14px">
     <div style="flex:1">
-      <div style="font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:3px">Departure</div>
+      <div style="font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:${RTL() ? 'normal' : '0.6px'};margin-bottom:3px">${T('label.departure')}</div>
       <div style="display:flex;align-items:baseline">
         <span style="font-size:20px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums">${depTimeLocal}</span>${delayBadge(fs?.dep_delay_min)}
       </div>
     </div>
-    <div style="flex:1;text-align:right">
-      <div style="font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:3px">Arrival</div>
+    <div style="flex:1;text-align:end">
+      <div style="font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:${RTL() ? 'normal' : '0.6px'};margin-bottom:3px">${T('label.arrival')}</div>
       <div style="display:flex;align-items:baseline;justify-content:flex-end">
         ${delayBadge(arrDelayMin, true)}<span style="font-size:20px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums">${arrTimeLocal}</span>
       </div>
@@ -754,7 +771,7 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
     : ''
 
   const noteHtml = !arrived
-    ? `<div style="color:#6b7280;font-size:10px;padding:4px 14px 5px">Schedule projection · no live signal</div>`
+    ? `<div style="color:#6b7280;font-size:10px;padding:4px 14px 5px">${T('map.no_signal')}</div>`
     : ''
 
   return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;width:280px">
@@ -2447,24 +2464,24 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
               ? `<div style="font-size:14px;font-weight:700;color:#f9fafb;line-height:1.2;letter-spacing:-.01em">${alName}</div>
                  <div style="font-size:11.5px;color:#9ca3af;margin-top:3px;font-variant-numeric:tabular-nums">${cs}${acType ? ' · ' + acType : ''}</div>`
               : `<div style="font-size:15px;font-weight:700;color:#f9fafb;line-height:1.2;letter-spacing:-.01em;font-variant-numeric:tabular-nums">${cs}</div>
-                 <div style="font-size:11px;color:#6b7280;margin-top:3px">${[acType, reg].filter(Boolean).join(' · ') || 'Unknown airline'}</div>`
+                 <div style="font-size:11px;color:#6b7280;margin-top:3px">${[acType, reg].filter(Boolean).join(' · ') || T('map.unknown_airline')}</div>`
             const popup = `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;width:260px">
               <div style="display:flex;align-items:flex-start;gap:11px;padding:14px 14px 11px">
                 ${logoHtml}
                 <div style="flex:1;min-width:0">${primaryLine}</div>
-                <span style="background:#0f172a;border:1px solid #334155;color:#94a3b8;font-size:9px;font-weight:700;padding:3px 8px;border-radius:99px;flex-shrink:0;letter-spacing:.04em;white-space:nowrap;margin-top:1px">OVERFLIGHT</span>
+                <span style="background:#0f172a;border:1px solid #334155;color:#94a3b8;font-size:9px;font-weight:700;padding:3px 8px;border-radius:99px;flex-shrink:0;letter-spacing:${RTL() ? 'normal' : '.04em'};white-space:nowrap;margin-top:1px">${RTL() ? T('map.overflight') : T('map.overflight').toUpperCase()}</span>
               </div>
               <div style="display:grid;grid-template-columns:1fr 1px 1fr;background:#1f2937;border-radius:0 0 14px 14px">
                 <div style="text-align:center;padding:14px 8px">
-                  <div style="font-size:9px;color:#4b5563;font-weight:700;text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px">Altitude</div>
+                  <div style="font-size:9px;color:#4b5563;font-weight:700;text-transform:uppercase;letter-spacing:${RTL() ? 'normal' : '.7px'};margin-bottom:6px">${T('map.altitude')}</div>
                   <div style="font-size:22px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums;line-height:1">${altDisp}</div>
-                  <div style="font-size:10px;color:#6b7280;margin-top:4px">ft</div>
+                  <div style="font-size:10px;color:#6b7280;margin-top:4px">${T('unit.ft')}</div>
                 </div>
                 <div style="background:#374151"></div>
                 <div style="text-align:center;padding:14px 8px">
-                  <div style="font-size:9px;color:#4b5563;font-weight:700;text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px">Speed</div>
+                  <div style="font-size:9px;color:#4b5563;font-weight:700;text-transform:uppercase;letter-spacing:${RTL() ? 'normal' : '.7px'};margin-bottom:6px">${T('map.speed')}</div>
                   <div style="font-size:22px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums;line-height:1">${spdDisp}</div>
-                  <div style="font-size:10px;color:#6b7280;margin-top:4px">kt</div>
+                  <div style="font-size:10px;color:#6b7280;margin-top:4px">${T('unit.kt')}</div>
                 </div>
               </div>
             </div>`
@@ -2595,7 +2612,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
             <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
           </svg>
-          Over Syria
+          {T('map.over_syria')}
         </button>
       )}
       {loading && !embed && (
