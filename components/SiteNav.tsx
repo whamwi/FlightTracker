@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useT, useHref } from '@/components/LocaleProvider'
 import { useEffect, useState } from 'react'
 import Wordmark from './Wordmark'
 
@@ -24,15 +25,25 @@ const C = {
   second:  '#4b5563',
 }
 
+/*
+ * `label` is the identity, `key` is what the reader sees.
+ *
+ * Callers pass active="Flights" and the comparison below is against that label, so translating
+ * it in place would break every page's active tab in Arabic. The English word stays as the
+ * stable identifier and only the display goes through the dictionary.
+ */
 export const NAV_ITEMS = [
-  { label: 'Flights',      href: '/board'        },
-  { label: 'Track',        href: '/map'          },
-  { label: 'Destinations', href: '/destinations' },
-  { label: 'Airlines',     href: '/airlines'     },
-  { label: 'News',         href: '/news'         },
+  { label: 'Flights',      key: 'nav.flights',      href: '/board'        },
+  { label: 'Track',        key: 'nav.track',        href: '/map'          },
+  { label: 'Destinations', key: 'nav.destinations', href: '/destinations' },
+  { label: 'Airlines',     key: 'nav.airlines',     href: '/airlines'     },
+  { label: 'News',         key: 'nav.news',         href: '/news'         },
 ]
 
 export default function SiteNav({ active, right }: { active: string; right?: React.ReactNode }) {
+  const t    = useT()
+  // Every nav link has to carry the locale or the language resets on the first tap.
+  const href = useHref()
   const [open, setOpen] = useState(false)
 
   useEffect(() => {
@@ -72,15 +83,15 @@ export default function SiteNav({ active, right }: { active: string; right?: Rea
         </Link>
 
         <div className="sn-tabs">
-          {NAV_ITEMS.map((t) => {
-            const isActive = t.label === active
+          {NAV_ITEMS.map((item) => {
+            const isActive = item.label === active
             return (
-              <Link key={t.label} href={t.href} style={{
+              <Link key={item.label} href={href(item.href)} style={{
                 display: 'flex', alignItems: 'center', gap: 7, padding: '9px 14px', borderRadius: 10,
                 textDecoration: 'none', background: isActive ? C.sunken : 'transparent',
               }}>
                 <span style={{ font: `${isActive ? 700 : 600} 13.5px/1 'Instrument Sans',system-ui`, color: isActive ? C.forest : C.second, whiteSpace: 'nowrap' }}>
-                  {t.label}
+                  {t(item.key)}
                 </span>
               </Link>
             )
@@ -154,16 +165,16 @@ export default function SiteNav({ active, right }: { active: string; right?: Rea
             boxShadow: '0 12px 28px -18px rgba(0,0,0,.5)',
             padding: '6px 12px 12px', display: 'flex', flexDirection: 'column', gap: 2,
           }}>
-            {NAV_ITEMS.map((t) => {
-              const isActive = t.label === active
+            {NAV_ITEMS.map((item) => {
+              const isActive = item.label === active
               return (
-                <Link key={t.label} href={t.href} onClick={() => setOpen(false)} style={{
+                <Link key={item.label} href={href(item.href)} onClick={() => setOpen(false)} style={{
                   display: 'flex', alignItems: 'center', padding: '13px 12px', borderRadius: 10,
                   textDecoration: 'none', background: isActive ? C.sunken : 'transparent',
                   font: `${isActive ? 700 : 600} 15px/1 'Instrument Sans',system-ui`,
                   color: isActive ? C.forest : C.second,
                 }}>
-                  {t.label}
+                  {t(item.key)}
                 </Link>
               )
             })}

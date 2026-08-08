@@ -51,6 +51,17 @@ export const airportCityAr: Record<string, string> = { DAM: 'دمشق', ALP: 'ح
 let activeLocale: 'en' | 'ar' = 'en'
 export const setActiveLocale = (l: 'en' | 'ar') => { activeLocale = l }
 
+/**
+ * The airline name in the active locale.
+ *
+ * Takes the English name the board already carries as the fallback, so a carrier that appears
+ * in a flight before it exists in the airlines table still shows a name rather than a code.
+ */
+export function airlineNameFor(iata: string | null | undefined, fallback: string): string {
+  if (activeLocale !== 'ar' || !iata) return fallback
+  return airlineByIata[iata]?.name_ar || fallback
+}
+
 /** The city name in the active locale, falling back to English when no Arabic name exists. */
 export function cityFor(iata: string): string {
   if (activeLocale === 'ar') return airportCityAr[iata] ?? airportCity[iata] ?? iata

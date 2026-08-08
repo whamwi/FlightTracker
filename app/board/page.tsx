@@ -3,9 +3,11 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react'
 import Link from 'next/link'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
-import { airportCity, cityFor, airportFlag as _apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
+import { airportCity, cityFor, airlineNameFor, airportFlag as _apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
 import SiteNav from '@/components/SiteNav'
 import LanguageSwitch from '@/components/LanguageSwitch'
+import { useT, useLocale } from '@/components/LocaleProvider'
+import { STATUS_KEY } from '@/lib/i18n'
 import { BOARD_AIRPORTS, type BoardAirport } from '@/lib/syria-airports'
 
 const city = (iata: string) => cityFor(iata)
@@ -285,6 +287,7 @@ function ArrivedRoute({ durationMin }: { durationMin: number }) {
 
 // ── Status badge ──────────────────────────────────────────────────────────────
 function StatusBadge({ status, view }: { status: string; view?: View }) {
+  const t = useT()
   const cfg = (() => {
     if (view === 'dep' && status === 'Departed') {
       return { ...STATUS.Departed, bg: '#E6EFEC', text: '#002623', dot: C.forest, border: '#B4CFC9' }
@@ -300,7 +303,9 @@ function StatusBadge({ status, view }: { status: string; view?: View }) {
     }}>
       {cfg.dot && <span style={{ width: 6, height: 6, borderRadius: 99, background: cfg.dot, display: 'block', flexShrink: 0 }} />}
       <span style={{ font: `600 11.5px/1 'Instrument Sans', system-ui`, color: cfg.text, whiteSpace: 'nowrap' }}>
-        {cfg.label}
+        {/* The English label stays as the fallback for a status with no mapping — better a
+            word the reader may not know than an empty badge. */}
+        {STATUS_KEY[status] ? t(STATUS_KEY[status]) : cfg.label}
       </span>
     </div>
   )
@@ -339,6 +344,7 @@ const PinSVG = () => (
 
 // ── Flight card ───────────────────────────────────────────────────────────────
 function FlightCard({ f, view, isPinned, onTogglePin }: { f: Flight; view: View; isPinned: boolean; onTogglePin: () => void }) {
+  const t = useT()
   const isArr   = view === 'arr'
   const status  = effectiveStatus(f)
   const cfg     = STATUS[status] ?? STATUS.Unknown
@@ -392,7 +398,7 @@ function FlightCard({ f, view, isPinned, onTogglePin }: { f: Flight; view: View;
             textDecoration: isCancelled ? 'line-through' : 'none',
             textDecorationColor: '#C4BEAE',
           }}>
-            {f.airline_name}
+            {airlineNameFor(f.airline_iata, f.airline_name)}
           </span>
           {/*
             * Ticket number, then callsign, then the airframe in brackets:
@@ -509,11 +515,11 @@ function FlightCard({ f, view, isPinned, onTogglePin }: { f: Flight; view: View;
               <line x1="10.3" y1="3.9" x2="4.7" y2="7.1" stroke="currentColor" strokeWidth="1.5"/>
               <line x1="4.7" y1="8.9" x2="10.3" y2="12.1" stroke="currentColor" strokeWidth="1.5"/>
             </svg>
-            Share
+            {t('action.share')}
           </Link>
           <button onClick={onTogglePin} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: 99, background: isPinned ? C.forest : C.sunken, border: `1px solid ${isPinned ? C.forest : C.border}`, color: isPinned ? '#fff' : C.secondary, fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: "'Instrument Sans', system-ui", whiteSpace: 'nowrap' }}>
             <PinSVG />
-            {isPinned ? 'Pinned' : 'Pin'}
+            {t(isPinned ? 'action.pinned' : 'action.pin')}
           </button>
         </div>
         {showTrack && (
@@ -586,6 +592,7 @@ function tabDateLabel(offset: number): string {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function BoardPage() {
+  const t = useT()
   const [tab, setTab]         = useState<Tab>(0)
   const [view, setView]       = useState<View>('arr')
   const [airport, setAirport] = useState<Airport>('DAM')
@@ -864,8 +871,8 @@ export default function BoardPage() {
     ? new Date(date + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
     : ''
 
-  const viewTitle    = view === 'arr' ? 'Arrivals' : 'Departures'
-  const tabTitle     = tab === 0 ? 'today' : tab === -1 ? 'yesterday' : 'tomorrow'
+  const viewTitle    = t(view === 'arr' ? 'board.arrivals_for' : 'board.departures_for')
+  const tabTitle     = t(tab === 0 ? 'day.today' : tab === -1 ? 'day.yesterday' : 'day.tomorrow')
 
   return (
     <div style={{ minHeight: '100vh', background: C.bg, fontFamily: "'Instrument Sans', system-ui, sans-serif" }}>
@@ -910,7 +917,7 @@ export default function BoardPage() {
           <input
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder="Flight number, city or airline"
+            placeholder={t('nav.search')}
             style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', font: `500 12.5px/1 'Instrument Sans', system-ui`, color: C.ink, minWidth: 0 }}
           />
           {query
@@ -935,18 +942,21 @@ export default function BoardPage() {
           <div className="ft-controls" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             {/* Date tabs */}
             <div style={{ display: 'flex', gap: 6 }}>
-              {([-1, 0, 1] as Tab[]).map(t => (
-                <button key={t} onClick={() => setTab(t)} style={{
+              {/* `tb`, not `t` — the loop variable used to be `t` and now shadows the translator. */}
+              {([-1, 0, 1] as Tab[]).map(tb => (
+                <button key={tb} onClick={() => setTab(tb)} style={{
                   padding: '9px 14px 10px', borderRadius: 12, cursor: 'pointer',
-                  background: tab === t ? C.ink : C.surface,
-                  border: tab === t ? 'none' : `1px solid ${C.border}`,
+                  background: tab === tb ? C.ink : C.surface,
+                  border: tab === tb ? 'none' : `1px solid ${C.border}`,
                   display: 'flex', alignItems: 'baseline', gap: 7,
-                  boxShadow: tab === t ? '0 8px 18px -10px rgba(22,22,22,.55)' : 'none',
+                  boxShadow: tab === tb ? '0 8px 18px -10px rgba(22,22,22,.55)' : 'none',
                 }}>
-                  <span style={{ font: `${tab === t ? 700 : 600} 13px/1 'Instrument Sans', system-ui`, color: tab === t ? '#fff' : C.secondary }}>
-                    {t === -1 ? 'Yesterday' : t === 0 ? `Today · ${tabDateLabel(0)}` : 'Tomorrow'}
+                  <span style={{ font: `${tab === tb ? 700 : 600} 13px/1 'Instrument Sans', system-ui`, color: tab === tb ? '#fff' : C.secondary }}>
+                    {tb === -1 ? t('day.yesterday')
+                      : tb === 0 ? `${t('label.today_prefix')} · ${tabDateLabel(0)}`
+                      : t('day.tomorrow')}
                   </span>
-                  {tab === t && total > 0 && (
+                  {tab === tb && total > 0 && (
                     <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, fontWeight: 600, background: '#B9A779', color: C.ink, padding: '3px 5px', borderRadius: 5 }}>
                       {total}
                     </span>
@@ -965,7 +975,7 @@ export default function BoardPage() {
                   boxShadow: view === v ? '0 1px 3px rgba(22,22,22,.14)' : 'none',
                 }}>
                   <span style={{ font: `600 13px/1 'Instrument Sans', system-ui`, color: view === v ? C.ink : C.muted }}>
-                    {v === 'arr' ? 'Arrivals' : 'Departures'}
+                    {t(v === 'arr' ? 'view.arrivals' : 'view.departures')}
                   </span>
                   {view === v && (
                     <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, fontWeight: 600, color: C.forest, background: '#E6EFEC', padding: '2px 5px', borderRadius: 5 }}>
@@ -1074,7 +1084,7 @@ export default function BoardPage() {
           {!loading && sorted.length === 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '80px 0', gap: 8, textAlign: 'center' }}>
               <span style={{ fontSize: 48 }}>✈</span>
-              <p style={{ color: C.secondary, fontWeight: 600, margin: 0 }}>No {view === 'arr' ? 'arrivals' : 'departures'}</p>
+              <p style={{ color: C.secondary, fontWeight: 600, margin: 0 }}>{t(view === 'arr' ? 'board.no_arrivals' : 'board.no_departures')}</p>
               <p style={{ color: C.muted, fontSize: 14, margin: 0 }}>{airport} · {dateLabel}</p>
             </div>
           )}
@@ -1102,7 +1112,7 @@ export default function BoardPage() {
 
           {tab === 1 && !loading && sorted.length > 0 && (
             <p style={{ textAlign: 'center', color: C.muted, fontSize: 12, marginTop: 24 }}>
-              Tomorrow's flights show scheduled times only · Live data arrives on the day
+              {t('board.tomorrow_note')}
             </p>
           )}
             </div>{/* end cards column */}
@@ -1220,7 +1230,7 @@ export default function BoardPage() {
           <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 18, display: 'flex', alignItems: 'center', gap: 22, flexWrap: 'wrap' }}>
             <span style={{ font: `500 11.5px/1 'Instrument Sans', system-ui`, color: C.muted }}>© 2026 FlySyria</span>
             <span style={{ font: `500 11.5px/1 'Instrument Sans', system-ui`, color: C.muted }}>Damascus · Aleppo</span>
-            <span style={{ font: `500 11.5px/1 'Instrument Sans', system-ui`, color: C.muted }}>Schedule data updated every 60s</span>
+            <span style={{ font: `500 11.5px/1 'Instrument Sans', system-ui`, color: C.muted }}>{t('board.updated')}</span>
             <div style={{ flex: 1 }} />
             <LanguageSwitch />
           </div>

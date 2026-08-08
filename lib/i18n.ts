@@ -56,11 +56,19 @@ const en: Dict = {
   'status.delayed':    'Delayed',
   'status.cancelled':  'Cancelled',
   'status.unknown':    'Unknown',
+  'status.checkin':    'Check-in',
+  'status.boarding':   'Boarding',
+  'status.gate_closed':'Gate Closed',
+  'status.en_route':   'En route',
+  'status.approaching':'Approaching',
+  'status.diverted':   'Diverted',
   'label.scheduled_time': 'Scheduled time',
+  'label.today_prefix':   'Today',
 
   // Card actions
   'action.share':      'Share',
   'action.pin':        'Pin',
+  'action.pinned':     'Pinned',
   'action.view_flights': 'View flights',
   'action.view_routes':  'View routes',
   'action.open_track':   'Open Track',
@@ -117,10 +125,18 @@ const ar: Dict = {
   'status.delayed':    'متأخرة',
   'status.cancelled':  'ملغاة',
   'status.unknown':    'غير معروف',
+  'status.checkin':    'تسجيل الوصول',
+  'status.boarding':   'الصعود',
+  'status.gate_closed':'أُغلقت البوابة',
+  'status.en_route':   'في الطريق',
+  'status.approaching':'تقترب',
+  'status.diverted':   'حُوِّلت',
   'label.scheduled_time': 'الموعد المجدول',
+  'label.today_prefix':   'اليوم',
 
   'action.share':      'مشاركة',
   'action.pin':        'تثبيت',
+  'action.pinned':     'مثبّتة',
   'action.view_flights': 'عرض الرحلات',
   'action.view_routes':  'عرض الخطوط',
   'action.open_track':   'فتح التتبّع',
@@ -153,6 +169,30 @@ const DICTS: Record<Locale, Dict> = { en, ar }
  */
 export function translate(locale: Locale, key: string): string {
   return DICTS[locale]?.[key] ?? DICTS.en[key] ?? key
+}
+
+/**
+ * The board's status vocabulary maps to dictionary keys here rather than in the page.
+ *
+ * The keys on the left are FR24's words as the board stores them; the right is ours. Keeping
+ * the mapping beside the dictionary is what lets the test below assert that every status the
+ * board can display has a translation — from the page it would be a second list to forget.
+ */
+export const STATUS_KEY: Record<string, string> = {
+  Scheduled:    'status.scheduled',
+  Expected:     'status.expected',
+  CheckIn:      'status.checkin',
+  Boarding:     'status.boarding',
+  GateClosed:   'status.gate_closed',
+  Departed:     'status.departed',
+  'En Route':   'status.en_route',
+  Approaching:  'status.approaching',
+  Arrived:      'status.arrived',
+  Landed:       'status.arrived',
+  Cancelled:    'status.cancelled',
+  Diverted:     'status.diverted',
+  Delayed:      'status.delayed',
+  Unknown:      'status.unknown',
 }
 
 /** Every key, for a coverage check in tests. */
