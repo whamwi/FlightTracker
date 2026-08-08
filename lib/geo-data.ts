@@ -35,6 +35,7 @@ export const airportOffset: Record<string, number>          = { DAM: 3, ALP: 3 }
  * below picks per call.
  */
 export const airportCityAr: Record<string, string> = { DAM: 'دمشق', ALP: 'حلب' }
+export const airportNameAr: Record<string, string> = { DAM: 'مطار دمشق الدولي', ALP: 'مطار حلب الدولي' }
 
 /**
  * The locale the page is currently rendering in.
@@ -62,6 +63,19 @@ export function airlineNameFor(iata: string | null | undefined, fallback: string
   return airlineByIata[iata]?.name_ar || fallback
 }
 
+/**
+ * The airport's own name for a button that means "go to this airport's board".
+ *
+ * Arabic gets مطار دمشق; English keeps the code, because DAM is what an English reader scans
+ * for and "Damascus International Airport" would not fit the button anyway.
+ */
+export function airportLabelFor(iata: string): string {
+  if (activeLocale !== 'ar') return iata
+  // The city, not the full official name — مطار دمشق reads on a button, مطار دمشق الدولي does not.
+  const city = airportCityAr[iata]
+  return city ? `مطار ${city}` : (airportNameAr[iata] ?? iata)
+}
+
 /** The city name in the active locale, falling back to English when no Arabic name exists. */
 export function cityFor(iata: string): string {
   if (activeLocale === 'ar') return airportCityAr[iata] ?? airportCity[iata] ?? iata
@@ -86,6 +100,7 @@ export async function loadGeoData(): Promise<void> {
     for (const r of rows) {
       if (r.city)        airportCity[r.iata]   = r.city
       if (r.city_ar)     airportCityAr[r.iata] = r.city_ar
+      if (r.name_ar)     airportNameAr[r.iata] = r.name_ar
       if (r.country_flag) airportFlag[r.iata]  = r.country_flag
       if (r.lat != null && r.lon != null) airportCoords[r.iata] = [r.lat, r.lon]
       if (r.utc_offset != null) airportOffset[r.iata] = Number(r.utc_offset)

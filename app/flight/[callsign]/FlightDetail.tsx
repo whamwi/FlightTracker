@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
-import { airportCity, cityFor, airlineNameFor, airportFlag as apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
+import { airportCity, cityFor, airlineNameFor, airportLabelFor, airportFlag as apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
 import { isSyrianAirport } from '@/lib/syria-airports'
 import { useT, useHref } from '@/components/LocaleProvider'
 import { STATUS_KEY } from '@/lib/i18n'
@@ -321,11 +321,13 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
           {/* 3. Route progress */}
           <div style={{ padding: '2px 14px 14px' }}>
 
-            {/* Elapsed / remaining — above the bar, live */}
-            {isEnRoute && elapsedMin != null && remainingMin != null && (
-              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                <span style={{ fontSize: 11, fontWeight: 600, color: C.muted }}>{durationLabel(elapsedMin)} {t('label.elapsed')}</span>
-                <span style={{ fontSize: 11, color: C.border }}>·</span>
+            {/*
+              Time remaining above the bar, time flown below it, both centred.
+              Two facts about the same journey read better on either side of the thing that
+              represents it than crowded onto one line with a separator.
+            */}
+            {isEnRoute && remainingMin != null && (
+              <div style={{ textAlign: 'center', marginBottom: 6 }}>
                 <span style={{ fontSize: 11, fontWeight: 700, color: C.forest }}>{durationLabel(remainingMin)} {t('label.left')}</span>
               </div>
             )}
@@ -368,12 +370,19 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
                 )}
               </div>
 
-              {/* ARR */}
-              <div style={{ flexShrink: 0, textAlign: 'right' }}>
+              {/* ARR — textAlign 'end', not 'right': the physical value pins the label to the
+                  left edge under RTL, which is the departure side. */}
+              <div style={{ flexShrink: 0, textAlign: 'end' }}>
                 <div style={{ fontSize: 12, color: C.mid, whiteSpace: 'nowrap' }}>{cityOf(flight.arr_iata)} {flagOf(flight.arr_iata)}</div>
                 <div style={{ fontSize: 10, color: C.muted, fontFamily: 'monospace' }}>{flight.arr_iata}</div>
               </div>
             </div>
+
+            {isEnRoute && elapsedMin != null && (
+              <div style={{ textAlign: 'center', marginTop: 6 }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: C.muted }}>{durationLabel(elapsedMin)} {t('label.elapsed')}</span>
+              </div>
+            )}
           </div>
 
           {/* 4. Times — bordered frame */}
@@ -388,7 +397,7 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
                 {!isCancelled && <DelayBadge min={depDelay} />}
               </div>
             </div>
-            <div style={{ flex: 1, textAlign: 'right' }}>
+            <div style={{ flex: 1, textAlign: 'end' }}>
               <div style={{ fontSize: 9, color: C.muted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 3 }}>{t('label.arrival')}</div>
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end' }}>
                 {!isCancelled && <DelayBadge min={arrDelay} />}
@@ -423,8 +432,12 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
             </Link>
             {/* Airport board */}
             <Link href={href('/board')} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: '#F7F5EC', color: C.ink, border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 8px', fontSize: 12, fontWeight: 600, textDecoration: 'none' }}>
-              {boardAirport}
-              <svg width={11} height={11} viewBox="0 0 14 14" fill="none"><path d="M4 7h7M8 4l3 3-3 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              <span style={{ whiteSpace: 'nowrap' }}>{airportLabelFor(boardAirport)}</span>
+              {/* Mirrored, not rotated: an arrow means "this way to the board", and that way
+                  is leftward in Arabic. */}
+              <svg width={11} height={11} viewBox="0 0 14 14" fill="none" style={{ transform: 'scaleX(var(--dir-flip, 1))' }}>
+                <path d="M4 7h7M8 4l3 3-3 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
             </Link>
           </div>
 

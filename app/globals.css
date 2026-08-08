@@ -58,6 +58,13 @@
 html[lang="ar"] p { line-height: 1.7; }
 
 /*
+ * Directional glyphs — arrows, chevrons — have to mirror with the script. CSS cannot flip an
+ * inline SVG on its own, so components read this and apply it as scaleX.
+ */
+html { --dir-flip: 1; }
+html[dir="rtl"] { --dir-flip: -1; }
+
+/*
  * Controls are sized by their padding, not by the text inside them — but the line box still
  * has to hold the glyphs.
  *
