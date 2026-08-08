@@ -11,9 +11,15 @@
  * Switching preserves the current path and query, so someone reading a specific flight in
  * English lands on that flight in Arabic rather than back at the board. Losing your place is
  * what makes people not use a language switch twice.
+ *
+ * Plain <a>, not next/link, and this is the whole reason the switch works at all. The two
+ * URLs are the same route once the middleware has rewritten them — /ar/board and /board both
+ * resolve to /board — so the App Router treated the change as a navigation within one segment
+ * and reused the cached layout. The address bar updated and nothing else did: the page stayed
+ * in Arabic with dir=rtl and every string as it was. Only a document load re-runs the layout,
+ * which is where lang, dir and the locale itself are decided.
  */
 
-import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { DEFAULT_LOCALE, LOCALES, type Locale } from '@/lib/i18n'
 import { useLocale } from './LocaleProvider'
@@ -59,9 +65,8 @@ export function LanguageToggle({ compact = false }: { compact?: boolean }) {
   const target = otherThan(active)
 
   return (
-    <Link
+    <a
       href={href(target)}
-      prefetch={false}
       hrefLang={target}
       aria-label={LABEL[target]}
       title={LABEL[target]}
@@ -79,7 +84,7 @@ export function LanguageToggle({ compact = false }: { compact?: boolean }) {
           {LABEL[target]}
         </span>
       )}
-    </Link>
+    </a>
   )
 }
 
@@ -100,10 +105,10 @@ export default function LanguageSwitch({ colour = '#A6A093' }: { colour?: string
               color: colour, opacity: 1,
             }}>{LABEL[l]}</span>
           ) : (
-            <Link href={href(l)} prefetch={false} hrefLang={l} style={{
+            <a href={href(l)} hrefLang={l} style={{
               fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, fontWeight: 500,
               color: colour, opacity: 0.7, textDecoration: 'none',
-            }}>{LABEL[l]}</Link>
+            }}>{LABEL[l]}</a>
           )}
         </span>
       ))}
