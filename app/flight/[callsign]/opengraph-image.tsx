@@ -71,6 +71,22 @@ const AIRLINE_AR: Record<string, string> = {
   SR: 'ساند للطيران',           DN: 'دان للطيران',
 }
 
+/**
+ * Word order for Satori, which has no bidi.
+ *
+ * It places words left to right whatever the script, so a multi-word Arabic string comes out
+ * back to front: الخطوط الجوية التركية rendered as التركية الجوية الخطوط. Every other Arabic
+ * string on this card is a single word, which is why only the airline name showed it.
+ *
+ * Tried first and discarded: `direction: 'rtl'` (Satori does not implement it) and
+ * `flexDirection: 'row-reverse'` (the words are one text run, not flex items). Reversing them
+ * here is a workaround for the renderer, not CSS — it must not spread to the pages, where the
+ * browser handles bidi correctly and this would break the text.
+ */
+function arWords(s: string): string {
+  return s.trim().split(/\s+/).reverse().join(' ')
+}
+
 /** Status words, matched the same loose way statusStyle matches them. */
 function statusAr(s: string): string {
   const t = s.toLowerCase()
@@ -283,17 +299,9 @@ export default async function Image(
               fontSize: 28, fontWeight: 700,
               color: C.forestMid,
               marginBottom: 36, letterSpacing: ar ? 'normal' : '-.2px',
-              /*
-               * Satori lays a flex container's words out as items, left to right, so a
-               * multi-word Arabic name came out reversed — الخطوط الجوية التركية rendered as
-               * التركية الجوية الخطوط. The single-word city names hid it.
-               *
-               * `direction: rtl` is the correct CSS and Satori ignores it; row-reverse is what
-               * actually reorders the items.
-               */
-              display: 'flex', flexDirection: ar ? 'row-reverse' : 'row',
+              display: 'flex',
             }}>
-              {ar ? (AIRLINE_AR[flight?.airline_iata ?? ''] ?? airline) : airline}
+              {ar ? arWords(AIRLINE_AR[flight?.airline_iata ?? ''] ?? airline) : airline}
             </div>
           ) : <div style={{ marginBottom: 36, display: 'flex' }} />}
 
