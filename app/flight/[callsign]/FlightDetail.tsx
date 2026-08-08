@@ -6,7 +6,7 @@ import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { airportCity, cityFor, airlineNameFor, airportLabelFor, airportFlag as apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
 import { isSyrianAirport } from '@/lib/syria-airports'
 import { useT, useHref, useLocale } from '@/components/LocaleProvider'
-import { STATUS_KEY } from '@/lib/i18n'
+import { STATUS_KEY, type Locale } from '@/lib/i18n'
 
 const cityOf = (iata: string) => cityFor(iata)
 const flagOf = (iata: string) => apFlag[iata] ?? ''
@@ -103,8 +103,14 @@ function fmtNum(raw: string) {
   return m ? `${m[1]} ${m[2]}` : raw
 }
 
-function durationLabel(min: number) {
+/*
+ * Arabic carries no English unit letters: an hour or more reads as 3:15, less than an hour
+ * as 45 د. The colon form only works once there is an hour to anchor it — 0:45 reads like a
+ * clock time rather than a length.
+ */
+function durationLabel(min: number, locale: Locale) {
   const h = Math.floor(min / 60), m = min % 60
+  if (locale === 'ar') return h > 0 ? `${h}:${String(m).padStart(2, '0')}` : `${m} د`
   return m > 0 ? `${h}h ${m}m` : `${h}h`
 }
 
@@ -131,10 +137,16 @@ function calcDelayMin(schedHHMM: string, actualISO: string, date: string) {
 }
 
 function DelayBadge({ min }: { min: number }) {
+  const locale = useLocale()
   if (Math.abs(min) < 2) return null
+  // marginInlineStart, not marginLeft: the badge follows the time, which is the left side in
+  // Arabic — the physical value pushed it away from the number it belongs to.
+  const unit = locale === 'ar' ? 'د' : 'm'
+  // dir="ltr" on the badge: it is one numeric token, and letting bidi resolve it in an RTL
+  // parent detached the sign to the far end — "+20د" came out as "د20+".
   return (
-    <span style={{ background: C.goldenBg, color: C.goldenTx, fontSize: 10, fontWeight: 700, padding: '2px 5px', borderRadius: 99, marginLeft: 5, lineHeight: 1.4 }}>
-      {min > 0 ? `+${min}m` : `${min}m`}
+    <span dir="ltr" style={{ background: C.goldenBg, color: C.goldenTx, fontSize: 10, fontWeight: 700, padding: '2px 5px', borderRadius: 99, marginInlineStart: 5, lineHeight: 1.4 }}>
+      {min > 0 ? `+${min}${unit}` : `${min}${unit}`}
     </span>
   )
 }
@@ -389,11 +401,11 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
             */}
             {isEnRoute && remainingMin != null && (
               <div style={{ textAlign: 'center', marginBottom: 2 }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: C.forest }}>{durationLabel(remainingMin)} {t('label.left')}</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: C.forest }}>{durationLabel(remainingMin, locale)} {t('label.left')}</span>
               </div>
             )}
             {isArrived && flight.duration_min > 0 && (
-              <div style={{ textAlign: 'center', color: C.muted, fontSize: 11, marginBottom: 2 }}>{t('label.flight_time')} {durationLabel(flight.duration_min)}</div>
+              <div style={{ textAlign: 'center', color: C.muted, fontSize: 11, marginBottom: 2 }}>{t('label.flight_time')} {durationLabel(flight.duration_min, locale)}</div>
             )}
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -447,7 +459,7 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
 
             {isEnRoute && elapsedMin != null && (
               <div style={{ textAlign: 'center', marginTop: 2 }}>
-                <span style={{ fontSize: 11, fontWeight: 600, color: C.muted }}>{durationLabel(elapsedMin)} {t('label.elapsed')}</span>
+                <span style={{ fontSize: 11, fontWeight: 600, color: C.muted }}>{durationLabel(elapsedMin, locale)} {t('label.elapsed')}</span>
               </div>
             )}
           </div>

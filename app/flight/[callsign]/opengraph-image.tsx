@@ -154,9 +154,12 @@ function isoToSyria(val: string | number | null | undefined): string {
   return `${String(Math.floor(syria / 60)).padStart(2, '0')}:${String(syria % 60).padStart(2, '0')}`
 }
 
-function fmtDur(min: number | null): string {
+function fmtDur(min: number | null, ar: boolean): string {
   if (!min || min <= 0) return ''
-  return `${Math.floor(min / 60)}h ${min % 60}m`
+  const h = Math.floor(min / 60), m = min % 60
+  // No English unit letters on the Arabic card — see durationLabel in FlightDetail.
+  if (ar) return h > 0 ? `${h}:${String(m).padStart(2, '0')}` : `${m} د`
+  return `${h}h ${m}m`
 }
 
 export default async function Image(
@@ -215,7 +218,7 @@ export default async function Image(
                || isoToSyria(estimatedArrUtc)
                || toSyria(flight?.arr_time_utc)
 
-  const dur     = fmtDur(flight?.duration_min ?? null)
+  const dur     = fmtDur(flight?.duration_min ?? null, ar)
   const sc      = statusStyle(status)
   const depCity = dep ? cityOf(dep, ar) : ''
   const arrCity = arr ? cityOf(arr, ar) : ''
@@ -337,7 +340,7 @@ export default async function Image(
                     marginLeft: 14, marginRight: 14, flexShrink: 0,
                   }}>
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                      <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z" fill="white" transform="rotate(90 12 12)" />
+                      <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z" fill="white" transform={`rotate(${ar ? -90 : 90} 12 12)`} />
                     </svg>
                   </div>
                   <div style={{ flex: 1, height: 1.5, background: C.border, display: 'flex' }} />

@@ -327,16 +327,20 @@ function StatusBadge({ status, view }: { status: string; view?: View }) {
 
 // ── Delay chip ────────────────────────────────────────────────────────────────
 function DelayChip({ min }: { min: number | null }) {
+  const locale = useLocale()
   if (!min || Math.abs(min) < 1) return null
   const isLate = min > 0
+  const unit   = locale === 'ar' ? 'د' : 'm'
+  // dir="ltr" on the badge: it is one numeric token, and letting bidi resolve it in an RTL
+  // parent detached the sign to the far end — "+20د" came out as "د20+".
   return (
-    <span style={{
+    <span dir="ltr" style={{
       fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, fontWeight: 600,
       padding: '3px 5px', borderRadius: 5, lineHeight: 1,
       background: isLate ? C.wineBg : '#E6EFEC',
       color: isLate ? C.wineText : '#002623',
     }}>
-      {isLate ? `+${min}m` : `${min}m`}
+      {isLate ? `+${min}${unit}` : `${min}${unit}`}
     </span>
   )
 }
