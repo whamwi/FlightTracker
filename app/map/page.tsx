@@ -250,16 +250,68 @@ function useInAirFlights() {
   const [loading, setLoading] = useState(true)
   const [geoReady, setGeoReady] = useState(false)
 
+  /*
+   * Two days, and the live feed as a second opinion.
+   *
+   * A flight that leaves Dubai at 19:30 lands in Damascus after midnight, so the board files
+   * it under tomorrow — the board is keyed on arrival date. Fetching today alone meant the
+   * panel could not see it at all while it was in the air, which is exactly when it matters.
+   *
+   * Its board row is no help either: those next-day rows carry no actual_dep_utc, so the
+   * status reads Scheduled or Delayed for a flight that is demonstrably flying. The map had
+   * it the whole time, because markers come from the airspace feed rather than the board —
+   * which is how this surfaced: an aircraft over the Gulf with no card beside it.
+   *
+   * So airborne is decided by either source: the board saying so, or the aircraft being in
+   * the feed. Arrived still wins over both, or a flight would linger after it lands.
+   */
   const load = useCallback(async () => {
-    const d = new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10)
+    const nowMs    = Date.now()
+    const dayAt    = (offsetMs: number) => new Date(nowMs + 3 * 3_600_000 + offsetMs).toISOString().slice(0, 10)
+    const [today, tomorrow] = [dayAt(0), dayAt(86_400_000)]
+
     try {
-      const res = await fetch(`/api/flightboard?date=${d}`)
-      if (!res.ok) return
-      const json = await res.json()
-      const inAir = ((json.flights ?? []) as InAirFlight[])
-        .filter(f => IN_AIR.has(panelEffectiveStatus(f)))
-        .sort((a, b) => etaMs(a) - etaMs(b))
-      setFlights(inAir)
+      const [boards, live] = await Promise.all([
+        Promise.all([today, tomorrow].map(d =>
+          fetch(`/api/flightboard?date=${d}`).then(r => (r.ok ? r.json() : null)).catch(() => null))),
+        // A failed feed must not empty the panel — it falls back to the board's own view.
+        fetch('/api/airspace').then(r => (r.ok ? r.json() : null)).catch(() => null),
+      ])
+
+      const airborne = new Set<string>(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ((live?.aircraft ?? []) as any[])
+          .map(a => String(a?.flight ?? '').trim().toUpperCase())
+          .filter(Boolean),
+      )
+
+      /*
+       * One row per flight. The same service appears on both days around midnight, and a
+       * delayed one appears twice on the same day — once as filed and once as revised. The
+       * row that knows the most wins: an actual departure first, then anything the board has
+       * moved off Scheduled.
+       */
+      // A plain object, not a Map: `Map` at this module's scope is the dynamically imported
+      // map component, so `new Map()` here builds a React element.
+      const rank = (f: InAirFlight) => (f.actual_dep_utc ? 2 : f.status && f.status !== 'Scheduled' ? 1 : 0)
+      const best: Record<string, InAirFlight> = {}
+      for (const board of boards) {
+        for (const f of ((board?.flights ?? []) as InAirFlight[])) {
+          const key  = `${f.iata_number}|${f.dep_iata}|${f.arr_iata}`
+          const prev = best[key]
+          if (!prev || rank(f) > rank(prev)) best[key] = f
+        }
+      }
+
+      const isFlying = (f: InAirFlight) => {
+        const status = panelEffectiveStatus(f)
+        if (status === 'Arrived' || status === 'Cancelled') return false
+        return IN_AIR.has(status)
+          || airborne.has((f.callsign ?? '').toUpperCase())
+          || airborne.has(f.iata_number.toUpperCase())
+      }
+
+      setFlights(Object.values(best).filter(isFlying).sort((a, b) => etaMs(a) - etaMs(b)))
     } finally {
       setLoading(false)
     }
