@@ -136,6 +136,22 @@ export async function GET(req: Request) {
   const arr_iata = searchParams.get('arr_iata')
   const save     = searchParams.get('save') === 'true'
   const num      = parseInt(searchParams.get('waypoints') ?? '20', 10)
+  /*
+   * Which corridor of this route this track represents.
+   *
+   * route_paths is keyed on (dep_iata, arr_iata, variant) and the write below merges on that
+   * key, so without this every import landed on variant 1 — and importing a second, genuinely
+   * different airway silently replaced the first instead of sitting beside it.
+   *
+   * Two carriers on JED→DAM are the case in point: flyadeal and Syrian fly within 5 km of one
+   * corridor while flynas is 210 km off it on every one of four days. That is not drift, it is
+   * a different airway, and both need to exist.
+   */
+  const variant  = parseInt(searchParams.get('variant') ?? '1', 10)
+
+  if (!Number.isInteger(variant) || variant < 1 || variant > 32) {
+    return NextResponse.json({ error: 'variant must be an integer 1–32' }, { status: 400 })
+  }
 
   if (!fr24_id || !dep_iata || !arr_iata) {
     return NextResponse.json(
@@ -247,6 +263,7 @@ export async function GET(req: Request) {
       body: JSON.stringify({
         dep_iata,
         arr_iata,
+        variant,
         waypoints,
         total_dist_nm,
         source_flights: [fr24_id],
@@ -265,6 +282,7 @@ export async function GET(req: Request) {
     fr24_id,
     dep_iata,
     arr_iata,
+    variant,
     raw_positions:   raw.length,
     airborne_count,
     total_dist_nm,
