@@ -34,17 +34,14 @@ export async function GET(req: Request) {
   const days = Math.min(Number(new URL(req.url).searchParams.get('days') ?? 30), 120)
   const from = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10)
 
-  const [dailyRes, paxRes, cacheRes] = await Promise.all([
+  const [dailyRes, cacheRes] = await Promise.all([
     fetch(`${SB_URL}/rest/v1/daily_stats?stat_date=gte.${from}&select=*&order=stat_date.asc`,
-      { headers: HEADERS, cache: 'no-store' }),
-    fetch(`${SB_URL}/rest/v1/monthly_pax?select=*&order=month.asc`,
       { headers: HEADERS, cache: 'no-store' }),
     fetch(`${SB_URL}/rest/v1/fr24_daily_cache?airport_iata=in.(DAM,ALP)&select=flight_date,airport_iata,arrivals,departures`,
       { headers: HEADERS, cache: 'no-store' }),
   ])
 
   const daily: Record<string, unknown>[] = dailyRes.ok ? await dailyRes.json() : []
-  const pax:   Record<string, unknown>[] = paxRes.ok   ? await paxRes.json()   : []
   const cache: { flight_date: string; airport_iata: string; arrivals: Leg[]; departures: Leg[] }[] =
     cacheRes.ok ? await cacheRes.json() : []
 
@@ -118,7 +115,6 @@ export async function GET(req: Request) {
     // Two different periods in one payload, labelled: the totals go back as far as the rollup
     // has been running, the rankings only as far as the cache still reaches.
     daily,
-    pax,
     overall,
     airlines,
     routes,
