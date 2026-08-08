@@ -71,6 +71,7 @@ const en: Dict = {
   'label.arrival':        'Arrival',
   'label.left':           'left',
   'label.elapsed':        'elapsed',
+  'label.total':          'total',
   'label.updated':        'Updated',
   'error.flight_not_found': 'Flight not found',
 
@@ -169,6 +170,7 @@ const ar: Dict = {
   'label.arrival':        'الوصول',
   'label.left':           'متبقٍّ',
   'label.elapsed':        'مضت',
+  'label.total':          'إجمالاً',
   'label.updated':        'آخر تحديث',
   'error.flight_not_found': 'لم يتم العثور على الرحلة',
 

@@ -327,12 +327,12 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
               represents it than crowded onto one line with a separator.
             */}
             {isEnRoute && remainingMin != null && (
-              <div style={{ textAlign: 'center', marginBottom: 6 }}>
+              <div style={{ textAlign: 'center', marginBottom: 2 }}>
                 <span style={{ fontSize: 11, fontWeight: 700, color: C.forest }}>{durationLabel(remainingMin)} {t('label.left')}</span>
               </div>
             )}
             {isArrived && flight.duration_min > 0 && (
-              <div style={{ textAlign: 'center', color: C.muted, fontSize: 11, marginBottom: 6 }}>{durationLabel(flight.duration_min)} total</div>
+              <div style={{ textAlign: 'center', color: C.muted, fontSize: 11, marginBottom: 2 }}>{durationLabel(flight.duration_min)} {t('label.total')}</div>
             )}
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -343,10 +343,10 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
               </div>
 
               {/* Bar + plane */}
-              <div style={{ flex: 1, position: 'relative', height: 1.5, background: C.track, borderRadius: 2 }}>
+              <div style={{ flex: 1, position: 'relative', height: 3, background: C.track, borderRadius: 3 }}>
                 {/* Blue fill */}
                 <div style={{
-                  position: 'absolute', left: 0, top: 0, bottom: 0, borderRadius: 2,
+                  position: 'absolute', insetInlineStart: 0, top: 0, bottom: 0, borderRadius: 3,
                   background: BLUE,
                   width: isArrived ? '100%' : isEnRoute && progressPct != null ? `${progressPct}%` : '0%',
                 }} />
@@ -379,7 +379,7 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
             </div>
 
             {isEnRoute && elapsedMin != null && (
-              <div style={{ textAlign: 'center', marginTop: 6 }}>
+              <div style={{ textAlign: 'center', marginTop: 2 }}>
                 <span style={{ fontSize: 11, fontWeight: 600, color: C.muted }}>{durationLabel(elapsedMin)} {t('label.elapsed')}</span>
               </div>
             )}
