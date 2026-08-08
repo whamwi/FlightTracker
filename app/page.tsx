@@ -39,6 +39,12 @@ export default async function Home({
    * somewhere else, and with a hardcoded path /ar landed on the English map. Anyone opening
    * the bare Arabic link — which is the one worth sharing — arrived in English.
    */
+  /*
+   * The language is decided in the middleware — the bare root resolves to ROOT_LOCALE there,
+   * /en and /ar say so outright. This route only carries it through the redirect, which is
+   * the one place it can be silently lost: with a hardcoded path, /ar landed on the English
+   * map and anyone opening the bare Arabic link arrived in the wrong language.
+   */
   const raw    = h.get('x-flysyria-locale')
   const locale = isLocale(raw) ? raw : DEFAULT_LOCALE
   const at     = (path: string) => (locale === DEFAULT_LOCALE ? path : `/${locale}${path}`)

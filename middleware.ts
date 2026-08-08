@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { LOCALES, DEFAULT_LOCALE } from '@/lib/i18n'
+import { LOCALES, DEFAULT_LOCALE, ROOT_LOCALE } from '@/lib/i18n'
 
 /**
  * Two jobs, in order: serve Arabic under /ar, and gate /admin behind Basic auth.
@@ -58,6 +58,23 @@ export function middleware(request: NextRequest) {
   }
 
   // ── Locale ────────────────────────────────────────────────────────────────────────
+  /*
+   * `/en` exists only as a root, and only because the root itself is no longer English.
+   *
+   * The bare `/` now sends a visitor to Arabic (see app/page.tsx), which is right for someone
+   * arriving from outside and wrong for the wordmark in the header: tapping the logo on an
+   * English page would have bounced the reader into Arabic. English pages point the logo here
+   * instead. There is deliberately no /en/board — English content stays unprefixed, so every
+   * link and search result that already exists keeps meaning what it meant.
+   */
+  if (pathname === '/en') {
+    const url = request.nextUrl.clone()
+    url.pathname = '/'
+    const headers = new Headers(request.headers)
+    headers.set(LOCALE_HEADER, 'en')
+    return NextResponse.rewrite(url, { request: { headers } })
+  }
+
   const prefix = AR_PREFIXES.find(p => pathname === p || pathname.startsWith(`${p}/`))
 
   if (prefix) {
@@ -71,8 +88,12 @@ export function middleware(request: NextRequest) {
     return NextResponse.rewrite(url, { request: { headers } })
   }
 
+  /*
+   * The bare root is the one URL with no language in it, so it is the one place a default has
+   * to be chosen rather than read. Everything else unprefixed is English, as it always was.
+   */
   const headers = new Headers(request.headers)
-  headers.set(LOCALE_HEADER, DEFAULT_LOCALE)
+  headers.set(LOCALE_HEADER, pathname === '/' ? ROOT_LOCALE : DEFAULT_LOCALE)
   return NextResponse.next({ request: { headers } })
 }
 

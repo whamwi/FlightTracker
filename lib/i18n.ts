@@ -15,6 +15,16 @@ export type Locale = typeof LOCALES[number]
 
 export const DEFAULT_LOCALE: Locale = 'en'
 
+/**
+ * What a visitor with no language in their URL gets.
+ *
+ * Distinct from DEFAULT_LOCALE, which is a fact about the URL scheme: English is the
+ * unprefixed one, so every link and search result that already exists keeps meaning what it
+ * meant. This is a fact about the audience — someone arriving at the bare root of a Syrian
+ * aviation site is more likely to want Arabic. Only the root consults it.
+ */
+export const ROOT_LOCALE: Locale = 'ar'
+
 export const isLocale = (v: string | null | undefined): v is Locale =>
   !!v && (LOCALES as readonly string[]).includes(v)
 

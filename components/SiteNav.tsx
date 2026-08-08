@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useT, useHref } from '@/components/LocaleProvider'
+import { useT, useHref, useLocale } from '@/components/LocaleProvider'
 import { useEffect, useState } from 'react'
 import Wordmark from './Wordmark'
 import { LanguageToggle } from './LanguageSwitch'
@@ -45,6 +45,7 @@ export default function SiteNav({ active, right }: { active: string; right?: Rea
   const t    = useT()
   // Every nav link has to carry the locale or the language resets on the first tap.
   const href = useHref()
+  const locale = useLocale()
   const [open, setOpen] = useState(false)
 
   useEffect(() => {
@@ -91,7 +92,9 @@ export default function SiteNav({ active, right }: { active: string; right?: Rea
       `}</style>
 
       <div className="sn-bar">
-        <Link href={href('/')} style={{ textDecoration: 'none' }} aria-label="FlySyria home">
+        {/* '/' is the router and it now lands on Arabic, so English pages take '/en' — see
+            the note in middleware.ts. */}
+        <Link href={locale === 'ar' ? '/ar' : '/en'} style={{ textDecoration: 'none' }} aria-label="FlySyria home">
           <Wordmark />
         </Link>
 
