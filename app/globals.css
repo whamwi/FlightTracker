@@ -46,11 +46,23 @@
 }
 
 /*
- * Arabic sits lower and reads smaller than Latin at the same nominal size, so it needs a
- * little more room to breathe. Scoped to the Arabic document only — the English pages are
- * untouched.
+ * Arabic wants more leading than Latin in running text — but this site has almost none.
+ *
+ * Setting it on <body> was a mistake: line-height inherits, and nearly every element here is a
+ * label, a chip or a button whose height is padding plus one line. At 1.7 the day tabs grew
+ * from 34px to 43px and the airport tabs to 40px, for text that is always one line. The
+ * controls looked inflated and the page lost its density.
+ *
+ * So it applies to paragraphs, which are the only places with more than one line to space.
  */
-html[lang="ar"] body { line-height: 1.7; }
+html[lang="ar"] p { line-height: 1.7; }
+
+/*
+ * Controls are sized by their padding, not by the text inside them. Pinning the line-height
+ * keeps an Arabic button the same height as its English counterpart, whatever the script.
+ */
+html[lang="ar"] button,
+html[lang="ar"] a { line-height: 1.15; }
 
 html, body, #__next { height: 100%; margin: 0; padding: 0; }
 
