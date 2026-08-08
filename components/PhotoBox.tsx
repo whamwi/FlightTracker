@@ -2,14 +2,21 @@
 
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import MapBox, { PANEL, actionBtn } from './MapBox'
+import MapBox, { PANEL } from './MapBox'
+import { useT, useLocale, useHref } from '@/components/LocaleProvider'
 
 /**
- * Rotating photo showcase for the Track map's control stack — same shell and size as the
- * video box, sitting directly under it.
+ * Rotating photo showcase for the Track map's control stack — same shell as the video box,
+ * sitting directly under it.
  *
  * Images are already rehosted in our own bucket by the Facebook sync, so these are plain
  * <img> swaps with no third-party player involved.
+ *
+ * Framed like the video rather than like a card: `bare`, so the picture reaches the panel's
+ * own edges, with the controls on the image instead of in a header above it. The header used
+ * to carry a title, a counter and three buttons stacked at one end — a second title bar over
+ * something the caption already names, and a row of chevrons that gave no clue which side of
+ * the picture they moved it towards.
  */
 
 const MAX_PHOTOS  = 30
@@ -28,6 +35,15 @@ type Photo = {
   thumb_url: string
 }
 
+/** Same overlay button as the video box's mute and expand controls. */
+const overlayBtn: React.CSSProperties = {
+  width: 28, height: 28, borderRadius: 8,
+  border: '1px solid rgba(255,255,255,.25)', background: 'rgba(0,0,0,.55)',
+  backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)',
+  color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+  flexShrink: 0, padding: 0,
+}
+
 const PhotoIcon = () => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={PANEL.forest} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <rect x="3" y="4" width="18" height="16" rx="2"/>
@@ -36,7 +52,16 @@ const PhotoIcon = () => (
   </svg>
 )
 
+const Chevron = ({ back }: { back: boolean }) => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <path d={back ? 'm15 18-6-6 6-6' : 'm9 18 6-6-6-6'}/>
+  </svg>
+)
+
 export default function PhotoBox({ open: openProp, onToggle, externalTrigger }: { open?: boolean; onToggle?: (next: boolean) => void; externalTrigger?: boolean } = {}) {
+  const t      = useT()
+  const href   = useHref()
+  const locale = useLocale()
   const [photos, setPhotos] = useState<Photo[]>([])
   const [idx,    setIdx]    = useState(0)
   const [open,   setOpen]   = useState(false)
@@ -92,56 +117,74 @@ export default function PhotoBox({ open: openProp, onToggle, externalTrigger }: 
 
   return (
     <MapBox
-      title="Authority Photos"
-      subtitle={
-        <>
-          {idx + 1} of {photos.length} · <Link href="/news" style={{ color: PANEL.forestMid, fontWeight: 600, textDecoration: 'none' }}>view all ↗</Link>
-        </>
-      }
-      pillLabel="Photos"
+      bare
+      title={t('map.authority_photos')}
+      pillLabel={t('news.tab_photos')}
       icon={<PhotoIcon />}
       onOpenChange={setOpen}
       open={openProp}
       onToggle={onToggle}
       externalTrigger={externalTrigger}
-      actions={
-        <>
-          <button onClick={() => step(-1)} style={actionBtn} title="Previous">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="m15 18-6-6 6-6"/>
-            </svg>
-          </button>
-          <button onClick={() => step(1)} style={actionBtn} title="Next">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="m9 18 6-6-6-6"/>
-            </svg>
-          </button>
-        </>
-      }
     >
-      {/* Hovering holds the current photo so a caption can actually be read. */}
-      <div onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
-        <a href={p.permalink} target="_blank" rel="noopener noreferrer"
-          title="View the original post" style={{ display: 'block', textDecoration: 'none' }}>
-          <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 9', background: PANEL.sunken }}>
-            <img
-              src={shown ?? src}
-              alt={p.caption?.slice(0, 120) ?? 'Aviation Authority photo'}
-              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
-            />
-          </div>
-        </a>
+      {(close) => (
+        /* Hovering holds the current photo so a caption can actually be read. */
+        <div onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
+          <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 9', background: '#000' }}>
+            <a href={p.permalink} target="_blank" rel="noopener noreferrer"
+              title={t('news.source')} style={{ display: 'block', position: 'absolute', inset: 0 }}>
+              <img
+                src={shown ?? src}
+                alt={p.caption?.slice(0, 120) ?? t('map.photo_alt')}
+                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+              />
+            </a>
 
-        <div style={{ padding: '8px 10px 10px', minHeight: 44 }}>
-          <p dir={rtl ? 'rtl' : 'ltr'} style={{
-            margin: 0, font: `500 11.5px/1.45 ${AR_FONT}`, color: PANEL.secondary,
-            textAlign: rtl ? 'right' : 'left',
-            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-          }}>
-            {p.caption ?? ''}
-          </p>
+            {/* Close where the video's controls sit, in the same button. */}
+            <button onClick={close} style={{ ...overlayBtn, position: 'absolute', right: 8, top: 8 }} title={t('action.close')}>✕</button>
+
+            {/*
+              One arrow against each edge, rather than both stacked in a corner: the side a
+              control sits on is the only thing that says which way it moves the picture.
+              Physical left and right — this steps through a stack of images, not a sentence,
+              and the chevron points the way the hand goes.
+            */}
+            {photos.length > 1 && (
+              <>
+                <button onClick={() => step(-1)} title={t('action.previous')}
+                  style={{ ...overlayBtn, position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)' }}>
+                  <Chevron back />
+                </button>
+                <button onClick={() => step(1)} title={t('action.next')}
+                  style={{ ...overlayBtn, position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)' }}>
+                  <Chevron back={false} />
+                </button>
+              </>
+            )}
+          </div>
+
+          {/* Caption under the picture, with the counter and the link to the full gallery. */}
+          <div style={{ padding: '9px 11px 10px' }}>
+            {p.caption && (
+              <p dir={rtl ? 'rtl' : 'ltr'} style={{
+                margin: 0, font: `500 11.5px/1.45 ${AR_FONT}`, color: PANEL.secondary,
+                textAlign: 'start',
+                display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+              }}>
+                {p.caption}
+              </p>
+            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: p.caption ? 7 : 0 }}>
+              <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: PANEL.muted }}>
+                {idx + 1} {t('label.of')} {photos.length}
+              </span>
+              <span style={{ flex: 1 }} />
+              <Link href={href('/news')} style={{ font: `600 10.5px/1 'Instrument Sans',system-ui`, color: PANEL.forestMid, textDecoration: 'none' }}>
+                {t('action.view_all')} {locale === 'ar' ? '↖' : '↗'}
+              </Link>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
     </MapBox>
   )
 }

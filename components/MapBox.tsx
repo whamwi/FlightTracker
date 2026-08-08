@@ -50,7 +50,11 @@ export default function MapBox({
   pillLabel: string
   icon:      ReactNode
   actions?:  ReactNode
-  children:  ReactNode
+  /**
+   * A render function instead of a node when the content needs to close the box itself —
+   * `bare` has no header, so there is no chrome left to hang a close button on.
+   */
+  children:  ReactNode | ((close: () => void) => ReactNode)
   onOpenChange?: (open: boolean) => void
   /**
    * The collapsed pill is this box's own open button. On phones the trigger lives in the
@@ -123,7 +127,7 @@ export default function MapBox({
   if (bare) {
     return (
       <div style={{ ...panelShell, width: 'min(308px, calc(88vw - 12px))', position: 'relative' }}>
-        {children}
+        {typeof children === 'function' ? children(() => toggle(false)) : children}
       </div>
     )
   }
@@ -161,7 +165,7 @@ export default function MapBox({
           borderRadius: 12,
           overflow: 'hidden',
         }}>
-          {children}
+          {typeof children === 'function' ? children(() => toggle(false)) : children}
         </div>
       </div>
     </div>
