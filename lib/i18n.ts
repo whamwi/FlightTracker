@@ -29,6 +29,7 @@ const en: Dict = {
   'nav.track':         'Track',
   // The pill on the board, distinct from the nav tab: it says what tapping it does.
   'nav.track_button':  'Track',
+  'nav.track_aria':    'Track flights on the live map',
   'nav.destinations':  'Destinations',
   'nav.airlines':      'Airlines',
   'nav.news':          'News',
@@ -120,7 +121,8 @@ const en: Dict = {
 const ar: Dict = {
   'nav.flights':       'الرحلات',
   'nav.track':         'تتبّع',
-  'nav.track_button':  'تابع على الخريطة',
+  'nav.track_button':  'تابع الرحلة',
+  'nav.track_aria':    'تابع الرحلات على الخريطة المباشرة',
   'nav.destinations':  'الوجهات',
   'nav.airlines':      'شركات الطيران',
   'nav.news':          'الأخبار',

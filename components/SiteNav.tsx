@@ -123,7 +123,7 @@ export default function SiteNav({ active, right }: { active: string; right?: Rea
           <Link
             href="/map"
             className="sn-track"
-            aria-label="Track flights on the live map"
+            aria-label={t('nav.track_aria')}
             style={{
               alignItems: 'center', gap: 6, height: 40, padding: '0 12px', marginInlineEnd: 8,
               borderRadius: 10, border: `1px solid ${C.forest}`, background: C.forest,
