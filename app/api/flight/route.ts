@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { fetchCallsignLookup, fetchIataToIcao, resolveCallsign } from '@/lib/callsign'
 import { SYRIA_AIRPORT_SET, SYRIA_AIRPORTS_CSV } from '@/lib/syria-airports'
 
 export const dynamic = 'force-dynamic'
@@ -138,6 +139,23 @@ export async function GET(req: Request) {
   if (!rawNum) return NextResponse.json({ ok: false, error: 'num required' }, { status: 400 })
   const num = rawNum.replace(/\s+/g, '').toUpperCase()
 
+  /*
+   * Every form this flight could be stored under.
+   *
+   * FR24 publishes some carriers by callsign rather than ticketed number — Fly Cham arrives as
+   * FYC744 when the booking, the board card and therefore the share link all say XH744. The
+   * board resolves that direction with resolveIata; this route only ever compared the raw
+   * string, so /flight/XH744 was "flight not found" in both languages while /flight/FYC744
+   * worked. Every Fly Cham share was broken.
+   */
+  const [lookup, iataToIcao] = await Promise.all([fetchCallsignLookup(), fetchIataToIcao()])
+  const aliases = new Set<string>([num])
+  const cs = resolveCallsign(num, lookup, iataToIcao)
+  if (cs) aliases.add(cs.toUpperCase())
+  for (const [k, v] of Object.entries(lookup.toIata)) {
+    if (v.toUpperCase() === num) aliases.add(k.toUpperCase())
+  }
+
   const syriaMs = Date.now() + 3 * 3_600_000
   const todayStr = new Date(syriaMs).toISOString().slice(0, 10)
   const reqDate  = searchParams.get('date')
@@ -173,7 +191,7 @@ export async function GET(req: Request) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         for (const raw of list as any[]) {
           const fNum = (raw.num ?? '').replace(/\s+/g, '').toUpperCase()
-          if (fNum !== num) continue
+          if (!aliases.has(fNum)) continue
           // arr_iata / dep_iata are often null in cache — infer from the row's airport
           const f = {
             ...raw,
@@ -206,7 +224,7 @@ export async function GET(req: Request) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             for (const f of (originRow.departures ?? []) as any[]) {
               const fNum = (f.num ?? '').replace(/\s+/g, '').toUpperCase()
-              if (fNum !== num) continue
+              if (!aliases.has(fNum)) continue
               const merged = {
                 ...bestRaw,
                 est_dep: f.est_dep ?? bestRaw.est_dep,

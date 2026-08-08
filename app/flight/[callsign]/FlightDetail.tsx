@@ -298,8 +298,11 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
       {notFound && !flight && (
         <div style={{ textAlign: 'center', paddingTop: 60 }}>
           <div style={{ fontSize: 18, fontWeight: 700, color: C.ink, marginBottom: 8 }}>{t('error.flight_not_found')}</div>
-          <div style={{ fontSize: 13, color: C.muted }}>No data for {fmtNum(callsign)} today or yesterday</div>
-          <Link href="/board" style={{ display: 'inline-block', marginTop: 20, fontSize: 13, fontWeight: 600, color: C.forest, textDecoration: 'none' }}>← All flights</Link>
+          <div style={{ fontSize: 13, color: C.muted }}>{t('error.no_data_for')} {fmtNum(callsign)} {t('error.today_or_yesterday')}</div>
+          {/* The arrow mirrors with the script — see --dir-flip. */}
+          <Link href={href('/board')} style={{ display: 'inline-block', marginTop: 20, fontSize: 13, fontWeight: 600, color: C.forest, textDecoration: 'none' }}>
+            <span style={{ display: 'inline-block', transform: 'scaleX(var(--dir-flip, 1))' }}>←</span> {t('action.all_flights')}
+          </Link>
         </div>
       )}
 

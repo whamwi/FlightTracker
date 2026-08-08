@@ -74,6 +74,9 @@ const en: Dict = {
   'label.total':          'total',
   'label.updated':        'Updated',
   'error.flight_not_found': 'Flight not found',
+  'error.no_data_for':      'No data for',
+  'error.today_or_yesterday': 'today or yesterday',
+  'action.all_flights':     'All flights',
 
   // Card actions
   'action.share':      'Share',
@@ -173,6 +176,9 @@ const ar: Dict = {
   'label.total':          'إجمالاً',
   'label.updated':        'آخر تحديث',
   'error.flight_not_found': 'لم يتم العثور على الرحلة',
+  'error.no_data_for':      'لا توجد بيانات للرحلة',
+  'error.today_or_yesterday': 'اليوم أو أمس',
+  'action.all_flights':     'كل الرحلات',
 
   'action.share':      'مشاركة',
   'action.pin':        'تثبيت',
