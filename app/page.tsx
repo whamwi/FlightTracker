@@ -1,6 +1,7 @@
 import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { userAgent } from 'next/server'
+import { DEFAULT_LOCALE, isLocale } from '@/lib/i18n'
 
 /**
  * The root is a router, not a page: phones get the board, everything else gets the map.
@@ -29,9 +30,24 @@ export default async function Home({
   // Links shared before the map moved point at /?flight=XX123, and they should still open
   // the map on any device — someone tapping a flight link wants that flight, not a schedule.
   const sp = await searchParams
-  const flight = typeof sp?.flight === 'string' ? sp.flight : null
-  if (flight) redirect(`/map?flight=${encodeURIComponent(flight)}`)
+  const h  = await headers()
 
-  const { device } = userAgent({ headers: await headers() })
-  redirect(device.type === 'mobile' ? '/board' : '/map')
+  /*
+   * Carry the language through the redirect.
+   *
+   * This route is the one place a locale can be silently lost: it sends every visitor
+   * somewhere else, and with a hardcoded path /ar landed on the English map. Anyone opening
+   * the bare Arabic link — which is the one worth sharing — arrived in English.
+   */
+  const raw    = h.get('x-flysyria-locale')
+  const locale = isLocale(raw) ? raw : DEFAULT_LOCALE
+  const at     = (path: string) => (locale === DEFAULT_LOCALE ? path : `/${locale}${path}`)
+
+  // Links shared before the map moved point at /?flight=XX123, and they should still open
+  // the map on any device — someone tapping a flight link wants that flight, not a schedule.
+  const flight = typeof sp?.flight === 'string' ? sp.flight : null
+  if (flight) redirect(at(`/map?flight=${encodeURIComponent(flight)}`))
+
+  const { device } = userAgent({ headers: h })
+  redirect(at(device.type === 'mobile' ? '/board' : '/map'))
 }

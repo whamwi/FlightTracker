@@ -1,5 +1,8 @@
 import { Analytics } from '@vercel/analytics/next'
+import { headers } from 'next/headers'
 import ErrorReporter from '@/components/ErrorReporter'
+import { LocaleProvider } from '@/components/LocaleProvider'
+import { DEFAULT_LOCALE, dirOf, isLocale } from '@/lib/i18n'
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
@@ -31,16 +34,28 @@ export const metadata: Metadata = {
   },
 }
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  /*
+   * Set on every request by the middleware, from the /ar path prefix. Read here rather than in
+   * the pages because the pages are client components and cannot see request headers — and
+   * because lang and dir belong on <html>, which only this layout owns.
+   *
+   * dir is what does the actual mirroring work: the layout is flexbox with gap almost
+   * everywhere, and that reverses on its own once the document direction changes.
+   */
+  const h      = await headers()
+  const raw    = h.get('x-flysyria-locale')
+  const locale = isLocale(raw) ? raw : DEFAULT_LOCALE
+
   return (
-    <html lang="en">
+    <html lang={locale} dir={dirOf(locale)}>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
         <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
       </head>
       <body className="bg-gray-950 text-white">
-        {children}
+        <LocaleProvider locale={locale}>{children}</LocaleProvider>
         {/*
           Vercel Web Analytics. Cookieless and with no cross-site identifiers, so it needs no
           consent banner and adds nothing to the App Privacy disclosures — which matters with

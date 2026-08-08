@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { airportCity, airportFlag as _apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
 import SiteNav from '@/components/SiteNav'
+import LanguageSwitch from '@/components/LanguageSwitch'
 import { BOARD_AIRPORTS, type BoardAirport } from '@/lib/syria-airports'
 
 const city = (iata: string) => airportCity[iata] ?? iata
@@ -1221,7 +1222,7 @@ export default function BoardPage() {
             <span style={{ font: `500 11.5px/1 'Instrument Sans', system-ui`, color: C.muted }}>Damascus · Aleppo</span>
             <span style={{ font: `500 11.5px/1 'Instrument Sans', system-ui`, color: C.muted }}>Schedule data updated every 60s</span>
             <div style={{ flex: 1 }} />
-            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, fontWeight: 500, color: '#A6A093' }}>العربية · English</span>
+            <LanguageSwitch />
           </div>
       </div>{/* end ft-body */}
     </div>

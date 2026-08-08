@@ -1,6 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { LOCALES, DEFAULT_LOCALE } from '@/lib/i18n'
 
-export function middleware(request: NextRequest) {
+/**
+ * Two jobs, in order: serve Arabic under /ar, and gate /admin behind Basic auth.
+ *
+ * The locale is a path prefix rather than a cookie because the links have to survive being
+ * shared. WhatsApp is how this product spreads and search is how people find it, and a cookie
+ * toggle gives neither a shareable nor an indexable Arabic URL — everyone who opened a link
+ * would get whichever language their own browser had last chosen.
+ *
+ * /ar/board rewrites to /board, so there is exactly one copy of every page and no app/[locale]
+ * restructure. The locale travels as a request header the root layout reads; the URL the
+ * visitor sees keeps its prefix.
+ *
+ * English is unprefixed. There is no /en, so every link, share and search result that exists
+ * today keeps working untouched.
+ */
+
+const LOCALE_HEADER = 'x-flysyria-locale'
+const AR_PREFIXES   = LOCALES.filter(l => l !== DEFAULT_LOCALE).map(l => `/${l}`)
+
+function adminGate(request: NextRequest): NextResponse | null {
   const auth = request.headers.get('authorization')
 
   if (!auth?.startsWith('Basic ')) {
@@ -25,23 +45,47 @@ export function middleware(request: NextRequest) {
     })
   }
 
-  return NextResponse.next()
+  return null
 }
 
-// Debug routes are behind the same gate as admin. They were reachable unauthenticated in
-// production: /api/debug-live spends ~53 FR24 credits per call with no rate limit and
-// echoes the upstream URL back, so anyone who found it could drain the credit balance in a
-// loop. Protected rather than deleted — they are useful, they just should not be open.
-// `app/api/debug-*` is untracked, so these ship with the working tree on every deploy.
+export function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl
+
+  // ── Admin and debug: unchanged behaviour, just reached through one entry point now ──
+  if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')
+      || pathname.startsWith('/api/debug-')) {
+    return adminGate(request) ?? NextResponse.next()
+  }
+
+  // ── Locale ────────────────────────────────────────────────────────────────────────
+  const prefix = AR_PREFIXES.find(p => pathname === p || pathname.startsWith(`${p}/`))
+
+  if (prefix) {
+    const locale = prefix.slice(1)
+    const url    = request.nextUrl.clone()
+    // '/ar' alone is the root page, not an empty path.
+    url.pathname = pathname.slice(prefix.length) || '/'
+
+    const headers = new Headers(request.headers)
+    headers.set(LOCALE_HEADER, locale)
+    return NextResponse.rewrite(url, { request: { headers } })
+  }
+
+  const headers = new Headers(request.headers)
+  headers.set(LOCALE_HEADER, DEFAULT_LOCALE)
+  return NextResponse.next({ request: { headers } })
+}
+
 export const config = {
   matcher: [
-    '/admin/:path*',
-    '/api/admin/:path*',
-    '/api/debug-hex/:path*',
-    '/api/debug-live/:path*',
-    '/api/debug-summary/:path*',
-    '/api/debug-hex',
-    '/api/debug-live',
-    '/api/debug-summary',
+    /*
+     * Everything except static assets and the API.
+     *
+     * The API is excluded deliberately: /api/airspace is polled every few seconds by every
+     * open map, and running the middleware on it would add work to the hottest path in the
+     * product for a header no route handler reads. The admin API is matched by name below
+     * because that one does need the gate.
+     */
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:jpg|jpeg|png|webp|svg|ico|txt|xml|json)$|api/(?!admin|debug-)).*)',
   ],
 }

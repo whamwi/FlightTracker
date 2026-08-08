@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { airportCity, airportFlag as _apFlag, loadGeoData } from '@/lib/geo-data'
 import SiteNav from '@/components/SiteNav'
+import LanguageSwitch from '@/components/LanguageSwitch'
 import { BOARD_AIRPORTS, type BoardAirport } from '@/lib/syria-airports'
 
 // ── Palette ───────────────────────────────────────────────────────────────────
@@ -725,7 +726,7 @@ export default function DestinationsPage() {
           <span style={{ font: `500 11.5px/1 'Instrument Sans',system-ui`, color: C.muted }}>© 2026 FlySyria</span>
           <span style={{ font: `500 11.5px/1 'Instrument Sans',system-ui`, color: C.muted }}>Damascus · Aleppo</span>
           <div style={{ flex: 1 }} />
-          <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11.5, color: '#A6A093' }}>العربية · English</span>
+          <LanguageSwitch />
         </div>
       </div>
 
