@@ -485,7 +485,33 @@ async function fetchSignalFlights(): Promise<SignalFlight[]> {
 
 // ── Persist last known positions ───────────────────────────────────────────────
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function upsertPositions(aircraft: any[]): Promise<void> {
+/**
+ * A generous box around the Syria polygon, matching the cron's.
+ *
+ * One degree of margin, so an aircraft is already stored before it crosses the border and the
+ * fallback can draw it the moment it does.
+ */
+const STORE_MARGIN_DEG = 1.0
+const inStoreRegion = (lat: number, lon: number): boolean =>
+  Number.isFinite(lat) && Number.isFinite(lon)
+  && lat >= 32.0 - STORE_MARGIN_DEG && lat <= 37.7 + STORE_MARGIN_DEG
+  && lon >= 35.3 - STORE_MARGIN_DEG && lon <= 42.7 + STORE_MARGIN_DEG
+
+async function upsertPositions(aircraft: any[], ours: Set<string>): Promise<void> {
+  /*
+   * The same rule the poll cron applies, and for the same reason.
+   *
+   * This is the second writer into aircraft_last_seen, and when the cron was filtered this one
+   * was not — the comment further down even asserted it "already saw the unfiltered set, so
+   * aircraft_last_seen is unaffected", which was exactly backwards. Every request from every
+   * open map wrote the whole feed back, so the table refilled with Ryanair and KLM within
+   * hours of being cleaned out: 11,493 rows, 930 of them in ten minutes.
+   *
+   * Keep what could be drawn — inside the region, or a callsign the board knows.
+   */
+  aircraft = aircraft.filter(a =>
+    inStoreRegion(a.lat, a.lon) || ours.has((a.flight ?? '').trim().toUpperCase()))
+
   if (!aircraft.length) return
   const now = new Date().toISOString()
   const rows = aircraft.map(a => ({
@@ -781,6 +807,16 @@ export async function GET() {
     // callsign → board info
     for (const f of resolvedBoard) boardMap.set(f.callsign, f)
 
+    /*
+     * The callsigns the board knows, for the storage filter below.
+     *
+     * Taken from the resolved board rather than a fresh query: it is the same set, already
+     * fetched, and it is what "our flights, wherever they are" means on this request.
+     */
+    const boardCallsignSet = new Set<string>(
+      resolvedBoard.map(f => (f.callsign ?? '').trim().toUpperCase()).filter(Boolean),
+    )
+
     // Radius feeds — stale-while-revalidate.
     //
     // adsb.fi allows 1 request/second, so the circles are queried sequentially and a full
@@ -840,7 +876,7 @@ export async function GET() {
     // Nothing is persisted when the positions came out of the table: see fromStorage above.
     const [signalFlights] = await Promise.all([
       fetchSignalFlights(),
-      fromStorage ? Promise.resolve() : upsertPositions(visualAircraft),
+      fromStorage ? Promise.resolve() : upsertPositions(visualAircraft, boardCallsignSet),
     ] as const)
 
     // Annotate visual radius aircraft
@@ -1064,8 +1100,9 @@ export async function GET() {
     // everything outside the Syria polygon. Shipping the rest to every visitor — an
     // audience that is ~72% mobile — is bandwidth spent on markers that are never drawn,
     // and adding the Turkey circle would have made that materially worse. Board-matched
-    // aircraft are always kept, wherever they are. upsertPositions above already saw the
-    // unfiltered set, so aircraft_last_seen is unaffected.
+    // aircraft are always kept, wherever they are. upsertPositions above applies the same
+    // rule to what it stores — it used to store the unfiltered set, which quietly refilled
+    // aircraft_last_seen with the whole continent.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const visible = annotated.filter((a: any) => a.board_match || inSyria(a.lat, a.lon))
 
