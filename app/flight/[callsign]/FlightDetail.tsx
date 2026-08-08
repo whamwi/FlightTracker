@@ -393,7 +393,7 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
               </div>
             )}
             {isArrived && flight.duration_min > 0 && (
-              <div style={{ textAlign: 'center', color: C.muted, fontSize: 11, marginBottom: 2 }}>{durationLabel(flight.duration_min)} {t('label.total')}</div>
+              <div style={{ textAlign: 'center', color: C.muted, fontSize: 11, marginBottom: 2 }}>{t('label.flight_time')} {durationLabel(flight.duration_min)}</div>
             )}
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -419,7 +419,7 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
                   than at the front of the travelled one.
                 */}
                 {!isEnRoute && !isArrived && (
-                  <div style={{ position: 'absolute', top: '50%', left: locale === 'ar' ? undefined : -9, right: locale === 'ar' ? -9 : undefined, transform: 'translateY(-50%)', zIndex: 2 }}>
+                  <div style={{ position: 'absolute', top: '50%', insetInlineStart: -9, transform: 'translateY(-50%)', zIndex: 2 }}>
                     <PlanePin />
                   </div>
                 )}
@@ -429,9 +429,9 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
                     <PlanePin />
                   </div>
                 )}
-                {/* Arrived: plane centered on bar right edge */}
+                {/* Arrived: plane centered on the destination end of the bar */}
                 {isArrived && (
-                  <div style={{ position: 'absolute', top: '50%', right: -9, transform: 'translateY(-50%)', zIndex: 2 }}>
+                  <div style={{ position: 'absolute', top: '50%', insetInlineEnd: -9, transform: 'translateY(-50%)', zIndex: 2 }}>
                     <PlanePin />
                   </div>
                 )}
