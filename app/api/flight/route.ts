@@ -85,7 +85,19 @@ function effectiveStatusFor(f: any): { status: string; rank: number } {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildFlight(f: any, num: string, status: string, airlineMap: Record<string, { name: string; flag: string; icao: string }>, date: string) {
-  const airlineIata = f.airline_iata || PREFIX_TO_IATA[num.slice(0, 3)] || ''
+  /*
+   * The carrier code, from whichever form the number arrived in.
+   *
+   * PREFIX_TO_IATA is keyed on three-letter ICAO prefixes — FYC, SYR — which is what FR24
+   * publishes for the carriers that use callsigns. Now that XH744 resolves as well as FYC744,
+   * `num` can also be the two-character IATA form, and slice(0,3) of XH744 is "XH7", matching
+   * nothing. The code came back empty, the logo URL became /airlines/100/_100px.png, and the
+   * card showed a black square where Fly Cham's logo should be.
+   */
+  const airlineIata = f.airline_iata
+    || PREFIX_TO_IATA[num.slice(0, 3)]
+    || (/^[A-Z][A-Z0-9]\d/.test(num) ? num.slice(0, 2) : '')
+    || ''
   const al = airlineMap[airlineIata] ?? { name: f.airline ?? airlineIata, flag: '', icao: '' }
   const actualDep = resolveActualDep(f)
   const revisedArr = resolveRevisedArr(f)
