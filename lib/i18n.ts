@@ -167,6 +167,19 @@ const en: Dict = {
   'dowfull.wed': 'Wednesday','dowfull.thu': 'Thursday','dowfull.fri': 'Friday',
   'dowfull.sat': 'Saturday',
   'a11y.departs': 'departs',
+
+  // Airlines
+  'airlines.search':      'Search airlines or a city',
+  'airlines.search_aria': 'Search airlines',
+  'airlines.loading':     'Loading airlines…',
+  'airlines.no_match':    'No airline matches',
+  'airlines.none':        'No airlines found',
+  'airlines.from':        'From',
+  'airlines.to':          'To',
+  'airlines.flights':     'flights',
+  'region.all_airlines':  'All regions',
+  'dest.count_one':       'destination',
+  'action.website':       'Website',
 }
 
 const ar: Dict = {
@@ -230,7 +243,7 @@ const ar: Dict = {
   'action.pin':        'تثبيت',
   'action.pinned':     'مثبّتة',
   'action.view_flights': 'تفاصيل الرحلات',
-  'action.view_routes':  'عرض الخطوط',
+  'action.view_routes':  'تفاصيل الخطوط',
   'action.open_track':   'فتح التتبّع',
 
   'map.live':          'الخريطة المباشرة',
@@ -292,6 +305,18 @@ const ar: Dict = {
   'dowfull.wed': 'الأربعاء', 'dowfull.thu': 'الخميس',  'dowfull.fri': 'الجمعة',
   'dowfull.sat': 'السبت',
   'a11y.departs': 'تقلع',
+
+  'airlines.search':      'ابحث عن شركة طيران أو مدينة',
+  'airlines.search_aria': 'البحث في شركات الطيران',
+  'airlines.loading':     'جارٍ تحميل شركات الطيران…',
+  'airlines.no_match':    'لا توجد شركة طيران تطابق',
+  'airlines.none':        'لا توجد شركات طيران',
+  'airlines.from':        'من',
+  'airlines.to':          'إلى',
+  'airlines.flights':     'رحلات',
+  'region.all_airlines':  'كل الشركات',
+  'dest.count_one':       'وجهة',
+  'action.website':       'الموقع الإلكتروني',
 }
 
 const DICTS: Record<Locale, Dict> = { en, ar }

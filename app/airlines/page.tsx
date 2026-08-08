@@ -4,7 +4,8 @@ import { usePhotoUploadVisible } from '@/lib/ui-flags'
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
-import { airportCity, airportFlag as _apFlag, loadGeoData } from '@/lib/geo-data'
+import { cityFor, airlineNameFor, getActiveLocale, airportFlag as _apFlag, loadGeoData } from '@/lib/geo-data'
+import { useT, useLocale } from '@/components/LocaleProvider'
 import SiteNav from '@/components/SiteNav'
 import { BOARD_AIRPORTS, type BoardAirport } from '@/lib/syria-airports'
 
@@ -23,15 +24,17 @@ const C = {
   separator: '#E0DCCB',
 }
 
-const city = (iata: string) => airportCity[iata] ?? iata
+const city = (iata: string) => cityFor(iata)
 const apFlag = (iata: string) => _apFlag[iata] ?? ''
 
 const DOW_ORDER = ['sun','mon','tue','wed','thu','fri','sat'] as const
-const DOW_LABEL: Record<string,string> = { sun:'S', mon:'M', tue:'T', wed:'W', thu:'T', fri:'F', sat:'S' }
+const dowLabel = (d: string, t: (k: string) => string) => t(`dow.${d}`)
 
+// Arabic carries no English unit letters — see the twin in FlightDetail.
 function fmtDur(min: number) {
   if (!min) return ''
   const h = Math.floor(min / 60), m = min % 60
+  if (getActiveLocale() === 'ar') return h > 0 ? `${h}:${String(m).padStart(2, '0')}` : `${m} د`
   return m ? `${h}h ${m}m` : `${h}h`
 }
 
@@ -91,6 +94,8 @@ interface AirlineInfo {
   reverseRoutes: ScheduleRow[]
   dests: DestChip[]
   weeklyCount: number
+  /** Distinct `number|day` pairs, which is what weeklyCount is counted from. */
+  slots: Set<string>
   activeDays: Set<string>
   minDuration: number
 }
@@ -112,33 +117,38 @@ function AirlineLogo({ prefix, name, size = 22 }: { prefix: string; name: string
 
 
 // ── Airport hero ──────────────────────────────────────────────────────────────
-const AIRPORT_HERO: Record<string, { src: string; fallback: string; label: string }> = {
-  DAM: { src: '/dam-hero.jpg', fallback: 'linear-gradient(135deg,#2E4A3E 0%,#1A2E28 100%)', label: 'Damascus' },
-  ALP: { src: '/alp-hero.jpg', fallback: 'linear-gradient(135deg,#4A3828 0%,#2C2018 100%)', label: 'Aleppo'   },
+// The name comes from cityFor at render time, so it follows the language; only the artwork
+// belongs here.
+const AIRPORT_HERO: Record<string, { src: string; fallback: string }> = {
+  DAM: { src: '/dam-hero.jpg', fallback: 'linear-gradient(135deg,#2E4A3E 0%,#1A2E28 100%)' },
+  ALP: { src: '/alp-hero.jpg', fallback: 'linear-gradient(135deg,#4A3828 0%,#2C2018 100%)' },
   // No photo yet — the img's onError drops to the gradient. Without an entry the `?? DAM`
   // fallback below showed Damascus's photo and name under the Deir ez-Zor tab.
-  DEZ: { src: '/dez-hero.jpg', fallback: 'linear-gradient(135deg,#3A4436 0%,#1F261C 100%)', label: 'Deir ez-Zor' },
+  DEZ: { src: '/dez-hero.jpg', fallback: 'linear-gradient(135deg,#3A4436 0%,#1F261C 100%)' },
 }
 function AirportHero({ airport, totalAirlines, totalFlights }: { airport: string; totalAirlines: number; totalFlights: number }) {
+  const t   = useT()
   const cfg = AIRPORT_HERO[airport] ?? AIRPORT_HERO.DAM
+  const label = city(airport)
   const [imgFailed, setImgFailed] = useState(false)
   useEffect(() => { setImgFailed(false) }, [airport])
   const effectiveSrc = !imgFailed ? cfg.src : null
   return (
     <div style={{ position: 'relative', borderRadius: 16, overflow: 'hidden', background: cfg.fallback, height: '100%' }}>
       {effectiveSrc && (
-        <img key={effectiveSrc} src={effectiveSrc} alt={cfg.label} onError={() => setImgFailed(true)}
+        <img key={effectiveSrc} src={effectiveSrc} alt={label} onError={() => setImgFailed(true)}
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center' }} />
       )}
       <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,.55) 0%, rgba(0,0,0,.1) 50%, transparent 100%)' }} />
-      <div style={{ position: 'absolute', left: 18, bottom: 16, display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <span style={{ font: `700 22px/1 'Instrument Sans',system-ui`, color: '#fff', letterSpacing: '-.02em', textShadow: '0 1px 8px rgba(0,0,0,.4)' }}>{cfg.label}</span>
+      <div style={{ position: 'absolute', insetInlineStart: 18, bottom: 16, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <span style={{ font: `700 22px/1 'Instrument Sans',system-ui`, color: '#fff', letterSpacing: '-.02em', textShadow: '0 1px 8px rgba(0,0,0,.4)' }}>{label}</span>
         <div style={{ display: 'flex', gap: 8 }}>
-          {totalAirlines > 0 && <span style={{ font: `600 12px/1 'Instrument Sans',system-ui`, color: 'rgba(255,255,255,.85)' }}>{totalAirlines} airlines</span>}
-          {totalFlights > 0 && <span style={{ font: `600 12px/1 'Instrument Sans',system-ui`, color: 'rgba(255,255,255,.6)' }}>· {totalFlights} flights/week</span>}
+          {totalAirlines > 0 && <span style={{ font: `600 12px/1 'Instrument Sans',system-ui`, color: 'rgba(255,255,255,.85)' }}>{totalAirlines} {t('airlines.count')}</span>}
+          {totalFlights > 0 && <span style={{ font: `600 12px/1 'Instrument Sans',system-ui`, color: 'rgba(255,255,255,.6)' }}>· {totalFlights} {t('airlines.per_week')}</span>}
         </div>
       </div>
-      <div style={{ position: 'absolute', right: 14, top: 14 }}>
+      {/* IATA badge, on the far side from the name */}
+      <div style={{ position: 'absolute', insetInlineEnd: 14, top: 14 }}>
         <div style={{ padding: '5px 10px', borderRadius: 8, background: 'rgba(0,0,0,.35)', backdropFilter: 'blur(6px)' }}>
           <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, fontWeight: 700, color: '#fff', letterSpacing: '.08em' }}>{airport}</span>
         </div>
@@ -158,9 +168,12 @@ function AirportHero({ airport, totalAirlines, totalFlights }: { airport: string
  * Instagram would also open the routes panel behind it.
  */
 function AirlineLinks({ links }: { links?: AirlineLinks }) {
+  const t = useT()
   if (!links) return null
+  // Facebook and Instagram are the products' own names and stay as they are; only the generic
+  // word is translated.
   const items = [
-    { href: links.website,   label: 'Website',
+    { href: links.website,   label: t('action.website'),
       path: <><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18"/></> },
     { href: links.facebook,  label: 'Facebook',
       path: <path d="M14 8h2V5h-2a4 4 0 0 0-4 4v2H8v3h2v7h3v-7h2.2l.8-3H13V9a1 1 0 0 1 1-1z"/> },
@@ -187,6 +200,7 @@ function AirlineLinks({ links }: { links?: AirlineLinks }) {
 function AirlineCard({ info, links, onView, imageUrl, onImageUploaded }: {
   info: AirlineInfo; links?: AirlineLinks; onView: () => void; imageUrl?: string; onImageUploaded: (prefix: string, url: string) => void
 }) {
+  const t = useT()
   const badge = info.weeklyCount >= 14 ? C.forest : C.gold
   const fileRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
@@ -236,7 +250,7 @@ function AirlineCard({ info, links, onView, imageUrl, onImageUploaded }: {
         {/* Upload button bottom-right */}
         {photoUploadVisible && (<>
         <button onClick={() => fileRef.current?.click()} disabled={uploading}
-          style={{ position: 'absolute', right: 10, bottom: 10, display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 8, background: 'rgba(0,0,0,.38)', backdropFilter: 'blur(8px)', border: '1px solid rgba(255,255,255,.18)', cursor: 'pointer', color: '#fff', font: `600 11px/1 'Instrument Sans',system-ui`, opacity: uploading ? .6 : 1 }}>
+          style={{ position: 'absolute', insetInlineEnd: 10, bottom: 10, display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 8, background: 'rgba(0,0,0,.38)', backdropFilter: 'blur(8px)', border: '1px solid rgba(255,255,255,.18)', cursor: 'pointer', color: '#fff', font: `600 11px/1 'Instrument Sans',system-ui`, opacity: uploading ? .6 : 1 }}>
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
           {uploading ? 'Uploading…' : 'Photo'}
         </button>
@@ -254,7 +268,7 @@ function AirlineCard({ info, links, onView, imageUrl, onImageUploaded }: {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
             <AirlineLogo prefix={info.prefix} name={info.name} size={32} />
-            <span style={{ font: `700 15px/1.2 'Instrument Sans',system-ui`, color: C.ink, letterSpacing: '-.01em' }}>{info.name}</span>
+            <span style={{ font: `700 15px/1.2 'Instrument Sans',system-ui`, color: C.ink, letterSpacing: '-.01em' }}>{airlineNameFor(info.prefix, info.name)}</span>
             <AirlineLinks links={links} />
           </div>
           {info.minDuration > 0 && <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: C.muted, flexShrink: 0 }}>{fmtDur(info.minDuration)}</span>}
@@ -268,20 +282,20 @@ function AirlineCard({ info, links, onView, imageUrl, onImageUploaded }: {
             </div>
           ))}
           {info.dests.length > 5 && <span style={{ fontSize: 10, color: C.muted, alignSelf: 'center' }}>+{info.dests.length - 5}</span>}
-          <div style={{ padding: '4px 9px', borderRadius: 999, background: badge, marginLeft: 'auto' }}>
-            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: '#fff' }}>{info.weeklyCount} / wk</span>
+          <div style={{ padding: '4px 9px', borderRadius: 999, background: badge, marginInlineStart: 'auto' }}>
+            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: '#fff' }}>{info.weeklyCount} {t('dest.per_week_short')}</span>
           </div>
         </div>
         <div style={{ borderTop: `1px dashed ${C.separator}`, paddingTop: 11, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', gap: 3 }}>
             {DOW_ORDER.map(d => (
               <span key={d} style={{ width: 20, height: 20, borderRadius: 99, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700, background: info.activeDays.has(d) ? C.forest : '#E8E5DC', color: info.activeDays.has(d) ? '#fff' : C.muted }}>
-                {DOW_LABEL[d]}
+                {dowLabel(d, t)}
               </span>
             ))}
           </div>
           <button onClick={onView} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 13px', borderRadius: 9, background: C.forest, cursor: 'pointer', border: 'none' }}>
-            <span style={{ font: `600 12px/1 'Instrument Sans',system-ui`, color: '#fff' }}>View routes</span>
+            <span style={{ font: `600 12px/1 'Instrument Sans',system-ui`, color: '#fff' }}>{t('action.view_routes')}</span>
           </button>
         </div>
       </div>
@@ -291,6 +305,9 @@ function AirlineCard({ info, links, onView, imageUrl, onImageUploaded }: {
 
 // ── Detail panel ──────────────────────────────────────────────────────────────
 function AirlineSheet({ info, airport, onClose, imageUrl }: { info: AirlineInfo | null; airport: string; onClose: () => void; imageUrl?: string }) {
+  const t      = useT()
+  const locale = useLocale()
+  const rtl    = locale === 'ar'
   const [dir, setDir] = useState<'from'|'to'>('from')
   const [isMobile, setIsMobile] = useState(false)
   useEffect(() => {
@@ -379,12 +396,14 @@ function AirlineSheet({ info, airport, onClose, imageUrl }: { info: AirlineInfo 
     transition: 'transform .3s ease-out',
     boxShadow: '0 -20px 48px -12px rgba(22,22,22,.28)',
   } : {
-    position: 'fixed', top: 0, right: 0, bottom: 0, zIndex: 50,
-    width: 'min(440px, 100vw)', background: C.surface, borderRadius: '20px 0 0 20px',
+    position: 'fixed', top: 0, insetInlineEnd: 0, bottom: 0, zIndex: 50,
+    width: 'min(440px, 100vw)', background: C.surface,
+    borderRadius: rtl ? '0 20px 20px 0' : '20px 0 0 20px',
     display: 'flex', flexDirection: 'column',
-    transform: info ? 'translateX(0)' : 'translateX(100%)',
+    // translateX is physical, so the hidden position has to be told which way is off-screen.
+    transform: info ? 'translateX(0)' : `translateX(${rtl ? '-100%' : '100%'})`,
     transition: 'transform .3s ease-out',
-    boxShadow: '-20px 0 48px -12px rgba(22,22,22,.28)',
+    boxShadow: `${rtl ? '' : '-'}20px 0 48px -12px rgba(22,22,22,.28)`,
   }
 
   return (
@@ -397,16 +416,16 @@ function AirlineSheet({ info, airport, onClose, imageUrl }: { info: AirlineInfo 
             <div style={{ position: 'relative', height: 180, background: airlineBg(info.prefix), flexShrink: 0, overflow: 'hidden' }}>
               {imageUrl && <img src={imageUrl} alt={info.name} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />}
               <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,.65) 0%, rgba(0,0,0,.1) 55%, transparent 100%)' }} />
-              <button onClick={onClose} style={{ position: 'absolute', right: 12, top: 12, width: 32, height: 32, borderRadius: 99, background: 'rgba(0,0,0,.35)', backdropFilter: 'blur(8px)', border: '1px solid rgba(255,255,255,.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#fff', font: `600 15px/1 'Instrument Sans',system-ui` }}>✕</button>
-              <div style={{ position: 'absolute', left: 16, bottom: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button onClick={onClose} style={{ position: 'absolute', insetInlineEnd: 12, top: 12, width: 32, height: 32, borderRadius: 99, background: 'rgba(0,0,0,.35)', backdropFilter: 'blur(8px)', border: '1px solid rgba(255,255,255,.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#fff', font: `600 15px/1 'Instrument Sans',system-ui` }}>✕</button>
+              <div style={{ position: 'absolute', insetInlineStart: 16, bottom: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
                 <AirlineLogo prefix={info.prefix} name={info.name} size={44} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
-                    <span style={{ font: `700 19px/1.1 'Instrument Sans',system-ui`, color: '#fff', letterSpacing: '-.015em', textShadow: '0 1px 6px rgba(0,0,0,.4)' }}>{info.name}</span>
+                    <span style={{ font: `700 19px/1.1 'Instrument Sans',system-ui`, color: '#fff', letterSpacing: '-.015em', textShadow: '0 1px 6px rgba(0,0,0,.4)' }}>{airlineNameFor(info.prefix, info.name)}</span>
                     <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,.65)', letterSpacing: '.06em' }}>{info.prefix}</span>
                   </div>
                   <span style={{ font: `500 11.5px/1 'Instrument Sans',system-ui`, color: 'rgba(255,255,255,.75)' }}>
-                    {info.weeklyCount} flights/week · {info.dests.length} destination{info.dests.length !== 1 ? 's' : ''}
+                    {info.weeklyCount} {t('airlines.per_week')} · {info.dests.length} {t(info.dests.length === 1 ? 'dest.count_one' : 'dest.count')}
                   </span>
                 </div>
               </div>
@@ -418,7 +437,7 @@ function AirlineSheet({ info, airport, onClose, imageUrl }: { info: AirlineInfo 
                 <div style={{ display: 'flex', background: '#E4E1D2', borderRadius: 11, padding: 3, gap: 3 }}>
                   {(['from','to'] as const).map(d => (
                     <button key={d} onClick={() => setDir(d)} style={{ flex: 1, padding: '8px 6px', borderRadius: 9, border: 'none', cursor: 'pointer', font: `${dir === d ? 700 : 600} 12px/1.2 'Instrument Sans',system-ui`, background: dir === d ? C.ink : 'transparent', color: dir === d ? '#fff' : C.muted, transition: 'all .15s' }}>
-                      {d === 'from' ? `From ${airportLabel}` : `To ${airportLabel}`}
+                      {`${t(d === 'from' ? 'airlines.from' : 'airlines.to')} ${airportLabel}`}
                     </button>
                   ))}
                 </div>
@@ -436,8 +455,8 @@ function AirlineSheet({ info, airport, onClose, imageUrl }: { info: AirlineInfo 
                     <span style={{ font: `700 15px/1 'Instrument Sans',system-ui`, color: C.ink }}>{city(g.iata)}</span>
                     <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: C.muted, letterSpacing: '.06em' }}>{g.iata}</span>
                     {g.flights.length > 1 && (
-                      <span style={{ font: `600 11px/1 'Instrument Sans',system-ui`, color: C.muted, marginLeft: 'auto' }}>
-                        {g.flights.length} flights
+                      <span style={{ font: `600 11px/1 'Instrument Sans',system-ui`, color: C.muted, marginInlineStart: 'auto' }}>
+                        {g.flights.length} {t('airlines.flights')}
                       </span>
                     )}
                   </div>
@@ -456,13 +475,13 @@ function AirlineSheet({ info, airport, onClose, imageUrl }: { info: AirlineInfo 
                                 be quietly wrong on most of them. */}
                             {f.varies && (
                               <div style={{ font: `500 10.5px/1.4 'Instrument Sans',system-ui`, color: C.muted, marginTop: 2 }}>
-                                {picked ? 'time for the selected day' : 'time varies by day — tap a day'}
+                                {t(picked ? 'dest.time_for_day' : 'dest.time_varies')}
                               </div>
                             )}
                           </div>
                           <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', gap: 5 }}>
                             <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 15, fontWeight: 700, color: C.ink }}>{shown.dep}</span>
-                            <span style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>→</span>
+                            <span style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>{rtl ? '←' : '→'}</span>
                             <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 15, fontWeight: 700, color: C.ink }}>{shown.arr}</span>
                           </div>
                         </div>
@@ -476,7 +495,7 @@ function AirlineSheet({ info, airport, onClose, imageUrl }: { info: AirlineInfo 
                                   key={d}
                                   disabled={!active}
                                   aria-pressed={on}
-                                  aria-label={active ? `${f.num} on ${d}, departs ${f.byDay[d]?.dep}` : undefined}
+                                  aria-label={active ? `${f.num} — ${t(`dowfull.${d}`)} — ${t('a11y.departs')} ${f.byDay[d]?.dep}` : undefined}
                                   onClick={() => setPickedDay(p => ({ ...p, [key]: p[key] === d ? '' : d }))}
                                   style={{
                                     // Gold for the selected day. The chips run forest for
@@ -497,7 +516,7 @@ function AirlineSheet({ info, airport, onClose, imageUrl }: { info: AirlineInfo 
                                     cursor: active ? 'pointer' : 'default',
                                   }}
                                 >
-                                  {DOW_LABEL[d]}
+                                  {dowLabel(d, t)}
                                 </button>
                               )
                             })}
@@ -509,7 +528,7 @@ function AirlineSheet({ info, airport, onClose, imageUrl }: { info: AirlineInfo 
                 </div>
               ))}
               {flights.length === 0 && (
-                <div style={{ padding: '32px 0', textAlign: 'center', color: C.muted, font: `500 13px/1.5 'Instrument Sans',system-ui` }}>No scheduled flights found</div>
+                <div style={{ padding: '32px 0', textAlign: 'center', color: C.muted, font: `500 13px/1.5 'Instrument Sans',system-ui` }}>{t('dest.no_flights')}</div>
               )}
             </div>
           </>
@@ -521,6 +540,7 @@ function AirlineSheet({ info, airport, onClose, imageUrl }: { info: AirlineInfo 
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function AirlinesPage() {
+  const t = useT()
   const [rows, setRows]             = useState<ScheduleRow[]>([])
   const [loading, setLoading]       = useState(true)
   const [airport, setAirport]       = useState<BoardAirport>('DAM')
@@ -571,13 +591,12 @@ export default function AirlinesPage() {
     for (const r of rows) {
       const prefix = r.airline_iata || r.iata_number.slice(0, 2)
       if (!map.has(prefix)) {
-        map.set(prefix, { prefix, name: r.airline_name, flag: r.country_flag, region: AIRLINE_REGION[prefix] ?? 'gulf', routes: [], reverseRoutes: [], dests: [], weeklyCount: 0, activeDays: new Set(), minDuration: 0 })
+        map.set(prefix, { prefix, name: r.airline_name, flag: r.country_flag, region: AIRLINE_REGION[prefix] ?? 'gulf', routes: [], reverseRoutes: [], dests: [], weeklyCount: 0, slots: new Set(), activeDays: new Set(), minDuration: 0 })
       }
       const info = map.get(prefix)!
       if (r.dep_iata === airport) {
         info.routes.push(r)
-        info.weeklyCount += r.days_of_week.length
-        for (const d of r.days_of_week) info.activeDays.add(d)
+        for (const d of r.days_of_week) { info.slots.add(`${r.iata_number}|${d}`); info.activeDays.add(d) }
         if (!info.dests.find(d => d.iata === r.arr_iata)) {
           info.dests.push({ iata: r.arr_iata, name: city(r.arr_iata), flag: apFlag(r.arr_iata) })
         }
@@ -587,6 +606,7 @@ export default function AirlinesPage() {
       }
     }
     return Array.from(map.values())
+      .map(a => ({ ...a, weeklyCount: a.slots.size }))
       .filter(a => a.routes.length > 0)
       .sort((a, b) => b.weeklyCount - a.weeklyCount || a.name.localeCompare(b.name))
   }, [rows, airport])
@@ -619,12 +639,12 @@ export default function AirlinesPage() {
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Search airlines or a city"
-            aria-label="Search airlines"
+            placeholder={t('airlines.search')}
+            aria-label={t('airlines.search_aria')}
             style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', font: `500 12.5px/1 'Instrument Sans',system-ui`, color: C.ink }}
           />
           {search && (
-            <button onClick={() => setSearch('')} aria-label="Clear search"
+            <button onClick={() => setSearch('')} aria-label={t('action.clear_search')}
               style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: C.muted, font: `600 15px/1 'Instrument Sans',system-ui`, padding: 0 }}>×</button>
           )}
         </div>
@@ -637,7 +657,7 @@ export default function AirlinesPage() {
           .al-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 20px; }
           /* Desktop: title left, then the airport toggle, then the counts. */
           .al-head   { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; }
-          .al-title  { order: 1; margin: 0 auto 0 0; font-size: 34px; }
+          .al-title  { order: 1; margin: 0; margin-inline-end: auto; font-size: 34px; }
           .al-toggle { order: 2; }
           .al-counts { order: 3; display: flex; align-items: center; gap: 8px; }
           .al-short  { display: none; }
@@ -664,25 +684,25 @@ export default function AirlinesPage() {
 
         {/* Title + stats */}
         <div className="al-head">
-          <h1 className="al-title" style={{ fontFamily: "'Instrument Sans',system-ui", fontWeight: 700, lineHeight: 1, color: C.ink, letterSpacing: '-.025em' }}>Airlines</h1>
+          <h1 className="al-title" style={{ fontFamily: "'Instrument Sans',system-ui", fontWeight: 700, lineHeight: 1, color: C.ink, letterSpacing: '-.025em' }}>{t('airlines.title')}</h1>
           <div className="al-counts">
             {airlines.length > 0 && (
               <div className="al-count-box" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 9, background: C.surface, border: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>
                 <span className="al-count-num" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{airlines.length}</span>
-                <span className="al-count-lbl" style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>airlines</span>
+                <span className="al-count-lbl" style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>{t('airlines.count')}</span>
               </div>
             )}
             {totalFlights > 0 && (
               <div className="al-count-box" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 9, background: C.surface, border: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>
                 <span className="al-count-num" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{totalFlights}</span>
-                <span className="al-count-lbl" style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>flights / week</span>
+                <span className="al-count-lbl" style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>{t('airlines.per_week')}</span>
               </div>
             )}
           </div>
           <div className="al-toggle" style={{ display: 'flex', padding: 3, background: '#E4E1D2', borderRadius: 9, gap: 2, width: 'fit-content' }}>
-            {BOARD_AIRPORTS.map(({ iata: code, city: label }) => (
+            {BOARD_AIRPORTS.map(({ iata: code }) => (
               <button key={code} onClick={() => setAirport(code)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 7, border: 'none', cursor: 'pointer', background: airport===code ? C.forest : 'transparent', color: airport===code ? '#fff' : C.muted, transition: 'all .15s' }}>
-                <span style={{ font: `${airport===code?700:600} 12px/1 'Instrument Sans',system-ui` }}>{label}</span>
+                <span style={{ font: `${airport===code?700:600} 12px/1 'Instrument Sans',system-ui` }}>{city(code)}</span>
                 <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 9.5, opacity: .7, lineHeight: 1 }}>{code}</span>
               </button>
             ))}
@@ -697,15 +717,15 @@ export default function AirlinesPage() {
         {/* Region filter tabs */}
         <div style={{ display: 'flex', gap: 6, marginBottom: 24, flexWrap: 'wrap' as const }}>
           {([
-            { id: 'all',    label: 'All regions',        short: 'All',         count: airlines.length },
-            { id: 'gulf',   label: 'Middle East & Gulf', short: 'Med Eastern', count: airlines.filter(a => a.region === 'gulf').length },
-            { id: 'europe', label: 'Europe & Turkey',    short: 'Europeans',   count: airlines.filter(a => a.region === 'europe').length },
+            { id: 'all',    label: 'region.all_airlines', short: 'region.all',    count: airlines.length },
+            { id: 'gulf',   label: 'region.gulf',          short: 'region.med',    count: airlines.filter(a => a.region === 'gulf').length },
+            { id: 'europe', label: 'region.europe_turkey', short: 'region.europe', count: airlines.filter(a => a.region === 'europe').length },
           ] as const).map(tab => {
             const active = region === tab.id
             return (
               <button key={tab.id} onClick={() => setRegion(tab.id)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 14px', borderRadius: 99, border: 'none', cursor: 'pointer', background: active ? C.ink : C.surface, color: active ? '#fff' : C.muted, boxShadow: active ? 'none' : `0 0 0 1px ${C.border}`, transition: 'all .15s', font: `${active ? 700 : 500} 12px/1 'Instrument Sans',system-ui` }}>
-                <span className="al-full">{tab.label}</span>
-                <span className="al-short">{tab.short}</span>
+                <span className="al-full">{t(tab.label)}</span>
+                <span className="al-short">{t(tab.short)}</span>
                 <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, opacity: active ? .75 : .6 }}>{tab.count}</span>
               </button>
             )
@@ -714,10 +734,10 @@ export default function AirlinesPage() {
 
         {/* Airline cards */}
         {loading ? (
-          <div style={{ textAlign: 'center', padding: '60px 0', color: C.muted, font: `500 14px/1 'Instrument Sans',system-ui` }}>Loading airlines…</div>
+          <div style={{ textAlign: 'center', padding: '60px 0', color: C.muted, font: `500 14px/1 'Instrument Sans',system-ui` }}>{t('airlines.loading')}</div>
         ) : visible.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '60px 0', color: C.muted, font: `500 14px/1 'Instrument Sans',system-ui` }}>
-            {search ? `No airline matches “${search}”.` : 'No airlines found'}
+            {search ? `${t('airlines.no_match')} “${search}”.` : t('airlines.none')}
           </div>
         ) : (
           <>
@@ -725,7 +745,7 @@ export default function AirlinesPage() {
               if (region !== 'all' && region !== r) return null
               const group = visible.filter(a => a.region === r)
               if (!group.length) return null
-              const label = r === 'gulf' ? 'Middle East & Gulf' : 'Europe & Turkey'
+              const label = t(r === 'gulf' ? 'region.gulf' : 'region.europe_turkey')
               return (
                 <div key={r} style={{ marginBottom: 36 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
