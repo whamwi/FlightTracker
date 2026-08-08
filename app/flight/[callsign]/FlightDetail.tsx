@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { airportCity, airportFlag as apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
 import { isSyrianAirport } from '@/lib/syria-airports'
+import { useT, useHref } from '@/components/LocaleProvider'
 
 const cityOf = (iata: string) => airportCity[iata] ?? iata
 const flagOf = (iata: string) => apFlag[iata] ?? ''
@@ -138,6 +139,8 @@ function PlanePin() {
 }
 
 export default function FlightDetail({ callsign }: { callsign: string }) {
+  const t    = useT()
+  const href = useHref()
   const [flight, setFlight]   = useState<Flight | null>(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
@@ -401,18 +404,18 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
                 <line x1="10.3" y1="3.9" x2="4.7" y2="7.1" stroke="currentColor" strokeWidth="1.5"/>
                 <line x1="4.7"  y1="8.9" x2="10.3" y2="12.1" stroke="currentColor" strokeWidth="1.5"/>
               </svg>
-              Share
+              {t('action.share')}
             </button>
             {/* Track → live map */}
-            <Link href={`/map?flight=${encodeURIComponent(flight.iata_number)}`} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#EBF3EF', color: C.forest, border: `1px solid #B8D8CC`, borderRadius: 10, padding: '10px 8px', fontSize: 12, fontWeight: 600, textDecoration: 'none' }}>
+            <Link href={href(`/map?flight=${encodeURIComponent(flight.iata_number)}`)} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#EBF3EF', color: C.forest, border: `1px solid #B8D8CC`, borderRadius: 10, padding: '10px 8px', fontSize: 12, fontWeight: 600, textDecoration: 'none' }}>
               <svg width={12} height={12} viewBox="0 0 16 16" fill="none">
                 <circle cx="8" cy="6.5" r="3" stroke="currentColor" strokeWidth="1.5"/>
                 <path d="M8 15C8 15 2.5 10 2.5 6.5a5.5 5.5 0 0 1 11 0C13.5 10 8 15 8 15z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
               </svg>
-              Track
+              {t('nav.track_button')}
             </Link>
             {/* Airport board */}
-            <Link href="/board" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: '#F7F5EC', color: C.ink, border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 8px', fontSize: 12, fontWeight: 600, textDecoration: 'none' }}>
+            <Link href={href('/board')} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: '#F7F5EC', color: C.ink, border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 8px', fontSize: 12, fontWeight: 600, textDecoration: 'none' }}>
               {boardAirport}
               <svg width={11} height={11} viewBox="0 0 14 14" fill="none"><path d="M4 7h7M8 4l3 3-3 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </Link>

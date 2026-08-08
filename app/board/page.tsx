@@ -6,7 +6,7 @@ import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { airportCity, cityFor, airlineNameFor, airportFlag as _apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
 import SiteNav from '@/components/SiteNav'
 import LanguageSwitch from '@/components/LanguageSwitch'
-import { useT, useLocale } from '@/components/LocaleProvider'
+import { useT, useLocale, useHref } from '@/components/LocaleProvider'
 import { STATUS_KEY } from '@/lib/i18n'
 import { BOARD_AIRPORTS, type BoardAirport } from '@/lib/syria-airports'
 
@@ -358,7 +358,8 @@ const PinSVG = () => (
 
 // ── Flight card ───────────────────────────────────────────────────────────────
 function FlightCard({ f, view, isPinned, onTogglePin }: { f: Flight; view: View; isPinned: boolean; onTogglePin: () => void }) {
-  const t = useT()
+  const t    = useT()
+  const href = useHref()
   const isArr   = view === 'arr'
   const status  = effectiveStatus(f)
   const cfg     = STATUS[status] ?? STATUS.Unknown
@@ -538,13 +539,13 @@ function FlightCard({ f, view, isPinned, onTogglePin }: { f: Flight; view: View;
         </div>
         {showTrack && (
           <Link
-            href={`/map?flight=${encodeURIComponent(f.iata_number)}`}
+            href={href(`/map?flight=${encodeURIComponent(f.iata_number)}`)}
             style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 11px', borderRadius: 99, background: C.forest, color: '#fff', fontSize: 11, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap', fontFamily: "'Instrument Sans', system-ui" }}
           >
             <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
               <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/>
             </svg>
-            Track
+            {t('nav.track_button')}
           </Link>
         )}
       </div>
