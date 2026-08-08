@@ -106,8 +106,43 @@ async function applyDrift(rm: RmRow, day: string, depUtc: string, arrUtc: string
 
   const days = rm.days_of_week ?? []
 
-  // 1. This row is only about this day — safe to move it.
+  /*
+   * Who else already sits at the new time on this flight and route?
+   *
+   * Asked before anything is written, because it decides the shape of the whole operation and
+   * both branches below need the answer. route_master is unique on
+   * (flight_id, dep_iata, arr_iata, dep_time_utc), so moving a row onto a time a sibling
+   * already holds is a 409, not an update.
+   */
+  const siblingsAtNewTime: RmRow[] = await sb(
+    `/route_master?flight_id=eq.${rm.flight_id}` +
+    `&dep_iata=eq.${rm.dep_iata}&arr_iata=eq.${rm.arr_iata}` +
+    `&dep_time_utc=eq.${encodeURIComponent(depUtc)}&id=neq.${rm.id}&select=*`,
+  ) ?? []
+
+  // 1. This row is only about this day.
   if (days.length <= 1) {
+    /*
+     * The day has caught up with a time another row already runs. 3L504 AUH–DAM was the case
+     * that found this: Friday on its own row at 06:05, Saturday at 06:20, and the rest of the
+     * week at 06:45. When Friday moved to 06:45 it became the sun–thu row, and the in-place
+     * update this branch used to do unconditionally hit the unique constraint.
+     *
+     * So merge the day into the sibling and drop this row, which has no other day left to
+     * describe. Merge first: if the delete fails the day is on two rows and the board shows
+     * the flight twice, which is visible; if the merge fails first, nothing has changed.
+     */
+    if (siblingsAtNewTime.length) {
+      const sib    = siblingsAtNewTime[0]
+      const merged = [...new Set([...(sib.days_of_week ?? []), day])]
+      await sb(`/route_master?id=eq.${sib.id}`, {
+        method: 'PATCH', headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({ days_of_week: merged, data_updated: new Date().toISOString() }),
+      })
+      await sb(`/route_master?id=eq.${rm.id}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } })
+      return { action: 'merged_and_removed_empty_row', row: sib.id, day, removed: rm.id }
+    }
+
     await sb(`/route_master?id=eq.${rm.id}`, {
       method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(times),
     })
@@ -123,13 +158,9 @@ async function applyDrift(rm: RmRow, day: string, depUtc: string, arrUtc: string
     body: JSON.stringify({ days_of_week: remaining, data_updated: new Date().toISOString() }),
   })
 
-  // Is there already a row at the new time for this flight and route? Then this day joins it
-  // rather than creating a second row saying the same thing.
-  const siblings: RmRow[] = await sb(
-    `/route_master?flight_id=eq.${rm.flight_id}` +
-    `&dep_iata=eq.${rm.dep_iata}&arr_iata=eq.${rm.arr_iata}` +
-    `&dep_time_utc=eq.${encodeURIComponent(depUtc)}&id=neq.${rm.id}&select=*`,
-  ) ?? []
+  // A row at the new time means this day joins it rather than creating a second row saying
+  // the same thing. Looked up above, before any write.
+  const siblings = siblingsAtNewTime
 
   if (siblings.length) {
     const sib = siblings[0]
