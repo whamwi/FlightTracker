@@ -454,7 +454,7 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
           says what these are, so the words were repeating themselves. Sits top-left, the
           corner the map credit vacated on phones. */}
       <div style={{
-        position: 'absolute', insetInlineStart: 12, top: 12, zIndex: 1000,
+        position: 'absolute', left: 12, top: 12, zIndex: 1000,
         minWidth: 30, height: 26, paddingLeft: 9, paddingRight: 9, borderRadius: 99,
         background: C.forest, display: 'flex', alignItems: 'center', justifyContent: 'center',
         boxShadow: '0 2px 10px rgba(0,0,0,.18)',
@@ -490,7 +490,11 @@ function InAirPanel({ selectedFlight, open, setOpen, onSelect, onClear }: { sele
   // ── Closed: pill FAB ─────────────────────────────────────────────────────
   if (!open) {
     return (
-      <div style={{ position: 'absolute', insetInlineStart: 12, bottom: 96, zIndex: 1000, display: 'flex', alignItems: 'center', gap: 8 }}>
+      /* Physical left, not inset-inline-start. The map overlays are placed against the map,
+         not against the text: Syria sits centre-right in the default view, so a panel that
+         mirrored into the right-hand side in Arabic would cover the country it is describing.
+         Reading direction is the wrong thing to hang this on. */
+      <div style={{ position: 'absolute', left: 12, bottom: 96, zIndex: 1000, display: 'flex', alignItems: 'center', gap: 8 }}>
       <button
         onClick={() => setOpen(true)}
         className="fab-pill"
@@ -539,7 +543,8 @@ function InAirPanel({ selectedFlight, open, setOpen, onSelect, onClear }: { sele
   // ── Open: side panel ─────────────────────────────────────────────────────
   return (
     <div style={{
-      position: 'absolute', insetInlineStart: 12, bottom: 'calc(30px + env(safe-area-inset-bottom))', zIndex: 999,
+      // Left in both languages — see the note on the collapsed pill above.
+      position: 'absolute', left: 12, bottom: 'calc(30px + env(safe-area-inset-bottom))', zIndex: 999,
       width: 'min(308px, calc(88vw - 12px))',
       maxHeight: 'calc(100% - 54px - env(safe-area-inset-bottom))',
       display: 'flex', flexDirection: 'column',
