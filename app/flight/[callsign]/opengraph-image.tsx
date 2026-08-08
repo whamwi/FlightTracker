@@ -282,8 +282,14 @@ export default async function Image(
             <div style={{
               fontSize: 28, fontWeight: 700,
               color: C.forestMid,
-              marginBottom: 36, letterSpacing: '-.2px',
-              display: 'flex',
+              marginBottom: 36, letterSpacing: ar ? 'normal' : '-.2px',
+              /*
+               * Satori lays a flex container's words out as items, left to right, so a
+               * multi-word Arabic name came out reversed — الخطوط الجوية التركية rendered as
+               * التركية الجوية الخطوط. The single-word city names hid it. `direction` puts the
+               * run back in reading order.
+               */
+              display: 'flex', direction: ar ? 'rtl' : 'ltr',
             }}>
               {ar ? (AIRLINE_AR[flight?.airline_iata ?? ''] ?? airline) : airline}
             </div>
