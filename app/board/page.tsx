@@ -582,6 +582,13 @@ const REGION: Record<string, string> = {
 }
 const REGION_ORDER = ['Middle East', 'Europe', 'Other']
 
+/** Grouping key → dictionary key. The keys above are data, not display text. */
+const REGION_KEY: Record<string, string> = {
+  'Middle East': 'region.middle_east',
+  Europe:        'region.europe_full',
+  Other:         'region.other',
+}
+
 // ── Tab date label ────────────────────────────────────────────────────────────
 function tabDateLabel(offset: number): string {
   const d = syriaDate(offset)
@@ -592,7 +599,8 @@ function tabDateLabel(offset: number): string {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function BoardPage() {
-  const t = useT()
+  const t      = useT()
+  const locale = useLocale()
   const [tab, setTab]         = useState<Tab>(0)
   const [view, setView]       = useState<View>('arr')
   const [airport, setAirport] = useState<Airport>('DAM')
@@ -992,11 +1000,15 @@ export default function BoardPage() {
                   padding: '8px 32px', borderRadius: 9, cursor: 'pointer',
                   background: airport === ap ? C.forest : 'transparent',
                   border: 'none',
-                  fontFamily: "'IBM Plex Mono', monospace", fontSize: 14, fontWeight: 700,
+                  /* The code is a code — mono and letter-spaced suits DAM and not دمشق, which
+                     wants the display face and no tracking. */
+                  fontFamily: locale === 'ar' ? "'Instrument Sans', system-ui" : "'IBM Plex Mono', monospace",
+                  fontSize: 14, fontWeight: 700,
                   color: airport === ap ? '#fff' : C.muted,
-                  letterSpacing: '.07em',
+                  letterSpacing: locale === 'ar' ? 'normal' : '.07em',
+                  whiteSpace: 'nowrap',
                 }}>
-                  {ap}
+                  {locale === 'ar' ? cityFor(ap) : ap}
                 </button>
               ))}
             </div>
@@ -1018,7 +1030,9 @@ export default function BoardPage() {
                   <line x1="6" y1="12" x2="10" y2="12" stroke={airlineFilter ? '#fff' : C.secondary} strokeWidth="1.5" strokeLinecap="round"/>
                 </svg>
                 <span style={{ font: `600 13px/1 'Instrument Sans', system-ui`, color: airlineFilter ? '#fff' : C.secondary }}>
-                  {airlineFilter ? (availableAirlines.find(a => a.iata === airlineFilter)?.name ?? airlineFilter) : 'Airline'}
+                  {airlineFilter
+                    ? airlineNameFor(airlineFilter, availableAirlines.find(a => a.iata === airlineFilter)?.name ?? airlineFilter)
+                    : t('filter.airline')}
                 </span>
                 {airlineFilter && (
                   <span onClick={e => { e.stopPropagation(); setAirlineFilter(null); setAirlinePopover(false) }}
@@ -1060,7 +1074,7 @@ export default function BoardPage() {
                 lineHeight: '14px',
               }}>
                 <span style={{ font: `600 12.5px/14px 'Instrument Sans', system-ui`, color: sortMode === 'airline' ? C.forest : C.secondary }}>
-                  Sort · {sortMode === 'time' ? 'Scheduled time' : 'Airline A→Z'}
+                  {t('sort.by')} · {t(sortMode === 'time' ? 'sort.scheduled' : 'sort.airline_az')}
                 </span>
               </button>
             </div>
@@ -1150,19 +1164,19 @@ export default function BoardPage() {
               {/* In-air chip */}
               <div style={{ position: 'absolute', left: 14, top: 14, display: 'flex', alignItems: 'center', gap: 7, padding: '7px 11px', borderRadius: 9, background: 'rgba(255,255,255,.94)', border: `1px solid ${C.border}`, boxShadow: '0 4px 12px -8px rgba(22,22,22,.4)' }}>
                 <span style={{ width: 6, height: 6, borderRadius: 99, background: C.forestMid, display: 'block' }} />
-                <span style={{ font: `600 11px/1 'Instrument Sans', system-ui`, color: C.ink }}>{enroute} flights in air</span>
+                <span style={{ font: `600 11px/1 'Instrument Sans', system-ui`, color: C.ink }}>{enroute} {t('map.in_air')}</span>
               </div>
             </div>
             <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: `1px solid ${C.trackEmpty}` }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                <span style={{ font: `600 13.5px/1 'Instrument Sans', system-ui`, color: C.ink }}>Live map</span>
+                <span style={{ font: `600 13.5px/1 'Instrument Sans', system-ui`, color: C.ink }}>{t('map.live')}</span>
                 <span style={{ font: `500 11px/1 'Instrument Sans', system-ui`, color: C.muted }}>Leaflet · light tiles</span>
               </div>
               <Link href="/map" style={{
                 display: 'flex', alignItems: 'center', gap: 7, padding: '8px 13px', borderRadius: 9,
                 background: C.forest, textDecoration: 'none',
               }}>
-                <span style={{ font: `600 12px/1 'Instrument Sans', system-ui`, color: '#fff' }}>Open Track</span>
+                <span style={{ font: `600 12px/1 'Instrument Sans', system-ui`, color: '#fff' }}>{t('action.open_track')}</span>
               </Link>
             </div>
           </div>
@@ -1171,7 +1185,7 @@ export default function BoardPage() {
           {(() => {
             const freq = weeklyFreq ?? destFreq
             if (!freq.length) return null
-            const periodLabel = weeklyStats ? 'last 7 days' : 'today'
+            const periodLabel = t(weeklyStats ? 'period.last_7_days' : 'period.today')
 
             const groups: Record<string, typeof freq> = {}
             for (const d of freq) {
@@ -1186,7 +1200,9 @@ export default function BoardPage() {
               return (
                 <div key={region} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 16, display: 'flex', flexDirection: 'column', gap: 12, boxShadow: '0 1px 2px rgba(22,22,22,.05)' }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-                    <span style={{ font: `600 13.5px/1 'Instrument Sans', system-ui`, color: C.ink }}>{region}</span>
+                    {/* The region name is the grouping key as well as the label, so it is
+                        translated at the point of display rather than in REGION_ORDER. */}
+                    <span style={{ font: `600 13.5px/1 'Instrument Sans', system-ui`, color: C.ink }}>{t(REGION_KEY[region] ?? '')  || region}</span>
                     <span style={{ font: `500 11px/1 'Instrument Sans', system-ui`, color: C.muted }}>{periodLabel}</span>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

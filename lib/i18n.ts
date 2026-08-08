@@ -88,6 +88,17 @@ const en: Dict = {
   'region.gulf':       'Middle East & Gulf',
   'region.europe':     'Europeans',
   'region.med':        'Med Eastern',
+  'region.middle_east':'Middle East',
+  'region.europe_full':'Europe',
+  'region.other':      'Other',
+
+  // Board controls
+  'sort.by':           'Sort',
+  'sort.scheduled':    'Scheduled time',
+  'sort.airline_az':   'Airline A→Z',
+  'filter.airline':    'Airline',
+  'period.last_7_days':'last 7 days',
+  'period.today':      'today',
 
   // Alerts CTA
   'cta.follow_title':  'Follow a flight from anywhere',
@@ -154,6 +165,16 @@ const ar: Dict = {
   'region.gulf':       'الشرق الأوسط والخليج',
   'region.europe':     'أوروبا',
   'region.med':        'شرق المتوسط',
+  'region.middle_east':'الشرق الأوسط',
+  'region.europe_full':'أوروبا',
+  'region.other':      'أخرى',
+
+  'sort.by':           'حسب',
+  'sort.scheduled':    'الوقت المجدول',
+  'sort.airline_az':   'شركة الطيران أ→ي',
+  'filter.airline':    'الخطوط الجوية',
+  'period.last_7_days':'آخر 7 أيام',
+  'period.today':      'اليوم',
 
   'cta.follow_title':  'تابع رحلتك من أي مكان',
   'cta.follow_body':   'تنبيهات التأخير والهبوط للرحلات التي يسافر عليها أهلك — مجاناً وبدون حساب.',
