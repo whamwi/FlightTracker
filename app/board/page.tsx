@@ -358,8 +358,9 @@ const PinSVG = () => (
 
 // ── Flight card ───────────────────────────────────────────────────────────────
 function FlightCard({ f, view, isPinned, onTogglePin }: { f: Flight; view: View; isPinned: boolean; onTogglePin: () => void }) {
-  const t    = useT()
-  const href = useHref()
+  const t      = useT()
+  const href   = useHref()
+  const locale = useLocale()
   const isArr   = view === 'arr'
   const status  = effectiveStatus(f)
   const cfg     = STATUS[status] ?? STATUS.Unknown
@@ -469,7 +470,7 @@ function FlightCard({ f, view, isPinned, onTogglePin }: { f: Flight; view: View;
         {isCancelled ? (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 5 }}>
             <span style={{ font: `500 11px/1 'Instrument Sans', system-ui`, color: C.muted, textAlign: 'center' }}>
-              Cancelled
+              {t('status.cancelled')}
             </span>
           </div>
         ) : showProgress && depForProgress ? (
@@ -483,10 +484,29 @@ function FlightCard({ f, view, isPinned, onTogglePin }: { f: Flight; view: View;
                 {durationLabel(f.duration_min)}
               </span>
             )}
-            <div style={{ width: '100%', height: 4, borderRadius: 99, background: C.trackEmpty }} />
+            {/*
+              A plane at the origin end of an empty track.
+              User feedback: on a scheduled flight the bar was a plain line, and nothing on the
+              card said which way the journey runs — the two airports read as a pair rather
+              than an order. The marker is the same one the departed and arrived states use, in
+              a muted colour because the flight has not left, and flexDirection row puts it at
+              the origin in both scripts.
+            */}
+            <div style={{ display: 'flex', flexDirection: 'row', width: '100%', alignItems: 'center', height: 18 }}>
+              <div style={{
+                width: 18, height: 18, borderRadius: 9, background: C.surface, flexShrink: 0,
+                border: `1.5px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill={C.muted} aria-hidden
+                     style={{ transform: `rotate(${locale === 'ar' ? -90 : 90}deg)` }}>
+                  <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
+                </svg>
+              </div>
+              <div style={{ flex: 1, height: 4, borderRadius: 99, background: C.trackEmpty }} />
+            </div>
             {(isArr ? f.arr_gate : f.dep_gate) && (
               <span style={{ font: `600 10.5px/1 'Instrument Sans', system-ui`, color: C.goldenText }}>
-                Gate {isArr ? f.arr_gate : f.dep_gate}
+                {t('label.gate')} {isArr ? f.arr_gate : f.dep_gate}
               </span>
             )}
           </div>
