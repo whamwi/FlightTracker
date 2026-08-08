@@ -778,8 +778,16 @@ export default function BoardPage() {
 
   const airlineFiltered = airlineFilter ? sorted.filter(f => f.airline_iata === airlineFilter) : sorted
 
-  const availableAirlines = [...new Map(sorted.map(f => [f.airline_iata, { iata: f.airline_iata, name: f.airline_name, flag: f.country_flag }])).values()]
-    .sort((a, b) => a.name.localeCompare(b.name))
+  /*
+   * `name` is what the reader sees, so it is resolved before the sort rather than after.
+   * Sorting the Arabic list by the English names leaves it in an order that is invisible on
+   * screen — الاتحاد للطيران under E, طيران الجزيرة under J.
+   */
+  const availableAirlines = [...new Map(sorted.map(f => [
+    f.airline_iata,
+    { iata: f.airline_iata, name: airlineNameFor(f.airline_iata, f.airline_name), flag: f.country_flag },
+  ])).values()]
+    .sort((a, b) => a.name.localeCompare(b.name, locale === 'ar' ? 'ar' : 'en'))
 
   const nowSyriaMinRaw = Math.floor((Date.now() + 3 * 3_600_000) / 60_000) % 1440
 
@@ -1045,7 +1053,7 @@ export default function BoardPage() {
                 </svg>
                 <span style={{ font: `600 13px/1 'Instrument Sans', system-ui`, color: airlineFilter ? '#fff' : C.secondary }}>
                   {airlineFilter
-                    ? airlineNameFor(airlineFilter, availableAirlines.find(a => a.iata === airlineFilter)?.name ?? airlineFilter)
+                    ? (availableAirlines.find(a => a.iata === airlineFilter)?.name ?? airlineFilter)
                     : t('filter.airline')}
                 </span>
                 {airlineFilter && (
@@ -1068,7 +1076,7 @@ export default function BoardPage() {
                       <button key={a.iata} onClick={() => { setAirlineFilter(airlineFilter === a.iata ? null : a.iata); setAirlinePopover(false) }}
                         style={{
                           display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '9px 14px',
-                          background: airlineFilter === a.iata ? C.sunken : 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left',
+                          background: airlineFilter === a.iata ? C.sunken : 'transparent', border: 'none', cursor: 'pointer', textAlign: 'start',
                         }}>
                         <span style={{ fontSize: 15 }}>{a.flag}</span>
                         <span style={{ font: `${airlineFilter === a.iata ? 700 : 500} 12.5px/1 'Instrument Sans', system-ui`, color: airlineFilter === a.iata ? C.forest : C.ink }}>
