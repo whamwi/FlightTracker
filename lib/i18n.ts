@@ -207,7 +207,7 @@ const ar: Dict = {
   'airlines.count':    'شركة',
   'airlines.per_week': 'رحلة / أسبوع',
   'region.all':        'الكل',
-  'region.gulf':       'الشرق الأوسط والخليج',
+  'region.gulf':       'الشرق الأوسط',
   'region.europe':     'أوروبا',
   'region.med':        'شرق المتوسط',
   'region.middle_east':'الشرق الأوسط',
