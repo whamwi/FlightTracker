@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { cityFor, airlineNameFor, getActiveLocale, airportFlag as _apFlag, loadGeoData } from '@/lib/geo-data'
 import { useT, useLocale } from '@/components/LocaleProvider'
+import { counted, countLabel } from '@/lib/i18n'
 import SiteNav from '@/components/SiteNav'
 import LanguageSwitch from '@/components/LanguageSwitch'
 import { BOARD_AIRPORTS, type BoardAirport } from '@/lib/syria-airports'
@@ -157,7 +158,8 @@ const AIRPORT_HERO: Record<string, { src: string; fallback: string }> = {
 }
 
 function AirportHero({ airport, totalDests, totalFlights }: { airport: string; totalDests: number; totalFlights: number }) {
-  const t   = useT()
+  const t      = useT()
+  const locale = useLocale()
   const cfg = AIRPORT_HERO[airport] ?? AIRPORT_HERO.DAM
   const label = city(airport)
   const [imgFailed, setImgFailed] = useState(false)
@@ -182,8 +184,8 @@ function AirportHero({ airport, totalDests, totalFlights }: { airport: string; t
       <div style={{ position: 'absolute', insetInlineStart: 18, bottom: 16, display: 'flex', flexDirection: 'column', gap: 4 }}>
         <span style={{ font: `700 22px/1 'Instrument Sans',system-ui`, color: '#fff', letterSpacing: '-.02em', textShadow: '0 1px 8px rgba(0,0,0,.4)' }}>{label}</span>
         <div style={{ display: 'flex', gap: 8 }}>
-          {totalDests > 0 && <span style={{ font: `600 12px/1 'Instrument Sans',system-ui`, color: 'rgba(255,255,255,.85)' }}>{totalDests} {t('dest.count')}</span>}
-          {totalFlights > 0 && <span style={{ font: `600 12px/1 'Instrument Sans',system-ui`, color: 'rgba(255,255,255,.6)' }}>· {totalFlights} {t('airlines.per_week')}</span>}
+          {totalDests > 0 && <span style={{ font: `600 12px/1 'Instrument Sans',system-ui`, color: 'rgba(255,255,255,.85)' }}>{counted(locale, totalDests, 'noun.dest')}</span>}
+          {totalFlights > 0 && <span style={{ font: `600 12px/1 'Instrument Sans',system-ui`, color: 'rgba(255,255,255,.6)' }}>· {counted(locale, totalFlights, 'noun.flight')} / {t('label.week')}</span>}
         </div>
       </div>
       {/* IATA badge, on the far side from the name */}
@@ -201,7 +203,8 @@ function DestCardDesktop({ dest, onView, weeklyCount, imageUrl, onImageUploaded 
   dest: Destination; onView: () => void; weeklyCount: number; imageUrl?: string
   onImageUploaded: (iata: string, url: string) => void
 }) {
-  const t = useT()
+  const t      = useT()
+  const locale = useLocale()
   const fileRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const photoUploadVisible = usePhotoUploadVisible()
@@ -258,7 +261,7 @@ function DestCardDesktop({ dest, onView, weeklyCount, imageUrl, onImageUploaded 
           ))}
           {dest.airlines.length > 4 && <span style={{ fontSize: 10, color: C.muted, alignSelf: 'center' }}>+{dest.airlines.length - 4}</span>}
           <div style={{ padding: '4px 9px', borderRadius: 999, background: badge, marginInlineStart: 'auto' }}>
-            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: '#fff' }}>{weeklyCount} {t('dest.per_week_short')}</span>
+            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: '#fff' }}>{locale === 'ar' ? `${counted(locale, weeklyCount, 'noun.flight')} ${t('label.weekly')}` : `${weeklyCount} ${t('label.weekly')}`}</span>
           </div>
         </div>
         <div style={{ borderTop: `1px dashed ${C.separator}`, paddingTop: 11, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -299,7 +302,7 @@ function DestRowMobile({ dest, onView, weeklyCount }: { dest: Destination; onVie
           {dest.minDuration > 0 && <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: C.muted }}>{fmtDur(dest.minDuration)}</span>}
         </div>
         <span style={{ font: `500 10.5px/1 'Instrument Sans',system-ui`, color: C.muted }}>
-          {apFlag(dest.iata)} {weeklyCount > 0 ? `${weeklyCount} ${t('dest.flights_per_wk')}` : ''}
+          {apFlag(dest.iata)} {weeklyCount > 0 ? `${counted(locale, weeklyCount, 'noun.flight')} ${t('label.weekly')}` : ''}
         </span>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', gap: 3 }}>
@@ -373,8 +376,8 @@ function BottomSheet({ dest, airport, onClose, imageUrl }: { dest: Destination |
   const hasReverse = (dest?.reverseFlights.length ?? 0) > 0
 
   const subtitle = dest ? [
-    dest.weeklyCount ? `${dest.weeklyCount} ${t('dest.flights_week')}` : null,
-    dest.airlines.length ? `${dest.airlines.length} ${t(dest.airlines.length > 1 ? 'dest.airline_many' : 'dest.airline_one')}` : null,
+    dest.weeklyCount ? `${counted(locale, dest.weeklyCount, 'noun.flight')} ${t('label.this_week')}` : null,
+    dest.airlines.length ? counted(locale, dest.airlines.length, 'noun.airline') : null,
     dest.minDuration ? fmtDur(dest.minDuration) : null,
   ].filter(Boolean).join(' · ') : ''
 
@@ -518,7 +521,8 @@ function BottomSheet({ dest, airport, onClose, imageUrl }: { dest: Destination |
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function DestinationsPage() {
-  const t = useT()
+  const t      = useT()
+  const locale = useLocale()
   const [rows, setRows]       = useState<ScheduleRow[]>([])
   const [loading, setLoading] = useState(true)
   const [airport, setAirport] = useState<BoardAirport>('DAM')
@@ -674,13 +678,13 @@ export default function DestinationsPage() {
             {totalDests > 0 && (
               <div className="dst-count-box" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 9, background: C.surface, border: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>
                 <span className="dst-count-num" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{totalDests}</span>
-                <span className="dst-count-lbl" style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>{t('dest.count')}</span>
+                <span className="dst-count-lbl" style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>{countLabel(locale, totalDests, 'noun.dest')}</span>
               </div>
             )}
             {totalFlights > 0 && (
               <div className="dst-count-box" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 9, background: C.surface, border: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>
                 <span className="dst-count-num" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{totalFlights}</span>
-                <span className="dst-count-lbl" style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>{t('airlines.per_week')}</span>
+                <span className="dst-count-lbl" style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>{countLabel(locale, totalFlights, 'noun.flight')} / {t('label.week')}</span>
               </div>
             )}
           </div>
@@ -735,7 +739,7 @@ export default function DestinationsPage() {
                 <div key={s.id} style={{ marginBottom: 36 }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 16 }}>
                     <h2 style={{ margin: 0, font: `700 19px/1 'Instrument Sans',system-ui`, color: C.ink, letterSpacing: '-.01em' }}>{t(s.label)}</h2>
-                    <span style={{ font: `500 12px/1 'Instrument Sans',system-ui`, color: C.muted }}>{dests.length} {t('dest.routes')}{weekTotal>0?` · ${weekTotal} ${t('dest.flights_week')}`:''}</span>
+                    <span style={{ font: `500 12px/1 'Instrument Sans',system-ui`, color: C.muted }}>{counted(locale, dests.length, 'noun.route')}{weekTotal>0?` · ${counted(locale, weekTotal, 'noun.flight')} ${t('label.this_week')}`:''}</span>
                   </div>
                   {/* Desktop grid */}
                   <div className="dst-grid">

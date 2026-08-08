@@ -98,10 +98,7 @@ const en: Dict = {
 
   // Destinations / Airlines
   'dest.title':        'Destinations',
-  'dest.count':        'destinations',
   'airlines.title':    'Airlines',
-  'airlines.count':    'airlines',
-  'airlines.per_week': 'flights / week',
   'region.all':        'All',
   'region.gulf':       'Middle East & Gulf',
   'region.europe':     'Europeans',
@@ -133,12 +130,6 @@ const en: Dict = {
   'cta.follow_body':   'Get delay and landing alerts for the flights your family is on — free, no account needed.',
 
   // Destinations
-  'dest.per_week_short':  '/ wk',
-  'dest.flights_per_wk':  'flights/wk',
-  'dest.flights_week':    'flights this week',
-  'dest.routes':          'routes',
-  'dest.airline_one':     'airline',
-  'dest.airline_many':    'airlines',
   'dest.loading':         'Loading destinations…',
   'dest.no_match':        'No destination matches',
   'dest.no_flights':      'No scheduled flights found',
@@ -176,10 +167,17 @@ const en: Dict = {
   'airlines.none':        'No airlines found',
   'airlines.from':        'From',
   'airlines.to':          'To',
-  'airlines.flights':     'flights',
   'region.all_airlines':  'All regions',
-  'dest.count_one':       'destination',
   'action.website':       'Website',
+
+  // Counted nouns — see countLabel below. English needs two forms; Arabic needs five.
+  'noun.dest.one':    'destination', 'noun.dest.other':    'destinations',
+  'noun.airline.one': 'airline',     'noun.airline.other': 'airlines',
+  'noun.flight.one':  'flight',      'noun.flight.other':  'flights',
+  'noun.route.one':   'route',       'noun.route.other':   'routes',
+  'label.week':       'week',
+  'label.this_week':  'this week',
+  'label.weekly':     '/ wk',
 }
 
 const ar: Dict = {
@@ -243,7 +241,7 @@ const ar: Dict = {
   'action.pin':        'تثبيت',
   'action.pinned':     'مثبّتة',
   'action.view_flights': 'تفاصيل الرحلات',
-  'action.view_routes':  'تفاصيل الخطوط',
+  'action.view_routes':  'تفاصيل الرحلات',
   'action.open_track':   'فتح التتبّع',
 
   'map.live':          'الخريطة المباشرة',
@@ -251,10 +249,7 @@ const ar: Dict = {
   'map.tiles':         'Leaflet · خرائط فاتحة',
 
   'dest.title':        'الوجهات',
-  'dest.count':        'وجهة',
   'airlines.title':    'شركات الطيران',
-  'airlines.count':    'شركة',
-  'airlines.per_week': 'رحلة / أسبوع',
   'region.all':        'الكل',
   'region.gulf':       'الشرق الأوسط',
   'region.europe':     'أوروبا',
@@ -281,12 +276,6 @@ const ar: Dict = {
   'cta.follow_title':  'تابع رحلتك من أي مكان',
   'cta.follow_body':   'تنبيهات التأخير والهبوط للرحلات التي يسافر عليها أهلك — مجاناً وبدون حساب.',
 
-  'dest.per_week_short':  'رحلة أسبوعيا',
-  'dest.flights_per_wk':  'رحلة/أسبوع',
-  'dest.flights_week':    'رحلة هذا الأسبوع',
-  'dest.routes':          'خط',
-  'dest.airline_one':     'شركة طيران',
-  'dest.airline_many':    'شركات طيران',
   'dest.loading':         'جارٍ تحميل الوجهات…',
   'dest.no_match':        'لا توجد وجهة تطابق',
   'dest.no_flights':      'لا توجد رحلات مجدولة',
@@ -313,10 +302,20 @@ const ar: Dict = {
   'airlines.none':        'لا توجد شركات طيران',
   'airlines.from':        'من',
   'airlines.to':          'إلى',
-  'airlines.flights':     'رحلات',
   'region.all_airlines':  'كل الشركات',
-  'dest.count_one':       'وجهة',
   'action.website':       'الموقع الإلكتروني',
+
+  'noun.dest.zero':    'وجهات', 'noun.dest.one':    'وجهة', 'noun.dest.two':    'وجهتان',
+  'noun.dest.few':     'وجهات', 'noun.dest.many':   'وجهة', 'noun.dest.other':  'وجهة',
+  'noun.airline.zero': 'شركات', 'noun.airline.one': 'شركة', 'noun.airline.two': 'شركتان',
+  'noun.airline.few':  'شركات', 'noun.airline.many':'شركة', 'noun.airline.other':'شركة',
+  'noun.flight.zero':  'رحلات', 'noun.flight.one':  'رحلة', 'noun.flight.two':  'رحلتان',
+  'noun.flight.few':   'رحلات', 'noun.flight.many': 'رحلة', 'noun.flight.other':'رحلة',
+  'noun.route.zero':   'خطوط',  'noun.route.one':   'خط',   'noun.route.two':   'خطان',
+  'noun.route.few':    'خطوط',  'noun.route.many':  'خط',   'noun.route.other': 'خط',
+  'label.week':       'أسبوع',
+  'label.this_week':  'هذا الأسبوع',
+  'label.weekly':     'أسبوعيا',
 }
 
 const DICTS: Record<Locale, Dict> = { en, ar }
@@ -354,6 +353,49 @@ export const STATUS_KEY: Record<string, string> = {
   Delayed:      'status.delayed',
   Unknown:      'status.unknown',
 }
+
+export type PluralCat = 'zero' | 'one' | 'two' | 'few' | 'many' | 'other'
+
+/**
+ * Which form of a counted noun the number takes.
+ *
+ * Arabic does not split at one the way English does. The number decides the noun's form:
+ *
+ *     1        وجهة      singular
+ *     2        وجهتان    dual
+ *     3–10     وجهات     plural
+ *     11–99    وجهة      singular again
+ *     100+     وجهة      singular
+ *
+ * So `10 وجهات` and `22 وجهة` are both correct, and no single string serves both — which is
+ * what `10 وجهة` on the airline sheet was getting wrong. The categories are CLDR's, so the
+ * rule stays recognisable to anyone who has met it before.
+ */
+export function pluralCategory(locale: Locale, n: number): PluralCat {
+  if (locale !== 'ar') return n === 1 ? 'one' : 'other'
+  const m100 = Math.abs(n) % 100
+  if (n === 0) return 'zero'
+  if (n === 1) return 'one'
+  if (n === 2) return 'two'
+  if (m100 >= 3 && m100 <= 10) return 'few'
+  if (m100 >= 11 && m100 <= 99) return 'many'
+  return 'other'
+}
+
+/**
+ * The noun alone, in the form the count requires. `base` is a key prefix such as `noun.flight`.
+ *
+ * Falls back to `<base>.other` rather than to the key itself: English defines only `.one` and
+ * `.other`, so the Arabic-only categories have to land somewhere sensible.
+ */
+export function countLabel(locale: Locale, n: number, base: string): string {
+  const dict = DICTS[locale] ?? DICTS.en
+  return dict[`${base}.${pluralCategory(locale, n)}`] ?? dict[`${base}.other`] ?? base
+}
+
+/** The number and its noun: `34 flights`, `10 وجهات`, `22 وجهة`. */
+export const counted = (locale: Locale, n: number, base: string): string =>
+  `${n} ${countLabel(locale, n, base)}`
 
 /** Every key, for a coverage check in tests. */
 export const ALL_KEYS = Object.keys(en)

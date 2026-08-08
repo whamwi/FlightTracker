@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { cityFor, airlineNameFor, getActiveLocale, airportFlag as _apFlag, loadGeoData } from '@/lib/geo-data'
 import { useT, useLocale } from '@/components/LocaleProvider'
+import { counted, countLabel } from '@/lib/i18n'
 import SiteNav from '@/components/SiteNav'
 import { BOARD_AIRPORTS, type BoardAirport } from '@/lib/syria-airports'
 
@@ -64,6 +65,16 @@ const AIRLINE_BG: Record<string, string> = {
   '6Q':'linear-gradient(140deg,#204080 0%,#102040 100%)',
   XQ:  'linear-gradient(140deg,#1A5090 0%,#0A2850 100%)',
 }
+/*
+ * How many destination chips fit beside the weekly badge.
+ *
+ * Five wrapped the badge onto a line of its own. Four clears it in English, where the badge
+ * reads "47 / wk" at 62px — but Arabic spells the noun out, "47 رحلة أسبوعيا" at 113px, and
+ * the extra 51px is one chip exactly. So the limit follows the badge it has to share the row
+ * with. The +N that follows the chips already says how many are not shown.
+ */
+const destChips = (locale: string) => (locale === 'ar' ? 3 : 4)
+
 const airlineBg = (prefix: string) => AIRLINE_BG[prefix] ?? 'linear-gradient(140deg,#607080 0%,#303840 100%)'
 
 const AIRLINE_REGION: Record<string, 'gulf' | 'europe'> = {
@@ -127,7 +138,8 @@ const AIRPORT_HERO: Record<string, { src: string; fallback: string }> = {
   DEZ: { src: '/dez-hero.jpg', fallback: 'linear-gradient(135deg,#3A4436 0%,#1F261C 100%)' },
 }
 function AirportHero({ airport, totalAirlines, totalFlights }: { airport: string; totalAirlines: number; totalFlights: number }) {
-  const t   = useT()
+  const t      = useT()
+  const locale = useLocale()
   const cfg = AIRPORT_HERO[airport] ?? AIRPORT_HERO.DAM
   const label = city(airport)
   const [imgFailed, setImgFailed] = useState(false)
@@ -143,8 +155,8 @@ function AirportHero({ airport, totalAirlines, totalFlights }: { airport: string
       <div style={{ position: 'absolute', insetInlineStart: 18, bottom: 16, display: 'flex', flexDirection: 'column', gap: 4 }}>
         <span style={{ font: `700 22px/1 'Instrument Sans',system-ui`, color: '#fff', letterSpacing: '-.02em', textShadow: '0 1px 8px rgba(0,0,0,.4)' }}>{label}</span>
         <div style={{ display: 'flex', gap: 8 }}>
-          {totalAirlines > 0 && <span style={{ font: `600 12px/1 'Instrument Sans',system-ui`, color: 'rgba(255,255,255,.85)' }}>{totalAirlines} {t('airlines.count')}</span>}
-          {totalFlights > 0 && <span style={{ font: `600 12px/1 'Instrument Sans',system-ui`, color: 'rgba(255,255,255,.6)' }}>· {totalFlights} {t('airlines.per_week')}</span>}
+          {totalAirlines > 0 && <span style={{ font: `600 12px/1 'Instrument Sans',system-ui`, color: 'rgba(255,255,255,.85)' }}>{counted(locale, totalAirlines, 'noun.airline')}</span>}
+          {totalFlights > 0 && <span style={{ font: `600 12px/1 'Instrument Sans',system-ui`, color: 'rgba(255,255,255,.6)' }}>· {counted(locale, totalFlights, 'noun.flight')} / {t('label.week')}</span>}
         </div>
       </div>
       {/* IATA badge, on the far side from the name */}
@@ -200,7 +212,9 @@ function AirlineLinks({ links }: { links?: AirlineLinks }) {
 function AirlineCard({ info, links, onView, imageUrl, onImageUploaded }: {
   info: AirlineInfo; links?: AirlineLinks; onView: () => void; imageUrl?: string; onImageUploaded: (prefix: string, url: string) => void
 }) {
-  const t = useT()
+  const t      = useT()
+  const locale = useLocale()
+  const chipLimit = destChips(locale)
   const badge = info.weeklyCount >= 14 ? C.forest : C.gold
   const fileRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
@@ -275,15 +289,15 @@ function AirlineCard({ info, links, onView, imageUrl, onImageUploaded }: {
         </div>
         {/* Destination chips + weekly badge */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-          {info.dests.slice(0, 5).map(d => (
+          {info.dests.slice(0, chipLimit).map(d => (
             <div key={d.iata} style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '3px 7px', borderRadius: 6, background: C.sunken, border: `1px solid ${C.border}` }}>
               <span style={{ fontSize: 11 }}>{d.flag}</span>
               <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 9.5, color: C.secondary, letterSpacing: '.04em' }}>{d.iata}</span>
             </div>
           ))}
-          {info.dests.length > 5 && <span style={{ fontSize: 10, color: C.muted, alignSelf: 'center' }}>+{info.dests.length - 5}</span>}
+          {info.dests.length > chipLimit && <span style={{ fontSize: 10, color: C.muted, alignSelf: 'center' }}>+{info.dests.length - chipLimit}</span>}
           <div style={{ padding: '4px 9px', borderRadius: 999, background: badge, marginInlineStart: 'auto' }}>
-            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: '#fff' }}>{info.weeklyCount} {t('dest.per_week_short')}</span>
+            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: '#fff' }}>{locale === 'ar' ? `${counted(locale, info.weeklyCount, 'noun.flight')} ${t('label.weekly')}` : `${info.weeklyCount} ${t('label.weekly')}`}</span>
           </div>
         </div>
         <div style={{ borderTop: `1px dashed ${C.separator}`, paddingTop: 11, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -425,7 +439,7 @@ function AirlineSheet({ info, airport, onClose, imageUrl }: { info: AirlineInfo 
                     <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,.65)', letterSpacing: '.06em' }}>{info.prefix}</span>
                   </div>
                   <span style={{ font: `500 11.5px/1 'Instrument Sans',system-ui`, color: 'rgba(255,255,255,.75)' }}>
-                    {info.weeklyCount} {t('airlines.per_week')} · {info.dests.length} {t(info.dests.length === 1 ? 'dest.count_one' : 'dest.count')}
+                    {counted(locale, info.weeklyCount, 'noun.flight')} / {t('label.week')} · {counted(locale, info.dests.length, 'noun.dest')}
                   </span>
                 </div>
               </div>
@@ -456,7 +470,7 @@ function AirlineSheet({ info, airport, onClose, imageUrl }: { info: AirlineInfo 
                     <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: C.muted, letterSpacing: '.06em' }}>{g.iata}</span>
                     {g.flights.length > 1 && (
                       <span style={{ font: `600 11px/1 'Instrument Sans',system-ui`, color: C.muted, marginInlineStart: 'auto' }}>
-                        {g.flights.length} {t('airlines.flights')}
+                        {counted(locale, g.flights.length, 'noun.flight')}
                       </span>
                     )}
                   </div>
@@ -540,7 +554,8 @@ function AirlineSheet({ info, airport, onClose, imageUrl }: { info: AirlineInfo 
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function AirlinesPage() {
-  const t = useT()
+  const t      = useT()
+  const locale = useLocale()
   const [rows, setRows]             = useState<ScheduleRow[]>([])
   const [loading, setLoading]       = useState(true)
   const [airport, setAirport]       = useState<BoardAirport>('DAM')
@@ -689,13 +704,13 @@ export default function AirlinesPage() {
             {airlines.length > 0 && (
               <div className="al-count-box" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 9, background: C.surface, border: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>
                 <span className="al-count-num" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{airlines.length}</span>
-                <span className="al-count-lbl" style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>{t('airlines.count')}</span>
+                <span className="al-count-lbl" style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>{countLabel(locale, airlines.length, 'noun.airline')}</span>
               </div>
             )}
             {totalFlights > 0 && (
               <div className="al-count-box" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 9, background: C.surface, border: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>
                 <span className="al-count-num" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{totalFlights}</span>
-                <span className="al-count-lbl" style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>{t('airlines.per_week')}</span>
+                <span className="al-count-lbl" style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>{countLabel(locale, totalFlights, 'noun.flight')} / {t('label.week')}</span>
               </div>
             )}
           </div>
