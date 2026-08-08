@@ -62,8 +62,11 @@ export default function SiteNav({ active, right }: { active: string; right?: Rea
     <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, position: 'sticky', top: 0, zIndex: 1100 }}>
       <style>{`
         .sn-bar   { display: flex; align-items: center; width: 100%; padding: 0 40px; height: 68px; gap: 14px; }
-        .sn-tabs  { display: flex; align-items: center; gap: 4px; margin-left: 14px; }
-        .sn-right { display: flex; margin-left: auto; align-items: center; }
+        /* Logical, not physical. margin-left:auto pushes toward the left in both directions,
+           so under dir=rtl the search stopped short of the row's end and floated with empty
+           space beyond it. margin-inline-start follows the writing direction. */
+        .sn-tabs  { display: flex; align-items: center; gap: 4px; margin-inline-start: 14px; }
+        .sn-right { display: flex; margin-inline-start: auto; align-items: center; }
         .sn-actions { display: none; }
         .sn-burger{ display: none; }
         .sn-track { display: none; }
@@ -71,7 +74,7 @@ export default function SiteNav({ active, right }: { active: string; right?: Rea
           .sn-bar    { padding: 0 12px; padding-top: env(safe-area-inset-top); height: calc(58px + env(safe-area-inset-top)); gap: 0; }
           .sn-tabs   { display: none; }
           .sn-right  { display: none; }
-          .sn-actions{ display: flex; align-items: center; gap: 8px; margin-left: auto; margin-right: 10px; }
+          .sn-actions{ display: flex; align-items: center; gap: 8px; margin-inline-start: auto; margin-inline-end: 10px; }
           .sn-burger { display: flex; }
           .sn-track  { display: inline-flex; }
         }
@@ -122,7 +125,7 @@ export default function SiteNav({ active, right }: { active: string; right?: Rea
             className="sn-track"
             aria-label="Track flights on the live map"
             style={{
-              alignItems: 'center', gap: 6, height: 40, padding: '0 12px', marginRight: 8,
+              alignItems: 'center', gap: 6, height: 40, padding: '0 12px', marginInlineEnd: 8,
               borderRadius: 10, border: `1px solid ${C.forest}`, background: C.forest,
               textDecoration: 'none', flexShrink: 0,
             }}
@@ -130,7 +133,7 @@ export default function SiteNav({ active, right }: { active: string; right?: Rea
             <svg width="15" height="15" viewBox="0 0 24 24" fill="#fff" aria-hidden>
               <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
             </svg>
-            <span style={{ font: `700 13.5px/1 'Instrument Sans',system-ui`, color: '#fff' }}>Track</span>
+            <span style={{ font: `700 13.5px/1 'Instrument Sans',system-ui`, color: '#fff', whiteSpace: 'nowrap' }}>{t('nav.track_button')}</span>
           </Link>
         )}
 

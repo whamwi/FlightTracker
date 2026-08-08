@@ -27,6 +27,8 @@ const en: Dict = {
   // Nav
   'nav.flights':       'Flights',
   'nav.track':         'Track',
+  // The pill on the board, distinct from the nav tab: it says what tapping it does.
+  'nav.track_button':  'Track',
   'nav.destinations':  'Destinations',
   'nav.airlines':      'Airlines',
   'nav.news':          'News',
@@ -100,6 +102,16 @@ const en: Dict = {
   'period.last_7_days':'last 7 days',
   'period.today':      'today',
 
+  // The now-line chips
+  'chip.in_air':       'in air',
+  'chip.arrived':      'arrived',
+  'chip.departed':     'departed',
+  'chip.now':          'NOW',
+
+  // Store buttons
+  'store.app_store':   'App Store',
+  'store.google_play': 'Google Play',
+
   // Alerts CTA
   'cta.follow_title':  'Follow a flight from anywhere',
   'cta.follow_body':   'Get delay and landing alerts for the flights your family is on — free, no account needed.',
@@ -108,6 +120,7 @@ const en: Dict = {
 const ar: Dict = {
   'nav.flights':       'الرحلات',
   'nav.track':         'تتبّع',
+  'nav.track_button':  'تابع على الخريطة',
   'nav.destinations':  'الوجهات',
   'nav.airlines':      'شركات الطيران',
   'nav.news':          'الأخبار',
@@ -175,6 +188,14 @@ const ar: Dict = {
   'filter.airline':    'الخطوط الجوية',
   'period.last_7_days':'آخر 7 أيام',
   'period.today':      'اليوم',
+
+  'chip.in_air':       'في الجو',
+  'chip.arrived':      'وصلت',
+  'chip.departed':     'غادرت',
+  'chip.now':          'الآن',
+
+  'store.app_store':   'آب ستور',
+  'store.google_play': 'جوجل بلاي',
 
   'cta.follow_title':  'تابع رحلتك من أي مكان',
   'cta.follow_body':   'تنبيهات التأخير والهبوط للرحلات التي يسافر عليها أهلك — مجاناً وبدون حساب.',

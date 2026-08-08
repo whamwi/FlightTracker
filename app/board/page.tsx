@@ -225,6 +225,7 @@ function AirlineLogo({ iata, name }: { iata: string; name: string }) {
 
 // ── Progress route (en-route) ────────────────────────────────────────────────
 function ProgressRoute({ depUtc, durationMin }: { depUtc: string; durationMin: number }) {
+  const locale = useLocale()
   const calc = () => {
     const dep = new Date(depUtc).getTime()
     return Math.min(100, Math.max(0, ((Date.now() - dep) / (durationMin * 60_000)) * 100))
@@ -252,7 +253,16 @@ function ProgressRoute({ depUtc, durationMin }: { depUtc: string; durationMin: n
           border: `1.5px solid ${C.forestMid}`, display: 'flex', alignItems: 'center', justifyContent: 'center',
           boxShadow: `0 2px 5px rgba(66,129,119,.35)`,
         }}>
-          <svg width="9" height="9" viewBox="0 0 10 10" fill={C.forestMid}><path d="M.7 1.1 9.3 5 .7 8.9 2.5 5z"/></svg>
+          {/*
+            The marker is the aircraft, so it points the way it is travelling — and that
+            reverses with the script: the bar fills left-to-right in English and
+            right-to-left in Arabic, so a fixed direction has the plane flying backwards in
+            one of them. The path is drawn nose-up and rotated.
+          */}
+          <svg width="10" height="10" viewBox="0 0 24 24" fill={C.forestMid} aria-hidden
+               style={{ transform: `rotate(${locale === 'ar' ? -90 : 90}deg)` }}>
+            <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
+          </svg>
         </div>
         <div style={{ flex: empty, height: 4, borderRadius: 99, background: C.trackEmpty }} />
       </div>
@@ -262,6 +272,7 @@ function ProgressRoute({ depUtc, durationMin }: { depUtc: string; durationMin: n
 
 // ── Arrived route ─────────────────────────────────────────────────────────────
 function ArrivedRoute({ durationMin }: { durationMin: number }) {
+  const locale = useLocale()
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
       {durationMin > 0 && (
@@ -278,7 +289,10 @@ function ArrivedRoute({ durationMin }: { durationMin: number }) {
           border: `1.5px solid ${C.forestLight}`, display: 'flex', alignItems: 'center', justifyContent: 'center',
           boxShadow: '0 2px 5px rgba(22,22,22,.12)',
         }}>
-          <svg width="9" height="9" viewBox="0 0 10 10" fill={C.forest} style={{ transform: 'rotate(45deg)' }}><path d="M.7 1.1 9.3 5 .7 8.9 2.5 5z"/></svg>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill={C.forest} aria-hidden
+               style={{ transform: `rotate(${locale === 'ar' ? -90 : 90}deg)` }}>
+            <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
+          </svg>
         </div>
       </div>
     </div>
@@ -787,20 +801,20 @@ export default function BoardPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px 5px 9px', borderRadius: 999, background: '#E6EFEC', border: '1px solid #B4CFC9' }}>
           <span style={{ width: 6, height: 6, borderRadius: 99, background: C.forest, display: 'block' }} />
           <span style={{ font: `600 11.5px/1 'Instrument Sans', system-ui`, color: '#002623', whiteSpace: 'nowrap' }}>
-            {landed} {view === 'arr' ? 'arrived' : 'departed'}
+            {landed} {t(view === 'arr' ? 'chip.arrived' : 'chip.departed')}
           </span>
         </div>
       )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 12px', borderRadius: 999, background: C.ink }}>
         <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, fontWeight: 600, color: '#fff', letterSpacing: '.04em' }}>
-          {nowSyriaHHMM} NOW
+          {nowSyriaHHMM} {t('chip.now')}
         </span>
       </div>
       {(enroute > 0 || complete) && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px 5px 9px', borderRadius: 999, background: C.forestMid }}>
           <span style={{ width: 6, height: 6, borderRadius: 99, background: '#fff', display: 'block' }} />
           <span style={{ font: `600 11.5px/1 'Instrument Sans', system-ui`, color: '#fff', whiteSpace: 'nowrap' }}>
-            {enroute} in air
+            {enroute} {t('chip.in_air')}
           </span>
         </div>
       )}
@@ -1170,7 +1184,7 @@ export default function BoardPage() {
             <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: `1px solid ${C.trackEmpty}` }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 <span style={{ font: `600 13.5px/1 'Instrument Sans', system-ui`, color: C.ink }}>{t('map.live')}</span>
-                <span style={{ font: `500 11px/1 'Instrument Sans', system-ui`, color: C.muted }}>Leaflet · light tiles</span>
+                <span style={{ font: `500 11px/1 'Instrument Sans', system-ui`, color: C.muted }}>{t('map.tiles')}</span>
               </div>
               <Link href="/map" style={{
                 display: 'flex', alignItems: 'center', gap: 7, padding: '8px 13px', borderRadius: 9,
@@ -1225,17 +1239,17 @@ export default function BoardPage() {
           {/* CTA card */}
           <div style={{ background: C.forest, borderRadius: 16, padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
             <span style={{ font: `700 15px/1.25 'Instrument Sans', system-ui`, color: '#EDEBE0', letterSpacing: '-.01em' }}>
-              Follow a flight from anywhere
+              {t('cta.follow_title')}
             </span>
             <span style={{ font: `400 12px/1.5 'Instrument Sans', system-ui`, color: 'rgba(237,235,224,.72)' }}>
-              Get delay and landing alerts for the flights your family is on — free, no account needed.
+              {t('cta.follow_body')}
             </span>
             <div style={{ display: 'flex', gap: 8 }}>
               <div style={{ flex: 1, padding: '10px 12px', borderRadius: 9, background: '#EDEBE0', textAlign: 'center', font: `600 12px/1 'Instrument Sans', system-ui`, color: C.forest }}>
-                App Store
+                {t('store.app_store')}
               </div>
               <div style={{ flex: 1, padding: '10px 12px', borderRadius: 9, background: 'rgba(237,235,224,.15)', textAlign: 'center', font: `600 12px/1 'Instrument Sans', system-ui`, color: '#EDEBE0' }}>
-                Google Play
+                {t('store.google_play')}
               </div>
             </div>
           </div>
