@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { cityFor, airlineNameFor, getActiveLocale, airportFlag as _apFlag, loadGeoData } from '@/lib/geo-data'
 import { useT, useLocale } from '@/components/LocaleProvider'
-import { counted, countLabel } from '@/lib/i18n'
+import { counted, countLabel, countNumber } from '@/lib/i18n'
 import SiteNav from '@/components/SiteNav'
 import LanguageSwitch from '@/components/LanguageSwitch'
 import { BOARD_AIRPORTS, type BoardAirport } from '@/lib/syria-airports'
@@ -677,13 +677,13 @@ export default function DestinationsPage() {
           <div className="dst-counts">
             {totalDests > 0 && (
               <div className="dst-count-box" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 9, background: C.surface, border: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>
-                <span className="dst-count-num" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{totalDests}</span>
+                {countNumber(locale, totalDests) && <span className="dst-count-num" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{countNumber(locale, totalDests)}</span>}
                 <span className="dst-count-lbl" style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>{countLabel(locale, totalDests, 'noun.dest')}</span>
               </div>
             )}
             {totalFlights > 0 && (
               <div className="dst-count-box" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 9, background: C.surface, border: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>
-                <span className="dst-count-num" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{totalFlights}</span>
+                {countNumber(locale, totalFlights) && <span className="dst-count-num" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{countNumber(locale, totalFlights)}</span>}
                 <span className="dst-count-lbl" style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>{countLabel(locale, totalFlights, 'noun.flight')} / {t('label.week')}</span>
               </div>
             )}

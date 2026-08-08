@@ -393,9 +393,18 @@ export function countLabel(locale: Locale, n: number, base: string): string {
   return dict[`${base}.${pluralCategory(locale, n)}`] ?? dict[`${base}.other`] ?? base
 }
 
-/** The number and its noun: `34 flights`, `10 وجهات`, `22 وجهة`. */
+/**
+ * The numeral, or nothing when the noun already carries the count.
+ *
+ * Arabic's dual is marked on the noun itself — رحلتان *is* "two flights" — so writing the 2
+ * as well says it twice. Every other count needs the numeral.
+ */
+export const countNumber = (locale: Locale, n: number): string =>
+  pluralCategory(locale, n) === 'two' ? '' : String(n)
+
+/** The number and its noun: `34 flights`, `10 وجهات`, `22 وجهة`, `رحلتان`. */
 export const counted = (locale: Locale, n: number, base: string): string =>
-  `${n} ${countLabel(locale, n, base)}`
+  [countNumber(locale, n), countLabel(locale, n, base)].filter(Boolean).join(' ')
 
 /** Every key, for a coverage check in tests. */
 export const ALL_KEYS = Object.keys(en)

@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { cityFor, airlineNameFor, getActiveLocale, airportFlag as _apFlag, loadGeoData } from '@/lib/geo-data'
 import { useT, useLocale } from '@/components/LocaleProvider'
-import { counted, countLabel } from '@/lib/i18n'
+import { counted, countLabel, countNumber } from '@/lib/i18n'
 import SiteNav from '@/components/SiteNav'
 import { BOARD_AIRPORTS, type BoardAirport } from '@/lib/syria-airports'
 
@@ -703,13 +703,13 @@ export default function AirlinesPage() {
           <div className="al-counts">
             {airlines.length > 0 && (
               <div className="al-count-box" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 9, background: C.surface, border: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>
-                <span className="al-count-num" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{airlines.length}</span>
+                {countNumber(locale, airlines.length) && <span className="al-count-num" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{countNumber(locale, airlines.length)}</span>}
                 <span className="al-count-lbl" style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>{countLabel(locale, airlines.length, 'noun.airline')}</span>
               </div>
             )}
             {totalFlights > 0 && (
               <div className="al-count-box" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 9, background: C.surface, border: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>
-                <span className="al-count-num" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{totalFlights}</span>
+                {countNumber(locale, totalFlights) && <span className="al-count-num" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{countNumber(locale, totalFlights)}</span>}
                 <span className="al-count-lbl" style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>{countLabel(locale, totalFlights, 'noun.flight')} / {t('label.week')}</span>
               </div>
             )}

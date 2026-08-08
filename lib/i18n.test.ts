@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { translate, isLocale, dirOf, ALL_KEYS, LOCALES, DEFAULT_LOCALE, counted, pluralCategory } from './i18n.ts'
+import { translate, isLocale, dirOf, ALL_KEYS, LOCALES, DEFAULT_LOCALE, counted, countNumber, pluralCategory } from './i18n.ts'
 
 test('every English key has an Arabic translation', () => {
   const missing = ALL_KEYS.filter(k => translate('ar', k) === k)
@@ -47,7 +47,8 @@ test('English is the unprefixed default', () => {
 test('Arabic counted nouns take the form the number requires', () => {
   // The whole point of the helper: 10 and 22 disagree, and both are right.
   assert.equal(counted('ar', 1,  'noun.dest'), '1 وجهة')
-  assert.equal(counted('ar', 2,  'noun.dest'), '2 وجهتان')
+  // The dual is marked on the noun, so the numeral would say it twice.
+  assert.equal(counted('ar', 2,  'noun.dest'), 'وجهتان')
   assert.equal(counted('ar', 10, 'noun.dest'), '10 وجهات')
   assert.equal(counted('ar', 22, 'noun.dest'), '22 وجهة')
   assert.equal(counted('ar', 0,  'noun.dest'), '0 وجهات')
@@ -81,4 +82,12 @@ test('a number never lands on a category the dictionary cannot answer', () => {
     const k = `noun.flight.${cat}`
     assert.notEqual(translate('ar', k), k, `n=${n} → ${cat}`)
   }
+})
+
+test('only the Arabic dual drops its numeral', () => {
+  assert.equal(countNumber('ar', 2),   '')
+  assert.equal(countNumber('ar', 102), '102')  // CLDR two is n === 2, not n % 100 === 2
+  assert.equal(countNumber('ar', 1),   '1')
+  assert.equal(countNumber('ar', 12),  '12')
+  assert.equal(countNumber('en', 2),   '2')
 })
