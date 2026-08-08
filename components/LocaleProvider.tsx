@@ -11,10 +11,15 @@
 
 import { createContext, useContext } from 'react'
 import { DEFAULT_LOCALE, translate, type Locale } from '@/lib/i18n'
+import { setActiveLocale } from '@/lib/geo-data'
 
 const LocaleCtx = createContext<Locale>(DEFAULT_LOCALE)
 
 export function LocaleProvider({ locale, children }: { locale: Locale; children: React.ReactNode }) {
+  // Set during render, not in an effect: the module-level helpers that read it run while the
+  // children below are rendering, so an effect would land a frame too late and paint the first
+  // pass in the wrong language.
+  setActiveLocale(locale)
   return <LocaleCtx.Provider value={locale}>{children}</LocaleCtx.Provider>
 }
 

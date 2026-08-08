@@ -3,12 +3,12 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react'
 import Link from 'next/link'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
-import { airportCity, airportFlag as _apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
+import { airportCity, cityFor, airportFlag as _apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
 import SiteNav from '@/components/SiteNav'
 import LanguageSwitch from '@/components/LanguageSwitch'
 import { BOARD_AIRPORTS, type BoardAirport } from '@/lib/syria-airports'
 
-const city = (iata: string) => airportCity[iata] ?? iata
+const city = (iata: string) => cityFor(iata)
 const airportFlag = (iata: string) => _apFlag[iata] ?? ''
 
 // ── Palette ──────────────────────────────────────────────────────────────────

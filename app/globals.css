@@ -2,6 +2,56 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Arabic glyphs, without touching a single one of the 753 inline style blocks.
+ *
+ * The site declares its fonts inline everywhere — font: 600 13px 'Instrument Sans' and
+ * 'IBM Plex Mono' for anything numeric. Neither has Arabic glyphs, so every Arabic string was
+ * falling through to whatever the device happened to have, and looked visibly worse than the
+ * English beside it.
+ *
+ * A browser builds a family from every @font-face that declares that name, choosing per glyph
+ * by unicode-range. So declaring Cairo *under the existing family names*, restricted to the
+ * Arabic ranges, makes every existing declaration render Arabic in Cairo and Latin in the
+ * original font. No component changes, and no risk of a half-converted page.
+ *
+ * Self-hosted rather than loaded from Google: it is 30 KB for the whole Arabic range, it saves
+ * a connection to a third party on a mobile-heavy audience, and fonts.gstatic.com is not
+ * dependable from inside Syria — which is 37% of this audience.
+ *
+ * The range covers Arabic, Supplement, Extended-A and -B, plus U+200C-200E: the zero-width
+ * non-joiner and the direction marks, which decide whether letters connect. Leaving those to
+ * a fallback font is how Arabic ends up rendered with the letters detached.
+ */
+@font-face {
+  font-family: 'Instrument Sans';
+  src: url('/fonts/cairo-arabic.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0897-08E1,
+                 U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF,
+                 U+FE70-FEFF;
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('/fonts/cairo-arabic.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0897-08E1,
+                 U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF,
+                 U+FE70-FEFF;
+}
+
+/*
+ * Arabic sits lower and reads smaller than Latin at the same nominal size, so it needs a
+ * little more room to breathe. Scoped to the Arabic document only — the English pages are
+ * untouched.
+ */
+html[lang="ar"] body { line-height: 1.7; }
+
 html, body, #__next { height: 100%; margin: 0; padding: 0; }
 
 /* Dark card-style popup */

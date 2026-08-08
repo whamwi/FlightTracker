@@ -53,6 +53,15 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
         <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+        {/*
+          Preloaded only for Arabic. The @font-face in globals.css declares Cairo under the
+          existing family names, so the browser would fetch it lazily on the first Arabic glyph
+          — which on this site is the whole page, and late enough to show a flash of fallback.
+          English visitors never request it.
+        */}
+        {locale === 'ar' && (
+          <link rel="preload" href="/fonts/cairo-arabic.woff2" as="font" type="font/woff2" crossOrigin="" />
+        )}
       </head>
       <body className="bg-gray-950 text-white">
         <LocaleProvider locale={locale}>{children}</LocaleProvider>

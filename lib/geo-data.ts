@@ -1,6 +1,9 @@
 export type AirportRow = {
   iata: string
   city: string
+  city_ar: string | null
+  name_ar: string | null
+  country_ar: string | null
   country_flag: string | null
   lat: number
   lon: number
@@ -11,6 +14,7 @@ export type AirlineRow = {
   iata: string
   icao: string
   name_en: string
+  name_ar: string | null
   country_flag: string | null
 }
 
@@ -22,6 +26,36 @@ export const airportCoords: Record<string, [number, number]> = {
   ALP: [36.1807, 37.2244],
 }
 export const airportOffset: Record<string, number>          = { DAM: 3, ALP: 3 }
+
+/*
+ * Arabic names, filled from the same fetch.
+ *
+ * Held in a parallel map rather than replacing airportCity, because both languages are needed
+ * at once: a card can be Arabic while a share link or an aria-label stays English. The reader
+ * below picks per call.
+ */
+export const airportCityAr: Record<string, string> = { DAM: 'دمشق', ALP: 'حلب' }
+
+/**
+ * The locale the page is currently rendering in.
+ *
+ * Module state rather than a parameter, because `city(iata)` is called from dozens of places
+ * across the board, destinations, airlines and the map — several of them module-level helpers
+ * that cannot call a hook. Threading a locale through all of them would be a large change for
+ * a value that is fixed by the URL and identical everywhere on the page.
+ *
+ * LocaleProvider sets it from the same value the layout put on <html>, so it cannot drift from
+ * what the document says, including after a client-side navigation between /board and
+ * /ar/board.
+ */
+let activeLocale: 'en' | 'ar' = 'en'
+export const setActiveLocale = (l: 'en' | 'ar') => { activeLocale = l }
+
+/** The city name in the active locale, falling back to English when no Arabic name exists. */
+export function cityFor(iata: string): string {
+  if (activeLocale === 'ar') return airportCityAr[iata] ?? airportCity[iata] ?? iata
+  return airportCity[iata] ?? iata
+}
 export const airlineByIata: Record<string, AirlineRow>      = {}
 export const icaoToIata: Record<string, string>             = {}
 
@@ -40,6 +74,7 @@ export async function loadGeoData(): Promise<void> {
     const rows: AirportRow[] = await apRes.value.json()
     for (const r of rows) {
       if (r.city)        airportCity[r.iata]   = r.city
+      if (r.city_ar)     airportCityAr[r.iata] = r.city_ar
       if (r.country_flag) airportFlag[r.iata]  = r.country_flag
       if (r.lat != null && r.lon != null) airportCoords[r.iata] = [r.lat, r.lon]
       if (r.utc_offset != null) airportOffset[r.iata] = Number(r.utc_offset)
