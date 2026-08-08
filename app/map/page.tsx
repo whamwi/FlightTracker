@@ -6,7 +6,9 @@ import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { Suspense, useState, useEffect, useCallback, useRef } from 'react'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
-import { airportCity, airportFlag as apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
+import { cityFor, airlineNameFor, getActiveLocale, airportFlag as apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
+import { useT, useLocale } from '@/components/LocaleProvider'
+import { STATUS_KEY, counted } from '@/lib/i18n'
 import Wordmark from '@/components/Wordmark'
 import SiteNav from '@/components/SiteNav'
 
@@ -72,8 +74,11 @@ function etaMs(f: InAirFlight): number {
   return Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate(), (h + 21) % 24, m)
 }
 
+// Arabic carries no English unit letters — see the twin in FlightDetail.
 function durationLabel(min: number) {
-  return `${Math.floor(min / 60)}h ${min % 60}m`
+  const h = Math.floor(min / 60), m = min % 60
+  if (getActiveLocale() === 'ar') return h > 0 ? `${h}:${String(m).padStart(2, '0')}` : `${m} د`
+  return `${h}h ${m}m`
 }
 
 function tzOffset(iata: string): number { return airportOffset[iata] ?? 3 }
@@ -119,6 +124,7 @@ function MiniLogo({ iata, name }: { iata: string; name: string }) {
 
 // ── Live progress bar (mini) ─────────────────────────────────────────────────
 function MiniProgress({ depUtc, durationMin, approaching, accentColor }: { depUtc: string; durationMin: number; approaching: boolean; accentColor?: string }) {
+  const t = useT()
   const calc = () => Math.min(100, Math.max(0, ((Date.now() - new Date(depUtc).getTime()) / (durationMin * 60_000)) * 100))
   const [pct, setPct] = useState(calc)
   useEffect(() => {
@@ -135,7 +141,7 @@ function MiniProgress({ depUtc, durationMin, approaching, accentColor }: { depUt
   return (
     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
       <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 9.5, color: C.muted, whiteSpace: 'nowrap' }}>
-        {rem > 0 ? `${durationLabel(rem)} left` : 'Arriving soon'}
+        {rem > 0 ? `${durationLabel(rem)} ${t('label.left')}` : t('map.arriving_soon')}
       </span>
       <div style={{ width: '100%', display: 'flex', alignItems: 'center', height: 16 }}>
         <div style={{ flex: fill, height: 3, borderRadius: 99, background: dotColor }} />
@@ -152,6 +158,7 @@ function MiniProgress({ depUtc, durationMin, approaching, accentColor }: { depUt
 
 // ── Compact flight card for the panel ───────────────────────────────────────
 function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelected?: boolean; onSelect: (n: string) => void }) {
+  const t = useT()
   const status = panelEffectiveStatus(f)
   const approaching = status === 'Approaching'
   const isAlp = f.dep_iata === 'ALP' || f.arr_iata === 'ALP'
@@ -163,8 +170,8 @@ function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelecte
   const arrMs   = etaMs(f)
   const arrTime = arrMs ? fmtLocal(new Date(arrMs).toISOString(), arrOff) : fmtLocal(f.arr_time_utc, arrOff)
 
-  const depCity  = airportCity[f.dep_iata] ?? f.dep_iata
-  const arrCity  = airportCity[f.arr_iata] ?? f.arr_iata
+  const depCity  = cityFor(f.dep_iata)
+  const arrCity  = cityFor(f.arr_iata)
   const depFlag  = apFlag[f.dep_iata] ?? ''
   const arrFlag  = apFlag[f.arr_iata] ?? ''
 
@@ -186,13 +193,13 @@ function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelecte
               {f.iata_number}{f.callsign && f.callsign !== f.iata_number ? ` · ${f.callsign}` : ''}
             </div>
             <div style={{ font: `500 10.5px/1 'Instrument Sans',system-ui`, color: C.muted, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {f.airline_name}
+              {airlineNameFor(f.airline_iata, f.airline_name)}
             </div>
           </div>
           <div className="ia-badge" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px 4px 6px', borderRadius: 99, background: approaching ? '#E6EFEC' : '#EBF2F1', border: `1px solid ${approaching ? '#B4CFC9' : '#BFD8D5'}`, flexShrink: 0 }}>
             <span style={{ width: 5, height: 5, borderRadius: 99, background: railColor, display: 'block' }} />
             <span style={{ font: `600 9.5px/1 'Instrument Sans',system-ui`, color: railColor, whiteSpace: 'nowrap' }}>
-              {status === 'En Route' ? 'En route' : status}
+              {t(STATUS_KEY[status] ?? 'status.unknown')}
             </span>
           </div>
         </div>
@@ -222,7 +229,7 @@ function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelecte
               <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, fontWeight: 700, color: C.ink }}>{f.arr_iata}</span>
               <span style={{ fontSize: 10 }}>{arrFlag}</span>
             </div>
-            <span style={{ font: `500 9px/1 'Instrument Sans',system-ui`, color: C.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 55, textAlign: 'right' }}>{arrCity}</span>
+            <span style={{ font: `500 9px/1 'Instrument Sans',system-ui`, color: C.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 55, textAlign: 'end' }}>{arrCity}</span>
             <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, fontWeight: 700, color: approaching ? C.forest : C.ink, marginTop: 2 }}>{arrTime}</span>
           </div>
         </div>
@@ -276,6 +283,8 @@ function useInAirFlights() {
  * aria-hidden so it is not announced as a second set of flights.
  */
 function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: string; onSelect: (n: string) => void; onClear: () => void }) {
+  const t      = useT()
+  const locale = useLocale()
   const { flights } = useInAirFlights()
   const scrollerRef = useRef<HTMLDivElement>(null)
   const setRef      = useRef<HTMLDivElement>(null)
@@ -382,7 +391,7 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
   if (flights.length === 0) return null
 
   const cards = (ghost: boolean) => (
-    <div ref={ghost ? undefined : setRef} aria-hidden={ghost} style={{ display: 'flex', gap: 8, paddingRight: 8 }}>
+    <div ref={ghost ? undefined : setRef} aria-hidden={ghost} style={{ display: 'flex', gap: 8, paddingInlineEnd: 8 }}>
       {flights.map((f) => {
         const selected = f.iata_number === selectedFlight
         const depOff = tzOffset(f.dep_iata)
@@ -396,7 +405,7 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
         // flights backwards. Every flight here has exactly one Syrian end.
         const outbound = (apFlag[f.dep_iata] ?? '') === '🇸🇾'
         const otherIata = outbound ? f.arr_iata : f.dep_iata
-        const otherCity = airportCity[otherIata] ?? otherIata
+        const otherCity = cityFor(otherIata)
         // Same rule as the desktop card and the map's plane markers: an Aleppo leg is orange,
         // everything else green — so the strip and the map agree at a glance.
         const isAlp = f.dep_iata === 'ALP' || f.arr_iata === 'ALP'
@@ -405,11 +414,11 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
           <button
             key={`${ghost ? 'g' : ''}${f.iata_number}-${f.dep_iata}-${f.arr_iata}`}
             onClick={() => (selected ? onClear() : onSelect(f.iata_number))}
-            aria-label={`${f.iata_number}, ${f.dep_iata} to ${f.arr_iata}`}
+            aria-label={`${f.iata_number} — ${cityFor(f.dep_iata)} ${locale === 'ar' ? '←' : '→'} ${cityFor(f.arr_iata)}`}
             data-flight={ghost ? undefined : f.iata_number}
             style={{
               flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'stretch',
-              padding: 0, borderRadius: 12, overflow: 'hidden', cursor: 'pointer', textAlign: 'left',
+              padding: 0, borderRadius: 12, overflow: 'hidden', cursor: 'pointer', textAlign: 'start',
               background: selected ? '#D4EBD4' : 'rgba(255,255,255,0.94)',
               border: `${selected ? 2 : 1}px solid ${selected ? C.forest : C.border}`,
               backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
@@ -425,11 +434,11 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
                   {f.iata_number}
                 </span>
                 <span style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>
-                  {outbound ? 'To:' : 'From:'} <span style={{ fontWeight: 700, color: C.ink }}>{otherCity}</span>
+                  {t(outbound ? 'map.to' : 'map.from')} <span style={{ fontWeight: 700, color: C.ink }}>{otherCity}</span>
                 </span>
               </span>
               <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, fontWeight: 600, color: C.muted, whiteSpace: 'nowrap' }}>
-                {f.dep_iata} {depTime} <span style={{ color: C.forestLight }}>→</span> {f.arr_iata} {arrTime}
+                {f.dep_iata} {depTime} <span style={{ color: C.forestLight }}>{locale === 'ar' ? '←' : '→'}</span> {f.arr_iata} {arrTime}
               </span>
             </span>
             </span>
@@ -445,7 +454,7 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
           says what these are, so the words were repeating themselves. Sits top-left, the
           corner the map credit vacated on phones. */}
       <div style={{
-        position: 'absolute', left: 12, top: 12, zIndex: 1000,
+        position: 'absolute', insetInlineStart: 12, top: 12, zIndex: 1000,
         minWidth: 30, height: 26, paddingLeft: 9, paddingRight: 9, borderRadius: 99,
         background: C.forest, display: 'flex', alignItems: 'center', justifyContent: 'center',
         boxShadow: '0 2px 10px rgba(0,0,0,.18)',
@@ -473,13 +482,15 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
 }
 
 function InAirPanel({ selectedFlight, open, setOpen, onSelect, onClear }: { selectedFlight?: string; open: boolean; setOpen: (v: boolean) => void; onSelect: (n: string) => void; onClear: () => void }) {
+  const t      = useT()
+  const locale = useLocale()
   const { flights, loading } = useInAirFlights()
   const count = flights.length
 
   // ── Closed: pill FAB ─────────────────────────────────────────────────────
   if (!open) {
     return (
-      <div style={{ position: 'absolute', left: 12, bottom: 96, zIndex: 1000, display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ position: 'absolute', insetInlineStart: 12, bottom: 96, zIndex: 1000, display: 'flex', alignItems: 'center', gap: 8 }}>
       <button
         onClick={() => setOpen(true)}
         className="fab-pill"
@@ -495,7 +506,7 @@ function InAirPanel({ selectedFlight, open, setOpen, onSelect, onClear }: { sele
       >
         <span className="live-dot" style={{ width: 7, height: 7, borderRadius: 99, background: count > 0 ? '#7effd4' : C.muted, display: 'block', flexShrink: 0 }} />
         <span style={{ font: `600 12.5px/1 'Instrument Sans',system-ui`, color: count > 0 ? '#fff' : C.ink, whiteSpace: 'nowrap' }}>
-          {loading ? 'Loading…' : count === 0 ? 'No flights in air' : `${count} in air`}
+          {loading ? t('label.loading') : count === 0 ? t('map.no_flights') : `${counted(locale, count, 'noun.flight')} ${t('chip.in_air')}`}
         </span>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={count > 0 ? '#fff' : C.muted} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
           <path d="m18 15-6-6-6 6"/>
@@ -507,7 +518,7 @@ function InAirPanel({ selectedFlight, open, setOpen, onSelect, onClear }: { sele
       {selectedFlight && (
         <button
           onClick={onClear}
-          aria-label={`Clear ${selectedFlight}`}
+          aria-label={`${t('action.clear')} ${selectedFlight}`}
           style={{
             display: 'flex', alignItems: 'center', gap: 6,
             padding: '9px 12px', borderRadius: 99,
@@ -528,7 +539,7 @@ function InAirPanel({ selectedFlight, open, setOpen, onSelect, onClear }: { sele
   // ── Open: side panel ─────────────────────────────────────────────────────
   return (
     <div style={{
-      position: 'absolute', left: 12, bottom: 'calc(30px + env(safe-area-inset-bottom))', zIndex: 999,
+      position: 'absolute', insetInlineStart: 12, bottom: 'calc(30px + env(safe-area-inset-bottom))', zIndex: 999,
       width: 'min(308px, calc(88vw - 12px))',
       maxHeight: 'calc(100% - 54px - env(safe-area-inset-bottom))',
       display: 'flex', flexDirection: 'column',
@@ -544,10 +555,10 @@ function InAirPanel({ selectedFlight, open, setOpen, onSelect, onClear }: { sele
         <div style={{ flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
             <span className="live-dot" style={{ width: 7, height: 7, borderRadius: 99, background: count > 0 ? C.forestMid : C.muted, display: 'block', flexShrink: 0 }} />
-            <span style={{ font: `700 13.5px/1 'Instrument Sans',system-ui`, color: C.ink }}>Flights in air</span>
+            <span style={{ font: `700 13.5px/1 'Instrument Sans',system-ui`, color: C.ink }}>{t('map.panel_title')}</span>
           </div>
           <span style={{ font: `500 10.5px/1 'Instrument Sans',system-ui`, color: C.muted, marginTop: 5, display: 'block' }}>
-            {loading ? 'Loading…' : `${count} ${count === 1 ? 'flight' : 'flights'} · sorted by arrival`}
+            {loading ? t('label.loading') : `${counted(locale, count, 'noun.flight')} · ${t('map.sorted')}`}
           </span>
         </div>
         {/* Clearing a selection. The obvious spellings — <Link href="/"> and router.replace('/')
@@ -560,7 +571,7 @@ function InAirPanel({ selectedFlight, open, setOpen, onSelect, onClear }: { sele
         {selectedFlight && (
           <button
             onClick={onClear}
-            aria-label="Clear selected flight"
+            aria-label={t('action.clear_selected')}
             style={{
               height: 28, borderRadius: 8, border: `1px solid ${C.border}`, background: C.sunken,
               cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -568,12 +579,12 @@ function InAirPanel({ selectedFlight, open, setOpen, onSelect, onClear }: { sele
               font: `600 11px/1 'Instrument Sans',system-ui`, whiteSpace: 'nowrap',
             }}
           >
-            Clear
+            {t('action.clear')}
           </button>
         )}
         <button
           onClick={() => setOpen(false)}
-          aria-label="Close panel"
+          aria-label={t('action.close_panel')}
           style={{ width: 28, height: 28, borderRadius: 8, border: `1px solid ${C.border}`, background: C.sunken, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color: C.muted, fontSize: 13, lineHeight: 1 }}
         >
           ✕
@@ -585,13 +596,13 @@ function InAirPanel({ selectedFlight, open, setOpen, onSelect, onClear }: { sele
         {loading && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '48px 0', gap: 10 }}>
             <div style={{ width: 24, height: 24, border: `2px solid ${C.forestMid}`, borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin .8s linear infinite' }} />
-            <span style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>Loading…</span>
+            <span style={{ font: `500 11px/1 'Instrument Sans',system-ui`, color: C.muted }}>{t('label.loading')}</span>
           </div>
         )}
         {!loading && count === 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '48px 0', gap: 10, textAlign: 'center' }}>
             <span style={{ fontSize: 36 }}>✈</span>
-            <span style={{ font: `600 12.5px/1.4 'Instrument Sans',system-ui`, color: C.muted }}>No flights<br/>currently in air</span>
+            <span style={{ font: `600 12.5px/1.4 'Instrument Sans',system-ui`, color: C.muted }}>{t('map.none_currently')}</span>
           </div>
         )}
         {!loading && flights.map(f => (

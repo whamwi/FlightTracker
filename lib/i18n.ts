@@ -95,6 +95,16 @@ const en: Dict = {
   'map.live':          'Live map',
   'map.in_air':        'flights in air',
   'map.tiles':         'Leaflet · light tiles',
+  'map.panel_title':   'Flights in air',
+  'map.arriving_soon': 'Arriving soon',
+  'map.no_flights':    'No flights in air',
+  'map.none_currently':'No flights currently in air',
+  'map.sorted':        'sorted by arrival',
+  'map.to':            'To:',
+  'map.from':          'From:',
+  'action.clear':          'Clear',
+  'action.clear_selected': 'Clear selected flight',
+  'action.close_panel':    'Close panel',
 
   // Destinations / Airlines
   'dest.title':        'Destinations',
@@ -198,7 +208,7 @@ const en: Dict = {
 
 const ar: Dict = {
   'nav.flights':       'الرحلات',
-  'nav.track':         'تتبّع',
+  'nav.track':         'مسار الرحلات',
   'nav.track_button':  'تابع الرحلة',
   'nav.track_aria':    'تابع الرحلات على الخريطة المباشرة',
   'nav.destinations':  'الوجهات',
@@ -263,6 +273,16 @@ const ar: Dict = {
   'map.live':          'الخريطة المباشرة',
   'map.in_air':        'رحلات في الجو',
   'map.tiles':         'Leaflet · خرائط فاتحة',
+  'map.panel_title':   'رحلات في الجو',
+  'map.arriving_soon': 'يقترب من الهبوط',
+  'map.no_flights':    'لا توجد رحلات في الجو',
+  'map.none_currently':'لا توجد رحلات في الجو حالياً',
+  'map.sorted':        'مرتبة حسب الوصول',
+  'map.to':            'إلى:',
+  'map.from':          'من:',
+  'action.clear':          'مسح',
+  'action.clear_selected': 'إلغاء تحديد الرحلة',
+  'action.close_panel':    'إغلاق اللوحة',
 
   'dest.title':        'الوجهات',
   'airlines.title':    'شركات الطيران',
