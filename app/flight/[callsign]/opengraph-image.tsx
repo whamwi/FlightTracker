@@ -286,10 +286,12 @@ export default async function Image(
               /*
                * Satori lays a flex container's words out as items, left to right, so a
                * multi-word Arabic name came out reversed — الخطوط الجوية التركية rendered as
-               * التركية الجوية الخطوط. The single-word city names hid it. `direction` puts the
-               * run back in reading order.
+               * التركية الجوية الخطوط. The single-word city names hid it.
+               *
+               * `direction: rtl` is the correct CSS and Satori ignores it; row-reverse is what
+               * actually reorders the items.
                */
-              display: 'flex', direction: ar ? 'rtl' : 'ltr',
+              display: 'flex', flexDirection: ar ? 'row-reverse' : 'row',
             }}>
               {ar ? (AIRLINE_AR[flight?.airline_iata ?? ''] ?? airline) : airline}
             </div>
