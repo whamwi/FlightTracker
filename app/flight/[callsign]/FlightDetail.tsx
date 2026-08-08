@@ -71,6 +71,33 @@ type Flight = {
   date: string
 }
 
+/**
+ * The numeric part of a flight number, whichever prefix form it carries.
+ *
+ * `replace(/^[A-Z0-9]{2,3}/, '')` was greedy and took three characters wherever it could, so
+ * only the three-letter ICAO forms survived:
+ *
+ *   FYC744 → 744   correct
+ *   XH744  → 44    wrong
+ *   TK846  → 46    wrong
+ *   G9375  → 75    wrong
+ *
+ * Every link the board generates uses the IATA form, so the ICAO fallback below was asking for
+ * FYC44 and THY46 — a different flight, or none. It went unnoticed because the registration
+ * lookup ahead of it usually succeeds; it only bites on flights with no ADS-B, which over
+ * Syria is most of them.
+ *
+ * Three letters then digits is ICAO (FYC744, THY846). Otherwise two characters — and those two
+ * cannot be assumed to start with a letter: IATA codes come as TK, as G9, and as 3L, which is
+ * Air Arabia Abu Dhabi and reads 3L504.
+ */
+function flightDigits(num: string): string {
+  const up = num.replace(/\s+/g, '').toUpperCase()
+  return up.match(/^[A-Z]{3}(\d+)$/)?.[1]
+      ?? up.match(/^[A-Z0-9]{2}(\d+)$/)?.[1]
+      ?? up.replace(/^[A-Z0-9]{2,3}/, '')
+}
+
 function fmtNum(raw: string) {
   const m = raw.match(/^([A-Z]{2,3})(\d+.*)$/)
   return m ? `${m[1]} ${m[2]}` : raw
@@ -188,7 +215,7 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
     let cancelled = false
     async function fetchPhoto(f: Flight | null) {
       if (!f) return
-      const digits = callsign.replace(/^[A-Z0-9]{2,3}/, '')
+      const digits = flightDigits(callsign)
 
       // 1. If we have aircraft_reg, use it directly
       if (f.aircraft_reg) {
