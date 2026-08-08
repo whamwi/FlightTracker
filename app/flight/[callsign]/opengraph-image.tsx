@@ -137,21 +137,44 @@ function prettyNum(raw: string): string {
   return m ? `${m[1]} ${m[2]}` : raw
 }
 
-function toSyria(hhmm: string | null | undefined): string {
+function hhmmAt(hhmm: string | null | undefined, offsetH: number): string {
   if (!hhmm) return ''
   const [h, m] = hhmm.split(':').map(Number)
   if (isNaN(h) || isNaN(m)) return ''
-  const total = ((h * 60 + m) + 180) % 1440
+  const total = (((h * 60 + m) + Math.round(offsetH * 60)) % 1440 + 1440) % 1440
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
 }
 
-function isoToSyria(val: string | number | null | undefined): string {
+/**
+ * Airport UTC offsets, from the same table the app reads.
+ *
+ * Falls back to Syria's +3 if the fetch fails — the old behaviour, so a lookup outage degrades
+ * to a slightly wrong time rather than a blank card.
+ */
+async function utcOffsets(): Promise<Record<string, number>> {
+  try {
+    const res = await fetch('https://www.flysyria.app/api/airports', { next: { revalidate: 3600 } })
+    if (!res.ok) return {}
+    const rows = await res.json() as { iata: string; utc_offset: number | null }[]
+    const out: Record<string, number> = {}
+    for (const r of rows) if (r.utc_offset != null) out[r.iata] = Number(r.utc_offset)
+    return out
+  } catch { return {} }
+}
+
+/*
+ * Each end of the card reads in its own airport's local time, the way the page does.
+ *
+ * This used to add a flat +3 to both, so a Sharjah departure came out an hour behind what the
+ * page showed beside it — and the card is the part most people ever see.
+ */
+function isoAt(val: string | number | null | undefined, offsetH: number): string {
   if (!val) return ''
   const ms = typeof val === 'number' ? val * 1000 : new Date(val as string).getTime()
   if (isNaN(ms)) return ''
   const totalMin = Math.floor(ms / 60_000) % 1440
-  const syria = (totalMin + 180) % 1440
-  return `${String(Math.floor(syria / 60)).padStart(2, '0')}:${String(syria % 60).padStart(2, '0')}`
+  const local = ((totalMin + Math.round(offsetH * 60)) % 1440 + 1440) % 1440
+  return `${String(Math.floor(local / 60)).padStart(2, '0')}:${String(local % 60).padStart(2, '0')}`
 }
 
 function fmtDur(min: number | null, ar: boolean): string {
@@ -210,13 +233,17 @@ export default async function Image(
     : null
 
   // Best available time: actual > revised > estimated (dep+dur) > scheduled
-  const depTime = isoToSyria(flight?.actual_dep_utc)
-               || isoToSyria(flight?.revised_dep_utc)
-               || toSyria(flight?.dep_time_utc)
-  const arrTime = isoToSyria(flight?.actual_arr_utc)
-               || isoToSyria(flight?.revised_arr_utc)
-               || isoToSyria(estimatedArrUtc)
-               || toSyria(flight?.arr_time_utc)
+  const offsets = await utcOffsets()
+  const depOff  = offsets[dep] ?? 3
+  const arrOff  = offsets[arr] ?? 3
+
+  const depTime = isoAt(flight?.actual_dep_utc, depOff)
+               || isoAt(flight?.revised_dep_utc, depOff)
+               || hhmmAt(flight?.dep_time_utc, depOff)
+  const arrTime = isoAt(flight?.actual_arr_utc, arrOff)
+               || isoAt(flight?.revised_arr_utc, arrOff)
+               || isoAt(estimatedArrUtc, arrOff)
+               || hhmmAt(flight?.arr_time_utc, arrOff)
 
   const dur     = fmtDur(flight?.duration_min ?? null, ar)
   const sc      = statusStyle(status)

@@ -7,7 +7,7 @@ import { airportCity, cityFor, airlineNameFor, airportFlag as _apFlag, airportOf
 import SiteNav from '@/components/SiteNav'
 import LanguageSwitch from '@/components/LanguageSwitch'
 import { useT, useLocale, useHref } from '@/components/LocaleProvider'
-import { STATUS_KEY } from '@/lib/i18n'
+import { STATUS_KEY, type Locale } from '@/lib/i18n'
 import { BOARD_AIRPORTS, type BoardAirport } from '@/lib/syria-airports'
 
 const city = (iata: string) => cityFor(iata)
@@ -128,9 +128,12 @@ function fmtLocal(raw: string | null | undefined, offsetH: number): string {
   return utcHHMMtoLocal(raw, offsetH)
 }
 
-function durationLabel(min: number): string {
+// Arabic carries no English unit letters — see the twin in FlightDetail.
+function durationLabel(min: number, locale: Locale): string {
   if (!min) return ''
-  return `${Math.floor(min / 60)}h ${min % 60}m`
+  const h = Math.floor(min / 60), m = min % 60
+  if (locale === 'ar') return h > 0 ? `${h}:${String(m).padStart(2, '0')}` : `${m} د`
+  return `${h}h ${m}m`
 }
 
 function effectiveStatus(f: Flight): string {
@@ -226,6 +229,7 @@ function AirlineLogo({ iata, name }: { iata: string; name: string }) {
 // ── Progress route (en-route) ────────────────────────────────────────────────
 function ProgressRoute({ depUtc, durationMin }: { depUtc: string; durationMin: number }) {
   const locale = useLocale()
+  const t      = useT()
   const calc = () => {
     const dep = new Date(depUtc).getTime()
     return Math.min(100, Math.max(0, ((Date.now() - dep) / (durationMin * 60_000)) * 100))
@@ -244,7 +248,7 @@ function ProgressRoute({ depUtc, durationMin }: { depUtc: string; durationMin: n
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
       <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: C.muted, whiteSpace: 'nowrap' }}>
-        {remainingMin > 0 ? `${durationLabel(remainingMin)} left` : 'Arriving'}
+        {remainingMin > 0 ? `${durationLabel(remainingMin, locale)} ${t('label.left')}` : t('label.arriving')}
       </span>
       <div style={{ display: 'flex', flexDirection: 'row', width: '100%', alignItems: 'center', height: 20 }}>
         <div style={{ flex: fill, height: 4, borderRadius: 99, background: C.forestMid }} />
@@ -277,7 +281,7 @@ function ArrivedRoute({ durationMin }: { durationMin: number }) {
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
       {durationMin > 0 && (
         <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: C.muted, whiteSpace: 'nowrap' }}>
-          {durationLabel(durationMin)}
+          {durationLabel(durationMin, locale)}
         </span>
       )}
       <div style={{ display: 'flex', flexDirection: 'row', width: '100%', alignItems: 'center', height: 20 }}>
@@ -485,7 +489,7 @@ function FlightCard({ f, view, isPinned, onTogglePin }: { f: Flight; view: View;
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, paddingTop: 5 }}>
             {f.duration_min > 0 && (
               <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: C.muted, whiteSpace: 'nowrap' }}>
-                {durationLabel(f.duration_min)}
+                {durationLabel(f.duration_min, locale)}
               </span>
             )}
             {/*
