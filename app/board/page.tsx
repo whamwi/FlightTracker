@@ -133,7 +133,8 @@ function durationLabel(min: number, locale: Locale): string {
   if (!min) return ''
   const h = Math.floor(min / 60), m = min % 60
   if (locale === 'ar') return h > 0 ? `${h}:${String(m).padStart(2, '0')}` : `${m} د`
-  return `${h}h ${m}m`
+  // No leading "0h" under an hour — see the twin on the map.
+  return h > 0 ? `${h}h ${m}m` : `${m}m`
 }
 
 function effectiveStatus(f: Flight): string {

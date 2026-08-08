@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useT, useHref } from '@/components/LocaleProvider'
 import { useEffect, useState } from 'react'
 import Wordmark from './Wordmark'
+import { LanguageToggle } from './LanguageSwitch'
 
 /**
  * The site header: wordmark, a tab row on desktop, a hamburger drawer on phones.
@@ -67,6 +68,11 @@ export default function SiteNav({ active, right }: { active: string; right?: Rea
            space beyond it. margin-inline-start follows the writing direction. */
         .sn-tabs  { display: flex; align-items: center; gap: 4px; margin-inline-start: 14px; }
         .sn-right { display: flex; margin-inline-start: auto; align-items: center; }
+        /* Pushed to the end of the bar on pages with no right-hand slot, and sitting just
+           after that slot on the pages that have one. */
+        .sn-lang  { display: flex; align-items: center; margin-inline-start: auto; margin-inline-end: 0; }
+        .sn-right + .sn-lang { margin-inline-start: 12px; }
+        .sn-lang-sm { display: none; }
         .sn-actions { display: none; }
         .sn-burger{ display: none; }
         .sn-track { display: none; }
@@ -74,14 +80,18 @@ export default function SiteNav({ active, right }: { active: string; right?: Rea
           .sn-bar    { padding: 0 12px; padding-top: env(safe-area-inset-top); height: calc(58px + env(safe-area-inset-top)); gap: 0; }
           .sn-tabs   { display: none; }
           .sn-right  { display: none; }
+          .sn-lang   { display: none; }
+          .sn-lang-sm{ display: flex; align-items: center; margin-inline-end: 8px; }
           .sn-actions{ display: flex; align-items: center; gap: 8px; margin-inline-start: auto; margin-inline-end: 10px; }
+          .sn-actions:empty + .sn-track,
+          .sn-actions:empty + .sn-lang-sm { margin-inline-start: auto; }
           .sn-burger { display: flex; }
           .sn-track  { display: inline-flex; }
         }
       `}</style>
 
       <div className="sn-bar">
-        <Link href="/" style={{ textDecoration: 'none' }} aria-label="FlySyria home">
+        <Link href={href('/')} style={{ textDecoration: 'none' }} aria-label="FlySyria home">
           <Wordmark />
         </Link>
 
@@ -102,6 +112,10 @@ export default function SiteNav({ active, right }: { active: string; right?: Rea
         </div>
 
         {right && <div className="sn-right">{right}</div>}
+
+        {/* On every page, not just the two footers that had it — the switch is only useful
+            where a visitor in the wrong language will actually see it, which is the header. */}
+        <div className="sn-lang"><LanguageToggle /></div>
 
         {/* Filled by the Track map, which portals its media buttons here on phones. Empty
             and zero-width everywhere else, so it costs nothing on the other pages. */}
@@ -136,6 +150,8 @@ export default function SiteNav({ active, right }: { active: string; right?: Rea
             <span style={{ font: `700 13.5px/1 'Instrument Sans',system-ui`, color: '#fff', whiteSpace: 'nowrap' }}>{t('nav.track_button')}</span>
           </Link>
         )}
+
+        <div className="sn-lang-sm"><LanguageToggle compact /></div>
 
         <button
           className="sn-burger"

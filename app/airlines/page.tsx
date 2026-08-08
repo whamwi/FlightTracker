@@ -36,6 +36,7 @@ function fmtDur(min: number) {
   if (!min) return ''
   const h = Math.floor(min / 60), m = min % 60
   if (getActiveLocale() === 'ar') return h > 0 ? `${h}:${String(m).padStart(2, '0')}` : `${m} د`
+  if (h === 0) return `${m}m`
   return m ? `${h}h ${m}m` : `${h}h`
 }
 

@@ -1,11 +1,12 @@
 'use client'
 
 /**
- * The language switch that was already promised in the footer.
+ * The language switch.
  *
- * `العربية · English` has been sitting on the board, destinations and airlines pages as a
- * plain span with no handler since before this — visible to every visitor and doing nothing.
- * This is the same text, wired.
+ * Two forms. `footer` keeps the wired-up `العربية · English` pair the footers already carried.
+ * `toggle` is the header's: a single control showing the flag of the language you would move
+ * to, because with exactly two languages a chooser is a list of one real option and a label
+ * for where you already are.
  *
  * Switching preserves the current path and query, so someone reading a specific flight in
  * English lands on that flight in Arabic rather than back at the board. Losing your place is
@@ -19,8 +20,18 @@ import { useLocale } from './LocaleProvider'
 
 const LABEL: Record<Locale, string> = { en: 'English', ar: 'العربية' }
 
-export default function LanguageSwitch({ colour = '#A6A093' }: { colour?: string }) {
-  const active   = useLocale()
+/*
+ * The flag stands for the language, not the country — there is no flag for a language, and
+ * every choice here is a compromise. English takes the American flag because that is where
+ * most of the English-reading audience is (16% of traffic, the largest single country after
+ * Syria); Arabic takes Syria's, which for this site is the point rather than a compromise.
+ */
+const FLAG: Record<Locale, string> = { en: '🇺🇸', ar: '🇸🇾' }
+
+/** The other language — with two of them, that is the whole of the choice. */
+const otherThan = (l: Locale): Locale => (LOCALES.find((x) => x !== l) ?? DEFAULT_LOCALE)
+
+function useSwitchHref() {
   const pathname = usePathname()
   const params   = useSearchParams()
 
@@ -35,23 +46,61 @@ export default function LanguageSwitch({ colour = '#A6A093' }: { colour?: string
   )
 
   const query = params.toString()
-  const href = (l: Locale) => {
+  return (l: Locale) => {
     const base = l === DEFAULT_LOCALE ? bare : `/${l}${bare === '/' ? '' : bare}`
     return query ? `${base}?${query}` : base
   }
+}
+
+/** Header form: one tap, showing where it takes you. */
+export function LanguageToggle({ compact = false }: { compact?: boolean }) {
+  const active = useLocale()
+  const href   = useSwitchHref()
+  const target = otherThan(active)
+
+  return (
+    <Link
+      href={href(target)}
+      prefetch={false}
+      hrefLang={target}
+      aria-label={LABEL[target]}
+      title={LABEL[target]}
+      style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+        height: 40, width: compact ? 40 : undefined, padding: compact ? 0 : '0 12px',
+        borderRadius: 10, border: '1px solid #D5DFD0', background: '#FFFFFF',
+        textDecoration: 'none', flexShrink: 0,
+      }}
+    >
+      {/* Emoji flags render at the font's own size, so this is set rather than inherited. */}
+      <span style={{ fontSize: 17, lineHeight: 1 }} aria-hidden>{FLAG[target]}</span>
+      {!compact && (
+        <span style={{ font: `600 13px/1 'Instrument Sans',system-ui`, color: '#4b5563', whiteSpace: 'nowrap' }}>
+          {LABEL[target]}
+        </span>
+      )}
+    </Link>
+  )
+}
+
+/** Footer form: both languages named, the current one marked. */
+export default function LanguageSwitch({ colour = '#A6A093' }: { colour?: string }) {
+  const active = useLocale()
+  const href   = useSwitchHref()
 
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
       {LOCALES.map((l, i) => (
         <span key={l} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           {i > 0 && <span style={{ color: colour, opacity: 0.5 }}>·</span>}
+          <span style={{ fontSize: 13, lineHeight: 1 }} aria-hidden>{FLAG[l]}</span>
           {l === active ? (
             <span style={{
               fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, fontWeight: 700,
               color: colour, opacity: 1,
             }}>{LABEL[l]}</span>
           ) : (
-            <Link href={href(l)} prefetch={false} style={{
+            <Link href={href(l)} prefetch={false} hrefLang={l} style={{
               fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, fontWeight: 500,
               color: colour, opacity: 0.7, textDecoration: 'none',
             }}>{LABEL[l]}</Link>
