@@ -268,7 +268,7 @@ const ar: Dict = {
   'cta.follow_title':  'تابع رحلتك من أي مكان',
   'cta.follow_body':   'تنبيهات التأخير والهبوط للرحلات التي يسافر عليها أهلك — مجاناً وبدون حساب.',
 
-  'dest.per_week_short':  '/ أسبوع',
+  'dest.per_week_short':  'رحلة أسبوعيا',
   'dest.flights_per_wk':  'رحلة/أسبوع',
   'dest.flights_week':    'رحلة هذا الأسبوع',
   'dest.routes':          'خط',
