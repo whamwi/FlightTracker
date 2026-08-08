@@ -278,7 +278,7 @@ const ar: Dict = {
   'dest.no_match':        'لا توجد وجهة تطابق',
   'dest.no_flights':      'لا توجد رحلات مجدولة',
   'dest.time_varies':     'الوقت يختلف حسب اليوم — اختر يوماً',
-  'dest.time_for_day':    'وقت اليوم المحدد',
+  'dest.time_for_day':    'اختار اليوم لمعرفة وقت الرحلة',
   'dest.search':          'ابحث عن مدينة أو شركة طيران',
   'dest.search_aria':     'البحث في الوجهات',
   'action.clear_search':  'مسح البحث',
