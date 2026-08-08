@@ -42,6 +42,7 @@ type Row = {
 const KIND_COLOUR: Record<string, string> = {
   ERROR: C.red, WARN: C.amber, VANISHED: C.amber,
   GONE: C.dim, RECOVERED: C.green, BOOT: C.blue,
+  OFFLINE: C.dim,
 }
 
 async function fetchRows(platform: string | null, hours: number): Promise<Row[] | null> {

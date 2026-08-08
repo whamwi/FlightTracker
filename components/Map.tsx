@@ -843,6 +843,37 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
   const mapRef          = useRef<HTMLDivElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapInstanceRef  = useRef<any>(null)
+
+  /*
+   * Is this map object still the live one, and still attached?
+   *
+   * The render pass awaits several times — the Leaflet import, then /api/airspace — and the
+   * component can unmount during any of them. Unmount runs map.remove(), which tears down the
+   * panes and nulls this ref. The `if (!map) return` at the top of the pass only catches an
+   * unmount that happened before the ref was read; after that, `map` is a perfectly valid
+   * object with no panes left. Adding a layer to it reaches Leaflet's _initIcon, where
+   * getPane() returns undefined and appendChild throws.
+   *
+   * Three users hit exactly that on /board and /map — two on the board's map preview, which
+   * mounts and unmounts as the page re-renders while a poll is still in flight.
+   *
+   * Identity check as well as the pane check: after remove() a stale map can still answer
+   * getPane, and it is no longer the one on screen either way.
+   */
+  const mapAlive = (m: any): boolean =>
+    !!m && mapInstanceRef.current === m && !!m.getPane?.('markerPane')
+
+  /**
+   * addTo, but only onto a map that can still receive it.
+   *
+   * Returns the layer regardless so callers keep their reference and need no restructuring.
+   * A layer that was not added is inert — Leaflet guards setLatLng and setIcon on a marker
+   * with no icon — and the next poll replaces it, if there is a next poll.
+   */
+  const addToMap = <T extends { addTo: (m: any) => T }>(layer: T, m: any): T => {
+    if (mapAlive(m)) layer.addTo(m)
+    return layer
+  }
   // Markers keyed by CALLSIGN (not hex) — one entry per flight
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const markersRef      = useRef<Record<string, any>>({})
@@ -1856,7 +1887,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
             drawTrackRoute(markersRef.current[cs], se_?.dep_iata ?? a.dep_iata ?? null, se_?.arr_iata ?? a.arr_iata ?? null)
           }
         } else {
-          const m = L.marker([dispLat, dispLon], { icon }).addTo(map)
+          const m = addToMap(L.marker([dispLat, dispLon], { icon }), map)
           if (embed) {
             m.on('click', () => {
               const fs  = flightStatusRef.current[cs]
@@ -2174,7 +2205,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
             drawTrackRoute(schedMarkersRef.current[callsign], dep_iata, arr_iata)
           }
         } else {
-          const m = L.marker([lat, lon], { icon }).addTo(map)
+          const m = addToMap(L.marker([lat, lon], { icon }), map)
           const fetchSchedPhoto = (cacheKey: string, apiUrl: string, onLoad: (url: string) => void) => {
             if (cacheKey in photoCacheRef.current || photoRequestedRef.current.has(cacheKey)) return
             photoRequestedRef.current.add(cacheKey)
@@ -2439,7 +2470,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
             </div>`
             const mk = L.marker([a.lat, a.lon], { icon, zIndexOffset: -200 })
             mk.bindPopup(popup, { className: 'fp-popup', closeButton: false, maxWidth: 280 })
-            mk.addTo(map)
+            addToMap(mk, map)
             overSyriaMarkersRef.current[cs] = mk
           }
         }

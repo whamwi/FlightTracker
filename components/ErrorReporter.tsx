@@ -45,7 +45,39 @@ export function reportHandledError(message: string, context?: Record<string, unk
   report('ERROR', message, null, context)
 }
 
-function report(kind: 'ERROR', message: string, stack?: string | null, extra?: Record<string, unknown>) {
+/**
+ * Whether this browser's errors are worth recording.
+ *
+ * A developer's half-saved file is not a user's bug. With no check here, every error thrown
+ * against a local dev server was written to the production table — including a
+ * `photoUploadVisible is not defined` that existed for about a minute between two edits, was
+ * never deployed, and still turned up in the log looking like a live fault on /airlines.
+ *
+ * Hostname rather than NODE_ENV: the reporter runs in the browser, and what matters is which
+ * server the page came from, not how the bundle was built.
+ */
+function shouldReport(): boolean {
+  const h = location.hostname
+  return h !== 'localhost' && h !== '127.0.0.1' && h !== '[::1]' && !h.endsWith('.local')
+}
+
+/**
+ * A failed fetch from a page nobody is looking at, or a phone with no signal, is a network
+ * condition rather than a fault in the app.
+ *
+ * These were 8 of 14 rows in the table — enough to bury the one entry that was a real defect.
+ * The event is still worth having, so it is recorded as OFFLINE rather than discarded: a rise
+ * in them says something about the network our users are on, which is worth knowing separately
+ * from a rise in errors.
+ */
+function isNetworkCondition(message: string): boolean {
+  if (!/failed to fetch|networkerror|load failed|network request failed/i.test(message)) return false
+  return document.visibilityState === 'hidden' || !navigator.onLine
+}
+
+function report(kind: 'ERROR' | 'OFFLINE', message: string, stack?: string | null, extra?: Record<string, unknown>) {
+  if (!shouldReport()) return
+  if (kind === 'ERROR' && isNetworkCondition(message)) kind = 'OFFLINE'
   if (sent >= MAX_PER_SESSION) return
   const key = `${message}|${(stack ?? '').slice(0, 120)}`
   if (seen.has(key)) return

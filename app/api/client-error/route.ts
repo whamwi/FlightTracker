@@ -33,7 +33,10 @@ type Incoming = {
 }
 
 const PLATFORMS = new Set(['web', 'ios', 'android'])
-const KINDS     = new Set(['ERROR', 'WARN', 'GONE', 'VANISHED', 'RECOVERED', 'BOOT'])
+// OFFLINE: a fetch that failed while the tab was hidden or the phone had no signal. Kept
+// rather than dropped — a rise in these says something about our users' networks — but not
+// an ERROR, which is what let them bury the one real defect in the table.
+const KINDS     = new Set(['ERROR', 'WARN', 'GONE', 'VANISHED', 'RECOVERED', 'BOOT', 'OFFLINE'])
 
 const clip = (s: unknown, max: number): string | null =>
   typeof s === 'string' && s.trim() ? s.trim().slice(0, max) : null
