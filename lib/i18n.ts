@@ -229,7 +229,7 @@ const ar: Dict = {
   'action.share':      'مشاركة',
   'action.pin':        'تثبيت',
   'action.pinned':     'مثبّتة',
-  'action.view_flights': 'عرض الرحلات',
+  'action.view_flights': 'تفاصيل الرحلات',
   'action.view_routes':  'عرض الخطوط',
   'action.open_track':   'فتح التتبّع',
 
@@ -283,7 +283,7 @@ const ar: Dict = {
   'dest.search_aria':     'البحث في الوجهات',
   'action.clear_search':  'مسح البحث',
   'action.view':          'عرض',
-  'region.all_full':      'كل المناطق',
+  'region.all_full':      'كل الوجهات',
   'region.europe_turkey': 'أوروبا وتركيا',
   // Latin initials on purpose — see the note beside the English set.
   'dow.sun': 'S', 'dow.mon': 'M', 'dow.tue': 'T', 'dow.wed': 'W',
