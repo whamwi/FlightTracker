@@ -96,6 +96,10 @@ const en: Dict = {
   'map.in_air':        'flights in air',
   'map.tiles':         'Leaflet · light tiles',
   'map.panel_title':   'Flights in air',
+  // The panel only ever holds airborne flights, so Departed and En Route both say the same
+  // thing here. Approaching keeps its own word — that one is telling you something new.
+  'status.in_air':     'In air',
+  'map.until_arrival': 'left',
   'map.arriving_soon': 'Arriving soon',
   'map.no_flights':    'No flights in air',
   'map.none_currently':'No flights currently in air',
@@ -281,6 +285,8 @@ const ar: Dict = {
   'map.in_air':        'رحلات في الجو',
   'map.tiles':         'Leaflet · خرائط فاتحة',
   'map.panel_title':   'رحلات في الجو',
+  'status.in_air':     'في الجو',
+  'map.until_arrival': 'باق للوصول',
   'map.arriving_soon': 'يقترب من الهبوط',
   'map.no_flights':    'لا توجد رحلات في الجو',
   'map.none_currently':'لا توجد رحلات في الجو حالياً',

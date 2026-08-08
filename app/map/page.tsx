@@ -78,7 +78,8 @@ function etaMs(f: InAirFlight): number {
 function durationLabel(min: number) {
   const h = Math.floor(min / 60), m = min % 60
   if (getActiveLocale() === 'ar') return h > 0 ? `${h}:${String(m).padStart(2, '0')}` : `${m} د`
-  return `${h}h ${m}m`
+  // No leading "0h": under an hour this read "0h 47m left", which the other cards never did.
+  return h > 0 ? `${h}h ${m}m` : `${m}m`
 }
 
 function tzOffset(iata: string): number { return airportOffset[iata] ?? 3 }
@@ -124,7 +125,8 @@ function MiniLogo({ iata, name }: { iata: string; name: string }) {
 
 // ── Live progress bar (mini) ─────────────────────────────────────────────────
 function MiniProgress({ depUtc, durationMin, approaching, accentColor }: { depUtc: string; durationMin: number; approaching: boolean; accentColor?: string }) {
-  const t = useT()
+  const t      = useT()
+  const locale = useLocale()
   const calc = () => Math.min(100, Math.max(0, ((Date.now() - new Date(depUtc).getTime()) / (durationMin * 60_000)) * 100))
   const [pct, setPct] = useState(calc)
   useEffect(() => {
@@ -141,12 +143,13 @@ function MiniProgress({ depUtc, durationMin, approaching, accentColor }: { depUt
   return (
     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
       <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 9.5, color: C.muted, whiteSpace: 'nowrap' }}>
-        {rem > 0 ? `${durationLabel(rem)} ${t('label.left')}` : t('map.arriving_soon')}
+        {rem > 0 ? `${durationLabel(rem)} ${t('map.until_arrival')}` : t('map.arriving_soon')}
       </span>
       <div style={{ width: '100%', display: 'flex', alignItems: 'center', height: 16 }}>
         <div style={{ flex: fill, height: 3, borderRadius: 99, background: dotColor }} />
         <div style={{ width: 14, height: 14, borderRadius: 7, background: C.surface, border: `1.5px solid ${dotColor}`, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <svg width="8" height="8" viewBox="0 0 24 24" fill={dotColor} style={{ transform: 'rotate(90deg)' }}>
+          {/* Nose at the destination, which is the left-hand end when the row runs right to left. */}
+          <svg width="8" height="8" viewBox="0 0 24 24" fill={dotColor} style={{ transform: `rotate(${locale === 'ar' ? -90 : 90}deg)` }}>
             <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
           </svg>
         </div>
@@ -199,7 +202,7 @@ function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelecte
           <div className="ia-badge" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px 4px 6px', borderRadius: 99, background: approaching ? '#E6EFEC' : '#EBF2F1', border: `1px solid ${approaching ? '#B4CFC9' : '#BFD8D5'}`, flexShrink: 0 }}>
             <span style={{ width: 5, height: 5, borderRadius: 99, background: railColor, display: 'block' }} />
             <span style={{ font: `600 9.5px/1 'Instrument Sans',system-ui`, color: railColor, whiteSpace: 'nowrap' }}>
-              {t(STATUS_KEY[status] ?? 'status.unknown')}
+              {t(status === 'Departed' || status === 'En Route' ? 'status.in_air' : (STATUS_KEY[status] ?? 'status.unknown'))}
             </span>
           </div>
         </div>
@@ -207,12 +210,14 @@ function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelecte
         {/* Row 2: route with progress */}
         <div className="ia-row2" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {/* Dep */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 1, width: 56, flexShrink: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-              <span style={{ fontSize: 10 }}>{depFlag}</span>
-              <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, fontWeight: 700, color: C.ink }}>{f.dep_iata}</span>
+          {/* City first and in the card's own weight; the code is the reference under it. The
+              other way round led with three letters most readers have to decode. */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 1, width: 64, flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 3, minWidth: 0 }}>
+              <span style={{ fontSize: 10, flexShrink: 0 }}>{depFlag}</span>
+              <span style={{ font: `700 11px/1.15 'Instrument Sans',system-ui`, color: C.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{depCity}</span>
             </div>
-            <span style={{ font: `500 9px/1 'Instrument Sans',system-ui`, color: C.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 55 }}>{depCity}</span>
+            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 9.5, color: C.muted }}>{f.dep_iata}</span>
             <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, fontWeight: 700, color: C.ink, marginTop: 2 }}>{depTime}</span>
           </div>
 
@@ -224,12 +229,12 @@ function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelecte
           )}
 
           {/* Arr */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 1, width: 56, flexShrink: 0, alignItems: 'flex-end' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-              <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, fontWeight: 700, color: C.ink }}>{f.arr_iata}</span>
-              <span style={{ fontSize: 10 }}>{arrFlag}</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 1, width: 64, flexShrink: 0, alignItems: 'flex-end' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 3, minWidth: 0 }}>
+              <span style={{ font: `700 11px/1.15 'Instrument Sans',system-ui`, color: C.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{arrCity}</span>
+              <span style={{ fontSize: 10, flexShrink: 0 }}>{arrFlag}</span>
             </div>
-            <span style={{ font: `500 9px/1 'Instrument Sans',system-ui`, color: C.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 55, textAlign: 'end' }}>{arrCity}</span>
+            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 9.5, color: C.muted }}>{f.arr_iata}</span>
             <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, fontWeight: 700, color: approaching ? C.forest : C.ink, marginTop: 2 }}>{arrTime}</span>
           </div>
         </div>
