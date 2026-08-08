@@ -112,7 +112,10 @@ function airlineIataFor(callsign: string, fs?: FlightStatus | null): string | nu
   return _icaoToIata[icao] ?? null
 }
 function airlineNameFor(iata: string | null): string | null {
-  return iata ? (_alByIata[iata]?.name_en ?? null) : null
+  if (!iata) return null
+  const row = _alByIata[iata]
+  if (!row) return null
+  return (RTL() ? (row.name_ar || row.name_en) : row.name_en) ?? null
 }
 // Syria home airports — tiny fallback so route lines draw before geo-data loads
 const AIRPORT_COORDS: Record<string, [number, number]> = {
@@ -579,24 +582,24 @@ function buildPopup(
   // physical one put the space on the badge's outer edge under RTL, leaving it touching the
   // time it belongs to. dir=ltr keeps the sign attached to its digits — bidi otherwise
   // throws a leading + to the far end of the token.
-  const delayBadge = (min: number | null | undefined, before = false) => min != null && Math.abs(min) >= 2
-    ? `<span dir="ltr" style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;padding:2px 5px;border-radius:99px;margin-inline-${before ? 'end' : 'start'}:5px;line-height:1.4">${min > 0 ? '+' : ''}${min}${RTL() ? 'د' : 'm'}</span>`
+  const delayBadge = (min: number | null | undefined) => min != null && Math.abs(min) >= 2
+    ? `<span dir="ltr" style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;padding:2px 5px;border-radius:99px;line-height:1.4;flex-shrink:0">${min > 0 ? '+' : ''}${min}${RTL() ? 'د' : 'm'}</span>`
     : ''
 
   const progressHtml = progressBarHtml(dep, arr, fraction, etaStr)
 
   const timesHtml = (depTimeLocal || arrTimeLocal)
     ? `<div style="display:flex;background:#1f2937;padding:11px 14px">
-        <div style="flex:1">
+        <div style="flex:1;text-align:start">
           <div style="font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:${RTL() ? 'normal' : '0.6px'};margin-bottom:3px">${T('label.departure')}</div>
-          <div style="display:flex;align-items:baseline">
+          <div style="display:flex;align-items:baseline;gap:7px">
             <span style="font-size:20px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums">${depTimeLocal || '—'}</span>${delayBadge(fs?.dep_delay_min)}
           </div>
         </div>
         <div style="flex:1;text-align:end">
           <div style="font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:${RTL() ? 'normal' : '0.6px'};margin-bottom:3px">${T('label.arrival')}</div>
-          <div style="display:flex;align-items:baseline;justify-content:flex-end">
-            ${delayBadge(fs?.arr_delay_min ?? schedArrDeltaMin(a.arr_time_utc, arrISO), true)}<span style="font-size:20px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums">${arrTimeLocal || '—'}</span>
+          <div style="display:flex;align-items:baseline;justify-content:flex-end;gap:7px">
+            ${delayBadge(fs?.arr_delay_min ?? schedArrDeltaMin(a.arr_time_utc, arrISO))}<span style="font-size:20px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums">${arrTimeLocal || '—'}</span>
           </div>
         </div>
       </div>`
@@ -609,16 +612,16 @@ function buildPopup(
   // time beside it.
   const lostLocal = lostAt ? popupToLocal(new Date(lostAt).toISOString(), arrOffset) : ''
   const lostLine = lostAt && !projected
-    ? `<div style="color:#ef4444;font-size:11px;padding:5px 14px">⚠ ${T('map.signal_lost')} ${lostLocal}</div>`
+    ? `<div style="color:#ef4444;font-size:11px;padding:5px 14px;text-align:center">⚠ ${T('map.signal_lost')} ${lostLocal}</div>`
     : ''
   const drLine = projected && lostAt
-    ? `<div style="color:#9ca3af;font-size:10px;padding:2px 14px 6px">${T('map.dead_reckoning')} ${lostLocal}</div>`
+    ? `<div style="color:#9ca3af;font-size:10px;padding:2px 14px 6px;text-align:center">${T('map.dead_reckoning')} ${lostLocal}</div>`
     : ''
   const photoHtml = photoUrl
     ? `<img src="${photoUrl}" style="width:100%;height:110px;object-fit:cover;display:block">`
     : ''
 
-  return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;width:280px">
+  return `<div dir="${RTL() ? 'rtl' : 'ltr'}" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;width:280px">
     ${photoHtml}
     <div style="display:flex;align-items:flex-start;gap:11px;padding:13px 13px 8px">
       ${logoHtml}
@@ -724,8 +727,8 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
   // physical one put the space on the badge's outer edge under RTL, leaving it touching the
   // time it belongs to. dir=ltr keeps the sign attached to its digits — bidi otherwise
   // throws a leading + to the far end of the token.
-  const delayBadge = (min: number | null | undefined, before = false) => min != null && Math.abs(min) >= 2
-    ? `<span dir="ltr" style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;padding:2px 5px;border-radius:99px;margin-inline-${before ? 'end' : 'start'}:5px;line-height:1.4">${min > 0 ? '+' : ''}${min}${RTL() ? 'د' : 'm'}</span>`
+  const delayBadge = (min: number | null | undefined) => min != null && Math.abs(min) >= 2
+    ? `<span dir="ltr" style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;padding:2px 5px;border-radius:99px;line-height:1.4;flex-shrink:0">${min > 0 ? '+' : ''}${min}${RTL() ? 'د' : 'm'}</span>`
     : ''
 
   // Route progress bar
@@ -752,16 +755,16 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
   const progressHtml = progressBarHtml(e.dep_iata, e.arr_iata, pct != null ? pct / 100 : null, etaStr)
 
   const timesHtml = `<div style="display:flex;background:#1f2937;padding:11px 14px">
-    <div style="flex:1">
+    <div style="flex:1;text-align:start">
       <div style="font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:${RTL() ? 'normal' : '0.6px'};margin-bottom:3px">${T('label.departure')}</div>
-      <div style="display:flex;align-items:baseline">
+      <div style="display:flex;align-items:baseline;gap:7px">
         <span style="font-size:20px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums">${depTimeLocal}</span>${delayBadge(fs?.dep_delay_min)}
       </div>
     </div>
     <div style="flex:1;text-align:end">
       <div style="font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:${RTL() ? 'normal' : '0.6px'};margin-bottom:3px">${T('label.arrival')}</div>
-      <div style="display:flex;align-items:baseline;justify-content:flex-end">
-        ${delayBadge(arrDelayMin, true)}<span style="font-size:20px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums">${arrTimeLocal}</span>
+      <div style="display:flex;align-items:baseline;justify-content:flex-end;gap:7px">
+        ${delayBadge(arrDelayMin)}<span style="font-size:20px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums">${arrTimeLocal}</span>
       </div>
     </div>
   </div>`
@@ -771,10 +774,10 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
     : ''
 
   const noteHtml = !arrived
-    ? `<div style="color:#6b7280;font-size:10px;padding:4px 14px 5px">${T('map.no_signal')}</div>`
+    ? `<div style="color:#6b7280;font-size:10px;padding:4px 14px 6px;text-align:center">${T('map.no_signal')}</div>`
     : ''
 
-  return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;width:280px">
+  return `<div dir="${RTL() ? 'rtl' : 'ltr'}" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;width:280px">
     ${photoHtml}
     <div style="display:flex;align-items:flex-start;gap:11px;padding:13px 13px 8px">
       ${logoHtml}
@@ -2465,7 +2468,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
                  <div style="font-size:11.5px;color:#9ca3af;margin-top:3px;font-variant-numeric:tabular-nums">${cs}${acType ? ' · ' + acType : ''}</div>`
               : `<div style="font-size:15px;font-weight:700;color:#f9fafb;line-height:1.2;letter-spacing:-.01em;font-variant-numeric:tabular-nums">${cs}</div>
                  <div style="font-size:11px;color:#6b7280;margin-top:3px">${[acType, reg].filter(Boolean).join(' · ') || T('map.unknown_airline')}</div>`
-            const popup = `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;width:260px">
+            const popup = `<div dir="${RTL() ? 'rtl' : 'ltr'}" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;width:260px">
               <div style="display:flex;align-items:flex-start;gap:11px;padding:14px 14px 11px">
                 ${logoHtml}
                 <div style="flex:1;min-width:0">${primaryLine}</div>
