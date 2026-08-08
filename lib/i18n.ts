@@ -150,7 +150,16 @@ const en: Dict = {
   'action.view':          'View',
   'region.all_full':      'All regions',
   'region.europe_turkey': 'Europe & Turkey',
-  // Single-letter day chips. Arabic uses the first letter of each day name.
+  /*
+   * Single-letter day chips, English in both languages.
+   *
+   * Arabic initials don't survive the reduction: الأحد and الاثنين both start with ا, as do
+   * الأربعاء and الاثنين once you allow for the hamza, so any one-letter set has to reach past
+   * the first letter for some days and not others — which is what made the first attempt read
+   * wrong. Syrian Airlines' own Arabic booking calendar keeps the Latin abbreviations, and so
+   * do the other carriers; the aria-label below carries the full Arabic name for anyone who
+   * needs it spoken.
+   */
   'dow.sun': 'S', 'dow.mon': 'M', 'dow.tue': 'T', 'dow.wed': 'W',
   'dow.thu': 'T', 'dow.fri': 'F', 'dow.sat': 'S',
   // Full names, for the day buttons' aria-label — the letter alone is useless read aloud.
@@ -276,8 +285,9 @@ const ar: Dict = {
   'action.view':          'عرض',
   'region.all_full':      'كل المناطق',
   'region.europe_turkey': 'أوروبا وتركيا',
-  'dow.sun': 'ح', 'dow.mon': 'ن', 'dow.tue': 'ث', 'dow.wed': 'ر',
-  'dow.thu': 'خ', 'dow.fri': 'ج', 'dow.sat': 'س',
+  // Latin initials on purpose — see the note beside the English set.
+  'dow.sun': 'S', 'dow.mon': 'M', 'dow.tue': 'T', 'dow.wed': 'W',
+  'dow.thu': 'T', 'dow.fri': 'F', 'dow.sat': 'S',
   'dowfull.sun': 'الأحد',    'dowfull.mon': 'الاثنين', 'dowfull.tue': 'الثلاثاء',
   'dowfull.wed': 'الأربعاء', 'dowfull.thu': 'الخميس',  'dowfull.fri': 'الجمعة',
   'dowfull.sat': 'السبت',
