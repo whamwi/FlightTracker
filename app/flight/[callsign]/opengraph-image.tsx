@@ -60,6 +60,17 @@ const CITY_AR: Record<string, string> = {
   ADD: 'أديس أبابا', NBO: 'نيروبي',
 }
 
+/** Carriers on this network, by IATA. Mirrors airlines.name_ar. */
+const AIRLINE_AR: Record<string, string> = {
+  RB: 'السورية للطيران',        XH: 'فلاي شام',            TK: 'الخطوط الجوية التركية',
+  QR: 'الخطوط الجوية القطرية',  KU: 'الخطوط الجوية الكويتية', J9: 'طيران الجزيرة',
+  EY: 'الاتحاد للطيران',        EK: 'طيران الإمارات',       FZ: 'فلاي دبي',
+  G9: 'العربية للطيران',        '3L': 'العربية للطيران أبوظبي', XY: 'طيران ناس',
+  F3: 'طيران أديل',             RJ: 'الملكية الأردنية',     PC: 'بيغاسوس للطيران',
+  VF: 'أناضول جت',              XQ: 'صن إكسبريس',          KK: 'ليف للطيران',
+  SR: 'ساند للطيران',           DN: 'دان للطيران',
+}
+
 /** Status words, matched the same loose way statusStyle matches them. */
 function statusAr(s: string): string {
   const t = s.toLowerCase()
@@ -274,14 +285,15 @@ export default async function Image(
               marginBottom: 36, letterSpacing: '-.2px',
               display: 'flex',
             }}>
-              {airline}
+              {ar ? (AIRLINE_AR[flight?.airline_iata ?? ''] ?? airline) : airline}
             </div>
           ) : <div style={{ marginBottom: 36, display: 'flex' }} />}
 
           {/* Route card */}
           {hasRoute && (
             <div style={{
-              display: 'flex', alignItems: 'center',
+              // Departure on the right in Arabic, so the card reads the way the language does.
+              display: 'flex', flexDirection: ar ? 'row-reverse' : 'row', alignItems: 'center',
               width: '100%', maxWidth: 900,
               background: C.surface,
               borderRadius: 20,
@@ -290,7 +302,7 @@ export default async function Image(
             }}>
               {/* DEP */}
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 200 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: C.muted, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 4, display: 'flex' }}>DEP</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: C.muted, letterSpacing: ar ? 'normal' : '.1em', textTransform: 'uppercase', marginBottom: 4, display: 'flex' }}>{ar ? 'المغادرة' : 'DEP'}</div>
                 <div style={{ fontSize: cityFontSize(depCity), fontWeight: 900, color: C.ink, lineHeight: 1.05, display: 'flex' }}>{depCity}</div>
                 <div style={{ fontSize: 14, fontWeight: 600, color: C.muted, marginTop: 3, letterSpacing: '.04em', display: 'flex' }}>{dep}</div>
                 {depTime ? (
@@ -323,7 +335,7 @@ export default async function Image(
 
               {/* ARR */}
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 200 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: C.muted, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 4, display: 'flex' }}>ARR</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: C.muted, letterSpacing: ar ? 'normal' : '.1em', textTransform: 'uppercase', marginBottom: 4, display: 'flex' }}>{ar ? 'الوصول' : 'ARR'}</div>
                 <div style={{ fontSize: cityFontSize(arrCity), fontWeight: 900, color: C.ink, lineHeight: 1.05, display: 'flex' }}>{arrCity}</div>
                 <div style={{ fontSize: 14, fontWeight: 600, color: C.muted, marginTop: 3, letterSpacing: '.04em', display: 'flex' }}>{arr}</div>
                 {arrTime ? (
