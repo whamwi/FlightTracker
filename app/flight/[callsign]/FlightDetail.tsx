@@ -3,11 +3,12 @@
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
-import { airportCity, airportFlag as apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
+import { airportCity, cityFor, airlineNameFor, airportFlag as apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
 import { isSyrianAirport } from '@/lib/syria-airports'
 import { useT, useHref } from '@/components/LocaleProvider'
+import { STATUS_KEY } from '@/lib/i18n'
 
-const cityOf = (iata: string) => airportCity[iata] ?? iata
+const cityOf = (iata: string) => cityFor(iata)
 const flagOf = (iata: string) => apFlag[iata] ?? ''
 const tzOff  = (iata: string) => airportOffset[iata] ?? 3
 
@@ -251,7 +252,13 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
 
   function handleShare() {
     if (!flight) return
-    const text = `${fmtNum(flight.iata_number)} · ${flight.dep_iata} → ${flight.arr_iata} · ${statusCfg?.label}`
+    /*
+     * The shared text is the thing that travels — into WhatsApp, where most of this product
+     * spreads. It has to be in the reader's language, and the cities read better than the
+     * codes when it lands somewhere with no other context.
+     */
+    const status = STATUS_KEY[flight.status] ? t(STATUS_KEY[flight.status]) : (statusCfg?.label ?? '')
+    const text = `${fmtNum(flight.iata_number)} · ${cityOf(flight.dep_iata)} → ${cityOf(flight.arr_iata)} · ${status}`
     if (typeof navigator !== 'undefined' && navigator.share) {
       navigator.share({ title: text, url: window.location.href }).catch(() => {})
     } else if (navigator.clipboard) {
@@ -281,7 +288,7 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
 
       {notFound && !flight && (
         <div style={{ textAlign: 'center', paddingTop: 60 }}>
-          <div style={{ fontSize: 18, fontWeight: 700, color: C.ink, marginBottom: 8 }}>Flight not found</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: C.ink, marginBottom: 8 }}>{t('error.flight_not_found')}</div>
           <div style={{ fontSize: 13, color: C.muted }}>No data for {fmtNum(callsign)} today or yesterday</div>
           <Link href="/board" style={{ display: 'inline-block', marginTop: 20, fontSize: 13, fontWeight: 600, color: C.forest, textDecoration: 'none' }}>← All flights</Link>
         </div>
@@ -299,15 +306,15 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
 
           {/* 2. Header: logo + airline + flight num + status */}
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 11, padding: '13px 13px 8px' }}>
-            <AirlineLogo iata={flight.airline_iata} name={flight.airline_name} />
+            <AirlineLogo iata={flight.airline_iata} name={airlineNameFor(flight.airline_iata, flight.airline_name)} />
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: C.ink, lineHeight: 1.25 }}>{flight.airline_name}</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: C.ink, lineHeight: 1.25 }}>{airlineNameFor(flight.airline_iata, flight.airline_name)}</div>
               <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
                 {fmtNum(flight.iata_number)}{flight.aircraft_type ? ` · ${flight.aircraft_type}` : ''}
               </div>
             </div>
             <span style={{ background: statusCfg.bg, color: statusCfg.text, fontSize: 10, fontWeight: 600, padding: '3px 8px', borderRadius: 99, flexShrink: 0, marginTop: 1 }}>
-              {statusCfg.label}
+              {flight && STATUS_KEY[flight.status] ? t(STATUS_KEY[flight.status]) : statusCfg.label}
             </span>
           </div>
 
@@ -317,9 +324,9 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
             {/* Elapsed / remaining — above the bar, live */}
             {isEnRoute && elapsedMin != null && remainingMin != null && (
               <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                <span style={{ fontSize: 11, fontWeight: 600, color: C.muted }}>{durationLabel(elapsedMin)} elapsed</span>
+                <span style={{ fontSize: 11, fontWeight: 600, color: C.muted }}>{durationLabel(elapsedMin)} {t('label.elapsed')}</span>
                 <span style={{ fontSize: 11, color: C.border }}>·</span>
-                <span style={{ fontSize: 11, fontWeight: 700, color: C.forest }}>{durationLabel(remainingMin)} left</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: C.forest }}>{durationLabel(remainingMin)} {t('label.left')}</span>
               </div>
             )}
             {isArrived && flight.duration_min > 0 && (
@@ -373,7 +380,7 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
           <div style={{ margin: '0 13px 12px', borderRadius: 10, border: `1px solid ${C.border}`, overflow: 'hidden' }}>
           <div style={{ display: 'flex', background: C.times, padding: '11px 14px' }}>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 9, color: C.muted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 3 }}>Departure</div>
+              <div style={{ fontSize: 9, color: C.muted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 3 }}>{t('label.departure')}</div>
               <div style={{ display: 'flex', alignItems: 'baseline' }}>
                 <span style={{ fontSize: 20, fontWeight: 700, color: isCancelled ? C.muted : C.ink, fontVariantNumeric: 'tabular-nums', textDecoration: isCancelled ? 'line-through' : 'none' }}>
                   {depDisplay}
@@ -382,7 +389,7 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
               </div>
             </div>
             <div style={{ flex: 1, textAlign: 'right' }}>
-              <div style={{ fontSize: 9, color: C.muted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 3 }}>Arrival</div>
+              <div style={{ fontSize: 9, color: C.muted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 3 }}>{t('label.arrival')}</div>
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end' }}>
                 {!isCancelled && <DelayBadge min={arrDelay} />}
                 <span style={{ fontSize: 20, fontWeight: 700, color: isCancelled ? C.muted : C.ink, fontVariantNumeric: 'tabular-nums', textDecoration: isCancelled ? 'line-through' : 'none' }}>
@@ -423,7 +430,7 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
 
           {lastRefresh > 0 && (
             <div style={{ textAlign: 'center', paddingBottom: 10, fontSize: 9, color: C.muted, fontFamily: 'monospace' }}>
-              Updated {new Date(lastRefresh).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+              {t('label.updated')} {new Date(lastRefresh).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
             </div>
           )}
         </div>

@@ -522,7 +522,7 @@ function FlightCard({ f, view, isPinned, onTogglePin }: { f: Flight; view: View;
       {/* Action strip */}
       <div style={{ borderTop: `1px solid ${C.trackEmpty}`, padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <Link href={`/flight/${encodeURIComponent(f.iata_number)}`} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: 99, background: C.sunken, border: `1px solid ${C.border}`, color: C.secondary, fontSize: 11, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap', fontFamily: "'Instrument Sans', system-ui" }}>
+          <Link href={href(`/flight/${encodeURIComponent(f.iata_number)}`)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: 99, background: C.sunken, border: `1px solid ${C.border}`, color: C.secondary, fontSize: 11, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap', fontFamily: "'Instrument Sans', system-ui" }}>
             <svg width={12} height={12} viewBox="0 0 16 16" fill="none">
               <circle cx="12" cy="3" r="1.8" stroke="currentColor" strokeWidth="1.5"/>
               <circle cx="12" cy="13" r="1.8" stroke="currentColor" strokeWidth="1.5"/>

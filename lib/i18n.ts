@@ -67,6 +67,12 @@ const en: Dict = {
   'status.diverted':   'Diverted',
   'label.scheduled_time': 'Scheduled time',
   'label.today_prefix':   'Today',
+  'label.departure':      'Departure',
+  'label.arrival':        'Arrival',
+  'label.left':           'left',
+  'label.elapsed':        'elapsed',
+  'label.updated':        'Updated',
+  'error.flight_not_found': 'Flight not found',
 
   // Card actions
   'action.share':      'Share',
@@ -159,6 +165,12 @@ const ar: Dict = {
   'status.diverted':   'حُوِّلت',
   'label.scheduled_time': 'الموعد المجدول',
   'label.today_prefix':   'اليوم',
+  'label.departure':      'المغادرة',
+  'label.arrival':        'الوصول',
+  'label.left':           'متبقٍّ',
+  'label.elapsed':        'مضت',
+  'label.updated':        'آخر تحديث',
+  'error.flight_not_found': 'لم يتم العثور على الرحلة',
 
   'action.share':      'مشاركة',
   'action.pin':        'تثبيت',
