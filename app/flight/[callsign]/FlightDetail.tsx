@@ -456,7 +456,12 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
           <div style={{ margin: '0 13px 12px', borderRadius: 10, border: `1px solid ${C.border}`, overflow: 'hidden' }}>
           <div style={{ display: 'flex', background: C.times, padding: '11px 14px' }}>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 9, color: C.muted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: locale === 'ar' ? 'normal' : '0.6px', marginBottom: 3 }}>{t('label.departure')}</div>
+              <div style={{ fontSize: 9, color: C.muted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: locale === 'ar' ? 'normal' : '0.6px', marginBottom: 3, display: 'flex', gap: 4, alignItems: 'baseline' }}>
+                <span>{t('label.departure')}</span>
+                {/* The kind belongs with the big number it describes. Beside the struck one it
+                    read as though the scheduled time were the actual. */}
+                {!isCancelled && depMoved && <span style={{ fontSize: 8, fontWeight: 500, opacity: .75, textTransform: 'none' }}>({t(depKind)})</span>}
+              </div>
               <div style={{ display: 'flex', alignItems: 'baseline' }}>
                 <span style={{ fontSize: 20, fontWeight: 700, color: isCancelled ? C.muted : C.ink, fontVariantNumeric: 'tabular-nums', textDecoration: isCancelled ? 'line-through' : 'none' }}>
                   {depDisplay}
@@ -466,13 +471,16 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
               {/* Only when it moved — repeating an unchanged time says nothing and costs a line. */}
               {!isCancelled && depMoved && (
                 <div style={{ fontSize: 10, color: C.muted, marginTop: 2, display: 'flex', gap: 5, alignItems: 'baseline' }}>
-                  <span>{t(depKind)}</span>
+                  <span>{t('label.scheduled')}</span>
                   <span style={{ textDecoration: 'line-through', fontVariantNumeric: 'tabular-nums' }}>{depSched}</span>
                 </div>
               )}
             </div>
             <div style={{ flex: 1, textAlign: 'end' }}>
-              <div style={{ fontSize: 9, color: C.muted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: locale === 'ar' ? 'normal' : '0.6px', marginBottom: 3 }}>{t('label.arrival')}</div>
+              <div style={{ fontSize: 9, color: C.muted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: locale === 'ar' ? 'normal' : '0.6px', marginBottom: 3, display: 'flex', gap: 4, alignItems: 'baseline', justifyContent: 'flex-end' }}>
+                {!isCancelled && arrMoved && <span style={{ fontSize: 8, fontWeight: 500, opacity: .75, textTransform: 'none' }}>({t(arrKind)})</span>}
+                <span>{t('label.arrival')}</span>
+              </div>
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end' }}>
                 {!isCancelled && <DelayBadge min={arrDelay} />}
                 <span style={{ fontSize: 20, fontWeight: 700, color: isCancelled ? C.muted : C.ink, fontVariantNumeric: 'tabular-nums', textDecoration: isCancelled ? 'line-through' : 'none' }}>
@@ -482,7 +490,7 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
               {!isCancelled && arrMoved && (
                 <div style={{ fontSize: 10, color: C.muted, marginTop: 2, display: 'flex', gap: 5, alignItems: 'baseline', justifyContent: 'flex-end' }}>
                   <span style={{ textDecoration: 'line-through', fontVariantNumeric: 'tabular-nums' }}>{arrSched}</span>
-                  <span>{t(arrKind)}</span>
+                  <span>{t('label.scheduled')}</span>
                 </div>
               )}
             </div>
