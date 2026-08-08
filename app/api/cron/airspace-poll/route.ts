@@ -37,8 +37,59 @@ const SB_HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 const MAX_SWEEPS   = 4
 const DEADLINE_MS  = 45_000
 
+/**
+ * A margin around the Syria polygon, in degrees.
+ *
+ * The read path keeps `board_match || inSyria`, so the polygon alone would be enough for what
+ * is drawn right now — but the stored rows are the fallback for when every feed is down, and
+ * an aircraft two minutes from the border needs to already be there when it crosses. One
+ * degree is roughly 110 km, comfortably more than a poll cycle of flying.
+ */
+const STORE_MARGIN_DEG = 1.0
+
+const inStoreRegion = (lat: number, lon: number): boolean =>
+  Number.isFinite(lat) && Number.isFinite(lon)
+  && lat >= 32.0 - STORE_MARGIN_DEG && lat <= 37.7 + STORE_MARGIN_DEG
+  && lon >= 35.3 - STORE_MARGIN_DEG && lon <= 42.7 + STORE_MARGIN_DEG
+
+/**
+ * The callsigns the board knows, so a flight of ours is kept wherever it is.
+ *
+ * Fetched once per invocation rather than per sweep — it is 163 rows and changes when a route
+ * is added, not between sweeps fourteen seconds apart.
+ */
+async function boardCallsigns(): Promise<Set<string>> {
+  try {
+    const res = await fetch(
+      `${SB_URL}/rest/v1/flight_lookup?select=broadcast_callsign&broadcast_callsign=not.is.null`,
+      { headers: SB_HEADERS, cache: 'no-store' },
+    )
+    if (!res.ok) return new Set()
+    return new Set((await res.json() as { broadcast_callsign: string }[])
+      .map(r => r.broadcast_callsign.trim().toUpperCase()))
+  } catch {
+    return new Set()
+  }
+}
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
-async function writePositions(aircraft: any[]): Promise<number> {
+async function writePositions(aircraft: any[], ours: Set<string>): Promise<number> {
+  /*
+   * Store what could be drawn, not the whole sweep.
+   *
+   * The five circles reach from Morocco to Iran, and every aircraft in them was being
+   * upserted every fourteen seconds. Measured on 2026-08-08: 17,931 airframes held, 131
+   * inside Syria, and 14 with a callsign the board has ever known. The other 99.3% was
+   * written, indexed, vacuumed and pruned without ever being read — 75 million updates, and
+   * two seen_at indexes bloated to 137 MB against a 27 MB heap.
+   *
+   * The rule matches the read path's `board_match || inSyria`, with a margin so an aircraft
+   * is already stored before it crosses the border.
+   */
+  const keep = aircraft.filter(a =>
+    inStoreRegion(a.lat, a.lon) || ours.has((a.flight ?? '').trim().toUpperCase()))
+  aircraft = keep
+
   if (!aircraft.length) return 0
   const now = new Date().toISOString()
   const rows = aircraft.map(a => ({
@@ -79,12 +130,13 @@ async function writePositions(aircraft: any[]): Promise<number> {
 export async function GET() {
   const started = Date.now()
   const sweeps: { aircraft: number; written: number; circlesOk: number; live: boolean }[] = []
+  const ours   = await boardCallsigns()
 
   for (let i = 0; i < MAX_SWEEPS; i++) {
     if (Date.now() - started > DEADLINE_MS) break
     try {
       const { aircraft, live, circlesOk } = await sweepAllCircles()
-      const written = await writePositions(aircraft)
+      const written = await writePositions(aircraft, ours)
       sweeps.push({ aircraft: aircraft.length, written, circlesOk, live })
     } catch (e) {
       console.error('[airspace-poll] sweep failed', String(e))

@@ -25,7 +25,21 @@ const SB_URL     = process.env.SUPABASE_URL!
 const SB_KEY     = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY!
 const SB_HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 
-const POSITION_RETENTION_DAYS = 3
+/*
+ * One day, measured rather than guessed.
+ *
+ * Counted on 2026-08-08, by age band, against callsigns the board actually knows:
+ *
+ *     0–6h    3,111 aircraft   8 Syria-relevant
+ *     6–24h   8,087            5
+ *     24–48h  3,331            1
+ *     >48h    3,402            0
+ *
+ * The third day held nothing at all. The only thing history buys is /api/photo-cs, which
+ * remembers a registration so a scheduled-but-silent flight still shows a photo — and that
+ * needs the dozen-odd aircraft on our routes, not four days of European traffic.
+ */
+const POSITION_RETENTION_DAYS = 1
 const LOG_RETENTION_DAYS      = 30
 
 async function pruneOlderThan(table: string, column: string, days: number) {
