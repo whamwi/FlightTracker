@@ -155,6 +155,7 @@ export async function GET(req: Request) {
         method: 'PATCH', headers: { ...HEADERS, Prefer: 'return=minimal' },
         body: JSON.stringify({
           resolved_at: new Date().toISOString(),
+          outcome: 'activity_appeared',
           resolved_reason: 'activity appeared after flagging',
         }),
       })

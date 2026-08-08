@@ -144,15 +144,35 @@ export async function GET(req: Request) {
 
   type Want = { row: Open; sig: Signal; need: 'dep' | 'arr' }
   const wanted: Want[] = []
+  /** Past the give-up point — closed with a verdict rather than left open. */
+  const stale: { id: number; num: string; airborne: boolean; overdueH: number }[] = []
 
   for (const row of open) {
     const cs  = row.callsign ?? row.iata_number
     const sig = byCallsign.get(cs)
-    if (!sig || !sig.airborne_at) continue
 
-    // Give up rather than chase something that plainly did not fly.
+    /*
+     * The give-up test comes first now, and applies whether or not a signal exists.
+     *
+     * It used to sit below a `continue` that skipped every row without an airborne signal —
+     * which is precisely the set this is meant to judge. A flight that never operated was
+     * therefore never given a verdict: it stayed resolved_at NULL forever, indistinguishable
+     * from one still in progress, and could not be counted at month end.
+     */
     const schedDep = toUnix(row.flight_date, row.sched_dep_utc)
-    if (schedDep && nowSec - schedDep > GIVE_UP_HOURS * 3600) continue
+    const overdueH = schedDep ? (nowSec - schedDep) / 3600 : null
+    if (overdueH !== null && overdueH > GIVE_UP_HOURS) {
+      stale.push({
+        id: row.id, num: row.iata_number,
+        // A signal means it did fly, we simply never confirmed it inside the window. That is
+        // a different fact from never having left, and the month-end count depends on it.
+        airborne: !!sig?.airborne_at,
+        overdueH: Math.round(overdueH * 10) / 10,
+      })
+      continue
+    }
+
+    if (!sig || !sig.airborne_at) continue
 
     if (!sig.real_dep_synced) { wanted.push({ row, sig, need: 'dep' }); continue }
 
@@ -168,8 +188,29 @@ export async function GET(req: Request) {
     }
   }
 
+  // Close out the give-ups before any early return, or a quiet night would leave them open.
+  const closed: string[] = []
+  for (const s of stale) {
+    const outcome = s.airborne ? 'flew_late' : 'did_not_operate'
+    const res = await fetch(`${SB_URL}/rest/v1/flight_no_activity?id=eq.${s.id}`, {
+      method: 'PATCH', headers: { ...HEADERS, Prefer: 'return=minimal' },
+      body: JSON.stringify({
+        resolved_at: new Date().toISOString(),
+        outcome,
+        resolved_reason: s.airborne
+          ? `airborne but never confirmed — ${s.overdueH}h past scheduled departure`
+          : `no signal ${s.overdueH}h past scheduled departure`,
+        hours_overdue: s.overdueH,
+      }),
+    })
+    closed.push(`${s.num} ${outcome}${res.ok ? '' : ' (WRITE FAILED)'}`)
+    if (!res.ok) console.error('[carry-over] verdict write failed', s.num, res.status, await res.text())
+  }
+
   if (!wanted.length) {
-    return NextResponse.json({ ok: true, open: open.length, signals: signals.length, called: 0 })
+    return NextResponse.json({
+      ok: true, open: open.length, signals: signals.length, called: 0, closed,
+    })
   }
 
   // 3. One FR24 call for everything wanted, by callsign.
@@ -246,6 +287,7 @@ export async function GET(req: Request) {
         method: 'PATCH', headers: { ...HEADERS, Prefer: 'return=minimal' },
         body: JSON.stringify({
           resolved_at: new Date().toISOString(),
+          outcome: 'flew_late',
           resolved_reason: `flew late — landed ${landedStamp}`
             + (item.datetime_landed ? '' : ' (from last_seen, no published landing)'),
         }),
