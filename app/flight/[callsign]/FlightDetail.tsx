@@ -267,6 +267,28 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
     : flight?.revised_arr_utc ? calcDelayMin(flight.arr_time_utc, flight.revised_arr_utc, flight.date)
     : estimatedArrUtc ? calcDelayMin(flight!.arr_time_utc, estimatedArrUtc, flight!.date) : 0
 
+  /*
+   * What the big number actually is, and what it replaced.
+   *
+   * The card shows one time and a variance badge, which answers "when" but not "instead of
+   * what" — a reader told 06:20 by the passenger sees 06:01 −19m and has to do the arithmetic
+   * to be sure it is the same flight. Airportia shows the original struck through beside it,
+   * which is the convention on an airport departure board too.
+   *
+   * The kind matters as much as the number: an actual time is observed, an estimated one is a
+   * prediction, and they currently look identical.
+   */
+  const depKind = flight?.actual_dep_utc ? 'label.actual'
+                : flight?.revised_dep_utc ? 'label.estimated' : 'label.scheduled'
+  const arrKind = flight?.actual_arr_utc ? 'label.actual'
+                : (flight?.revised_arr_utc || estimatedArrUtc) ? 'label.estimated' : 'label.scheduled'
+
+  // The scheduled time, shown struck through only when the displayed one differs from it.
+  const depSched = flight ? utcHHMMtoLocal(flight.dep_time_utc, depOffset) : '—'
+  const arrSched = flight ? utcHHMMtoLocal(flight.arr_time_utc, arrOffset) : '—'
+  const depMoved = depSched !== depDisplay
+  const arrMoved = arrSched !== arrDisplay
+
   // En-route progress (uses live `now` so it ticks every 30s)
   const depMs = isEnRoute && flight?.actual_dep_utc ? new Date(flight.actual_dep_utc).getTime() : null
   const progressPct = (() => {
@@ -434,22 +456,35 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
           <div style={{ margin: '0 13px 12px', borderRadius: 10, border: `1px solid ${C.border}`, overflow: 'hidden' }}>
           <div style={{ display: 'flex', background: C.times, padding: '11px 14px' }}>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 9, color: C.muted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 3 }}>{t('label.departure')}</div>
+              <div style={{ fontSize: 9, color: C.muted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: locale === 'ar' ? 'normal' : '0.6px', marginBottom: 3 }}>{t('label.departure')}</div>
               <div style={{ display: 'flex', alignItems: 'baseline' }}>
                 <span style={{ fontSize: 20, fontWeight: 700, color: isCancelled ? C.muted : C.ink, fontVariantNumeric: 'tabular-nums', textDecoration: isCancelled ? 'line-through' : 'none' }}>
                   {depDisplay}
                 </span>
                 {!isCancelled && <DelayBadge min={depDelay} />}
               </div>
+              {/* Only when it moved — repeating an unchanged time says nothing and costs a line. */}
+              {!isCancelled && depMoved && (
+                <div style={{ fontSize: 10, color: C.muted, marginTop: 2, display: 'flex', gap: 5, alignItems: 'baseline' }}>
+                  <span>{t(depKind)}</span>
+                  <span style={{ textDecoration: 'line-through', fontVariantNumeric: 'tabular-nums' }}>{depSched}</span>
+                </div>
+              )}
             </div>
             <div style={{ flex: 1, textAlign: 'end' }}>
-              <div style={{ fontSize: 9, color: C.muted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 3 }}>{t('label.arrival')}</div>
+              <div style={{ fontSize: 9, color: C.muted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: locale === 'ar' ? 'normal' : '0.6px', marginBottom: 3 }}>{t('label.arrival')}</div>
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end' }}>
                 {!isCancelled && <DelayBadge min={arrDelay} />}
                 <span style={{ fontSize: 20, fontWeight: 700, color: isCancelled ? C.muted : C.ink, fontVariantNumeric: 'tabular-nums', textDecoration: isCancelled ? 'line-through' : 'none' }}>
                   {arrDisplay}
                 </span>
               </div>
+              {!isCancelled && arrMoved && (
+                <div style={{ fontSize: 10, color: C.muted, marginTop: 2, display: 'flex', gap: 5, alignItems: 'baseline', justifyContent: 'flex-end' }}>
+                  <span style={{ textDecoration: 'line-through', fontVariantNumeric: 'tabular-nums' }}>{arrSched}</span>
+                  <span>{t(arrKind)}</span>
+                </div>
+              )}
             </div>
           </div>
           </div>
