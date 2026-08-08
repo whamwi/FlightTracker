@@ -168,19 +168,31 @@ function calcDelay(schedHHMM: string, actualISO: string | null): number | null {
   return Math.round((actualMs - schedMs) / 60_000)
 }
 
+/*
+ * Minutes into the board's day — which can exceed 1440.
+ *
+ * Both branches used to wrap at midnight, so a flight due 21:50 and delayed to 00:05 sorted
+ * as 5: first in the list, above the 01:00 arrivals, and on the wrong side of the now-line
+ * as if it had landed this morning. It was on the board the whole time and nowhere anyone
+ * would look for it, which is the same mistake the +1 marker exists to prevent, made in the
+ * ordering instead of the digits.
+ *
+ * A spilled arrival keeps counting past 1440 so it sorts after the evening it belongs to.
+ */
 function effectiveLocalMin(f: Flight, v: View): number {
+  const spill = v === 'arr' && f.arr_next_day ? 1440 : 0
   const iso = v === 'arr'
     ? (f.actual_arr_utc ?? f.revised_arr_utc)
     : (f.actual_dep_utc ?? f.revised_dep_utc)
   if (iso) {
     const localMs = new Date(iso).getTime() + 3 * 3_600_000
     const d = new Date(localMs)
-    return d.getUTCHours() * 60 + d.getUTCMinutes()
+    return d.getUTCHours() * 60 + d.getUTCMinutes() + spill
   }
   const hhmm = v === 'arr' ? f.arr_time_utc : f.dep_time_utc
   if (!hhmm) return 0
   const [h, m] = hhmm.split(':').map(Number)
-  return (h * 60 + m + 3 * 60) % 1440
+  return ((h * 60 + m + 3 * 60) % 1440) + spill
 }
 
 // ── Airline logo ─────────────────────────────────────────────────────────────
