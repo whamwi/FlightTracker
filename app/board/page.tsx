@@ -1004,6 +1004,21 @@ export default function BoardPage() {
         .ft-controls-wrap { position: sticky; top: 58px; z-index: 10; background: #EDEBE0; padding: 10px 0; margin: -10px 0; }
         .ft-airport-btn { padding: 8px 14px !important; }
         .ft-airport-pills { display: none !important; }
+        /*
+          Fill the width instead of packing to the start. The Arabic labels are shorter than
+          the English ones, so the same controls left a ragged gap down one side — and the
+          spacer below was taking the leftover rather than the buttons.
+        */
+        .ft-day-tabs { flex: 1 1 100%; }
+        /*
+          Grow from the content, not to equal thirds. Equal widths ignore what is in them, and
+          the middle tab carries a date — "9 Aug" wrapped onto a second line while Yesterday
+          and Tomorrow sat in space they did not need.
+        */
+        .ft-day-tabs > button { flex: 1 1 auto; justify-content: center; white-space: nowrap; }
+        .ft-view-toggle { flex: 1; }
+        .ft-view-toggle > button { flex: 1 1 auto; justify-content: center; white-space: nowrap; }
+        .ft-spacer { display: none !important; }
         .ft-airport-menu  { display: block; }
         .ft-sort-btns { display: none !important; }
         @media (min-width: 768px) {
@@ -1060,7 +1075,7 @@ export default function BoardPage() {
           <div className="ft-controls-wrap">
           <div className="ft-controls" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             {/* Date tabs */}
-            <div style={{ display: 'flex', gap: 6 }}>
+            <div className="ft-day-tabs" style={{ display: 'flex', gap: 6 }}>
               {/* `tb`, not `t` — the loop variable used to be `t` and now shadows the translator. */}
               {([-1, 0, 1] as Tab[]).map(tb => (
                 <button key={tb} onClick={() => setTab(tb)} style={{
@@ -1085,7 +1100,7 @@ export default function BoardPage() {
             </div>
 
             {/* Arr / Dep + DAM / ALP */}
-            <div style={{ display: 'flex', padding: 3, background: C.border, borderRadius: 11, gap: 3 }}>
+            <div className="ft-view-toggle" style={{ display: 'flex', padding: 3, background: C.border, borderRadius: 11, gap: 3 }}>
               {(['arr', 'dep'] as View[]).map(v => (
                 <button key={v} onClick={() => setView(v)} style={{
                   display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 9, cursor: 'pointer',
@@ -1139,7 +1154,10 @@ export default function BoardPage() {
                 aria-haspopup="listbox"
                 aria-expanded={airportMenu}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 10,
+                  // 40px, not the padding's natural 29 — it sits beside the arrivals toggle,
+                  // and two controls on one line that disagree by 11px read as a mistake.
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  height: 40, padding: '0 14px', borderRadius: 11,
                   cursor: 'pointer', background: C.forest, border: 'none', whiteSpace: 'nowrap',
                 }}
               >
@@ -1182,7 +1200,7 @@ export default function BoardPage() {
               )}
             </div>
 
-            <div style={{ flex: 1 }} />
+            <div className="ft-spacer" style={{ flex: 1 }} />
 
             {/* Airline filter + Sort — desktop only */}
             <div className="ft-sort-btns" style={{ gap: 8, alignItems: 'center', position: 'relative' }}>
