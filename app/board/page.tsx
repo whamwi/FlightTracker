@@ -1034,7 +1034,15 @@ export default function BoardPage() {
           .ft-title { font-size: 34px !important; }
           .ft-content { flex-direction: row !important; align-items: flex-start !important; }
           .ft-sidebar { display: flex !important; flex-direction: column; gap: 16px; width: 320px; flex-shrink: 0; position: sticky !important; top: 136px !important; align-self: flex-start !important; max-height: calc(100vh - 148px); overflow-y: auto; }
-          .ft-controls-wrap { position: sticky; top: 68px; z-index: 10; background: #EDEBE0; padding: 10px 0; margin: -10px 0; }
+          /*
+            The controls belong to the list, not to the page.
+            They spanned the full 1320px while the cards under them were 980 — the sidebar's
+            320 plus the 20 gap — so every button floated over a column it had nothing to do
+            with. margin-inline-end because the sidebar is the second child either way: it
+            lands on the right in English and the left in Arabic, and inline-end is both.
+            The shorthand above resets margins, so this has to follow it.
+          */
+          .ft-controls-wrap { position: sticky; top: 68px; z-index: 10; background: #EDEBE0; padding: 10px 0; margin: -10px 0; margin-inline-end: 340px; }
           .ft-controls { gap: 12px !important; }
           .ft-airport-btn { padding: 8px 32px !important; }
           .ft-airport-pills { display: flex !important; }
@@ -1043,6 +1051,12 @@ export default function BoardPage() {
         }
         @media (min-width: 1100px) {
           .ft-body { padding: 26px 40px 40px !important; }
+          /*
+            Dead rule, kept as it was found: .ft-sidebar carries an inline width:320, which
+            beats a stylesheet declaration, so the sidebar is 320 at every desktop width. The
+            controls' margin above stays 340 for that reason — matching this 352 would overhang
+            the list by 32px, which is exactly what it did on the first attempt.
+          */
           .ft-sidebar { width: 352px; }
         }
       `}</style>
