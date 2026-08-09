@@ -353,7 +353,7 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
 
       {/* Back row */}
       <div style={{ width: '100%', maxWidth: 360, padding: '16px 16px 10px', display: 'flex', alignItems: 'center', gap: 10 }}>
-        <Link href="/board" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 8, border: `1px solid ${C.border}`, background: C.card, color: C.ink, textDecoration: 'none', flexShrink: 0 }}>
+        <Link href={href('/board')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 8, border: `1px solid ${C.border}`, background: C.card, color: C.ink, textDecoration: 'none', flexShrink: 0 }}>
           <svg width={13} height={13} viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
         </Link>
         <span style={{ fontSize: 13, fontWeight: 600, color: C.muted }}>

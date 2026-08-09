@@ -7,7 +7,7 @@ import { useSearchParams } from 'next/navigation'
 import { Suspense, useState, useEffect, useCallback, useRef } from 'react'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { cityFor, airlineNameFor, getActiveLocale, airportFlag as apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
-import { useT, useLocale } from '@/components/LocaleProvider'
+import { useT, useLocale, useHref } from '@/components/LocaleProvider'
 import { STATUS_KEY, counted } from '@/lib/i18n'
 import Wordmark from '@/components/Wordmark'
 import SiteNav from '@/components/SiteNav'
@@ -161,7 +161,8 @@ function MiniProgress({ depUtc, durationMin, approaching, accentColor }: { depUt
 
 // ── Compact flight card for the panel ───────────────────────────────────────
 function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelected?: boolean; onSelect: (n: string) => void }) {
-  const t = useT()
+  const t    = useT()
+  const href = useHref()
   const status = panelEffectiveStatus(f)
   const approaching = status === 'Approaching'
   const isAlp = f.dep_iata === 'ALP' || f.arr_iata === 'ALP'
@@ -180,7 +181,7 @@ function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelecte
 
   return (
     <Link
-      href={`/map?flight=${encodeURIComponent(f.iata_number)}`}
+      href={href(`/map?flight=${encodeURIComponent(f.iata_number)}`)}
       onClick={(e) => { e.preventDefault(); onSelect(f.iata_number) }}
       style={{ display: 'block', textDecoration: 'none', background: isSelected ? '#D4EBD4' : C.surface, border: `${isSelected ? 2 : 1}px solid ${isSelected ? C.forest : C.border}`, borderRadius: 12, overflow: 'hidden', boxShadow: isSelected ? '0 6px 20px rgba(5,66,57,0.22), 0 1px 4px rgba(5,66,57,0.12)' : '0 1px 4px rgba(0,0,0,.06)', position: 'relative', transform: isSelected ? 'translateY(-1px)' : 'none', transition: 'box-shadow .2s, transform .2s, background .2s', flexShrink: 0 }}
     >
@@ -393,13 +394,22 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
     // Needed to tell our own scroll events apart from the user's — see onScroll below.
     let selfScrollTo = -1
     const PX_PER_MS = 0.03
+    /*
+     * Which way scrollLeft runs.
+     *
+     * Under dir=rtl the origin is the right edge and scrollLeft goes negative, so adding to it
+     * asked the browser to scroll past the start — it clamped at 0 and the strip sat still.
+     * It only began moving after a touch, because the drag left scrollLeft negative and the
+     * addition then had somewhere to go. English was never affected, which is why this hid.
+     */
+    const sign = getComputedStyle(el).direction === 'rtl' ? -1 : 1
     const tick = (t: number) => {
       const width = setRef.current?.offsetWidth ?? 0
       const dt = last ? t - last : 0
       last = t
       if (!held && t >= resumeAt && width > 0) {
-        pos += PX_PER_MS * dt
-        if (pos >= width) pos -= width
+        pos += sign * PX_PER_MS * dt
+        if (Math.abs(pos) >= width) pos -= sign * width
         el.scrollLeft = pos
         selfScrollTo = el.scrollLeft
       } else {

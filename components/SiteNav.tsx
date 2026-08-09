@@ -138,7 +138,7 @@ export default function SiteNav({ active, right }: { active: string; right?: Rea
           */}
         {active === 'Flights' && (
           <Link
-            href="/map"
+            href={href('/map')}
             className="sn-track"
             aria-label={t('nav.track_aria')}
             style={{

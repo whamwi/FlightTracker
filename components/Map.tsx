@@ -1048,9 +1048,22 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         maxBoundsViscosity: 0,
         zoomControl: false,
       })
-      if (embed) {
-        map.fitBounds([[22, 26], [43, 62]])
-      }
+      /*
+       * Open on the whole network, not on Syria alone.
+       *
+       * zoom 6 over Damascus cut off both ends of the map's own traffic — Istanbul to the
+       * north-west and Dubai to the south-east are where most of it comes from, and a reader
+       * arriving at Track should see the aircraft, not have to pinch out to find them. These
+       * are the bounds the embed already used; they hold IST at 41.3N and DXB at 25.2N.
+       *
+       * Fitted once the map is ready rather than inline: fitBounds needs the container's real
+       * size, and called straight after the constructor it can run before layout has given it
+       * one — in which case it silently keeps the constructor's zoom 6 over Damascus.
+       */
+      map.whenReady(() => {
+        map.invalidateSize()
+        map.fitBounds([[22, 26], [43, 62]], { padding: [8, 8] })
+      })
 
       // Leaflet prepends its own "Leaflet |" credit. It is MIT-licensed and asks for no
       // attribution, so that part is courtesy rather than obligation — dropping it takes
@@ -2579,7 +2592,9 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           </button>
           {/* Straight to the board. The map is the entry point most people land on, and the
               full schedule was otherwise two taps away behind the menu. */}
-          <a href="/board" aria-label="Flight board" style={{ ...headerActionBtn(false), textDecoration: 'none' }}>
+          {/* getActiveLocale, not a bare path: this button sent an Arabic reader to the
+              English board — it is the phone header's way back from the map. */}
+          <a href={getActiveLocale() === 'ar' ? '/ar/board' : '/board'} aria-label={T('nav.flights')} style={{ ...headerActionBtn(false), textDecoration: 'none' }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
               <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
             </svg>

@@ -684,6 +684,7 @@ function tabDateLabel(offset: number): string {
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function BoardPage() {
   const t      = useT()
+  const href   = useHref()
   const locale = useLocale()
   const [tab, setTab]         = useState<Tab>(0)
   const [view, setView]       = useState<View>('arr')
@@ -1378,7 +1379,7 @@ export default function BoardPage() {
                 <span style={{ font: `600 13.5px/1 'Instrument Sans', system-ui`, color: C.ink }}>{t('map.live')}</span>
                 <span style={{ font: `500 11px/1 'Instrument Sans', system-ui`, color: C.muted }}>{t('map.tiles')}</span>
               </div>
-              <Link href="/map" style={{
+              <Link href={href('/map')} style={{
                 display: 'flex', alignItems: 'center', gap: 7, padding: '8px 13px', borderRadius: 9,
                 background: C.forest, textDecoration: 'none',
               }}>
