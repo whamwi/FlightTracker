@@ -77,7 +77,6 @@ function etaMs(f: InAirFlight): number {
 // Arabic carries no English unit letters — see the twin in FlightDetail.
 function durationLabel(min: number) {
   const h = Math.floor(min / 60), m = min % 60
-  // Spelled out, and agreed with the number: 1 دقيقة, 3 دقائق, 45 دقيقة.
   if (getActiveLocale() === 'ar') return h > 0 ? `${h}:${String(m).padStart(2, '0')}` : counted('ar', m, 'noun.minute')
   // No leading "0h": under an hour this read "0h 47m left", which the other cards never did.
   return h > 0 ? `${h}h ${m}m` : `${m}m`

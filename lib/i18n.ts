@@ -315,7 +315,7 @@ const ar: Dict = {
   'label.today_prefix':   'اليوم',
   'label.departure':      'المغادرة',
   'label.arrival':        'الوصول',
-  'label.left':           'متبقٍّ',
+  'label.left':           'على الوصول',
   'label.arriving':       'تقترب',
   'label.elapsed':        'مضت',
   'label.flight_time':    'زمن الرحلة',

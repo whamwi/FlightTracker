@@ -7,7 +7,7 @@ import { airportCity, cityFor, airlineNameFor, airportFlag as _apFlag, airportOf
 import SiteNav from '@/components/SiteNav'
 import LanguageSwitch from '@/components/LanguageSwitch'
 import { useT, useLocale, useHref } from '@/components/LocaleProvider'
-import { STATUS_KEY, type Locale } from '@/lib/i18n'
+import { STATUS_KEY, counted, type Locale } from '@/lib/i18n'
 import { BOARD_AIRPORTS, type BoardAirport } from '@/lib/syria-airports'
 
 const city = (iata: string) => cityFor(iata)
@@ -134,7 +134,7 @@ function fmtLocal(raw: string | null | undefined, offsetH: number): string {
 function durationLabel(min: number, locale: Locale): string {
   if (!min) return ''
   const h = Math.floor(min / 60), m = min % 60
-  if (locale === 'ar') return h > 0 ? `${h}:${String(m).padStart(2, '0')}` : `${m} د`
+  if (locale === 'ar') return h > 0 ? `${h}:${String(m).padStart(2, '0')}` : counted('ar', m, 'noun.minute')
   // No leading "0h" under an hour — see the twin on the map.
   return h > 0 ? `${h}h ${m}m` : `${m}m`
 }
@@ -440,7 +440,15 @@ function FlightCard({ f, view, isPinned, onTogglePin, boardDate }: { f: Flight; 
         <AirlineLogo iata={f.airline_iata} name={f.airline_name} />
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
           <span style={{
-            font: `600 14.5px/1.1 'Instrument Sans', system-ui`, color: C.ink,
+            /*
+              Smaller and looser in Arabic. Cairo sits taller in its em than the Latin face, so
+              14.5px on a 1.1 line-height clipped the tops of the letters — the tighter the
+              leading, the more it takes off. The Latin sizing is unchanged.
+            */
+            font: locale === 'ar'
+              ? `600 13.5px/1.45 'Instrument Sans', system-ui`
+              : `600 14.5px/1.1 'Instrument Sans', system-ui`,
+            color: C.ink,
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
             textDecoration: isCancelled ? 'line-through' : 'none',
             textDecorationColor: '#C4BEAE',

@@ -113,7 +113,7 @@ const dowLabel = (d: string, t: (k: string) => string) => t(`dow.${d}`)
 function fmtDur(min: number) {
   if (!min) return ''
   const h = Math.floor(min / 60), m = min % 60
-  if (getActiveLocale() === 'ar') return h > 0 ? `${h}:${String(m).padStart(2, '0')}` : `${m} د`
+  if (getActiveLocale() === 'ar') return h > 0 ? `${h}:${String(m).padStart(2, '0')}` : counted('ar', m, 'noun.minute')
   if (h === 0) return `${m}m`
   return m ? `${h}h ${m}m` : `${h}h`
 }
