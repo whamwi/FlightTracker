@@ -93,7 +93,7 @@ function statusAr(s: string): string {
   if (t.includes('arrived') || t.includes('landed'))     return 'وصلت'
   if (t.includes('en route') || t.includes('in flight')) return 'في الطريق'
   if (t.includes('approach'))                            return 'تقترب'
-  if (t.includes('departed') || t.includes('took off'))  return 'غادرت'
+  if (t.includes('departed') || t.includes('took off'))  return 'أقلعت'
   if (t.includes('delayed'))                             return 'متأخرة'
   if (t.includes('cancel'))                              return 'ملغاة'
   if (t.includes('boarding'))                            return 'الصعود'

@@ -299,7 +299,7 @@ const ar: Dict = {
 
   'status.scheduled':  'مجدولة',
   'status.expected':   'متوقعة',
-  'status.departed':   'غادرت',
+  'status.departed':   'أقلعت',
   'status.arrived':    'وصلت',
   'status.landed':     'هبطت',
   'status.delayed':    'متأخرة',
@@ -391,7 +391,7 @@ const ar: Dict = {
 
   'chip.in_air':       'في الجو',
   'chip.arrived':      'وصلت',
-  'chip.departed':     'غادرت',
+  'chip.departed':     'أقلعت',
   'chip.now':          'الآن',
 
   'store.app_store':   'آب ستور',
