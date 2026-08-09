@@ -583,7 +583,7 @@ function buildPopup(
   // time it belongs to. dir=ltr keeps the sign attached to its digits — bidi otherwise
   // throws a leading + to the far end of the token.
   const delayBadge = (min: number | null | undefined) => min != null && Math.abs(min) >= 2
-    ? `<span dir="ltr" style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;padding:2px 5px;border-radius:99px;line-height:1.4;flex-shrink:0">${RTL() ? `د${Math.abs(min)}${min > 0 ? '+' : '-'}` : `${min > 0 ? '+' : ''}${min}m`}</span>`
+    ? `<span dir="ltr" style="display:inline-flex;background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;padding:2px 5px;border-radius:99px;line-height:1.4;flex-shrink:0">${RTL() ? `<span>د</span><span>${Math.abs(min)}</span><span>${min > 0 ? '+' : '-'}</span>` : `${min > 0 ? '+' : ''}${min}m`}</span>`
     : ''
 
   const progressHtml = progressBarHtml(dep, arr, fraction, etaStr)
@@ -728,7 +728,7 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
   // time it belongs to. dir=ltr keeps the sign attached to its digits — bidi otherwise
   // throws a leading + to the far end of the token.
   const delayBadge = (min: number | null | undefined) => min != null && Math.abs(min) >= 2
-    ? `<span dir="ltr" style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;padding:2px 5px;border-radius:99px;line-height:1.4;flex-shrink:0">${RTL() ? `د${Math.abs(min)}${min > 0 ? '+' : '-'}` : `${min > 0 ? '+' : ''}${min}m`}</span>`
+    ? `<span dir="ltr" style="display:inline-flex;background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;padding:2px 5px;border-radius:99px;line-height:1.4;flex-shrink:0">${RTL() ? `<span>د</span><span>${Math.abs(min)}</span><span>${min > 0 ? '+' : '-'}</span>` : `${min > 0 ? '+' : ''}${min}m`}</span>`
     : ''
 
   // Route progress bar

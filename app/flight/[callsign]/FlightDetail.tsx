@@ -144,18 +144,20 @@ function DelayBadge({ min }: { min: number }) {
   // Arabic — the physical value pushed it away from the number it belongs to.
   const unit = locale === 'ar' ? 'د' : 'm'
   /*
-   * Laid out by hand, because bidi will not do it.
+   * Three elements, not one string, and dir=ltr on the wrapper.
    *
-   * The badge should read د6+ on screen: unit, number, sign. Under dir=rtl the algorithm puts
-   * the Arabic letter rightmost and throws the sign to the far left whatever order the string
-   * is in — both "+6د" and "د6+" came out as "+6د". So the span is forced to ltr, which makes
-   * rendering literal, and the characters are written in the order they should appear.
+   * Bidi will not lay this out: under dir=rtl it puts the Arabic letter rightmost and drops
+   * the lone sign at the far left, so "+6د" and "د6+" rendered identically. Separate spans in
+   * a flex row are positioned by DOM order alone, which is the only way to pin unit, number,
+   * sign and keep it pinned for a minus or a three-digit delay.
    */
   return (
-    <span dir="ltr" style={{ background: C.goldenBg, color: C.goldenTx, fontSize: 10, fontWeight: 700, padding: '2px 5px', borderRadius: 99, marginInlineStart: 5, lineHeight: 1.4 }}>
-      {locale === 'ar'
-        ? `${unit}${Math.abs(min)}${min > 0 ? '+' : '-'}`
-        : (min > 0 ? `+${min}${unit}` : `${min}${unit}`)}
+    <span dir="ltr" style={{ display: 'inline-flex', background: C.goldenBg, color: C.goldenTx, fontSize: 10, fontWeight: 700, padding: '2px 5px', borderRadius: 99, marginInlineStart: 5, lineHeight: 1.4 }}>
+      {locale === 'ar' ? (
+        <>
+          <span>{unit}</span><span>{Math.abs(min)}</span><span>{min > 0 ? '+' : '-'}</span>
+        </>
+      ) : (min > 0 ? `+${min}${unit}` : `${min}${unit}`)}
     </span>
   )
 }
