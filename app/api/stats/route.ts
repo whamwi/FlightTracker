@@ -66,7 +66,7 @@ export async function GET(req: Request) {
 
   // ── Live detail from whatever the cache still holds ────────────────────────
   const seen = new Set<string>()
-  const legs: { airline: string; route: string; delay: number | null }[] = []
+  const legs: { airline: string; airlineIata: string | null; route: string; delay: number | null }[] = []
   let cacheFrom = '', cacheTo = ''
 
   for (const row of cache) {
@@ -86,33 +86,56 @@ export async function GET(req: Request) {
       const other = l.arr_iata ?? l.dep_iata
       legs.push({
         airline: l.airline ?? l.airline_iata ?? '—',
+        // Carried alongside the display name, not instead of it. The name is what this
+        // endpoint has always returned and something may still be reading it; the code is what
+        // a client needs to look the carrier up in its own table.
+        airlineIata: l.airline_iata ?? null,
         route: other ? `${row.airport_iata}–${other}` : '—',
         delay,
       })
     }
   }
 
-  const summarise = (keyOf: (l: typeof legs[number]) => string) => {
-    const g = new Map<string, { n: number; measured: number; onTime: number; total: number }>()
+  type Group = { n: number; measured: number; onTime: number; total: number; name: string; iata: string | null }
+
+  const summarise = (
+    keyOf: (l: typeof legs[number]) => string,
+    metaOf?: (l: typeof legs[number]) => { name: string; iata: string | null },
+  ) => {
+    const g = new Map<string, Group>()
     for (const l of legs) {
       const k = keyOf(l)
       if (k === '—') continue
-      const e = g.get(k) ?? { n: 0, measured: 0, onTime: 0, total: 0 }
+      const e = g.get(k) ?? { n: 0, measured: 0, onTime: 0, total: 0, ...(metaOf?.(l) ?? { name: k, iata: null }) }
       e.n++
       if (l.delay != null) { e.measured++; e.total += l.delay; if (l.delay <= ON_TIME_MIN) e.onTime++ }
       g.set(k, e)
     }
-    return [...g.entries()]
-      .filter(([, e]) => e.n >= MIN_LEGS)
-      .map(([name, e]) => ({
-        name,
+    return [...g.values()]
+      .filter(e => e.n >= MIN_LEGS)
+      .map(e => ({
+        name: e.name,
+        iata: e.iata,
         flights: e.n,
         on_time_pct: e.measured ? Math.round((100 * e.onTime) / e.measured) : null,
         avg_delay_min: e.measured ? Math.round(e.total / e.measured) : null,
       }))
   }
 
-  const airlines = summarise(l => l.airline).sort((a, b) => (b.on_time_pct ?? -1) - (a.on_time_pct ?? -1))
+  /*
+   * Grouped by code where there is one, not by display name.
+   *
+   * The name was the key, which merged Air Arabia's two airlines: G9 out of Sharjah and 3L out
+   * of Abu Dhabi both file as "Air Arabia" and were being averaged into a single row despite
+   * being separate carriers with separate punctuality. Keying on the code splits them, and
+   * gives clients something to translate against — the names here are this endpoint's own and
+   * do not match the airlines table ("Syrian Air" against "Syrian Arab Airlines", "AJet"
+   * against "Anadolujet"), so a name is not something anyone can look a carrier up by.
+   */
+  const airlines = summarise(
+    l => l.airlineIata || l.airline,
+    l => ({ name: l.airline, iata: l.airlineIata }),
+  ).sort((a, b) => (b.on_time_pct ?? -1) - (a.on_time_pct ?? -1))
   const routes   = summarise(l => l.route).sort((a, b) => b.flights - a.flights).slice(0, 10)
 
   const measured = legs.filter(l => l.delay != null)
