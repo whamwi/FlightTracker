@@ -30,6 +30,12 @@ type Leg = {
   dep_iata?: string | null; arr_iata?: string | null
 }
 
+type GacaRow = {
+  month: string; scope: string
+  passengers_total: number | null; passengers_in: number | null; passengers_out: number | null
+  flights: number | null; airlines: number | null; overflights: number | null
+}
+
 export async function GET(req: Request) {
   const days = Math.min(Number(new URL(req.url).searchParams.get('days') ?? 30), 120)
   const from = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10)
@@ -43,7 +49,7 @@ export async function GET(req: Request) {
    */
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Damascus' })
 
-  const [dailyRes, cacheRes] = await Promise.all([
+  const [dailyRes, cacheRes, gacaRes] = await Promise.all([
     fetch(`${SB_URL}/rest/v1/daily_stats?stat_date=gte.${from}&select=*&order=stat_date.asc`,
       { headers: HEADERS, cache: 'no-store' }),
     /*
@@ -58,9 +64,19 @@ export async function GET(req: Request) {
      */
     fetch(`${SB_URL}/rest/v1/fr24_daily_cache?airport_iata=in.(DAM,ALP)&flight_date=gte.${from}&flight_date=lte.${today}&select=flight_date,airport_iata,arrivals,departures`,
       { headers: HEADERS, cache: 'no-store' }),
+    /*
+     * What the authority published, month by month.
+     *
+     * A third basis, kept separate on purpose: route_master is what is advertised in a week,
+     * the cache is what was observed over a rolling window, and this is what SyrGACA counted in
+     * a calendar month. Passengers are the point — no amount of flight tracking produces them.
+     */
+    fetch(`${SB_URL}/rest/v1/gaca_monthly?select=*&order=month.desc`,
+      { headers: HEADERS, cache: 'no-store' }),
   ])
 
   const daily: Record<string, unknown>[] = dailyRes.ok ? await dailyRes.json() : []
+  const gaca: GacaRow[] = gacaRes.ok ? await gacaRes.json() : []
   const cache: { flight_date: string; airport_iata: string; arrivals: Leg[]; departures: Leg[] }[] =
     cacheRes.ok ? await cacheRes.json() : []
 
@@ -161,5 +177,27 @@ export async function GET(req: Request) {
     airlines,
     routes,
     min_legs: MIN_LEGS,
+    /*
+     * The authority's own monthly figures, on their own footing.
+     *
+     * Not merged into `overall` or the rolling window: these are calendar months from a
+     * different counter, and folding them in would produce the same confusion the window note
+     * was added to fix. `pax` is the per-airport series; `overflights` is the national one,
+     * which belongs to Syrian airspace rather than to any airport.
+     */
+    pax: gaca
+      .filter(r => r.scope !== 'SY' && r.passengers_total != null)
+      .map(r => ({
+        month: r.month,
+        airport_iata: r.scope,
+        passengers: r.passengers_total as number,
+        passengers_in: r.passengers_in,
+        passengers_out: r.passengers_out,
+        flights: r.flights,
+        airlines: r.airlines,
+      })),
+    overflights: gaca
+      .filter(r => r.scope === 'SY' && r.overflights != null)
+      .map(r => ({ month: r.month, aircraft: r.overflights as number })),
   })
 }
