@@ -143,11 +143,19 @@ function DelayBadge({ min }: { min: number }) {
   // marginInlineStart, not marginLeft: the badge follows the time, which is the left side in
   // Arabic — the physical value pushed it away from the number it belongs to.
   const unit = locale === 'ar' ? 'د' : 'm'
-  // dir="ltr" on the badge: it is one numeric token, and letting bidi resolve it in an RTL
-  // parent detached the sign to the far end — "+20د" came out as "د20+".
+  /*
+   * Laid out by hand, because bidi will not do it.
+   *
+   * The badge should read د6+ on screen: unit, number, sign. Under dir=rtl the algorithm puts
+   * the Arabic letter rightmost and throws the sign to the far left whatever order the string
+   * is in — both "+6د" and "د6+" came out as "+6د". So the span is forced to ltr, which makes
+   * rendering literal, and the characters are written in the order they should appear.
+   */
   return (
     <span dir="ltr" style={{ background: C.goldenBg, color: C.goldenTx, fontSize: 10, fontWeight: 700, padding: '2px 5px', borderRadius: 99, marginInlineStart: 5, lineHeight: 1.4 }}>
-      {min > 0 ? `+${min}${unit}` : `${min}${unit}`}
+      {locale === 'ar'
+        ? `${unit}${Math.abs(min)}${min > 0 ? '+' : '-'}`
+        : (min > 0 ? `+${min}${unit}` : `${min}${unit}`)}
     </span>
   )
 }

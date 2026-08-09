@@ -350,8 +350,14 @@ function DelayChip({ min }: { min: number | null }) {
   if (!min || Math.abs(min) < 1) return null
   const isLate = min > 0
   const unit   = locale === 'ar' ? 'د' : 'm'
-  // dir="ltr" on the badge: it is one numeric token, and letting bidi resolve it in an RTL
-  // parent detached the sign to the far end — "+20د" came out as "د20+".
+  /*
+   * Laid out by hand, because bidi will not do it.
+   *
+   * The badge should read د6+ on screen: unit, number, sign. Under dir=rtl the algorithm puts
+   * the Arabic letter rightmost and throws the sign to the far left whatever order the string
+   * is in — both "+6د" and "د6+" came out as "+6د". So the span is forced to ltr, which makes
+   * rendering literal, and the characters are written in the order they should appear.
+   */
   return (
     <span dir="ltr" style={{
       fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, fontWeight: 600,
@@ -359,7 +365,9 @@ function DelayChip({ min }: { min: number | null }) {
       background: isLate ? C.wineBg : '#E6EFEC',
       color: isLate ? C.wineText : '#002623',
     }}>
-      {isLate ? `+${min}${unit}` : `${min}${unit}`}
+      {locale === 'ar'
+        ? `${unit}${Math.abs(min)}${isLate ? '+' : '-'}`
+        : (isLate ? `+${min}${unit}` : `${min}${unit}`)}
     </span>
   )
 }
