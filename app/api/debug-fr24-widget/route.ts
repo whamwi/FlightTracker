@@ -19,7 +19,26 @@ export const dynamic = 'force-dynamic'
 
 const TZ = 'Asia/Damascus'
 
-async function probe(code: string) {
+/*
+ * Three variants, because a bare server fetch and the board's fetch differ by more than the
+ * IP. The browser sends a user agent, an Origin and a Referer; Cloudflare weighs all of them.
+ * If the bare call is refused and the dressed one is not, a cron is viable after all.
+ */
+const VARIANTS: { name: string; headers: Record<string, string> }[] = [
+  { name: 'bare', headers: {} },
+  { name: 'ua', headers: {
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0 Safari/537.36',
+    } },
+  { name: 'ua+origin', headers: {
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0 Safari/537.36',
+      'Accept': 'application/json, text/plain, */*',
+      'Accept-Language': 'en-GB,en;q=0.9',
+      'Origin': 'https://www.flysyria.app',
+      'Referer': 'https://www.flysyria.app/',
+    } },
+]
+
+async function probe(code: string, variant: { name: string; headers: Record<string, string> }) {
   const flightDate = new Date().toLocaleDateString('en-CA', { timeZone: TZ })
   const ts  = Math.floor(new Date(flightDate + 'T00:00:00+03:00').getTime() / 1000)
   const url = `https://api.flightradar24.com/common/v1/airport.json?code=${code}`
@@ -28,7 +47,7 @@ async function probe(code: string) {
 
   const started = Date.now()
   try {
-    const res  = await fetch(url, { cache: 'no-store' })
+    const res  = await fetch(url, { cache: 'no-store', headers: variant.headers })
     const body = await res.text()
     let counts: { arrivals?: number; departures?: number } | null = null
     try {
@@ -36,7 +55,7 @@ async function probe(code: string) {
       if (sched) counts = { arrivals: sched.arrivals?.data?.length ?? 0, departures: sched.departures?.data?.length ?? 0 }
     } catch { /* not JSON — almost certainly a challenge page */ }
     return {
-      code, status: res.status, ms: Date.now() - started,
+      code, variant: variant.name, status: res.status, ms: Date.now() - started,
       contentType: res.headers.get('content-type'),
       cfRay: res.headers.get('cf-ray'),
       bytes: body.length,
@@ -44,11 +63,11 @@ async function probe(code: string) {
       head: counts ? null : body.slice(0, 300),
     }
   } catch (err) {
-    return { code, error: String(err), ms: Date.now() - started }
+    return { code, variant: variant.name, error: String(err), ms: Date.now() - started }
   }
 }
 
 export async function GET() {
-  const results = await Promise.all(['DAM', 'IST'].map(probe))
+  const results = await Promise.all(VARIANTS.map(v => probe('DAM', v)))
   return NextResponse.json({ ok: true, from: 'vercel-server', results })
 }
