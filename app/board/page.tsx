@@ -1033,16 +1033,13 @@ export default function BoardPage() {
           .ft-body { padding: 26px 28px 40px !important; }
           .ft-title { font-size: 34px !important; }
           .ft-content { flex-direction: row !important; align-items: flex-start !important; }
-          .ft-sidebar { display: flex !important; flex-direction: column; gap: 16px; width: 320px; flex-shrink: 0; position: sticky !important; top: 136px !important; align-self: flex-start !important; max-height: calc(100vh - 148px); overflow-y: auto; }
+          .ft-sidebar { display: flex !important; flex-direction: column; gap: 16px; width: 320px; flex-shrink: 0; position: sticky !important; top: 78px !important; align-self: flex-start !important; max-height: calc(100vh - 90px); overflow-y: auto; }
           /*
-            The controls belong to the list, not to the page.
-            They spanned the full 1320px while the cards under them were 980 — the sidebar's
-            320 plus the 20 gap — so every button floated over a column it had nothing to do
-            with. margin-inline-end because the sidebar is the second child either way: it
-            lands on the right in English and the left in Arabic, and inline-end is both.
-            The shorthand above resets margins, so this has to follow it.
+            The controls live inside the list column, not above the whole page, so they take
+            its width without being told to — and the sidebar starts level with them instead
+            of below, which left a blank rectangle above the live-map box.
           */
-          .ft-controls-wrap { position: sticky; top: 68px; z-index: 10; background: #EDEBE0; padding: 10px 0; margin: -10px 0; margin-inline-end: 340px; }
+          .ft-controls-wrap { position: sticky; top: 68px; z-index: 10; background: #EDEBE0; padding: 10px 0; margin: -10px 0; }
           .ft-controls { gap: 12px !important; }
           .ft-airport-btn { padding: 8px 32px !important; }
           .ft-airport-pills { display: flex !important; }
@@ -1094,6 +1091,10 @@ export default function BoardPage() {
           </div>
 
           {/* Controls row */}
+
+          {/* ── Content: cards + sidebar ── */}
+          <div className="ft-content" style={{ display: 'flex', gap: 20 }}>
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div className="ft-controls-wrap">
           <div className="ft-controls" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             {/* Date tabs */}
@@ -1289,10 +1290,6 @@ export default function BoardPage() {
             </div>
           </div>
           </div>{/* end ft-controls-wrap */}
-
-          {/* ── Content: cards + sidebar ── */}
-          <div className="ft-content" style={{ display: 'flex', gap: 20 }}>
-            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
 
           {/* Loading */}
           {loading && (
