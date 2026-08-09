@@ -380,7 +380,15 @@ const PinSVG = () => (
 )
 
 // ── Flight card ───────────────────────────────────────────────────────────────
-function FlightCard({ f, view, isPinned, onTogglePin }: { f: Flight; view: View; isPinned: boolean; onTogglePin: () => void }) {
+/*
+ * `boardDate` is the day this card was read off, and it travels with the link.
+ *
+ * Without it, tapping Share on a Yesterday card opened today's service: /api/flight searches
+ * today first and returns the first match, so the same number on two days always resolves to
+ * the later one. Only sent when it is not today — a link to a flight happening now should
+ * stay live rather than freeze to a date.
+ */
+function FlightCard({ f, view, isPinned, onTogglePin, boardDate }: { f: Flight; view: View; isPinned: boolean; onTogglePin: () => void; boardDate?: string }) {
   const t      = useT()
   const href   = useHref()
   const locale = useLocale()
@@ -575,7 +583,7 @@ function FlightCard({ f, view, isPinned, onTogglePin }: { f: Flight; view: View;
       {/* Action strip */}
       <div style={{ borderTop: `1px solid ${C.trackEmpty}`, padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <Link href={href(`/flight/${encodeURIComponent(f.iata_number)}`)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: 99, background: C.sunken, border: `1px solid ${C.border}`, color: C.secondary, fontSize: 11, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap', fontFamily: "'Instrument Sans', system-ui" }}>
+          <Link href={href(`/flight/${encodeURIComponent(f.iata_number)}${boardDate ? `?date=${boardDate}` : ''}`)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: 99, background: C.sunken, border: `1px solid ${C.border}`, color: C.secondary, fontSize: 11, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap', fontFamily: "'Instrument Sans', system-ui" }}>
             <svg width={12} height={12} viewBox="0 0 16 16" fill="none">
               <circle cx="12" cy="3" r="1.8" stroke="currentColor" strokeWidth="1.5"/>
               <circle cx="12" cy="13" r="1.8" stroke="currentColor" strokeWidth="1.5"/>
@@ -1192,7 +1200,7 @@ export default function BoardPage() {
                 <Fragment key={`${f.iata_number}-${f.dep_iata}-${f.arr_iata}-${f.dep_time_utc}-${f.arr_time_utc}`}>
                   {i === nowDisplayIdx && nowLine(false)}
                   <div ref={i === nowDisplayIdx - 1 ? prevNowRef : undefined}>
-                    <FlightCard f={f} view={view} isPinned={pins.has(f.iata_number)} onTogglePin={() => togglePin(f.iata_number)} />
+                    <FlightCard f={f} view={view} isPinned={pins.has(f.iata_number)} onTogglePin={() => togglePin(f.iata_number)} boardDate={tab === 0 ? undefined : date} />
                   </div>
                 </Fragment>
               ))}

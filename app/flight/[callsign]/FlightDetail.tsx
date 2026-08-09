@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { airportCity, cityFor, airlineNameFor, airportLabelFor, airportFlag as apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
@@ -190,6 +191,8 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
   const t      = useT()
   const href   = useHref()
   const locale = useLocale()
+  // Only present on links made from a day other than today — see fetchFlight.
+  const onDate = useSearchParams().get('date')
   const [flight, setFlight]   = useState<Flight | null>(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
@@ -204,9 +207,17 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
 
   useEffect(() => { loadGeoData() }, [])
 
+  /*
+   * The day the link was made on, when it was not today.
+   *
+   * /api/flight searches today before yesterday and returns the first hit, so the same number
+   * on two consecutive days always resolved to the later one — sharing a flight off the
+   * Yesterday tab opened today's service instead.
+   */
   const fetchFlight = useCallback(async () => {
     try {
-      const res = await fetch(`/api/flight?num=${encodeURIComponent(callsign)}`)
+      const q = onDate ? `&date=${encodeURIComponent(onDate)}` : ''
+      const res = await fetch(`/api/flight?num=${encodeURIComponent(callsign)}${q}`)
       if (res.status === 404) { setNotFound(true); setLoading(false); return }
       if (!res.ok) return
       const data = await res.json()
@@ -214,7 +225,7 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
     } catch {}
     setLoading(false)
     setLastRefresh(Date.now())
-  }, [callsign])
+  }, [callsign, onDate])
 
   useEffect(() => {
     fetchFlight()
