@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { translate, isLocale, dirOf, ALL_KEYS, LOCALES, DEFAULT_LOCALE, counted, countNumber, pluralCategory } from './i18n.ts'
+import { translate, isLocale, dirOf, ALL_KEYS, LOCALES, DEFAULT_LOCALE, counted, countNumber, pluralCategory, alternatesFor } from './i18n.ts'
 
 test('every English key has an Arabic translation', () => {
   const missing = ALL_KEYS.filter(k => translate('ar', k) === k)
@@ -90,4 +90,28 @@ test('only the Arabic dual drops its numeral', () => {
   assert.equal(countNumber('ar', 1),   '1')
   assert.equal(countNumber('ar', 12),  '12')
   assert.equal(countNumber('en', 2),   '2')
+})
+
+test('each language canonicalises to itself, never to the other', () => {
+  // The bug this replaces: /ar pointing at /, which tells Google to drop the Arabic page.
+  const ar = alternatesFor('/ar/flight/XH728')
+  assert.equal(ar.canonical, 'https://www.flysyria.app/ar/flight/XH728')
+  const en = alternatesFor('/flight/XH728')
+  assert.equal(en.canonical, 'https://www.flysyria.app/flight/XH728')
+})
+
+test('the hreflang pair is the same on both sides of it', () => {
+  const a = alternatesFor('/ar/board').languages
+  const b = alternatesFor('/board').languages
+  assert.deepEqual(a, b)
+  assert.equal(a.en, 'https://www.flysyria.app/board')
+  assert.equal(a.ar, 'https://www.flysyria.app/ar/board')
+  assert.equal(a['x-default'], a.en)
+})
+
+test('the roots do not collapse to a trailing slash or a doubled one', () => {
+  assert.equal(alternatesFor('/').canonical,   'https://www.flysyria.app')
+  assert.equal(alternatesFor('/ar').canonical, 'https://www.flysyria.app/ar')
+  // /en is a root alias for /, so it must claim the English root rather than itself.
+  assert.equal(alternatesFor('/en').canonical, 'https://www.flysyria.app')
 })

@@ -2,7 +2,7 @@ import { Analytics } from '@vercel/analytics/next'
 import { headers } from 'next/headers'
 import ErrorReporter from '@/components/ErrorReporter'
 import { LocaleProvider } from '@/components/LocaleProvider'
-import { DEFAULT_LOCALE, dirOf, isLocale } from '@/lib/i18n'
+import { DEFAULT_LOCALE, alternatesFor, dirOf, isLocale } from '@/lib/i18n'
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
@@ -12,7 +12,17 @@ export const viewport: Viewport = {
   viewportFit: 'cover',
 }
 
-export const metadata: Metadata = {
+/*
+ * generateMetadata rather than a static object, because the alternates depend on the path and
+ * a layout is not given one — the middleware passes it in a header. Everything else here is
+ * unchanged; only the alternates are computed.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const path = (await headers()).get('x-flysyria-path') ?? '/'
+  return { ...baseMetadata, alternates: alternatesFor(path) }
+}
+
+const baseMetadata: Metadata = {
   title: 'FlySyria',
   description: 'Live flight status for Damascus & Aleppo — real-time arrivals, departures and live tracking.',
   openGraph: {

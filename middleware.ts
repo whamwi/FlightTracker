@@ -18,6 +18,15 @@ import { LOCALES, DEFAULT_LOCALE, ROOT_LOCALE } from '@/lib/i18n'
  */
 
 const LOCALE_HEADER = 'x-flysyria-locale'
+/*
+ * The URL the visitor actually sees, prefix included.
+ *
+ * A layout receives no pathname, and /ar/board is rewritten to /board before it renders — so
+ * without this the layout cannot tell which of the two languages it is, nor build a canonical
+ * or an hreflang pair for the page. The locale header alone is not enough: the links need the
+ * path as well.
+ */
+const PATH_HEADER   = 'x-flysyria-path'
 const AR_PREFIXES   = LOCALES.filter(l => l !== DEFAULT_LOCALE).map(l => `/${l}`)
 
 function adminGate(request: NextRequest): NextResponse | null {
@@ -72,6 +81,7 @@ export function middleware(request: NextRequest) {
     url.pathname = '/'
     const headers = new Headers(request.headers)
     headers.set(LOCALE_HEADER, 'en')
+    headers.set(PATH_HEADER, pathname)
     return NextResponse.rewrite(url, { request: { headers } })
   }
 
@@ -85,6 +95,7 @@ export function middleware(request: NextRequest) {
 
     const headers = new Headers(request.headers)
     headers.set(LOCALE_HEADER, locale)
+    headers.set(PATH_HEADER, pathname)
     return NextResponse.rewrite(url, { request: { headers } })
   }
 
@@ -94,6 +105,7 @@ export function middleware(request: NextRequest) {
    */
   const headers = new Headers(request.headers)
   headers.set(LOCALE_HEADER, pathname === '/' ? ROOT_LOCALE : DEFAULT_LOCALE)
+  headers.set(PATH_HEADER, pathname)
   return NextResponse.next({ request: { headers } })
 }
 

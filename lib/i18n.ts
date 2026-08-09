@@ -28,6 +28,37 @@ export const ROOT_LOCALE: Locale = 'ar'
 export const isLocale = (v: string | null | undefined): v is Locale =>
   !!v && (LOCALES as readonly string[]).includes(v)
 
+export const SITE_URL = 'https://www.flysyria.app'
+
+/**
+ * The canonical and hreflang set for one page, given the URL the visitor is on.
+ *
+ * Every page exists at two addresses and each must claim itself. Pointing /ar at the English
+ * URL — which is what the flight pages did — is not a hint that they are related, it is an
+ * instruction to drop the Arabic one, and Google obeys it.
+ *
+ * x-default goes to English: it is the unprefixed URL, the one already shared and indexed, and
+ * the sensible landing place for a reader whose language we do not have.
+ */
+export function alternatesFor(visiblePath: string) {
+  // Read the prefix, do not infer it from whether the path changed: /en is a root alias for /,
+  // so it rewrites like a prefixed path while being the English page.
+  const prefix = `/${LOCALES.find(l => l !== DEFAULT_LOCALE) ?? 'ar'}`
+  const isAr   = visiblePath === prefix || visiblePath.startsWith(`${prefix}/`)
+
+  const bare   = isAr ? (visiblePath.slice(prefix.length) || '/')
+               : visiblePath === '/en' ? '/'
+               : visiblePath
+  const suffix = bare === '/' ? '' : bare
+
+  const en = `${SITE_URL}${suffix}`
+  const ar = `${SITE_URL}${prefix}${suffix}`
+  return {
+    canonical: isAr ? ar : en,
+    languages: { en, ar, 'x-default': en },
+  }
+}
+
 /** Text direction. Drives `dir` on <html>, which is what mirrors the flexbox layout. */
 export const dirOf = (l: Locale): 'rtl' | 'ltr' => (l === 'ar' ? 'rtl' : 'ltr')
 

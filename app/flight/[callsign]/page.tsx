@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import { headers } from 'next/headers'
 import FlightDetail from './FlightDetail'
-import { DEFAULT_LOCALE, isLocale, type Locale } from '@/lib/i18n'
+import { DEFAULT_LOCALE, SITE_URL, alternatesFor, isLocale, type Locale } from '@/lib/i18n'
 
 const SB_URL = process.env.SUPABASE_URL!
 const SB_KEY = process.env.SUPABASE_ANON_KEY!
@@ -130,7 +130,13 @@ export async function generateMetadata(
   return {
     title,
     description,
-    alternates: { canonical: `https://www.flysyria.app/flight/${encodeURIComponent(callsign.toUpperCase())}` },
+    /*
+     * Each language claims itself. This used to hardcode the unprefixed URL, so every Arabic
+     * flight page carried a canonical pointing at its English twin — an instruction to index
+     * that one instead, which Google follows. The Arabic flight pages, the largest set on the
+     * site, were asking to be dropped.
+     */
+    alternates: alternatesFor(`/${locale === 'ar' ? 'ar/' : ''}flight/${encodeURIComponent(callsign.toUpperCase())}`),
     openGraph: {
       title, description, siteName: 'FlySyria', type: 'website',
       /*

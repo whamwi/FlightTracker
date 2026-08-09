@@ -18,6 +18,23 @@ export const revalidate = 3600
 
 const BASE = 'https://www.flysyria.app'
 
+/*
+ * One entry per page with both languages attached, rather than two entries.
+ *
+ * That is the form Google asks for: the alternates say "these are the same page" so the pair
+ * is not read as duplicates, and either can be served depending on the reader. Listing /ar
+ * separately would get them indexed but leave them competing with each other.
+ */
+const withLanguages = (path: string) => ({
+  url: `${BASE}${path === '/' ? '' : path}` || BASE,
+  alternates: {
+    languages: {
+      en: `${BASE}${path === '/' ? '' : path}` || BASE,
+      ar: `${BASE}/ar${path === '/' ? '' : path}`,
+    },
+  },
+})
+
 const SB_URL = process.env.SUPABASE_URL!
 const SB_KEY = process.env.SUPABASE_ANON_KEY!
 
@@ -55,13 +72,13 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   return [
     ...STATIC.map(s => ({
-      url: `${BASE}${s.path}`,
+      ...withLanguages(s.path),
       lastModified: now,
       changeFrequency: s.changeFrequency,
       priority: s.priority,
     })),
     ...flights.map(num => ({
-      url: `${BASE}/flight/${encodeURIComponent(num)}`,
+      ...withLanguages(`/flight/${encodeURIComponent(num)}`),
       lastModified: now,
       // The status on these changes constantly, but the page's existence and its route do not.
       changeFrequency: 'daily' as const,
