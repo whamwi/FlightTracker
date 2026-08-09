@@ -777,15 +777,37 @@ export default function BoardPage() {
         if (depth === 0) {
           Promise.all(writes).then(() => loadRef.current(0, true)).catch(() => {})
         }
-        if (depth === 0) {
-          const origins = new Set<string>()
-          for (const f of (sched.arrivals?.data ?? [])) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const dep = (f as any)?.flight?.airport?.origin?.code?.iata
-            if (dep && dep !== airportCode) origins.add(dep as string)
-          }
-          origins.forEach(origin => warmFR24Cache(origin, 1))
-        }
+        /*
+         * DISABLED 9 Aug 2026 — trial. Restore by uncommenting; nothing else changed.
+         *
+         * This fanned out to every non-Syrian origin in the arrivals list and fetched its
+         * widget too — about 21 extra airports, ~25 requests to FR24 every five minutes from
+         * every open tab, on an audience that is 72% mobile.
+         *
+         * What it bought, measured on 9 Aug:
+         *   departure times   nothing. FR24's airport board carries both ends, so DAM's own
+         *                     arrival row already holds the origin's real_dep — true for all
+         *                     seven flights that had departed that morning.
+         *   departure status  nothing, same reason.
+         *   origin gate       20 of 42 rows filled, and never rendered: the arrivals view
+         *                     draws arr_gate, and the departures view draws flights leaving
+         *                     Damascus, whose gate comes from Damascus.
+         *   busy origins      worse than nothing — DXB's cached day stopped at 03:55 and held
+         *                     no Syria-bound departure at all, though XH728 leaves at 19:00.
+         *
+         * Left commented rather than deleted because one morning is one morning: if a carrier
+         * turns up whose destination row lacks real_dep while its origin's board has it, this
+         * is the thing to put back.
+         *
+         * if (depth === 0) {
+         *   const origins = new Set<string>()
+         *   for (const f of (sched.arrivals?.data ?? [])) {
+         *     const dep = (f as any)?.flight?.airport?.origin?.code?.iata
+         *     if (dep && dep !== airportCode) origins.add(dep as string)
+         *   }
+         *   origins.forEach(origin => warmFR24Cache(origin, 1))
+         * }
+         */
       })
       .catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
