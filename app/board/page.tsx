@@ -687,6 +687,7 @@ export default function BoardPage() {
   const [sortMode, setSortMode]     = useState<'time' | 'airline'>('time')
   const [airlineFilter, setAirlineFilter] = useState<string | null>(null)
   const [airlinePopover, setAirlinePopover] = useState(false)
+  const [airportMenu, setAirportMenu]       = useState(false)
   const airlineBtnRef = useRef<HTMLButtonElement>(null)
 
   type WeeklyStats = {
@@ -1002,6 +1003,8 @@ export default function BoardPage() {
            the desktop rule below overrides it with 68px. */
         .ft-controls-wrap { position: sticky; top: 58px; z-index: 10; background: #EDEBE0; padding: 10px 0; margin: -10px 0; }
         .ft-airport-btn { padding: 8px 14px !important; }
+        .ft-airport-pills { display: none !important; }
+        .ft-airport-menu  { display: block; }
         .ft-sort-btns { display: none !important; }
         @media (min-width: 768px) {
           .ft-body { padding: 26px 28px 40px !important; }
@@ -1011,6 +1014,8 @@ export default function BoardPage() {
           .ft-controls-wrap { position: sticky; top: 68px; z-index: 10; background: #EDEBE0; padding: 10px 0; margin: -10px 0; }
           .ft-controls { gap: 12px !important; }
           .ft-airport-btn { padding: 8px 32px !important; }
+          .ft-airport-pills { display: flex !important; }
+          .ft-airport-menu  { display: none; }
           .ft-sort-btns { display: flex !important; }
         }
         @media (min-width: 1100px) {
@@ -1100,7 +1105,16 @@ export default function BoardPage() {
               ))}
             </div>
 
-            <div style={{ display: 'flex', padding: 3, background: C.border, borderRadius: 11, gap: 3 }}>
+            {/*
+              Pills on desktop, a dropdown on the phone.
+
+              Three pills measured 205px against a 343px row, and with the arrivals/departures
+              toggle at 166 the pair no longer fitted — the airport row dropped to a third
+              line and the sticky block grew from 87px to 134 on an 812px screen. Squeezing
+              the pills only bought 8px of headroom and would break again on اللاذقية or
+              القامشلي; a dropdown is one control at any airport count.
+            */}
+            <div className="ft-airport-pills" style={{ display: 'flex', padding: 3, background: C.border, borderRadius: 11, gap: 3 }}>
               {AIRPORTS.map(ap => (
                 <button key={ap} onClick={() => setAirport(ap)} className="ft-airport-btn" style={{
                   padding: '8px 32px', borderRadius: 9, cursor: 'pointer',
@@ -1117,6 +1131,55 @@ export default function BoardPage() {
                   {locale === 'ar' ? cityFor(ap) : ap}
                 </button>
               ))}
+            </div>
+
+            <div className="ft-airport-menu" style={{ position: 'relative' }}>
+              <button
+                onClick={() => setAirportMenu(v => !v)}
+                aria-haspopup="listbox"
+                aria-expanded={airportMenu}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 10,
+                  cursor: 'pointer', background: C.forest, border: 'none', whiteSpace: 'nowrap',
+                }}
+              >
+                <span style={{ font: `700 13px/1 'Instrument Sans', system-ui`, color: '#fff' }}>
+                  {locale === 'ar' ? cityFor(airport) : airport}
+                </span>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.75)"
+                     strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden
+                     style={{ transform: airportMenu ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }}>
+                  <path d="m6 9 6 6 6-6"/>
+                </svg>
+              </button>
+
+              {airportMenu && (
+                <>
+                  <div onClick={() => setAirportMenu(false)} style={{ position: 'fixed', inset: 0, zIndex: 99 }} />
+                  <div role="listbox" style={{
+                    position: 'absolute', top: 'calc(100% + 6px)', insetInlineStart: 0, zIndex: 100,
+                    background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12,
+                    boxShadow: '0 8px 24px -8px rgba(22,22,22,.22)', minWidth: 150, padding: '6px 0',
+                  }}>
+                    {AIRPORTS.map(ap => (
+                      <button key={ap} role="option" aria-selected={airport === ap}
+                        onClick={() => { setAirport(ap); setAirportMenu(false) }}
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                          width: '100%', padding: '10px 14px', border: 'none', cursor: 'pointer',
+                          background: airport === ap ? C.sunken : 'transparent', textAlign: 'start',
+                        }}>
+                        <span style={{ font: `${airport === ap ? 700 : 500} 13.5px/1 'Instrument Sans', system-ui`, color: C.ink }}>
+                          {cityFor(ap)}
+                        </span>
+                        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: C.muted, letterSpacing: '.06em' }}>
+                          {ap}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
 
             <div style={{ flex: 1 }} />
