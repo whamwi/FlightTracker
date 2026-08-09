@@ -1047,6 +1047,15 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         center: [33.0, 40.0], zoom: 6,
         maxBoundsViscosity: 0,
         zoomControl: false,
+        /*
+         * Quarter-step zoom so fitBounds can actually land on the bounds.
+         *
+         * With whole levels it rounds down to the next one that fits, which on most phone
+         * widths threw away a lot of slack and opened wider than asked for. zoomDelta stays 1
+         * so the +/- buttons still move a full level at a time.
+         */
+        zoomSnap: 0.25,
+        zoomDelta: 1,
       })
       /*
        * Open on the whole network, not on Syria alone.
@@ -1062,7 +1071,9 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
        */
       map.whenReady(() => {
         map.invalidateSize()
-        map.fitBounds([[22, 26], [43, 62]], { padding: [8, 8] })
+        // Hugging Istanbul (41.3N, 28.8E) and Dubai (25.2N, 55.4E) rather than sitting well
+        // outside them — the first pass read as too far out.
+        map.fitBounds([[24, 28], [42.5, 56.5]], { padding: [8, 8] })
       })
 
       // Leaflet prepends its own "Leaflet |" credit. It is MIT-licensed and asks for no
