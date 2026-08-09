@@ -33,11 +33,30 @@ type Leg = {
 export async function GET(req: Request) {
   const days = Math.min(Number(new URL(req.url).searchParams.get('days') ?? 30), 120)
   const from = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10)
+  /*
+   * Today, in Damascus, so the tables stop at flights that have actually operated.
+   *
+   * fr24_daily_cache holds the days ahead as well as the days behind — the board caches
+   * tomorrow's schedule — so an unbounded read counted flights that have not happened. It is
+   * why "flights tracked" ran ahead of "with a recorded departure time" by more than
+   * cancellations could explain.
+   */
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Damascus' })
 
   const [dailyRes, cacheRes] = await Promise.all([
     fetch(`${SB_URL}/rest/v1/daily_stats?stat_date=gte.${from}&select=*&order=stat_date.asc`,
       { headers: HEADERS, cache: 'no-store' }),
-    fetch(`${SB_URL}/rest/v1/fr24_daily_cache?airport_iata=in.(DAM,ALP)&select=flight_date,airport_iata,arrivals,departures`,
+    /*
+     * Bounded by the same window as the daily series above, and stopped at today.
+     *
+     * This read had no date filter at all, so the two halves of the panel described different
+     * periods: the charts rolled the last `days`, while the headline metrics and both tables
+     * summed whatever the cache had ever held. Nothing prunes that table, so the window was
+     * not rolling but growing — "since 24 July" today, and still "since 24 July" a year from
+     * now, by which point a route that stopped flying in August would keep its rank forever
+     * and the count would compare with nothing.
+     */
+    fetch(`${SB_URL}/rest/v1/fr24_daily_cache?airport_iata=in.(DAM,ALP)&flight_date=gte.${from}&flight_date=lte.${today}&select=flight_date,airport_iata,arrivals,departures`,
       { headers: HEADERS, cache: 'no-store' }),
   ])
 
