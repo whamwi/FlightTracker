@@ -89,7 +89,24 @@ export async function GET(req: Request) {
     if (!cacheFrom || row.flight_date < cacheFrom) cacheFrom = row.flight_date
     if (!cacheTo   || row.flight_date > cacheTo)   cacheTo   = row.flight_date
     for (const l of [...(row.arrivals ?? []), ...(row.departures ?? [])]) {
-      const key = `${row.flight_date}|${l.num ?? ''}|${l.sched_dep ?? ''}`
+      /*
+       * Keyed on the flight, not on the day it was filed under.
+       *
+       * sched_dep is an absolute timestamp, so one physical departure has one value for it
+       * however FR24 dates the row — and FR24 re-dates them: a service leaving Istanbul at
+       * 22:47 and landing in Damascus after midnight was filed under the 9th, then moved to
+       * the 10th. With the date in the key those are two flights and the month counts both.
+       *
+       * Forty-nine legs in the cache are currently filed under more than one date. None fall
+       * inside the window the tables read, so no published figure is wrong today — this makes
+       * that structural rather than lucky.
+       *
+       * The date stays in the key when sched_dep is missing, because without a timestamp there
+       * is nothing else to tell two operations of the same number apart.
+       */
+      const key = l.sched_dep
+        ? `${l.num ?? ''}|${l.sched_dep}`
+        : `${row.flight_date}|${l.num ?? ''}|`
       if (seen.has(key)) continue
       seen.add(key)
       const sched = Number(l.sched_dep)
