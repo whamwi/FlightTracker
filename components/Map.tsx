@@ -17,7 +17,7 @@ import VideoBox from './VideoBox'
 const RAF_MOTION = true
 import PhotoBox from './PhotoBox'
 import { PANEL } from './MapBox'
-import { translate } from '@/lib/i18n'
+import { translate, counted } from '@/lib/i18n'
 import { getActiveLocale, cityFor } from '@/lib/geo-data'
 
 /*
@@ -423,7 +423,7 @@ function schedToLocal(hhmm: string | null, offset: number): string {
 
 // Arabic carries no English unit letters — see the twin in FlightDetail.
 const fmtHm = (m: number) => RTL()
-  ? (m >= 60 ? `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}` : `${m} د`)
+  ? (m >= 60 ? `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}` : counted('ar', m, 'noun.minute'))
   : (m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`)
 
 /**
