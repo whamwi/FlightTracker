@@ -11,6 +11,7 @@ import { useT, useLocale, useHref } from '@/components/LocaleProvider'
 import { STATUS_KEY, counted } from '@/lib/i18n'
 import Wordmark from '@/components/Wordmark'
 import SiteNav from '@/components/SiteNav'
+import { markerHub, MARKER_ACCENT } from '@/lib/syria-airports'
 
 const Map = dynamic(() => import('@/components/Map'), { ssr: false })
 
@@ -165,8 +166,11 @@ function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelecte
   const href = useHref()
   const status = panelEffectiveStatus(f)
   const approaching = status === 'Approaching'
-  const isAlp = f.dep_iata === 'ALP' || f.arr_iata === 'ALP'
-  const railColor = isAlp ? '#f97316' : (approaching ? C.forest : C.forestMid)
+  // Damascus keeps the brand forest it has always had here — the rail sits on a pale panel,
+  // not on a map, and #16a34a would be loud against it. The provincial hubs take the marker
+  // colour, which is the whole point of having one.
+  const hub = markerHub(f.dep_iata, f.arr_iata)
+  const railColor = hub === 'DAM' ? (approaching ? C.forest : C.forestMid) : MARKER_ACCENT[hub]
 
   const depOff  = tzOffset(f.dep_iata)
   const arrOff  = tzOffset(f.arr_iata)
@@ -224,7 +228,7 @@ function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelecte
 
           {/* Progress */}
           {f.actual_dep_utc && f.duration_min > 0 ? (
-            <MiniProgress depUtc={f.actual_dep_utc} durationMin={f.duration_min} approaching={approaching} accentColor={isAlp ? '#f97316' : undefined} />
+            <MiniProgress depUtc={f.actual_dep_utc} durationMin={f.duration_min} approaching={approaching} accentColor={hub === 'DAM' ? undefined : MARKER_ACCENT[hub]} />
           ) : (
             <div style={{ flex: 1, height: 3, borderRadius: 99, background: C.trackEmpty }} />
           )}
@@ -473,10 +477,10 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
         const outbound = (apFlag[f.dep_iata] ?? '') === '🇸🇾'
         const otherIata = outbound ? f.arr_iata : f.dep_iata
         const otherCity = cityFor(otherIata)
-        // Same rule as the desktop card and the map's plane markers: an Aleppo leg is orange,
-        // everything else green — so the strip and the map agree at a glance.
-        const isAlp = f.dep_iata === 'ALP' || f.arr_iata === 'ALP'
-        const railColor = isAlp ? '#f97316' : C.forestMid
+        // Same rule as the desktop card and the map's plane markers, so the strip and the map
+        // agree at a glance. It was a boolean, which quietly gave Deir ez-Zor the Damascus rail.
+        const hub = markerHub(f.dep_iata, f.arr_iata)
+        const railColor = hub === 'DAM' ? C.forestMid : MARKER_ACCENT[hub]
         return (
           <button
             key={`${ghost ? 'g' : ''}${f.iata_number}-${f.dep_iata}-${f.arr_iata}`}

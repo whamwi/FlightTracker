@@ -19,6 +19,7 @@ import PhotoBox from './PhotoBox'
 import { PANEL } from './MapBox'
 import { translate, counted } from '@/lib/i18n'
 import { getActiveLocale, cityFor } from '@/lib/geo-data'
+import { markerHub, MARKER_ACCENT, type BoardAirport } from '@/lib/syria-airports'
 
 /*
  * The popups are built as HTML strings from module-level functions, so there is no hook to
@@ -373,10 +374,13 @@ function bestHeading(a: Aircraft): number {
 
 // ── Icon & popup ──────────────────────────────────────────────────────────────
 
-function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, stale: boolean, label?: string, alp = false, estimated = false, colorOverride?: string) {
+function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, stale: boolean, label?: string, hub: BoardAirport = 'DAM', estimated = false, colorOverride?: string) {
   const mobile  = typeof window !== 'undefined' && window.matchMedia(PHONE_MQ).matches
   const size    = syria ? (mobile ? 36 : 40) : (mobile ? 26 : 30)
-  const color   = colorOverride ?? (stale ? '#9ca3af' : alp ? '#f97316' : syria ? '#16a34a' : '#1d4ed8')
+  // Was a boolean — Aleppo orange, any other Syrian airport green — which painted Deir ez-Zor
+  // as Damascus from the day it opened. The table is shared with the mobile app so the two
+  // maps cannot drift apart again.
+  const color   = colorOverride ?? (stale ? '#9ca3af' : syria ? MARKER_ACCENT[hub] : '#1d4ed8')
   const opacity = stale ? 0.5 : 1
   const shadow  = syria && !stale ? 'drop-shadow(0 5px 4px rgba(0,0,0,0.45))' : 'drop-shadow(0 1px 3px rgba(0,0,0,0.4))'
   const strokeW = syria && !stale ? 0.4 : 0.6
@@ -1563,7 +1567,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
 
         const isLive     = lostAt === 0 && !isFr24
         const elapsed    = lostAt > 0 ? now - lostAt : 0
-        const isAlp      = a.arr_iata === 'ALP' || a.dep_iata === 'ALP'
+        const hub        = markerHub(a.dep_iata, a.arr_iata)
         const isOnGround = (a.alt_baro === 'ground' || (typeof a.alt_baro === 'number' && a.alt_baro < 500))
                         && (typeof a.gs === 'number' ? a.gs < 50 : false)
 
@@ -1868,7 +1872,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         const staleLabel    = arrSnapped ? `${cs}\nARRIVED` : cs
         const isEstimated   = projected && !arrSnapped
         const isHighlighted = highlightedCSRef.current === cs
-        const icon    = planeIcon(L, dispTrack, true, arrSnapped, staleLabel, isAlp, isEstimated, isHighlighted ? '#ef4444' : undefined)
+        const icon    = planeIcon(L, dispTrack, true, arrSnapped, staleLabel, hub, isEstimated, isHighlighted ? '#ef4444' : undefined)
         const fsDr    = flightStatusRef.current[cs]
         const regDr   = fsDr?.aircraft_reg ?? a.r ?? null
         const photoDr = regDr ? photoCacheRef.current[regDr] ?? null : null
@@ -1952,10 +1956,10 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
             highlightedCSRef.current = cs
             setLoading(false)
             const capCs = cs; const capDep = a.dep_iata ?? flightStatusRef.current[cs]?.dep_iata ?? null; const capArr = a.arr_iata ?? flightStatusRef.current[cs]?.arr_iata ?? null
-            const capTrack = dispTrack; const capLabel = staleLabel; const capAlp = isAlp; const capEst = isEstimated
+            const capTrack = dispTrack; const capLabel = staleLabel; const capHub = hub; const capEst = isEstimated
             setTimeout(() => {
               const mk = markersRef.current[capCs]; const mi = mapInstanceRef.current
-              if (mk && mi) { mk.setIcon(planeIcon(L, capTrack, true, false, capLabel, capAlp, capEst, '#ef4444')); ((_z) => { const _w = mi.getSize().x; const _off = panelOpenRef.current && _w >= 480 ? Math.min(160, (_w - 320) / 2) : 0; const _p = mi.project(mk.getLatLng(), _z); mi.setView(mi.unproject(_p.subtract(L.point(_off, 0)), _z), _z) })(Math.max(mi.getZoom(), 8)); isAutoOpenRef.current = true; mk.openPopup(); drawTrackRoute(mk, capDep, capArr) }
+              if (mk && mi) { mk.setIcon(planeIcon(L, capTrack, true, false, capLabel, capHub, capEst, '#ef4444')); ((_z) => { const _w = mi.getSize().x; const _off = panelOpenRef.current && _w >= 480 ? Math.min(160, (_w - 320) / 2) : 0; const _p = mi.project(mk.getLatLng(), _z); mi.setView(mi.unproject(_p.subtract(L.point(_off, 0)), _z), _z) })(Math.max(mi.getZoom(), 8)); isAutoOpenRef.current = true; mk.openPopup(); drawTrackRoute(mk, capDep, capArr) }
             }, 300)
           }
         }
@@ -1967,7 +1971,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           setLoading(false)
           const mk = markersRef.current[cs]; const mi = mapInstanceRef.current
           const dep = a.dep_iata ?? flightStatusRef.current[cs]?.dep_iata ?? null; const arr = a.arr_iata ?? flightStatusRef.current[cs]?.arr_iata ?? null
-          mk.setIcon(planeIcon(L, dispTrack, true, false, staleLabel, isAlp, isEstimated, '#ef4444'))
+          mk.setIcon(planeIcon(L, dispTrack, true, false, staleLabel, hub, isEstimated, '#ef4444'))
           if (mk && mi) { ((_z) => { const _w = mi.getSize().x; const _off = panelOpenRef.current && _w >= 480 ? Math.min(160, (_w - 320) / 2) : 0; const _p = mi.project(mk.getLatLng(), _z); mi.setView(mi.unproject(_p.subtract(L.point(_off, 0)), _z), _z) })(Math.max(mi.getZoom(), 8)); isAutoOpenRef.current = true; mk.openPopup(); drawTrackRoute(mk, dep, arr) }
         }
 
@@ -2205,9 +2209,9 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           ? bearingFromPath(wps, fPos)
           : bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], fPos)
         const label = arrived ? `${callsign}\nARRIVED` : callsign
-        const isAlp = dep_iata === 'ALP' || arr_iata === 'ALP'
+        const hub = markerHub(dep_iata, arr_iata)
         const isSchedHighlighted = highlightedCSRef.current === callsign
-        const icon  = planeIcon(L, track, true, arrived, label, isAlp, !arrived, isSchedHighlighted ? '#ef4444' : undefined)
+        const icon  = planeIcon(L, track, true, arrived, label, hub, !arrived, isSchedHighlighted ? '#ef4444' : undefined)
         const schedReg   = fs?.aircraft_reg ?? null
         const schedPhoto = (schedReg ? photoCacheRef.current[schedReg] : null) ?? photoCacheRef.current[`cs:${callsign}`] ?? null
         const popup = buildSchedulePopup(entry, arrived, fs, fPos, schedPhoto)
@@ -2303,10 +2307,10 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
             autoOpenDoneRef.current = true
             highlightedCSRef.current = callsign
             setLoading(false)
-            const capCs2 = callsign; const capTrack2 = track; const capLabel2 = label; const capAlp2 = isAlp
+            const capCs2 = callsign; const capTrack2 = track; const capLabel2 = label; const capHub2 = hub
             setTimeout(() => {
               const mk = schedMarkersRef.current[capCs2]; const mi = mapInstanceRef.current
-              if (mk && mi) { mk.setIcon(planeIcon(L, capTrack2, true, false, capLabel2, capAlp2, false, '#ef4444')); ((_z) => { const _w = mi.getSize().x; const _off = panelOpenRef.current && _w >= 480 ? Math.min(160, (_w - 320) / 2) : 0; const _p = mi.project(mk.getLatLng(), _z); mi.setView(mi.unproject(_p.subtract(L.point(_off, 0)), _z), _z) })(Math.max(mi.getZoom(), 8)); isAutoOpenRef.current = true; mk.openPopup(); drawTrackRoute(mk, dep_iata, arr_iata) }
+              if (mk && mi) { mk.setIcon(planeIcon(L, capTrack2, true, false, capLabel2, capHub2, false, '#ef4444')); ((_z) => { const _w = mi.getSize().x; const _off = panelOpenRef.current && _w >= 480 ? Math.min(160, (_w - 320) / 2) : 0; const _p = mi.project(mk.getLatLng(), _z); mi.setView(mi.unproject(_p.subtract(L.point(_off, 0)), _z), _z) })(Math.max(mi.getZoom(), 8)); isAutoOpenRef.current = true; mk.openPopup(); drawTrackRoute(mk, dep_iata, arr_iata) }
             }, 300)
           }
         }
@@ -2318,7 +2322,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           highlightedCSRef.current = callsign
           setLoading(false)
           const mk = schedMarkersRef.current[callsign]; const mi = mapInstanceRef.current
-          mk.setIcon(planeIcon(L, track, true, false, label, isAlp, false, '#ef4444'))
+          mk.setIcon(planeIcon(L, track, true, false, label, hub, false, '#ef4444'))
           if (mk && mi) { ((_z) => { const _w = mi.getSize().x; const _off = panelOpenRef.current && _w >= 480 ? Math.min(160, (_w - 320) / 2) : 0; const _p = mi.project(mk.getLatLng(), _z); mi.setView(mi.unproject(_p.subtract(L.point(_off, 0)), _z), _z) })(Math.max(mi.getZoom(), 8)); isAutoOpenRef.current = true; mk.openPopup(); drawTrackRoute(mk, dep_iata, arr_iata) }
         }
 
