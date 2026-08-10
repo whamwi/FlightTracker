@@ -165,6 +165,29 @@ async function fetchViaApi(): Promise<{ rows: VideoRow[]; pages: number; dropped
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────
+/**
+ * When this job last ran, and whether it worked.
+ *
+ * Without it a run that found no new video was indistinguishable from a run that never
+ * happened: syrgaca_media stamps created_at on insert only, so a quiet day and a dead cron
+ * leave the same trace — none. The channel publishes every two or three days, which means
+ * the silence is usually genuine and a failure could hide in it for a week.
+ *
+ * Shares syrgaca_sync_state with the Facebook scrape, one row per job. Failures are written
+ * too, so the answer to "did it run" is never inferred from the absence of something.
+ */
+async function writeState(patch: Record<string, unknown>) {
+  try {
+    await fetch(`${SB_URL}/rest/v1/syrgaca_sync_state?job=eq.youtube`, {
+      method:  'PATCH',
+      headers: { ...HEADERS, 'Content-Type': 'application/json' },
+      body:    JSON.stringify(patch),
+    })
+  } catch {
+    // Bookkeeping must never be the thing that fails the sync it is recording.
+  }
+}
+
 export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET
   if (secret && req.headers.get('Authorization') !== `Bearer ${secret}`) {
@@ -175,11 +198,14 @@ export async function GET(req: Request) {
   // YouTube error about a missing key, and the only symptom anyone would notice is a
   // gallery that stopped gaining videos — weeks later.
   if (!YT_KEY) {
+    await writeState({ run_started_at: new Date().toISOString(), last_error: 'YOUTUBE_API_KEY is not set' })
     return NextResponse.json(
       { ok: false, error: 'YOUTUBE_API_KEY is not set — this sync has no keyless path since YouTube stopped serving the channel RSS feed' },
       { status: 500 },
     )
   }
+
+  await writeState({ run_started_at: new Date().toISOString(), last_error: null })
 
   try {
     const { rows, pages, dropped } = await fetchViaApi()
@@ -214,8 +240,10 @@ export async function GET(req: Request) {
       if (res.ok) pruned = ((await res.json()) as unknown[]).length
     }
 
+    await writeState({ last_synced_at: new Date().toISOString(), last_error: null })
     return NextResponse.json({ ok: true, pages, videos: rows.length, shortsSkipped: dropped, upserted, pruned })
   } catch (e) {
+    await writeState({ last_error: String(e) })
     return NextResponse.json({ ok: false, error: String(e) }, { status: 500 })
   }
 }

@@ -71,9 +71,12 @@ type MediaRow = {
 }
 
 // ── Sync state ────────────────────────────────────────────────────────────────
+// Keyed by job name, not by id = 1. The table was a singleton built for this scrape; the
+// YouTube sync now keeps its state in the same place, so the row has to be addressed by
+// which job it belongs to rather than by the only number there used to be.
 async function readState(): Promise<AnyRec> {
   const res = await fetch(
-    `${SB_URL}/rest/v1/syrgaca_sync_state?id=eq.1&select=*`,
+    `${SB_URL}/rest/v1/syrgaca_sync_state?job=eq.facebook&select=*`,
     { headers: HEADERS, cache: 'no-store' },
   )
   if (!res.ok) return {}
@@ -82,7 +85,7 @@ async function readState(): Promise<AnyRec> {
 }
 
 async function writeState(patch: AnyRec) {
-  await fetch(`${SB_URL}/rest/v1/syrgaca_sync_state?id=eq.1`, {
+  await fetch(`${SB_URL}/rest/v1/syrgaca_sync_state?job=eq.facebook`, {
     method:  'PATCH',
     headers: { ...HEADERS, 'Content-Type': 'application/json' },
     body:    JSON.stringify(patch),
