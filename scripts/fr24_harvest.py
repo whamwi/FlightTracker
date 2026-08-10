@@ -28,6 +28,7 @@ Usage
     python3 fr24_harvest.py --airports DAM,ALP,DEZ
     python3 fr24_harvest.py --airports DXB,IST,AMM --out dest.json
     python3 fr24_harvest.py --airports DAM --date 2026-08-11
+    python3 fr24_harvest.py --airports DAM,ALP --earlier      # includes yesterday's stragglers
 """
 
 from __future__ import annotations
@@ -166,15 +167,26 @@ def fetch_page(code: str, day: str, page: int) -> dict[str, Any]:
     ) or {}
 
 
-def fetch_airport(code: str, day: str, pages: int = 1) -> list[tuple[str, dict[str, Any]]]:
-    """Every entry across `pages` pages, tagged with which side of the board it came from.
+def fetch_airport(code: str, day: str, pages: int = 1,
+                  earlier: bool = False) -> list[tuple[str, dict[str, Any]]]:
+    """Every entry across the requested pages, tagged with which side of the board it came from.
 
     One page is plenty for a Syrian airport — Damascus files about 70 movements a day, well
     inside the 100 cap. It is not enough for a hub: at Dubai the first hundred rows are a slice
     of one morning and contain no Syria flights at all. They start on page 2.
+
+    `earlier` adds page -1, the window before the current one. It is the only way back: FR24
+    refuses a past timestamp outright with a 400, mode or no mode. It matters because a
+    departure is filed under the day it was *scheduled* to leave and never the day it actually
+    left, so a flight due out at 22:50 and delayed past midnight stays on yesterday — where
+    today's page 1 will never look. Arrivals are filed by scheduled arrival instead, which is
+    why a late landing appears to move itself to the next day.
+
+    Same rule the deployed harvester runs on, so this script can reproduce what the service sees.
     """
     out: list[tuple[str, dict[str, Any]]] = []
-    for page in range(1, pages + 1):
+    wanted = ([-1] if earlier else []) + list(range(1, pages + 1))
+    for page in wanted:
         if page > 1:
             time.sleep(DELAY_SEC)
         sched = fetch_page(code, day, page)
@@ -183,13 +195,15 @@ def fetch_airport(code: str, day: str, pages: int = 1) -> list[tuple[str, dict[s
             data = (sched.get(side) or {}).get("data") or []
             rows += len(data)
             out.extend((side, entry) for entry in data)
-        # A short page is the end of the schedule, not a hiccup.
-        if rows == 0:
+        # A short page is the end of the schedule, not a hiccup — but only going forward. An
+        # empty page -1 says nothing about page 1, so it must not stop the walk.
+        if rows == 0 and page > 0:
             break
     return out
 
 
-def harvest(code: str, day: str, pages: int = 1, only_syria: bool = False) -> dict[str, dict[str, list]]:
+def harvest(code: str, day: str, pages: int = 1, only_syria: bool = False,
+            earlier: bool = False) -> dict[str, dict[str, list]]:
     """
     Cache rows for one airport, bucketed by date exactly as the browser path buckets them.
 
@@ -203,7 +217,7 @@ def harvest(code: str, day: str, pages: int = 1, only_syria: bool = False) -> di
         return by_date.setdefault(d, {"arrivals": [], "departures": []})
 
     seen: set[str] = set()
-    for side, entry in fetch_airport(code, day, pages):
+    for side, entry in fetch_airport(code, day, pages, earlier):
         row = norm_flight(entry)
         if not row:
             continue
@@ -252,6 +266,9 @@ def main() -> int:
     p.add_argument("--delay", type=float, default=1.0,
                    help="seconds between requests (default 1). Sweeping many airports without "
                         "this earns a 429 about thirty requests in")
+    p.add_argument("--earlier", action="store_true",
+                   help="also pull page -1, the window before now — the only way to reach a "
+                        "late-night departure that slipped past midnight onto yesterday")
     p.add_argument("--only-syria", action="store_true",
                    help="keep only flights touching a Syrian airport — for harvesting destinations")
     p.add_argument("--out", help="write the normalised rows to this JSON file")
@@ -266,7 +283,8 @@ def main() -> int:
     failures = 0
     for code in codes:
         try:
-            by_date = harvest(code, args.date, pages=args.pages, only_syria=args.only_syria)
+            by_date = harvest(code, args.date, pages=args.pages,
+                              only_syria=args.only_syria, earlier=args.earlier)
             result[code] = by_date
             report(code, by_date)
         except Exception as e:  # noqa: BLE001 — one airport failing must not lose the rest
