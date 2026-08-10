@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.parse
 import signal
 import sys
 import time
@@ -94,6 +95,13 @@ MAX_DURATION_MIN = 300
 
 # A reference payload is kept once an hour; the rest are stored only on error or on change.
 SAMPLE_EVERY_SEC = 3600
+
+# Retention. The payload is bulk — 23KB a row — and its value is short-lived: it exists to be
+# read while something is being validated, not kept. The metadata is the opposite, a few dozen
+# bytes that answer "did this run and what came back", so it is kept far longer.
+PAYLOAD_KEEP_DAYS = 7
+PROBE_KEEP_DAYS   = 90
+PRUNE_EVERY_SEC   = 3600
 
 
 def log(msg: str) -> None:
@@ -231,6 +239,58 @@ def record_probe(endpoint: str, fetch_by: str, query: str, page: int, status: in
         log(f"  probe write failed {res.status_code}: {res.text[:200]}")
 
 
+# ── Retention ────────────────────────────────────────────────────────────────
+
+_last_prune = 0.0
+
+
+def prune() -> None:
+    """
+    Drop old payloads, then old rows. Runs here rather than on a schedule of its own because
+    this service is the only thing that writes them: if it is stopped, nothing accumulates and
+    there is nothing to prune. A separate scheduler would be a second thing to keep alive for
+    no gain.
+
+    Payloads are nulled rather than deleted, so the record that a request happened — and what it
+    returned — outlives the bytes it returned.
+    """
+    global _last_prune
+    now = time.monotonic()
+    if now - _last_prune < PRUNE_EVERY_SEC:
+        return
+    _last_prune = now
+
+    # Percent-encoded, because an ISO timestamp ends in "+00:00" and a bare + in a query string
+    # is a space: PostgREST answered 400 on "2026-08-10T18:19:48 00:00" until this was quoted.
+    def cutoff(days: int) -> str:
+        return urllib.parse.quote(
+            (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(), safe="")
+
+    cutoff_payload = cutoff(PAYLOAD_KEEP_DAYS)
+    cutoff_row     = cutoff(PROBE_KEEP_DAYS)
+
+    try:
+        r = cr.patch(
+            f"{SB_URL}/rest/v1/fr24_staging_probe"
+            f"?queried_at=lt.{cutoff_payload}&payload=not.is.null",
+            headers={**SB_HEADERS, "Prefer": "return=representation"},
+            data=json.dumps({"payload": None}), impersonate=IMPERSONATE, timeout=60,
+        )
+        cleared = len(r.json()) if r.status_code < 300 else -1
+
+        r = cr.delete(
+            f"{SB_URL}/rest/v1/fr24_staging_probe?queried_at=lt.{cutoff_row}",
+            headers={**SB_HEADERS, "Prefer": "return=representation"},
+            impersonate=IMPERSONATE, timeout=60,
+        )
+        dropped = len(r.json()) if r.status_code < 300 else -1
+
+        if cleared or dropped:
+            log(f"prune: {cleared} payloads cleared, {dropped} rows dropped")
+    except Exception as e:  # noqa: BLE001 — housekeeping must not end the service
+        log(f"prune failed: {type(e).__name__}: {e}")
+
+
 # ── Sweep ────────────────────────────────────────────────────────────────────
 
 _last_sample: dict[str, float] = {}
@@ -301,6 +361,7 @@ def main() -> int:
     if "--once" in sys.argv:
         log("single sweep")
         sweep()
+        prune()
         return 0
 
     running = True
@@ -319,6 +380,7 @@ def main() -> int:
         started = time.monotonic()
         try:
             sweep()
+            prune()
         except Exception as e:  # noqa: BLE001 — a bad sweep must not end the service
             log(f"sweep failed: {type(e).__name__}: {e}")
         # Sleep in short slices so SIGTERM is answered promptly rather than at the next sweep.
