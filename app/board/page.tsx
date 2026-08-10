@@ -573,7 +573,11 @@ function FlightCard({ f, view, isPinned, onTogglePin, boardDate }: { f: Flight; 
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-            {!isCancelled && isArr && <DelayChip min={arrDelay} />}
+            {/* Not gated to the arrivals board. The card prints an arrival time on both, and a
+                revised time without its variance is the half of the story that raises the
+                question — SYR515 read 10:49 against a filed 11:04 and said nothing about the
+                fifteen minutes, while the map's flight sheet showed the chip all along. */}
+            {!isCancelled && <DelayChip min={arrDelay} />}
             {hasComputedETA && !isCancelled && (
               <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, fontWeight: 600, padding: '3px 5px', borderRadius: 5, background: C.goldenBg, color: C.goldenText }}>~</span>
             )}
