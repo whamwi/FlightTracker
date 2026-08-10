@@ -79,6 +79,9 @@ IMPERSONATE = "chrome"
 # limit caps at 100 server-side; anything larger is a 400. One page covers a Syrian airport,
 # which files about seventy movements a day.
 PAGE_LIMIT = 100
+# page 1 is the window around now; page -1 is the one before it, which is the only way to reach
+# yesterday — a past timestamp is refused with a 400.
+PAGES = (1, -1)
 RETRIES = 3
 BACKOFF_SEC = 5
 
@@ -103,13 +106,13 @@ def ts(unix: int | None) -> str | None:
     return datetime.fromtimestamp(unix, timezone.utc).isoformat() if unix else None
 
 
-def fetch_airport(code: str, day: str) -> tuple[dict, int, int]:
+def fetch_airport(code: str, day: str, page: int = 1) -> tuple[dict, int, int]:
     """The schedule payload for one airport, plus the HTTP status and how long it took."""
     midnight = int(datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=TZ).timestamp())
     url = (
         f"{BASE}?code={code}&plugin=&plugin-setting[schedule][mode]="
         f"&plugin-setting[schedule][timestamp]={midnight}"
-        f"&page=1&limit={PAGE_LIMIT}&fleet=&token="
+        f"&page={page}&limit={PAGE_LIMIT}&fleet=&token="
     )
     started = time.monotonic()
     res = None
@@ -212,10 +215,10 @@ def upsert_flights(rows: list[dict]) -> int:
     return len(rows)
 
 
-def record_probe(endpoint: str, fetch_by: str, query: str, status: int,
+def record_probe(endpoint: str, fetch_by: str, query: str, page: int, status: int,
                  ms: int, rows: int, payload: dict | None) -> None:
     body = {
-        "endpoint": endpoint, "fetch_by": fetch_by, "query": query,
+        "endpoint": endpoint, "fetch_by": fetch_by, "query": query, "page": page,
         "http_status": status, "duration_ms": ms, "rows_returned": rows,
         "payload": payload,
     }
@@ -234,41 +237,63 @@ _last_sample: dict[str, float] = {}
 
 
 def sweep() -> None:
+    """
+    Every airport, against yesterday's anchor as well as today's.
+
+    FR24 files a departure under the day it was *scheduled* to leave, using the scheduled time
+    and never the actual one. A flight due out at 22:50 and delayed to 00:15 therefore stays
+    under yesterday — and at midnight "today" rolls over, so page 1 alone stops covering that
+    flight at the exact moment it departs. Arrivals do not have the problem: they are filed by
+    scheduled arrival, which is why a late-night landing appears to "move" to the next day of
+    its own accord.
+
+    Reached with page=-1 rather than yesterday's timestamp. A past anchor is refused outright —
+    HTTP 400, with or without a schedule mode — while the earlier page returns it: 11 flights
+    absent from page 1 on 10 Aug, including departures scheduled from 19:10 onward the evening
+    before. The window already reaches forward on its own, so only the backward side needs
+    asking for.
+    """
     day = datetime.now(TZ).strftime("%Y-%m-%d")
 
-    for i, code in enumerate(AIRPORTS):
-        if i:
-            time.sleep(REQUEST_DELAY)
+    first = True
+    for code in AIRPORTS:
+        for page in PAGES:
+            if not first:
+                time.sleep(REQUEST_DELAY)
+            first = False
+            sweep_one(code, day, page)
 
-        sched, status, ms = fetch_airport(code, day)
-        entries = ((sched.get("departures") or {}).get("data") or []) + \
-                  ((sched.get("arrivals") or {}).get("data") or [])
 
-        rows, seen = [], set()
-        for e in entries:
-            r = norm(e, code)
-            if not r:
-                continue
-            # Arrivals and departures overlap for a domestic leg; the primary key would collide.
-            key = (r["flight_date"], r["num"], r["dep_iata"], r["arr_iata"])
-            if key in seen:
-                continue
-            seen.add(key)
-            rows.append(r)
+def sweep_one(code: str, day: str, page: int = 1) -> None:
+    sched, status, ms = fetch_airport(code, day, page)
+    entries = ((sched.get("departures") or {}).get("data") or []) + \
+              ((sched.get("arrivals") or {}).get("data") or [])
 
-        written = upsert_flights(rows)
+    rows, seen = [], set()
+    for e in entries:
+        r = norm(e, code)
+        if not r:
+            continue
+        # Arrivals and departures overlap for a domestic leg; the primary key would collide.
+        key = (r["flight_date"], r["num"], r["dep_iata"], r["arr_iata"])
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append(r)
 
-        # Keep the raw payload when it failed, when it was empty, or once an hour as a
-        # reference. Storing every sweep would be ~60MB a day for two airports.
-        now = time.monotonic()
-        keep = status != 200 or not rows or now - _last_sample.get(code, 0) > SAMPLE_EVERY_SEC
-        if keep:
-            _last_sample[code] = now
-        record_probe("airport.json", "airport", code, status, ms, len(rows),
-                     sched if keep else None)
+    written = upsert_flights(rows)
 
-        log(f"{code}: HTTP {status} {ms}ms  {len(rows)} rows  {written} written"
-            + ("  [payload kept]" if keep else ""))
+    # Keep the raw payload when it failed, when it was empty, or once an hour as a
+    # reference. Storing every sweep would be ~60MB a day for two airports.
+    now = time.monotonic()
+    keep = status != 200 or not rows or now - _last_sample.get(f"{code}|{page}", 0) > SAMPLE_EVERY_SEC
+    if keep:
+        _last_sample[f"{code}|{page}"] = now
+    record_probe("airport.json", "airport", code, page, status, ms, len(rows),
+                 sched if keep else None)
+
+    log(f"{code} p{page}: HTTP {status} {ms}ms  {len(rows)} rows  {written} written"
+        + ("  [payload kept]" if keep else ""))
 
 
 def main() -> int:
