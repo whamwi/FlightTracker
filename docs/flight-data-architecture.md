@@ -304,12 +304,27 @@ The sequence they described survives in `flight_event` for as long as that is re
 
 ### Three questions before this is applied
 
-1. **Identity.** The key assumes `iata_number` resolves consistently. Fly Cham is filed as
-   `FYC781` by FR24 and sold as `XH781`, and resolution happens in the worker against
-   `flight_lookup`. If that lookup is wrong or missing for a carrier, the same flight lands twice
-   under two numbers. The alternative is keying on the slot — `(flight_date, dep_iata, arr_iata,
-   sched_dep)` — which is immune to the naming problem but breaks when a schedule is amended.
-   Worth deciding deliberately rather than defaulting.
+1. ~~**Identity.**~~ **Answered.** Resolution comes from `airlines`, not `flight_lookup`. The
+   table carries both codes an airline has — `iata` and `icao` — and all 20 rows have both,
+   because it is maintained by hand once per airline joining the Syrian scheme. So `FYC781`
+   resolves to `XH781` through `airlines.icao = 'FYC' → iata = 'XH'`, from a source that is
+   complete by construction rather than sparse like `flight_lookup`.
+
+   This also supplies the **legitimacy rule**: a flight is only real if its callsign prefix
+   belongs to a known airline. FR24 emits codeshares that look like flights and are not, and
+   membership of `airlines` is the filter — which is what `/api/flightboard` already does when it
+   rejects Taquan Air's `K3…`. **The harvester does not apply it yet**, which is why `K3965` and
+   `K3967` reached staging on 10 Aug.
+
+   Two consequences for the code:
+
+   - `PREFIX_TO_IATA` is hardcoded in `app/api/flight/route.ts` and `app/api/weekly-stats/route.ts`,
+     duplicating a column that already exists — and the two copies have already drifted, one
+     carrying `SXS: 'XQ'` and the other not. Both should read `airlines`.
+   - Those maps hold two entries the table does not: `HST → RB`, a legacy ICAO for Syrian Air,
+     and `SXS → XQ` for SunExpress, which is not a known airline and would be rejected anyway.
+     `HST` needs somewhere to live — an alias column on `airlines` rather than a constant in two
+     route files.
 
 2. **How much of the sequence history keeps.** Right now compaction keeps the outcome and drops
    the estimates. If "how far did the estimate wander" turns out to matter for the ETA work, that
