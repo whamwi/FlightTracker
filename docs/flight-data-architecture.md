@@ -21,6 +21,33 @@ a schema, and the consequences are structural rather than cosmetic:
 Adding the Railway harvester as a tenth writer would make this worse. The fix is a shape with an
 owner.
 
+## A worked example: RB445, 10 Aug 2026
+
+Aleppo to Istanbul, scheduled 19:30Z. FR24's own website records it departing 20:28Z and landing
+22:02Z, on YK-SYR. Three separate failures of the current pipeline, on one flight:
+
+**We asserted the opposite of what we knew.** The harvester recorded the departure at 20:35:05Z.
+The `no-activity` inventory ran at **21:15:35Z** — forty minutes later — and flagged the flight as
+having done nothing. The information was public, and held, before the claim was made.
+
+**A wrong answer stood for twelve hours.** Flagging runs at 21:15Z and reconciliation at 09:00Z,
+so the row stayed open long after the board itself was showing the flight as landed. Resolution
+is a batch job against data that changes continuously.
+
+**The cache holds a departure time that is wrong and cannot be corrected.** It has `real_dep` at
+19:54Z against FR24's own 20:28Z — 34 minutes early. Its merge keeps the existing row once an
+arrival is confirmed, so an error captured early is frozen permanently. Never-downgrade without
+never-correct.
+
+The staging trigger refuses nulls but accepts revisions, which is why it agrees with FR24 to the
+second.
+
+None of this was diagnosable before. The cache has one `fetched_at` for a whole airport-day, so
+"when did we learn this flight had departed" had no answer; the per-field `*_seen_at` columns are
+what turned an argument about architecture into a timeline. That is the case for the backend pull
+in one row, and it is why validating an *absence* of data — see `outcome` below — has to be
+deliberate rather than inferred.
+
 ## The shape
 
 ### One canonical row per flight per operating day
