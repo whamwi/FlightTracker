@@ -111,8 +111,16 @@ The two pipelines stay independent. No dual-write, no coexistence logic.
 
 ## Retention: a live table of three days, and a history table that earns its keep
 
-The canonical table holds **yesterday, today and tomorrow** and nothing else. A nightly job
-compacts anything older into `flight_history` and clears it on the third night.
+The canonical table holds **five days**. A nightly job compacts anything older into
+`flight_history` and clears it.
+
+Five rather than three deliberately: this data has never existed before, so the working window is
+set wide enough to find out what a few days of live history is worth before it is narrowed. It
+costs almost nothing — ninety flights a day — and the answer decides the number.
+
+**`flight_history` is the product, not the archive.** It holds the final facts about a flight:
+what was scheduled, what actually happened, and whether it happened at all. Everything in the live
+table is working state on its way to becoming one settled row.
 
 That keeps the serving table small enough that every query against it is trivial, and it gives
 history a job rather than making it an archive:
@@ -217,8 +225,8 @@ create table flight (
   real_arr_seen_at timestamptz,
 
   -- Facts that are not timestamps and therefore cannot be derived. A cancelled flight has no
-  -- departure to record, so its cancellation has to be stored.
-  cancelled       boolean     not null default false,
+  -- departure to record, so its cancellation has to be stored — as an outcome rather than its
+  -- own boolean, or there would be two ways to say the same thing.
   diverted_to     text,
 
   dep_terminal    text,
@@ -242,8 +250,12 @@ create index on flight (flight_date, arr_iata);
 create index on flight (fr24_id) where fr24_id is not null;
 ```
 
-**No `status` column.** It is derived at read time from the times, `cancelled` and `diverted_to`,
+**No `status` column.** It is derived at read time from the times, `outcome` and `diverted_to`,
 for whichever end the caller is looking from.
+
+`outcome` is not only a compaction concern: it moves to `departed` the moment a real departure
+arrives and to `cancelled` the moment FR24 says so. Compaction inherits it and only has to
+resolve what is still `unknown`.
 
 ### `flight_event` — append-only
 
@@ -283,14 +295,23 @@ create table flight_history (
   sched_arr       timestamptz not null,
   real_dep        timestamptz,
   real_arr        timestamptz,
-  cancelled       boolean     not null default false,
   diverted_to     text,
+  outcome         text        not null,   -- departed | cancelled | no_show | unknown
+  outcome_source  text,
   -- Derived once at compaction so the stats path never recomputes them.
   dep_delay_min   int,
   arr_delay_min   int,
-  -- Scheduled, never observed to depart. The question the live table cannot answer, because by
-  -- the time it is knowable the row has been cleared.
-  never_departed  boolean     not null default false,
+  -- What became of it. 'unknown' is a first-class value: absence of data is not evidence that
+  -- a flight did not fly, and recording our own blind spots as facts would poison the stats
+  -- built on this table.
+  --   departed  — we hold a real departure
+  --   cancelled — FR24 said so
+  --   no_show   — scheduled, no departure, and CONFIRMED against the paid API
+  --   unknown   — no data, not yet verified
+  outcome         text        not null default 'unknown'
+                  check (outcome in ('departed','cancelled','no_show','unknown')),
+  outcome_checked_at timestamptz,        -- when the paid API was asked
+  outcome_source     text,               -- what answered
   compacted_at    timestamptz not null default now(),
   primary key (flight_date, iata_number, dep_iata, arr_iata)
 );
@@ -330,6 +351,12 @@ The sequence they described survives in `flight_event` for as long as that is re
    the estimates. If "how far did the estimate wander" turns out to matter for the ETA work, that
    belongs in history rather than in an event log that is itself being pruned.
 
-3. **`never_departed` needs a rule.** Scheduled, no `real_dep`, and past its slot by how long?
-   An hour is probably right for these routes but should be checked against the data rather than
-   picked.
+3. ~~**`never_departed` needs a rule.**~~ **Answered, and it is not a rule about time.** A flight
+   with no departure past its slot is a *candidate*, not a fact — the gap may be ours. Compaction
+   marks it `unknown` and the paid API is asked to confirm before it becomes `no_show`.
+
+   This is the paid API's proper role: verifying a negative for a handful of flights a day, not
+   bulk acquisition. A few calls, and the difference between "we did not see it" and "it did not
+   fly" — which is exactly the distinction the stats need and the free feed cannot make.
+
+   Still to pick: how long past the slot a flight becomes a candidate worth spending a call on.
