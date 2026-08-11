@@ -124,6 +124,31 @@ RAW_KEEP_DAYS     = int(os.environ.get("FR24_RAW_KEEP_DAYS", "0"))
 PRUNE_EVERY_SEC   = 3600
 
 
+# ── Live positions ───────────────────────────────────────────────────────────
+#
+# A second endpoint, and a different job. airport.json carries no position at all — no trail, no
+# coordinates, verified across every stored payload — so a live fix needs its own call.
+#
+# One bounded request returns every aircraft in the box, keyed by the same fr24_id our schedule
+# rows already carry. That is one request for all flights rather than one per flight, and the fix
+# is 2-4 seconds old rather than wherever a track happened to end.
+
+FEED_URL     = "https://data-cloud.flightradar24.com/zones/fcgi/feed.js"
+# Gulf and Turkey. Measured: a Syria-only box found NONE of our two live flights, because both
+# were still en route outside Syrian airspace; this box found both. Do not widen it — see
+# FEED_CAP.
+FEED_BOUNDS  = os.environ.get("FR24_FEED_BOUNDS", "45.0,22.0,25.0,60.0")
+FEED_ENABLED = os.environ.get("FR24_FEED", "1") != "0"
+# The response truncates at 1,500 aircraft without saying so. A box spanning Europe to India
+# returned fewer of our flights than a smaller box inside it, because the cap discarded them.
+# Tile boxes rather than enlarging one, and watch this number.
+FEED_CAP     = 1500
+# Half of all responses are empty, always carrying the frozen full_count 22684 while healthy ones
+# return a moving count near 24,750. Two backends, one broken. Empty means retry.
+FEED_RETRIES = 6
+FEED_DEAD_COUNT = 22684
+
+
 def log(msg: str) -> None:
     print(f"{datetime.now(timezone.utc).isoformat(timespec='seconds')}  {msg}", flush=True)
 
@@ -408,16 +433,24 @@ def sweep() -> None:
     """
     day = datetime.now(TZ).strftime("%Y-%m-%d")
 
+    live: dict[str, int] = {}
     first = True
     for code in AIRPORTS:
         for page in PAGES:
             if not first:
                 time.sleep(REQUEST_DELAY)
             first = False
-            sweep_one(code, day, page)
+            live.update(sweep_one(code, day, page))
+
+    # The live set comes from the rows we just fetched rather than a second read of the database.
+    # It is the same answer and one fewer round trip, and it cannot drift out of step with the
+    # sweep that produced it.
+    if live:
+        time.sleep(REQUEST_DELAY)
+    collect_positions(live)
 
 
-def sweep_one(code: str, day: str, page: int = 1) -> None:
+def sweep_one(code: str, day: str, page: int = 1) -> dict[str, int]:
     probe_uid = str(uuid.uuid4())
     sched, status, ms = fetch_airport(code, day, page)
 
@@ -447,6 +480,98 @@ def sweep_one(code: str, day: str, page: int = 1) -> None:
     log(f"{code} p{page}: HTTP {status} {ms}ms  {len(rows)} seen  {written} changed"
         + (f"  ({len(rows) - written} unchanged)" if written >= 0 else "")
         + ("  [payload kept]" if keep else ""))
+
+    # Flights worth asking the position feed about: FR24 holds a live instance and the flight has
+    # not landed. That deliberately includes aircraft still on the ground — `live` flips when the
+    # aircraft starts moving, roughly fifteen minutes before a departure time is published, which
+    # is the earliest signal we get that a flight is going.
+    return {
+        r["fr24_id"]: r["fr24_row"]
+        for r in rows
+        if r.get("fr24_id") and r.get("fr24_row") and r.get("status_live") and not r.get("real_arr")
+    }
+
+
+def fetch_feed() -> tuple[dict, int]:
+    """Every aircraft in the box, keyed by fr24_id, retrying past the broken backend."""
+    url = (f"{FEED_URL}?bounds={FEED_BOUNDS}&faa=1&satellite=1&mlat=1&flarm=1&adsb=1"
+           "&gnd=1&air=1&vehicles=0&estimated=1&maxage=14400&gliders=0&stats=0")
+    for attempt in range(FEED_RETRIES):
+        try:
+            res = cr.get(url, impersonate=IMPERSONATE, timeout=40)
+            if res.status_code != 200:
+                time.sleep(2)
+                continue
+            payload = res.json()
+            craft = {k: v for k, v in payload.items()
+                     if k not in ("full_count", "version", "stats")}
+            if craft:
+                return craft, attempt + 1
+            # Empty is the dead backend, not empty skies — the two are indistinguishable without
+            # this retry, and treating it as "no flights" would look exactly like an outage.
+            time.sleep(2)
+        except Exception as e:                # noqa: BLE001 — positions must not end the sweep
+            log(f"  feed attempt {attempt + 1} failed: {type(e).__name__}: {e}")
+            time.sleep(2)
+    return {}, FEED_RETRIES
+
+
+def collect_positions(live: dict[str, int]) -> None:
+    """
+    Positions for our own flights, and only while some flight is actually live.
+
+    `live` maps fr24_id -> fr24_row for flights FR24 currently reports as live and not yet
+    arrived. When it is empty — overnight, or any quiet hour — no request is made at all, which
+    is most of the value: the box costs ~170KB whether we need two aircraft from it or none.
+    """
+    if not FEED_ENABLED or not live:
+        return
+
+    craft, attempts = fetch_feed()
+    if not craft:
+        log(f"  feed: no aircraft after {attempts} attempts — backend down, positions skipped")
+        return
+    if len(craft) >= FEED_CAP:
+        log(f"  feed: {len(craft)} aircraft AT THE {FEED_CAP} CAP — response truncated, "
+            f"flights may be silently missing; narrow FR24_FEED_BOUNDS")
+
+    rows = []
+    for fid, v in craft.items():
+        if fid not in live:
+            continue                          # not ours; the other ~1,160 are overflights
+        rows.append({
+            "fr24_id": fid, "fr24_row": live[fid],
+            "hex": v[0] or None, "lat": v[1], "lon": v[2], "track_deg": v[3],
+            "altitude_ft": v[4], "ground_speed_kts": v[5], "squawk": v[6] or None,
+            "source": v[7] or None, "aircraft_type": v[8] or None, "registration": v[9] or None,
+            "fix_at": ts(v[10]), "origin_iata": v[11] or None, "dest_iata": v[12] or None,
+            "flight_number": v[13] or None, "on_ground": bool(v[14]),
+            "vertical_speed_fpm": v[15], "callsign": v[16] or None,
+            "airline_icao": v[18] if len(v) > 18 else None,
+            "aircraft_seen": len(craft), "raw": v,
+        })
+
+    if not rows:
+        log(f"  feed: {len(craft)} aircraft, none of our {len(live)} live flights in the box")
+        return
+
+    res = cr.post(
+        f"{SB_URL}/rest/v1/fr24_live_position?select=id",
+        # The same fix asked for twice is one observation. Anything moving changes between polls,
+        # so this only collapses a parked aircraft or a repeated response.
+        headers={**SB_HEADERS, "Prefer": "resolution=ignore-duplicates,return=representation"},
+        data=json.dumps(rows), impersonate=IMPERSONATE, timeout=60,
+    )
+    if res.status_code >= 300:
+        log(f"  position write failed {res.status_code}: {res.text[:200]}")
+        return
+    try:
+        kept = len(res.json())
+    except Exception:                          # noqa: BLE001
+        kept = -1
+    ages = [int(time.time()) - v[10] for fid, v in craft.items() if fid in live]
+    log(f"  feed: {len(craft)} aircraft, {len(rows)}/{len(live)} ours, {kept} new"
+        f"  fix age {min(ages)}-{max(ages)}s" + (f"  [{attempts} attempts]" if attempts > 1 else ""))
 
 
 def main() -> int:
