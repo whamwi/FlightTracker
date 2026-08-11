@@ -378,12 +378,32 @@ The sequence they described survives in `flight_event` for as long as that is re
    the estimates. If "how far did the estimate wander" turns out to matter for the ETA work, that
    belongs in history rather than in an event log that is itself being pruned.
 
-3. ~~**`never_departed` needs a rule.**~~ **Answered, and it is not a rule about time.** A flight
-   with no departure past its slot is a *candidate*, not a fact — the gap may be ours. Compaction
-   marks it `unknown` and the paid API is asked to confirm before it becomes `no_show`.
+3. ~~**`never_departed` needs a rule.**~~ **Answered, and it is not a rule about time.**
 
-   This is the paid API's proper role: verifying a negative for a handful of flights a day, not
-   bulk acquisition. A few calls, and the difference between "we did not see it" and "it did not
-   fly" — which is exactly the distinction the stats need and the free feed cannot make.
+   The threshold question dissolved once the data was examined. FR24's own vocabulary already
+   distinguishes the cases: a flight still ahead of its slot reads `Scheduled`, and one that has
+   passed it without operating flips to `Unknown`. That is FR24 saying it has stopped expecting
+   the flight — better evidence than any elapsed-hours rule we could pick, and it arrives at the
+   moment FR24 forms the view rather than at a clock tick of ours.
 
-   Still to pick: how long past the slot a flight becomes a candidate worth spending a call on.
+   | observed | `outcome` |
+   |---|---|
+   | `real_dep` present | `departed` |
+   | status contains Cancelled | `cancelled` |
+   | past slot, no departure, status `Unknown` | `unknown` → verify → `no_show` |
+   | status `Scheduled`, slot in the future | not a candidate |
+
+   **`Unknown` is a candidate, not proof.** On 10 Aug `G9376` read `Unknown` at Sharjah while
+   Damascus had it as `Departed 14:15` — one feed losing track of a flight that was airborne. So
+   the verification step stands: the paid API confirms a negative for the handful of genuinely
+   ambiguous flights, which is the one thing the free feed structurally cannot do.
+
+   Worked both ways on 10 Aug. `FYC761` (ALP-SHJ, 06:35Z) and its return `FYC762` (01:30Z) both
+   read `Unknown` with no departure, and both genuinely did not operate — confirmed independently.
+   The pair resumed the next morning, `FYC762` departing at 01:49Z. Meanwhile `RB445` had a real
+   departure recorded and should never have been a candidate at all.
+
+   **A note on why we can see this.** `FYC761`'s slot was ten hours before the harvester started,
+   and it is only in the table because of the `page=-1` fetch. Without the earlier page the new
+   system would be blind to exactly the flights it exists to catch — the ones that quietly did not
+   happen.
