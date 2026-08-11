@@ -481,14 +481,24 @@ def sweep_one(code: str, day: str, page: int = 1) -> dict[str, int]:
         + (f"  ({len(rows) - written} unchanged)" if written >= 0 else "")
         + ("  [payload kept]" if keep else ""))
 
-    # Flights worth asking the position feed about: FR24 holds a live instance and the flight has
-    # not landed. That deliberately includes aircraft still on the ground — `live` flips when the
-    # aircraft starts moving, roughly fifteen minutes before a departure time is published, which
-    # is the earliest signal we get that a flight is going.
+    # Flights worth asking the position feed about: any with a live instance. That covers the
+    # whole arc, and both ends of it matter.
+    #
+    # Before departure, because `live` flips when the aircraft starts *moving* — 19 seconds after
+    # RB504 began rolling and 14½ minutes before its departure time was published. After arrival,
+    # because a landing is not the end: `live` stays true through roll-out and taxi, and FR24
+    # publishes a provisional departure time it later corrects (16 of 168 legs), which position is
+    # the only independent way to adjudicate. FYC727 was stated as departing 14:47:00 while our
+    # fixes had it stationary at Damascus until 14:56:31; the corrected value, 14:57:48, sits
+    # exactly where the position said it should.
+    #
+    # This previously excluded `real_arr`, so we stopped watching at touchdown and could check
+    # departures but never arrivals. Bounded anyway — `live` goes false within about ten minutes
+    # of landing, on every arrival observed so far.
     return {
         r["fr24_id"]: r["fr24_row"]
         for r in rows
-        if r.get("fr24_id") and r.get("fr24_row") and r.get("status_live") and not r.get("real_arr")
+        if r.get("fr24_id") and r.get("fr24_row") and r.get("status_live")
     }
 
 
