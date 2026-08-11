@@ -136,6 +136,47 @@ The two pipelines stay independent. No dual-write, no coexistence logic.
    to compensate for the blob and should disappear rather than be ported.
 5. Drop `fr24_daily_cache` last.
 
+## Contract proof, 11 Aug 2026
+
+`scripts/contract_proof.py` builds the board's exact per-flight payload out of
+`fr24_staging_flight` plus `airlines` and diffs it against the live endpoint. Read-only; it
+changes nothing. **63 of 89 flights identical across all 24 contract fields**, with identity,
+both airport codes, all four scheduled fields, gates and terminals agreeing completely.
+
+The data is sufficient. What the remaining differences taught us:
+
+### The board files arrivals by arrival date, departures by departure date
+
+Three flights appeared for us and not for the board — `FYC524`, `FYC526`, `FYC728` — all
+arrivals landing after Damascus midnight. The harvester files every flight under its departure
+date; the browser path files each side by its own time, so those sit on the 12th for the board
+and the 11th for us.
+
+This is a question about the view, not about storage. A flight has one identity and one row.
+`flight_date` stays the departure date, and the board query becomes:
+
+> departures from A where local departure is D, **union** arrivals to A where local arrival is D
+
+Storage records, the query decides — the same rule as the null case, now with a second instance.
+
+### Arrivals come from two sources, and one of them is the paid API
+
+`RJ431` on 11 Aug: our row comes from ALP, the destination itself, and FR24's ALP feed had no
+arrival at all — only `Estimated 05:16*` against a 02:40 schedule. The board has it landing at
+02:06:32Z. That value came from `/api/landing-confirm`, which runs every fifteen minutes, finds
+flights whose ETA passed 30 minutes ago with no confirmed arrival, and asks the **paid API**.
+
+Two consequences. The canonical pipeline has to take that source as well, or it loses arrivals
+the board currently has. And the pattern proposed for `outcome` — free feed for bulk, paid API to
+confirm the one thing the free feed cannot — is **already in production for arrivals**. Extending
+it to `no_show` is consistent with what is there, not a new idea.
+
+### Staging is ahead of the board where it matters
+
+Five flights carry data the live board does not: `G9434`'s actual departure at 04:26:53Z against
+the board's null, `TK849`'s baggage belt, `G9434`'s registration. That is the freshness argument
+in the diff rather than in prose.
+
 ## Retention: a live table of three days, and a history table that earns its keep
 
 The canonical table holds **five days**. A nightly job compacts anything older into
