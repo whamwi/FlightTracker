@@ -42,8 +42,10 @@ Already built and proven in the staging trigger:
 
 - an actual departure or arrival is never unlearned — an event that happened does not un-happen
   because the feed stopped mentioning it;
-- a definitive status never regresses, ranked by the same table `/api/fr24-cache` uses today;
 - every field records **when it was learned**, not only what it is.
+
+There is deliberately no status rule here. `status` is not stored — see the reconciliation
+measurement below — so there is nothing to rank.
 
 ### A null means "we stopped being told", not "it is gone"
 
@@ -85,6 +87,7 @@ change — recorded so the app-side work can be planned separately:
 | `arr_terminal`, `arr_gate`, `arr_baggage` | sheet only, via a separate lookup |
 | `est_dep`, `est_arr` with `*_seen_at` | value only, no age |
 | provenance — which airport's feed saw it | absent |
+| status derived per viewpoint (origin or destination) | one string, whichever was stored |
 | per-field learned-at timestamps | absent |
 
 The interesting one is age. "Estimated 21:33, learned four minutes ago" is a different statement
@@ -106,11 +109,70 @@ The two pipelines stay independent. No dual-write, no coexistence logic.
    to compensate for the blob and should disappear rather than be ported.
 5. Drop `fr24_daily_cache` last.
 
-## Open questions
+## Retention: a live table of three days, and a history table that earns its keep
 
-- **Reconciling two observations into one canonical row.** When Damascus and Dubai disagree,
-  which wins? Proposal: the airport nearer the event — origin for departure fields, destination
-  for arrival fields — since that is where the information originates. Needs checking against a
-  day of staging data before it is fixed in code.
-- **Retention.** The canonical table grows without bound. Daily flights are small, but a
-  retention rule should exist before it is serving traffic rather than after.
+The canonical table holds **yesterday, today and tomorrow** and nothing else. A nightly job
+compacts anything older into `flight_history` and clears it on the third night.
+
+That keeps the serving table small enough that every query against it is trivial, and it gives
+history a job rather than making it an archive:
+
+- it becomes the source for `/api/stats` and the daily figures, instead of those being derived
+  from a cache that was never meant to be durable;
+- it can answer questions the live table structurally cannot — **flights that were scheduled and
+  never took off**, routes that quietly stopped, an airline's punctuality over a season.
+
+Compaction is the moment to collapse the chronological record: the live table carries every field
+and its learned-at timestamps while a flight is current, and history keeps the settled outcome
+plus whatever of the sequence is worth preserving.
+
+## Reconciliation: measured, and it is not the problem it looked like
+
+Measured 11 Aug 2026 on 28 flights seen from both a Syrian airport and the other endpoint
+(DXB, SHJ, AMM, KWI):
+
+| field | both | only dest | only Syria | differ |
+|---|---|---|---|---|
+| `status` | 28 | 0 | 0 | **27** |
+| `est_arr` | 5 | 0 | 0 | 1 |
+| `real_dep` | 27 | 0 | 0 | **0** |
+| `real_arr` | 22 | 0 | 1 | **0** |
+| `dep_gate` | 8 | 0 | 0 | 0 |
+| `arr_gate` | 5 | 0 | 0 | 0 |
+
+**The timestamps agree exactly.** Zero disagreements on actual departure across 27 flights, zero
+on actual arrival across 22. There is no reconciliation problem for the data that matters, and
+no need for a rule about which airport wins.
+
+**`status` disagrees almost every time, and none of it is disagreement:**
+
+```
+G9352   SHJ = "Landed 15:38"     SYR = "Departed 11:33"
+G9433   SHJ = "Departed 04:27"   SYR = "Landed 06:12"
+FYC728  DXB = "Departed 19:58"   SYR = "Landed 21:37"
+```
+
+Each airport reports the flight relative to **its own role, in its own local time**. G9352 left
+Damascus at 11:33 local and landed in Sharjah at 15:38 local. Both are correct; they are two
+views of one flight.
+
+### So `status` is not stored
+
+It is a rendering of the timestamps from a chosen viewpoint, not a fact about the flight. The
+canonical table stores the times; status is derived at read time for whichever end the caller
+cares about — which is what the board already does with `STATUS_KEY`.
+
+This removes `statusRank` along with it. That function exists to referee between conflicting
+status strings, and the conflict is an artefact of storing a rendering. Note the never-downgrade
+invariant still applies to the **timestamps** — an actual arrival is never unlearned — it simply
+no longer needs a status ranking to express it.
+
+### The destination harvest is not worth the requests
+
+`only dest` is zero on every field: Dubai, Sharjah, Amman and Kuwait contributed nothing the
+Syrian side did not already have. Combined with the rate limit and the page-as-time-window
+problem, destination harvesting should stay off unless a specific field is shown to need it.
+
+**Caveats.** 28 flights at one moment. Gate and terminal counts are small (4-8) and there was no
+baggage data at all, so this settles status and timestamps, not gates. Worth re-running over a
+full day before the gate fields are relied on.
