@@ -176,3 +176,145 @@ problem, destination harvesting should stay off unless a specific field is shown
 **Caveats.** 28 flights at one moment. Gate and terminal counts are small (4-8) and there was no
 baggage data at all, so this settles status and timestamps, not gates. Worth re-running over a
 full day before the gate fields are relied on.
+
+## Draft table definitions
+
+Not applied. Three questions worth checking before they are — listed after the DDL.
+
+### `flight` — canonical, live
+
+Holds yesterday, today and tomorrow. One row per flight per operating day.
+
+```sql
+create table flight (
+  -- Identity. Resolved by the worker via flight_lookup before writing, so a flight filed as
+  -- FYC781 by one source and XH781 by another lands on one row rather than two. This is the
+  -- riskiest column in the schema: see question 1.
+  flight_date     date        not null,
+  iata_number     text        not null,
+  dep_iata        text        not null,
+  arr_iata        text        not null,
+
+  callsign        text,                    -- the other identifier, always carried
+  fr24_id         text,                    -- FR24's per-leg id; null until it tracks the flight
+  airline_iata    text,
+  aircraft_type   text,
+  registration    text,
+
+  -- Times. The canonical facts; measured to agree across sources.
+  sched_dep       timestamptz not null,
+  sched_arr       timestamptz not null,
+  est_dep         timestamptz,
+  est_arr         timestamptz,
+  real_dep        timestamptz,
+  real_arr        timestamptz,
+
+  -- When we learned the value currently held, not when it happened. Only on the volatile
+  -- fields; everything else is reconstructable from flight_event.
+  est_dep_seen_at  timestamptz,
+  est_arr_seen_at  timestamptz,
+  real_dep_seen_at timestamptz,
+  real_arr_seen_at timestamptz,
+
+  -- Facts that are not timestamps and therefore cannot be derived. A cancelled flight has no
+  -- departure to record, so its cancellation has to be stored.
+  cancelled       boolean     not null default false,
+  diverted_to     text,
+
+  dep_terminal    text,
+  dep_gate        text,
+  arr_terminal    text,
+  arr_gate        text,
+  arr_baggage     text,
+
+  -- Which feeds have reported this flight. Diagnostic only: the timestamps agree, so there is
+  -- nothing to reconcile, but knowing DAM saw it and DXB did not is worth keeping.
+  sources         text[]      not null default '{}',
+
+  first_seen_at   timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+
+  primary key (flight_date, iata_number, dep_iata, arr_iata)
+);
+
+create index on flight (flight_date, dep_iata);
+create index on flight (flight_date, arr_iata);
+create index on flight (fr24_id) where fr24_id is not null;
+```
+
+**No `status` column.** It is derived at read time from the times, `cancelled` and `diverted_to`,
+for whichever end the caller is looking from.
+
+### `flight_event` — append-only
+
+```sql
+create table flight_event (
+  id            bigserial   primary key,
+  flight_date   date        not null,
+  iata_number   text        not null,
+  dep_iata      text        not null,
+  arr_iata      text        not null,
+  field         text        not null,     -- 'est_arr', 'arr_gate', 'cancelled', …
+  old_value     text,
+  new_value     text,
+  source        text        not null,     -- which feed reported the change
+  observed_at   timestamptz not null default now()
+);
+
+create index on flight_event (flight_date, iata_number, observed_at);
+create index on flight_event (field, observed_at desc);
+```
+
+Values as text: this is a log, not a working set, and one column beats six nullable typed ones.
+
+### `flight_history` — compacted
+
+```sql
+create table flight_history (
+  flight_date     date        not null,
+  iata_number     text        not null,
+  dep_iata        text        not null,
+  arr_iata        text        not null,
+  callsign        text,
+  airline_iata    text,
+  aircraft_type   text,
+  registration    text,
+  sched_dep       timestamptz not null,
+  sched_arr       timestamptz not null,
+  real_dep        timestamptz,
+  real_arr        timestamptz,
+  cancelled       boolean     not null default false,
+  diverted_to     text,
+  -- Derived once at compaction so the stats path never recomputes them.
+  dep_delay_min   int,
+  arr_delay_min   int,
+  -- Scheduled, never observed to depart. The question the live table cannot answer, because by
+  -- the time it is knowable the row has been cleared.
+  never_departed  boolean     not null default false,
+  compacted_at    timestamptz not null default now(),
+  primary key (flight_date, iata_number, dep_iata, arr_iata)
+);
+
+create index on flight_history (flight_date);
+create index on flight_history (airline_iata, flight_date);
+```
+
+Estimates and their learned-at timestamps are dropped at compaction — they are working state.
+The sequence they described survives in `flight_event` for as long as that is retained.
+
+### Three questions before this is applied
+
+1. **Identity.** The key assumes `iata_number` resolves consistently. Fly Cham is filed as
+   `FYC781` by FR24 and sold as `XH781`, and resolution happens in the worker against
+   `flight_lookup`. If that lookup is wrong or missing for a carrier, the same flight lands twice
+   under two numbers. The alternative is keying on the slot — `(flight_date, dep_iata, arr_iata,
+   sched_dep)` — which is immune to the naming problem but breaks when a schedule is amended.
+   Worth deciding deliberately rather than defaulting.
+
+2. **How much of the sequence history keeps.** Right now compaction keeps the outcome and drops
+   the estimates. If "how far did the estimate wander" turns out to matter for the ETA work, that
+   belongs in history rather than in an event log that is itself being pruned.
+
+3. **`never_departed` needs a rule.** Scheduled, no `real_dep`, and past its slot by how long?
+   An hour is probably right for these routes but should be checked against the data rather than
+   picked.
