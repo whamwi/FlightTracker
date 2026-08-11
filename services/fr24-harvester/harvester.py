@@ -272,15 +272,22 @@ def norm(entry: dict, source: str, page: int, direction: str, probe_uid: str) ->
 
 def insert_flights(rows: list[dict]) -> int:
     """
-    Plain insert. No conflict target, no merge, nothing to overwrite — a refresh that says exactly
-    what the last one said still gets its own row, because "unchanged at 05:14" is a fact about
-    the flight and cannot be reconstructed from a row that was overwritten.
+    Send every entry; the table keeps only the ones that changed.
+
+    The filter is a BEFORE INSERT trigger keyed on fr24_row, not logic here, for two reasons. It
+    cannot be forgotten by another writer, and it does not depend on this process's memory — a
+    restart would otherwise re-write every leg once, and a second harvester would double
+    everything.
+
+    Asking for the inserted ids back is what makes the skip observable: the response carries the
+    rows that survived, so the difference between sent and kept is the measurement. `select=id`
+    keeps that response a few bytes a row rather than the full payload.
     """
     if not rows:
         return 0
     res = cr.post(
-        f"{SB_URL}/rest/v1/fr24_flight_raw",
-        headers={**SB_HEADERS, "Prefer": "return=minimal"},
+        f"{SB_URL}/rest/v1/fr24_flight_raw?select=id",
+        headers={**SB_HEADERS, "Prefer": "return=representation"},
         data=json.dumps(rows),
         impersonate=IMPERSONATE,
         timeout=60,
@@ -288,16 +295,25 @@ def insert_flights(rows: list[dict]) -> int:
     if res.status_code >= 300:
         log(f"  insert failed {res.status_code}: {res.text[:200]}")
         return 0
-    return len(rows)
+    try:
+        return len(res.json())
+    except Exception:                      # noqa: BLE001 — the write succeeded either way
+        return -1
 
 
 def record_probe(probe_uid: str, endpoint: str, fetch_by: str, query: str, page: int,
-                 status: int, ms: int, rows: int, payload: dict | None) -> None:
+                 status: int, ms: int, rows: int, payload: dict | None,
+                 legs_seen: list[int] | None = None) -> None:
+    """
+    Once unchanged flights stop being written, this is the only record that they were still there.
+    Without legs_seen, "unchanged since 06:00" and "dropped out of FR24's window at 06:02" are
+    indistinguishable — the same blind spot the upsert had, arriving by a different route.
+    """
     body = {
         "probe_uid": probe_uid,
         "endpoint": endpoint, "fetch_by": fetch_by, "query": query, "page": page,
         "http_status": status, "duration_ms": ms, "rows_returned": rows,
-        "payload": payload,
+        "payload": payload, "legs_seen": legs_seen or None,
     }
     res = cr.post(
         f"{SB_URL}/rest/v1/fr24_raw_probe",
@@ -417,6 +433,7 @@ def sweep_one(code: str, day: str, page: int = 1) -> None:
                 rows.append(r)
 
     written = insert_flights(rows)
+    legs_seen = sorted({r["fr24_row"] for r in rows if r.get("fr24_row")})
 
     # Keep the raw payload when it failed, when it was empty, or once an hour as a
     # reference. Storing every sweep would be ~60MB a day for two airports.
@@ -425,9 +442,10 @@ def sweep_one(code: str, day: str, page: int = 1) -> None:
     if keep:
         _last_sample[f"{code}|{page}"] = now
     record_probe(probe_uid, "airport.json", "airport", code, page, status, ms, len(rows),
-                 sched if keep else None)
+                 sched if keep else None, legs_seen)
 
-    log(f"{code} p{page}: HTTP {status} {ms}ms  {len(rows)} rows  {written} written"
+    log(f"{code} p{page}: HTTP {status} {ms}ms  {len(rows)} seen  {written} changed"
+        + (f"  ({len(rows) - written} unchanged)" if written >= 0 else "")
         + ("  [payload kept]" if keep else ""))
 
 
