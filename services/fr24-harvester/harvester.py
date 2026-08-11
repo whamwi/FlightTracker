@@ -218,6 +218,12 @@ def norm(entry: dict, source: str, page: int, direction: str, probe_uid: str) ->
         "direction": direction,
         "flight_date": flight_date,
 
+        # The identity key. Present from the moment a flight is filed and stable across every
+        # refresh, so it is what follows a leg through its life. `id` below is a different thing
+        # despite the name — the *live instance* id, null until close to departure (0% more than
+        # 12 hours out, 90% once departed), and the join key for tracks and route-path import.
+        "fr24_row":     (ident.get("row") if isinstance(ident.get("row"), int)
+                         else int(ident["row"]) if str(ident.get("row") or "").isdigit() else None),
         "fr24_id":      ident.get("id"),
         "num":          num,
         "callsign":     ident.get("callsign"),
