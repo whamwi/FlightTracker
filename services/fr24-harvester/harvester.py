@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Server-side FR24 harvest — writes the staging tables, reads nothing, breaks nothing.
+Server-side FR24 harvest — records what FR24 says, every field, every refresh.
 
 Why this exists
 ---------------
@@ -11,8 +11,17 @@ Aleppo at 10:06:45Z and did not reach the cache until 10:17:51Z — the moment s
 /fr24 on a desktop.
 
 This does the same fetch from a server on a schedule of our choosing. It writes only
-fr24_staging_flight and fr24_staging_probe. Nothing in either app reads those tables, so this
-can run, be wrong, and be turned off without anyone noticing.
+fr24_flight_raw and fr24_raw_probe. Nothing in either app reads those tables, so this can run,
+be wrong, and be turned off without anyone noticing.
+
+Append, never merge
+-------------------
+The predecessor upserted one row per flight, so each sweep overwrote the last and only the newest
+value of every field survived. That answers "what does FR24 say now" and destroys "what did FR24
+say before" — and the sequence is the interesting part: when an estimate first moved, how many
+times it moved, whether a departure was announced before it was observed. None of it can be
+recovered later, so this writes a row per flight per refresh and interprets nothing. `flight`
+decides what is true; this only records what was said.
 
 Why one long-lived process rather than a cron
 ---------------------------------------------
@@ -45,6 +54,7 @@ import urllib.parse
 import signal
 import sys
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from curl_cffi import requests as cr
@@ -90,8 +100,9 @@ BACKOFF_SEC = 5
 # browser path rather than dropped: without it this aircraft arrives with no flight number.
 REG_TO_FLIGHT = {"YK-BAA": "FYC728"}
 
-# Anything longer is FR24 pairing the wrong legs. Same cap as the browser path.
-MAX_DURATION_MIN = 300
+# The browser path dropped anything over 300 minutes as FR24 pairing the wrong legs. That rule is
+# right but it is a judgement, so it moves downstream to `flight`. Here the improbable leg is
+# recorded like everything else — a filter at write time is a decision that cannot be revisited.
 
 # A reference payload is kept once an hour; the rest are stored only on error or on change.
 SAMPLE_EVERY_SEC = 3600
@@ -101,6 +112,15 @@ SAMPLE_EVERY_SEC = 3600
 # bytes that answer "did this run and what came back", so it is kept far longer.
 PAYLOAD_KEEP_DAYS = 7
 PROBE_KEEP_DAYS   = 90
+
+# The raw tape is the largest thing we write: measured at 8.4k rows an hour, ~202k a day. Five
+# days is the intended window, matching the one already agreed for the live table.
+#
+# It ships **off**, and must stay off until compaction into flight_history exists. Deleting raw
+# rows before anything durable has read them is not retention, it is loss on a timer — and it is
+# the exact mistake the upsert made, only slower. Turn it on by setting FR24_RAW_KEEP_DAYS once
+# there is somewhere for the data to go.
+RAW_KEEP_DAYS     = int(os.environ.get("FR24_RAW_KEEP_DAYS", "0"))
 PRUNE_EVERY_SEC   = 3600
 
 
@@ -142,18 +162,29 @@ def fetch_airport(code: str, day: str, page: int = 1) -> tuple[dict, int, int]:
     return sched, 200, ms
 
 
-def norm(entry: dict, source: str) -> dict | None:
-    """One FR24 schedule entry as a staging row, or None if unusable."""
+def norm(entry: dict, source: str, page: int, direction: str, probe_uid: str) -> dict | None:
+    """
+    One FR24 schedule entry as a raw row, or None if it carries no usable identity or schedule.
+
+    Only two rejections survive here, and both are "this is not a flight" rather than "this looks
+    wrong": no identifier at all, and no scheduled times. Everything else — an implausible
+    duration, a status that contradicts the timestamps, an airline we do not recognise — is
+    recorded as sent and judged downstream. A filter applied at write time is a decision that
+    cannot be revisited, and the whole point of this table is that it can be.
+    """
     fl = entry.get("flight")
     if not fl:
         return None
 
-    ident = fl.get("identification") or {}
-    time_ = fl.get("time") or {}
-    ap = fl.get("airport") or {}
+    ident  = fl.get("identification") or {}
+    time_  = fl.get("time") or {}
+    ap     = fl.get("airport") or {}
     origin, dest = ap.get("origin") or {}, ap.get("destination") or {}
+    airline = fl.get("airline") or {}
+    craft   = fl.get("aircraft") or {}
+    status  = fl.get("status") or {}
 
-    reg = (fl.get("aircraft") or {}).get("registration")
+    reg = craft.get("registration")
     num = (
         ((ident.get("number") or {}).get("default"))
         or ident.get("callsign")
@@ -165,73 +196,105 @@ def norm(entry: dict, source: str) -> dict | None:
 
     sched = time_.get("scheduled") or {}
     sched_dep, sched_arr = sched.get("departure"), sched.get("arrival")
-    if not sched_dep or not sched_arr:
-        return None
-    if round((sched_arr - sched_dep) / 60) > MAX_DURATION_MIN:
+    if not sched_dep and not sched_arr:
         return None
 
     est, real = time_.get("estimated") or {}, time_.get("real") or {}
+    other = time_.get("other") or {}
     o_info, d_info = origin.get("info") or {}, dest.get("info") or {}
+    o_code, d_code = origin.get("code") or {}, dest.get("code") or {}
+    al_code = airline.get("code") or {}
+    model = craft.get("model") or {}
 
-    # Filed under the local date of its own scheduled departure, matching the browser path.
-    flight_date = datetime.fromtimestamp(sched_dep, TZ).strftime("%Y-%m-%d")
+    # The one derivation allowed in a raw table, because it is the query key: FR24 files a
+    # departure under the local day it was *scheduled* to leave, never the day it actually left.
+    anchor = sched_dep or sched_arr
+    flight_date = datetime.fromtimestamp(anchor, TZ).strftime("%Y-%m-%d")
 
     return {
+        "probe_uid": probe_uid,
         "source_airport": source,
+        "page": page,
+        "direction": direction,
         "flight_date": flight_date,
-        "num": num,
-        "dep_iata": ((origin.get("code") or {}).get("iata")) or "",
-        "arr_iata": ((dest.get("code") or {}).get("iata")) or "",
-        "fr24_id": ident.get("id"),
-        "airline_iata": ((fl.get("airline") or {}).get("code") or {}).get("iata"),
-        "aircraft": ((fl.get("aircraft") or {}).get("model") or {}).get("code"),
-        "reg": reg,
-        "sched_dep": ts(sched_dep),
-        "sched_arr": ts(sched_arr),
-        "est_dep": ts(est.get("departure")),
-        "est_arr": ts(est.get("arrival")),
-        "real_dep": ts(real.get("departure")),
-        "real_arr": ts(real.get("arrival")),
+
+        "fr24_id":      ident.get("id"),
+        "num":          num,
+        "callsign":     ident.get("callsign"),
+        "airline_iata": al_code.get("iata"),
+        "airline_icao": al_code.get("icao"),
+        "airline_name": airline.get("name"),
+        "reg":          reg,
+        "hex":          (craft.get("identification") or {}).get("modes") or craft.get("hex"),
+        "aircraft_code": model.get("code"),
+        "aircraft_text": model.get("text"),
+
+        "dep_iata": o_code.get("iata"),
+        "dep_icao": o_code.get("icao"),
+        "dep_name": origin.get("name"),
+        "arr_iata": d_code.get("iata"),
+        "arr_icao": d_code.get("icao"),
+        "arr_name": dest.get("name"),
+
+        "sched_dep":   ts(sched_dep),
+        "sched_arr":   ts(sched_arr),
+        "est_dep":     ts(est.get("departure")),
+        "est_arr":     ts(est.get("arrival")),
+        "real_dep":    ts(real.get("departure")),
+        "real_arr":    ts(real.get("arrival")),
+        "eta":         ts(other.get("eta")),
+        "src_updated": ts(other.get("updated")),
+
         "dep_terminal": o_info.get("terminal"),
-        "dep_gate": o_info.get("gate"),
+        "dep_gate":     o_info.get("gate"),
         "arr_terminal": d_info.get("terminal"),
-        "arr_gate": d_info.get("gate"),
-        "arr_baggage": d_info.get("baggage"),
-        "status": (fl.get("status") or {}).get("text"),
+        "arr_gate":     d_info.get("gate"),
+        "arr_baggage":  d_info.get("baggage"),
+
+        "status_text":    status.get("text"),
+        "status_generic": ((status.get("generic") or {}).get("status") or {}).get("text"),
+        "status_type":    ((status.get("generic") or {}).get("status") or {}).get("type"),
+        "status_icon":    status.get("icon"),
+        "status_live":    status.get("live"),
+
+        # Verbatim, so a field nobody thought to extract is still there to be found.
+        "raw": fl,
     }
 
 
 # ── Supabase ─────────────────────────────────────────────────────────────────
 
-def upsert_flights(rows: list[dict]) -> int:
+def insert_flights(rows: list[dict]) -> int:
     """
-    Merge on the primary key. first_seen_at and the *_seen_at stamps are owned by the table's
-    trigger, so they are never sent from here and cannot be overwritten by a later sweep.
+    Plain insert. No conflict target, no merge, nothing to overwrite — a refresh that says exactly
+    what the last one said still gets its own row, because "unchanged at 05:14" is a fact about
+    the flight and cannot be reconstructed from a row that was overwritten.
     """
     if not rows:
         return 0
     res = cr.post(
-        f"{SB_URL}/rest/v1/fr24_staging_flight",
-        headers={**SB_HEADERS, "Prefer": "resolution=merge-duplicates,return=minimal"},
+        f"{SB_URL}/rest/v1/fr24_flight_raw",
+        headers={**SB_HEADERS, "Prefer": "return=minimal"},
         data=json.dumps(rows),
         impersonate=IMPERSONATE,
         timeout=60,
     )
     if res.status_code >= 300:
-        log(f"  upsert failed {res.status_code}: {res.text[:200]}")
+        log(f"  insert failed {res.status_code}: {res.text[:200]}")
         return 0
     return len(rows)
 
 
-def record_probe(endpoint: str, fetch_by: str, query: str, page: int, status: int,
-                 ms: int, rows: int, payload: dict | None) -> None:
+def record_probe(probe_uid: str, endpoint: str, fetch_by: str, query: str, page: int,
+                 status: int, ms: int, rows: int, payload: dict | None) -> None:
     body = {
+        "probe_uid": probe_uid,
         "endpoint": endpoint, "fetch_by": fetch_by, "query": query, "page": page,
         "http_status": status, "duration_ms": ms, "rows_returned": rows,
         "payload": payload,
     }
     res = cr.post(
-        f"{SB_URL}/rest/v1/fr24_staging_probe",
+        f"{SB_URL}/rest/v1/fr24_raw_probe",
         headers={**SB_HEADERS, "Prefer": "return=minimal"},
         data=json.dumps(body), impersonate=IMPERSONATE, timeout=60,
     )
@@ -266,27 +329,35 @@ def prune() -> None:
         return urllib.parse.quote(
             (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(), safe="")
 
-    cutoff_payload = cutoff(PAYLOAD_KEEP_DAYS)
-    cutoff_row     = cutoff(PROBE_KEEP_DAYS)
-
     try:
         r = cr.patch(
-            f"{SB_URL}/rest/v1/fr24_staging_probe"
-            f"?queried_at=lt.{cutoff_payload}&payload=not.is.null",
+            f"{SB_URL}/rest/v1/fr24_raw_probe"
+            f"?queried_at=lt.{cutoff(PAYLOAD_KEEP_DAYS)}&payload=not.is.null",
             headers={**SB_HEADERS, "Prefer": "return=representation"},
             data=json.dumps({"payload": None}), impersonate=IMPERSONATE, timeout=60,
         )
         cleared = len(r.json()) if r.status_code < 300 else -1
 
         r = cr.delete(
-            f"{SB_URL}/rest/v1/fr24_staging_probe?queried_at=lt.{cutoff_row}",
+            f"{SB_URL}/rest/v1/fr24_raw_probe?queried_at=lt.{cutoff(PROBE_KEEP_DAYS)}",
             headers={**SB_HEADERS, "Prefer": "return=representation"},
             impersonate=IMPERSONATE, timeout=60,
         )
         dropped = len(r.json()) if r.status_code < 300 else -1
 
-        if cleared or dropped:
-            log(f"prune: {cleared} payloads cleared, {dropped} rows dropped")
+        raw_dropped = 0
+        if RAW_KEEP_DAYS > 0:
+            r = cr.delete(
+                f"{SB_URL}/rest/v1/fr24_flight_raw?observed_at=lt.{cutoff(RAW_KEEP_DAYS)}",
+                headers={**SB_HEADERS, "Prefer": "count=exact,return=minimal"},
+                impersonate=IMPERSONATE, timeout=120,
+            )
+            raw_dropped = int((r.headers.get("content-range") or "/0").split("/")[-1] or 0) \
+                if r.status_code < 300 else -1
+
+        if cleared or dropped or raw_dropped:
+            log(f"prune: {cleared} payloads cleared, {dropped} probes dropped, "
+                f"{raw_dropped} raw rows dropped")
     except Exception as e:  # noqa: BLE001 — housekeeping must not end the service
         log(f"prune failed: {type(e).__name__}: {e}")
 
@@ -325,23 +396,21 @@ def sweep() -> None:
 
 
 def sweep_one(code: str, day: str, page: int = 1) -> None:
+    probe_uid = str(uuid.uuid4())
     sched, status, ms = fetch_airport(code, day, page)
-    entries = ((sched.get("departures") or {}).get("data") or []) + \
-              ((sched.get("arrivals") or {}).get("data") or [])
 
-    rows, seen = [], set()
-    for e in entries:
-        r = norm(e, code)
-        if not r:
-            continue
-        # Arrivals and departures overlap for a domestic leg; the primary key would collide.
-        key = (r["flight_date"], r["num"], r["dep_iata"], r["arr_iata"])
-        if key in seen:
-            continue
-        seen.add(key)
-        rows.append(r)
+    # Both lists, kept apart. A domestic leg appears in DAM's departures and in ALP's arrivals,
+    # and the two sides carry different detail — the departure side knows the gate, the arrival
+    # side knows the belt. The predecessor deduplicated them to protect a primary key and so
+    # threw away whichever side it saw second.
+    rows = []
+    for direction, key in (("departure", "departures"), ("arrival", "arrivals")):
+        for e in ((sched.get(key) or {}).get("data") or []):
+            r = norm(e, code, page, direction, probe_uid)
+            if r:
+                rows.append(r)
 
-    written = upsert_flights(rows)
+    written = insert_flights(rows)
 
     # Keep the raw payload when it failed, when it was empty, or once an hour as a
     # reference. Storing every sweep would be ~60MB a day for two airports.
@@ -349,7 +418,7 @@ def sweep_one(code: str, day: str, page: int = 1) -> None:
     keep = status != 200 or not rows or now - _last_sample.get(f"{code}|{page}", 0) > SAMPLE_EVERY_SEC
     if keep:
         _last_sample[f"{code}|{page}"] = now
-    record_probe("airport.json", "airport", code, page, status, ms, len(rows),
+    record_probe(probe_uid, "airport.json", "airport", code, page, status, ms, len(rows),
                  sched if keep else None)
 
     log(f"{code} p{page}: HTTP {status} {ms}ms  {len(rows)} rows  {written} written"
