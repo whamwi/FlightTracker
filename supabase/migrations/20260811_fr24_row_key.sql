@@ -3,11 +3,15 @@
 -- Measured over 11,630 rows on 11 Aug 2026, `identification.row` is the only identifier present
 -- for the whole of a flight's life:
 --
---            >12h out   3-12h   <3h   departed
---   row        100%      100%   100%    100%
---   hex/reg    100%      100%   100%    100%
---   fr24_id      0%        0%     5%     90%
---   callsign     0%        9%    18%     90%
+--              24h+   12-24h   3-12h   <3h   departed
+--   row        100%     100%    100%   100%    100%
+--   hex/reg      0%       0%     12%    48%     95%
+--   fr24_id      0%       0%      0%     4%     93%
+--   callsign     0%       0%      6%    22%     93%
+--
+-- (Read those with nullif(col,''). FR24 sends an empty string, not null, for what it does not
+-- know, so count(hex) reports 100% and means nothing. An earlier version of this comment carried
+-- exactly that mistake and claimed hex was present from the moment of filing.)
 --
 -- `fr24_id` — which the harvester was already extracting — is the *live instance* id and does not
 -- exist until the flight is close to moving. It is the right key for joining to tracks and to the
