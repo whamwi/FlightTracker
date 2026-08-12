@@ -68,6 +68,7 @@ app.add_middleware(
 
 _cache: dict[str, tuple[float, Any]] = {}
 _airports: dict[str, tuple[float, float]] = {}
+_airlines: dict[str, dict] = {}
 
 
 def now_iso() -> str:
@@ -86,6 +87,14 @@ async def airports(client: httpx.AsyncClient) -> dict[str, tuple[float, float]]:
         for a in await sb(client, "airports?select=iata,lat,lon&lat=not.is.null"):
             _airports[a["iata"]] = (a["lat"], a["lon"])
     return _airports
+
+
+async def airlines(client: httpx.AsyncClient) -> dict[str, dict]:
+    """The curated allow-list, by IATA code. A carrier absent from it is not a flight we show."""
+    if not _airlines:
+        for a in await sb(client, "airlines?select=iata,icao,name_en,country_flag"):
+            _airlines[a["iata"]] = a
+    return _airlines
 
 
 def iso(v: str | None) -> datetime | None:
@@ -223,6 +232,110 @@ def dep_confirmed(f: dict, pos: dict | None) -> bool:
     return bool(pos and not pos.get("on_ground"))
 
 
+
+# ── The board contract ───────────────────────────────────────────────────────
+#
+# The 24 fields every client already reads, reproduced exactly rather than approximated. This is
+# the shape scripts/contract_proof.py validated at 90 of 90 against production — the four
+# apparent misses were a day-bucketing convention, not data.
+
+STATUS_RANK = {"Scheduled": 1, "Estimated": 2, "Departed": 5, "Arrived": 8, "Cancelled": 9}
+
+
+def zulu(v: str | None) -> str | None:
+    """The board's timestamp form: milliseconds and a Z, not an offset."""
+    d = iso(v)
+    return d.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z") if d else None
+
+
+def derive_status(f: dict) -> str:
+    """
+    Status is a rendering, not a stored fact.
+
+    Measured across 28 flights seen from both ends: the timestamps agreed and the status strings
+    disagreed 27 times, because each airport describes the flight from its own role. FR24's own
+    text is worse still — 74 arrived flights were still reading "Departed" and 28 legs carried no
+    status at all — which is why this is derived from the times instead.
+    """
+    if (f.get("outcome") or "") == "cancelled":
+        return "Cancelled"
+    if f.get("real_arr"):
+        return "Arrived"
+    dep, est_arr = iso(f.get("real_dep")), iso(f.get("est_arr"))
+    if dep and est_arr:
+        eff = (est_arr - dep).total_seconds() / 60
+        # Down once actual departure plus effective block time is more than fifteen minutes past.
+        if eff > 30 and dep + timedelta(minutes=eff) < datetime.now(timezone.utc) - timedelta(minutes=15):
+            return "Arrived"
+    if dep:
+        return "Departed"
+    # "Expected", not "Estimated" — production's vocabulary is Arrived / Departed / Expected /
+    # Scheduled, and every client's dictionary keys off those four words.
+    if f.get("est_dep") or f.get("est_arr"):
+        return "Expected"
+    return "Scheduled"
+
+
+def effective_duration(f: dict) -> int:
+    """Actual departure to revised arrival when both are known — the schedule is padded."""
+    dep, est_arr = iso(f.get("real_dep")), iso(f.get("est_arr"))
+    if dep and est_arr:
+        computed = round((est_arr - dep).total_seconds() / 60)
+        if computed > 30:
+            return computed
+    sd, sa = iso(f["sched_dep"]), iso(f["sched_arr"])
+    return round((sa - sd).total_seconds() / 60)
+
+
+def terminal(v: str | None) -> str | None:
+    """FR24 sometimes prefixes a terminal with T; clients render the bare number."""
+    v = (v or "").strip()
+    if not v:
+        return None
+    return v[1:] if len(v) > 1 and v[0].upper() == "T" and v[1:].isalnum() else v
+
+
+def to_contract(f: dict, al: dict | None, pos: dict | None) -> dict:
+    sd, sa = iso(f["sched_dep"]), iso(f["sched_arr"])
+    dep_local, arr_local = sd.astimezone(TZ).date(), sa.astimezone(TZ).date()
+    return {
+        # Both identifiers, always. FR24 files some carriers under one form and some the other.
+        "iata_number":   f["iata_number"],
+        "callsign":      f.get("callsign"),
+        "airline_name":  (al or {}).get("name_en"),
+        "airline_iata":  f.get("airline_iata") or (al or {}).get("iata"),
+        "country_flag":  (al or {}).get("country_flag"),
+        "dep_iata":      f["dep_iata"],
+        "arr_iata":      f["arr_iata"],
+        "dep_time_utc":  sd.astimezone(timezone.utc).strftime("%H:%M"),
+        "arr_time_utc":  sa.astimezone(timezone.utc).strftime("%H:%M"),
+        "sched_dep_unix": int(sd.timestamp()),
+        "duration_min":  effective_duration(f),
+        "status":        derive_status(f),
+        "actual_dep_utc":  zulu(f.get("real_dep")),
+        "actual_arr_utc":  zulu(f.get("real_arr")),
+        "revised_dep_utc": zulu(f.get("est_dep")),
+        "revised_arr_utc": zulu(f.get("est_arr")),
+        "aircraft_type": f.get("aircraft_type"),
+        "aircraft_reg":  f.get("registration") or "",
+        "dep_terminal":  terminal(f.get("dep_terminal")),
+        "dep_gate":      f.get("dep_gate"),
+        "arr_terminal":  terminal(f.get("arr_terminal")),
+        "arr_gate":      f.get("arr_gate"),
+        # Suppressed until the flight is actually down. FR24 republishes belts from earlier
+        # instances of the same number: FZ1114 carried 3, then 7, then 1 across a day, on a leg
+        # that had not yet departed. A belt shown before arrival is not early information, it is
+        # the wrong carousel.
+        "arr_baggage":   f.get("arr_baggage") if f.get("real_arr") else None,
+        # Derived, never carried: a flight due today that lands after midnight belongs at the end
+        # of today rather than the start.
+        "arr_next_day":  arr_local > dep_local,
+        # The mirror, for the arrivals view. One flight, two board appearances.
+        "dep_prev_day":  dep_local < arr_local,
+        "dep_confirmed": dep_confirmed(f, pos),
+    }
+
+
 # ── Documents ────────────────────────────────────────────────────────────────
 
 async def latest_positions(client: httpx.AsyncClient) -> dict[str, dict]:
@@ -286,24 +399,43 @@ async def build_live() -> dict:
 
 
 async def build_board(date: str) -> dict:
+    """
+    A day's flights in the shape every client already reads.
+
+    Selected on local departure day OR local arrival day, which is the two-board model: a flight
+    leaving 22:00 and landing 00:25 belongs on today's departures board and tomorrow's arrivals
+    board. One row, two appearances, each annotated so the reader knows which end sits on another
+    day. Affects about 2.4% of flights.
+    """
     async with httpx.AsyncClient() as client:
-        flights = await sb(client, f"flight?select=*&flight_date=eq.{date}&order=sched_dep.asc")
+        # A day either side, then filtered on local dates — cheaper than a computed-column query
+        # and it keeps the timezone rule in one place rather than in SQL as well.
+        rows = await sb(
+            client,
+            f"flight?select=*&flight_date=gte.{date}&flight_date=lte.{date}"
+            f"&order=sched_dep.asc",
+        )
+        span = await sb(
+            client,
+            f"flight?select=*&flight_date=eq.{(datetime.strptime(date, '%Y-%m-%d') - timedelta(days=1)).strftime('%Y-%m-%d')}"
+            f"&order=sched_dep.asc",
+        )
+        als = await airlines(client)
         pos_by_id = await latest_positions(client)
 
+    want = datetime.strptime(date, "%Y-%m-%d").date()
     out = []
-    for f in flights:
-        pos = pos_by_id.get(f.get("fr24_id"))
-        dep_local = iso(f["sched_dep"]).astimezone(TZ).date()
-        arr_local = iso(f["sched_arr"]).astimezone(TZ).date()
-        out.append({
-            **f,
-            # The mirror of the existing arr_next_day, completing the two-board model: one flight
-            # row, two appearances. A departure at 22:00 arriving 00:25 belongs on today's
-            # departures board and tomorrow's arrivals board.
-            "arr_next_day": arr_local > dep_local,
-            "dep_prev_day": dep_local < arr_local,
-            "dep_confirmed": dep_confirmed(f, pos),
-        })
+    for f in [*rows, *span]:
+        sd, sa = iso(f["sched_dep"]), iso(f["sched_arr"])
+        if not sd or not sa:
+            continue
+        dep_local, arr_local = sd.astimezone(TZ).date(), sa.astimezone(TZ).date()
+        if dep_local != want and arr_local != want:
+            continue
+        al = als.get(f.get("airline_iata") or "")
+        out.append(to_contract(f, al, pos_by_id.get(f.get("fr24_id"))))
+
+    out.sort(key=lambda x: x["sched_dep_unix"])
     return {"as_of": now_iso(), "date": date, "flights": out}
 
 
