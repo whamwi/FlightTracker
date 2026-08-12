@@ -363,19 +363,84 @@ async def latest_positions(client: httpx.AsyncClient) -> dict[str, dict]:
     return out
 
 
+async def adsb_fixes(client: httpx.AsyncClient) -> dict[str, dict]:
+    """
+    Our own ADS-B, keyed by callsign.
+
+    Read straight from aircraft_last_seen rather than through /api/airspace, which is the point
+    of this: that endpoint decorates the same positions with flight state joined from
+    fr24_daily_cache, and the app inherited the join. XH728 spent an entire flight undrawn
+    because today's cache row carried yesterday's arrival time — 66 fixes recorded, including
+    the taxi and the rotation, and not one of them reached the map.
+
+    Positions here, state from `flight`, and the two never mix.
+    """
+    cutoff = quote(
+        (datetime.now(timezone.utc) - timedelta(seconds=FIX_STALE_SEC)).isoformat(), safe="")
+    rows = await sb(
+        client,
+        "aircraft_last_seen?select=hex,callsign,lat,lon,alt_baro,gs,track,seen_at"
+        f"&seen_at=gte.{cutoff}&lat=not.is.null&callsign=not.is.null",
+    )
+    out: dict[str, dict] = {}
+    for r in rows:
+        cs = (r.get("callsign") or "").strip()
+        if cs:
+            out[cs] = r
+    return out
+
+
 async def build_live() -> dict:
     async with httpx.AsyncClient() as client:
         aps = await airports(client)
         pos_by_id = await latest_positions(client)
-        if not pos_by_id:
-            return {"as_of": now_iso(), "flights": []}
+        adsb = await adsb_fixes(client)
 
-        ids = ",".join(f'"{i}"' for i in pos_by_id)
-        flights = await sb(client, f"flight?select=*&fr24_id=in.({ids})")
+        # Everything with a position from either source. A flight our receivers can see but FR24
+        # has not filed a live instance for still belongs here.
+        wanted = set(pos_by_id)
+        flights: list[dict] = []
+        if wanted:
+            ids = ",".join(f'"{i}"' for i in wanted)
+            flights = await sb(client, f"flight?select=*&fr24_id=in.({ids})")
+        if adsb:
+            known = {f.get("callsign") for f in flights}
+            missing = [c for c in adsb if c not in known]
+            if missing:
+                cs_in = ",".join(f'"{c}"' for c in missing)
+                today = datetime.now(TZ).strftime("%Y-%m-%d")
+                flights += await sb(
+                    client,
+                    f"flight?select=*&callsign=in.({cs_in})&real_dep=not.is.null&real_arr=is.null"
+                    f"&flight_date=gte.{(datetime.strptime(today,'%Y-%m-%d') - timedelta(days=1)).strftime('%Y-%m-%d')}",
+                )
+        if not flights:
+            return {"as_of": now_iso(), "flights": []}
 
     out = []
     for f in flights:
-        pos = pos_by_id.get(f.get("fr24_id"))
+        """
+        Our own reception wins where both have the aircraft.
+
+        Direct ADS-B against a network aggregate up to a minute old — and mixing two sources for
+        one aircraft makes it jitter between them. The rule used to live in the app; it belongs
+        here, so every surface inherits one answer instead of each implementing it.
+        """
+        a = adsb.get(f.get("callsign") or "")
+        pos = None
+        if a:
+            pos = {
+                "lat": a["lat"], "lon": a["lon"],
+                "altitude_ft": a.get("alt_baro"),
+                "ground_speed_kts": round(a["gs"]) if a.get("gs") is not None else None,
+                "track_deg": round(a["track"]) if a.get("track") is not None else None,
+                "vertical_speed_fpm": None,
+                "on_ground": (a.get("alt_baro") or 0) <= 0,
+                "fix_at": a.get("seen_at"),
+                "source": "adsb",
+            }
+        else:
+            pos = pos_by_id.get(f.get("fr24_id"))
         progress, p_basis = derive_progress(f, pos, aps)
         eta, e_basis = derive_eta(f)
         delay, d_basis = derive_delay(f)
@@ -401,6 +466,13 @@ async def build_live() -> dict:
                 "fix_at": pos.get("fix_at"),
                 "source": pos.get("source"),
             } if pos else None,
+            # Both actuals travel with the live document now, so a consumer never needs a second
+            # source to know whether the flight is still flying.
+            "actual_dep_utc": zulu(f.get("real_dep")),
+            "actual_arr_utc": zulu(f.get("real_arr")),
+            "dep_iata": f.get("dep_iata"),
+            "arr_iata": f.get("arr_iata"),
+            "duration_min": effective_duration(f),
         })
     return {"as_of": now_iso(), "flights": out}
 
