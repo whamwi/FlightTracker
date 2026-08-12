@@ -449,24 +449,45 @@ def sweep() -> None:
     """
     day = datetime.now(TZ).strftime("%Y-%m-%d")
 
-    live: dict[str, int] = {}
+    seen: dict[str, tuple[int, str | None, bool, bool]] = {}
     first = True
     for code in AIRPORTS:
         for page in PAGES:
             if not first:
                 time.sleep(REQUEST_DELAY)
             first = False
-            live.update(sweep_one(code, day, page))
+            seen.update(sweep_one(code, day, page))
 
     # The live set comes from the rows we just fetched rather than a second read of the database.
     # It is the same answer and one fewer round trip, and it cannot drift out of step with the
     # sweep that produced it.
+    live = {fid: row for fid, (row, _cs, is_live, _arr) in seen.items() if is_live}
     if live:
         time.sleep(REQUEST_DELAY)
     collect_positions(live)
 
+    # Our own reception, into the same table. Not gated on `live`: the receiver sees an aircraft
+    # whether or not FR24 has decided to track it, and that gap is the whole reason we have one.
+    #
+    # A callsign is not unique across a sweep. SYR444 operates daily, so page -1 carries
+    # yesterday's arrived instance and page 1 today's airborne one, under different fr24_ids —
+    # and the first attempt at this filed our fix against the wrong one, which would have drawn
+    # a landed flight moving over Turkey. Rank instead of overwrite: airborne beats not-yet-live
+    # beats arrived, so a repeated callsign resolves to the instance actually in the air.
+    by_callsign: dict[str, tuple[str, int]] = {}
+    rank: dict[str, int] = {}
+    for fid, (row, cs, is_live, arrived) in seen.items():
+        if not cs:
+            continue
+        r = 2 if (is_live and not arrived) else (0 if arrived else 1)
+        if r > rank.get(cs, -1):
+            rank[cs], by_callsign[cs] = r, (fid, row)
+    n = collect_adsb(by_callsign)
+    if n:
+        log(f"  adsb: {n} fixes from our own receivers")
 
-def sweep_one(code: str, day: str, page: int = 1) -> dict[str, int]:
+
+def sweep_one(code: str, day: str, page: int = 1) -> dict[str, tuple[int, str | None, bool, bool]]:
     probe_uid = str(uuid.uuid4())
     sched, status, ms = fetch_airport(code, day, page)
 
@@ -511,10 +532,15 @@ def sweep_one(code: str, day: str, page: int = 1) -> dict[str, int]:
     # This previously excluded `real_arr`, so we stopped watching at touchdown and could check
     # departures but never arrivals. Bounded anyway — `live` goes false within about ten minutes
     # of landing, on every arrival observed so far.
+    # Returns identity rather than the live subset alone: fr24_id -> (row, callsign, live, arrived).
+    # The feed wants only the live ones, but our own ADS-B has no fr24_id of its own and reaches
+    # one through the callsign — including for a flight FR24 never marks live, which is exactly
+    # the case that left FYC728 off both surfaces on 12 Aug.
     return {
-        r["fr24_id"]: r["fr24_row"]
+        r["fr24_id"]: (r["fr24_row"], (r.get("callsign") or "").strip() or None,
+                       bool(r.get("status_live")), r.get("real_arr") is not None)
         for r in rows
-        if r.get("fr24_id") and r.get("fr24_row") and r.get("status_live")
+        if r.get("fr24_id") and r.get("fr24_row")
     }
 
 
@@ -540,6 +566,68 @@ def fetch_feed() -> tuple[dict, int]:
             log(f"  feed attempt {attempt + 1} failed: {type(e).__name__}: {e}")
             time.sleep(2)
     return {}, FEED_RETRIES
+
+
+def collect_adsb(live_by_callsign: dict[str, tuple[str, int]]) -> int:
+    """
+    Our own ADS-B, written into the same table as FR24's feed.
+
+    One canonical position store, the same shape as fr24_flight_raw -> flight: sources write in,
+    everything reads out. Joining the two at serve time — which is what the API did briefly —
+    rebuilds the problem in a new place, because a reader then has to know which table to trust.
+
+    Keyed by the same fr24_id as the feed rows, resolved through the callsign the sweep just
+    returned, so both sources describe the same flight rather than two rows nobody can join.
+    """
+    if not live_by_callsign:
+        return 0
+    cutoff = urllib.parse.quote(
+        (datetime.now(timezone.utc) - timedelta(seconds=300)).isoformat(), safe="")
+    try:
+        res = cr.get(
+            f"{SB_URL}/rest/v1/aircraft_last_seen"
+            "?select=hex,callsign,lat,lon,alt_baro,gs,track,seen_at"
+            f"&seen_at=gte.{cutoff}&lat=not.is.null&callsign=not.is.null",
+            headers=SB_HEADERS, impersonate=IMPERSONATE, timeout=60,
+        )
+        if res.status_code >= 300:
+            return 0
+        rows = []
+        for a in res.json():
+            cs = (a.get("callsign") or "").strip()
+            hit = live_by_callsign.get(cs)
+            if not hit:
+                continue                       # not one of ours; the sweep decides what is
+            fid, frow = hit
+            alt = a.get("alt_baro")
+            rows.append({
+                "fr24_id": fid, "fr24_row": frow,
+                "hex": (a.get("hex") or "").upper() or None, "callsign": cs,
+                "lat": a["lat"], "lon": a["lon"],
+                "altitude_ft": alt,
+                "ground_speed_kts": round(a["gs"]) if a.get("gs") is not None else None,
+                "track_deg": round(a["track"]) if a.get("track") is not None else None,
+                "vertical_speed_fpm": None,
+                # Only when altitude actually says so. A null alt_baro is a transponder that did
+                # not report one — half the ground vehicles at DAM look like that — and reading
+                # it as zero would land an airborne aircraft on the map.
+                "on_ground": (alt <= 0) if alt is not None else None,
+                "fix_at": a.get("seen_at"),
+                # Named so a reader can prefer it: direct reception beats a network aggregate.
+                "source": "adsb",
+                "raw": a,
+            })
+        if not rows:
+            return 0
+        r = cr.post(
+            f"{SB_URL}/rest/v1/fr24_live_position?select=id",
+            headers={**SB_HEADERS, "Prefer": "resolution=ignore-duplicates,return=representation"},
+            data=json.dumps(rows), impersonate=IMPERSONATE, timeout=60,
+        )
+        return len(r.json()) if r.status_code < 300 else 0
+    except Exception as e:                     # noqa: BLE001 — positions must not end the sweep
+        log(f"  adsb ingest failed: {type(e).__name__}: {e}")
+        return 0
 
 
 def collect_positions(live: dict[str, int]) -> None:

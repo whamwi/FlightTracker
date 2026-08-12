@@ -346,7 +346,14 @@ def to_contract(f: dict, al: dict | None, pos: dict | None, board_day) -> dict:
 # ── Documents ────────────────────────────────────────────────────────────────
 
 async def latest_positions(client: httpx.AsyncClient) -> dict[str, dict]:
-    """Newest fix per flight, discarding anything too old to describe the present."""
+    """
+    Newest fix per flight, discarding anything too old to describe the present.
+
+    One table, both sources. Our own ADS-B is written into `fr24_live_position` by the harvester
+    with source='adsb', beside FR24's feed rows, keyed by the same fr24_id — so this reads one
+    place and nothing downstream has to know a second one exists. Joining two position tables at
+    serve time, which this did briefly on 12 Aug, only moves the disagreement into the reader.
+    """
     # Percent-encoded: an ISO timestamp ends in "+00:00" and a bare + in a query string is a
     # space. PostgREST answered 400 on "2026-08-10T18:19:48 00:00" until the harvester quoted it.
     cutoff = quote(
@@ -357,36 +364,14 @@ async def latest_positions(client: httpx.AsyncClient) -> dict[str, dict]:
         "track_deg,vertical_speed_fpm,on_ground,fix_at,source"
         f"&fix_at=gte.{cutoff}&order=fix_at.desc",
     )
+    # Direct reception beats a network aggregate up to a minute old, so source decides before
+    # recency does — otherwise a flight both sources can see jitters between them as first one
+    # then the other happens to hold the newest row.
     out: dict[str, dict] = {}
-    for r in rows:
-        out.setdefault(r["fr24_id"], r)      # ordered desc, so first wins
-    return out
-
-
-async def adsb_fixes(client: httpx.AsyncClient) -> dict[str, dict]:
-    """
-    Our own ADS-B, keyed by callsign.
-
-    Read straight from aircraft_last_seen rather than through /api/airspace, which is the point
-    of this: that endpoint decorates the same positions with flight state joined from
-    fr24_daily_cache, and the app inherited the join. XH728 spent an entire flight undrawn
-    because today's cache row carried yesterday's arrival time — 66 fixes recorded, including
-    the taxi and the rotation, and not one of them reached the map.
-
-    Positions here, state from `flight`, and the two never mix.
-    """
-    cutoff = quote(
-        (datetime.now(timezone.utc) - timedelta(seconds=FIX_STALE_SEC)).isoformat(), safe="")
-    rows = await sb(
-        client,
-        "aircraft_last_seen?select=hex,callsign,lat,lon,alt_baro,gs,track,seen_at"
-        f"&seen_at=gte.{cutoff}&lat=not.is.null&callsign=not.is.null",
-    )
-    out: dict[str, dict] = {}
-    for r in rows:
-        cs = (r.get("callsign") or "").strip()
-        if cs:
-            out[cs] = r
+    for r in rows:                            # ordered desc, so first of a kind is the newest
+        cur = out.get(r["fr24_id"])
+        if cur is None or (cur.get("source") != "adsb" and r.get("source") == "adsb"):
+            out[r["fr24_id"]] = r
     return out
 
 
@@ -394,53 +379,20 @@ async def build_live() -> dict:
     async with httpx.AsyncClient() as client:
         aps = await airports(client)
         pos_by_id = await latest_positions(client)
-        adsb = await adsb_fixes(client)
 
-        # Everything with a position from either source. A flight our receivers can see but FR24
-        # has not filed a live instance for still belongs here.
-        wanted = set(pos_by_id)
+        # Everything with a fresh fix, whichever source produced it. A flight our own receivers
+        # can see but FR24 has filed no live instance for is already here: the harvester wrote it
+        # under the same fr24_id.
         flights: list[dict] = []
-        if wanted:
-            ids = ",".join(f'"{i}"' for i in wanted)
+        if pos_by_id:
+            ids = ",".join(f'"{i}"' for i in pos_by_id)
             flights = await sb(client, f"flight?select=*&fr24_id=in.({ids})")
-        if adsb:
-            known = {f.get("callsign") for f in flights}
-            missing = [c for c in adsb if c not in known]
-            if missing:
-                cs_in = ",".join(f'"{c}"' for c in missing)
-                today = datetime.now(TZ).strftime("%Y-%m-%d")
-                flights += await sb(
-                    client,
-                    f"flight?select=*&callsign=in.({cs_in})&real_dep=not.is.null&real_arr=is.null"
-                    f"&flight_date=gte.{(datetime.strptime(today,'%Y-%m-%d') - timedelta(days=1)).strftime('%Y-%m-%d')}",
-                )
         if not flights:
             return {"as_of": now_iso(), "flights": []}
 
     out = []
     for f in flights:
-        """
-        Our own reception wins where both have the aircraft.
-
-        Direct ADS-B against a network aggregate up to a minute old — and mixing two sources for
-        one aircraft makes it jitter between them. The rule used to live in the app; it belongs
-        here, so every surface inherits one answer instead of each implementing it.
-        """
-        a = adsb.get(f.get("callsign") or "")
-        pos = None
-        if a:
-            pos = {
-                "lat": a["lat"], "lon": a["lon"],
-                "altitude_ft": a.get("alt_baro"),
-                "ground_speed_kts": round(a["gs"]) if a.get("gs") is not None else None,
-                "track_deg": round(a["track"]) if a.get("track") is not None else None,
-                "vertical_speed_fpm": None,
-                "on_ground": (a.get("alt_baro") or 0) <= 0,
-                "fix_at": a.get("seen_at"),
-                "source": "adsb",
-            }
-        else:
-            pos = pos_by_id.get(f.get("fr24_id"))
+        pos = pos_by_id.get(f.get("fr24_id"))
         progress, p_basis = derive_progress(f, pos, aps)
         eta, e_basis = derive_eta(f)
         delay, d_basis = derive_delay(f)
