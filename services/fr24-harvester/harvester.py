@@ -107,19 +107,25 @@ REG_TO_FLIGHT = {"YK-BAA": "FYC728"}
 # A reference payload is kept once an hour; the rest are stored only on error or on change.
 SAMPLE_EVERY_SEC = 3600
 
-# Retention. The payload is bulk — 23KB a row — and its value is short-lived: it exists to be
-# read while something is being validated, not kept. The metadata is the opposite, a few dozen
-# bytes that answer "did this run and what came back", so it is kept far longer.
-PAYLOAD_KEEP_DAYS = 7
-PROBE_KEEP_DAYS   = 90
+# Retention, set 12 Aug. Everything transient is kept two days; the durable record is `flight`,
+# which holds one final row per flight, is maintained by trigger, and is never pruned. Verified
+# before enabling this: 364 flight rows against 364 raw legs passing the airline filter, so
+# nothing that qualifies is lost when the tape ages out.
+PAYLOAD_KEEP_DAYS = 2
+PROBE_KEEP_DAYS   = 2
+# Positions are the largest transient at ~4.4 MB/day and have no long-term consumer: playback
+# returns a complete 4-second track per flight on demand, whenever asked, so keeping 60-second
+# samples indefinitely would be storing a worse copy of something retrievable.
+POSITION_KEEP_DAYS = int(os.environ.get("FR24_POSITION_KEEP_DAYS", "2"))
 
-# The raw tape is the largest thing we write: measured at 8.4k rows an hour, ~202k a day. Five
-# days is the intended window, matching the one already agreed for the live table.
+# The raw tape, ~14 MB a day at the 60-second cadence. Still off by default, but the reason has
+# changed: the durable record now exists — `flight` holds one final row per flight, maintained by
+# trigger, covering every leg that passes the airline filter (364 of 364, verified 12 Aug).
 #
-# It ships **off**, and must stay off until compaction into flight_history exists. Deleting raw
-# rows before anything durable has read them is not retention, it is loss on a timer — and it is
-# the exact mistake the upsert made, only slower. Turn it on by setting FR24_RAW_KEEP_DAYS once
-# there is somewhere for the data to go.
+# What pruning raw costs is not the final state but the *replay*: touching each row in
+# observed_at order rebuilds `flight` under a changed rule, which is how the day-early scheduled
+# arrivals were repaired retroactively and how the merge rules were validated. That window is the
+# only thing to weigh. Set FR24_RAW_KEEP_DAYS to enable.
 RAW_KEEP_DAYS     = int(os.environ.get("FR24_RAW_KEEP_DAYS", "0"))
 PRUNE_EVERY_SEC   = 3600
 
@@ -392,6 +398,16 @@ def prune() -> None:
         )
         dropped = len(r.json()) if r.status_code < 300 else -1
 
+        pos_dropped = 0
+        if POSITION_KEEP_DAYS > 0:
+            r = cr.delete(
+                f"{SB_URL}/rest/v1/fr24_live_position?observed_at=lt.{cutoff(POSITION_KEEP_DAYS)}",
+                headers={**SB_HEADERS, "Prefer": "count=exact,return=minimal"},
+                impersonate=IMPERSONATE, timeout=120,
+            )
+            pos_dropped = int((r.headers.get("content-range") or "/0").split("/")[-1] or 0) \
+                if r.status_code < 300 else -1
+
         raw_dropped = 0
         if RAW_KEEP_DAYS > 0:
             r = cr.delete(
@@ -402,9 +418,9 @@ def prune() -> None:
             raw_dropped = int((r.headers.get("content-range") or "/0").split("/")[-1] or 0) \
                 if r.status_code < 300 else -1
 
-        if cleared or dropped or raw_dropped:
+        if cleared or dropped or raw_dropped or pos_dropped:
             log(f"prune: {cleared} payloads cleared, {dropped} probes dropped, "
-                f"{raw_dropped} raw rows dropped")
+                f"{pos_dropped} positions dropped, {raw_dropped} raw rows dropped")
     except Exception as e:  # noqa: BLE001 — housekeeping must not end the service
         log(f"prune failed: {type(e).__name__}: {e}")
 
