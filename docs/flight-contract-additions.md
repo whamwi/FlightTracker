@@ -216,10 +216,26 @@ entry served to everyone, with nothing per-user about it, so the O(users) fan-ou
 upstream does not reappear here. The cost this was guarding against is real in principle and
 absent at Syrian traffic levels.
 
-## 7. Open questions
+### Keying
 
-- Whether the live document should be keyed by `iata_number` or `fr24_id`. The latter is what
-  the position feed uses and needs no matching; the former is what every client already holds.
+**Both documents are keyed by `iata_number`, with `fr24_id` carried alongside in the live
+document.**
+
+`iata_number` is what every client already holds and what the schedule document uses, so the two
+join on the client with no lookup. `fr24_id` rides along because it is what the position feed is
+keyed by and what `flight-playback.json` addresses — the map can use it for its own matching
+without any client needing to understand it.
+
+This is also the join that removes a whole class of failure. FYC728 on 10 Aug produced an ADS-B
+fix with a **null callsign** that could not be attached to any flight, so the map fell back to
+projecting along the stored route and drew the aircraft over Jordan while the real position was
+110 km east of Damascus. Keying on identifiers the server resolves — rather than matching on a
+callsign the feed may omit — makes that impossible rather than unlikely.
+
+Note `iata_number` is the *resolved* form. FR24 files Fly Cham as `FYC491`; the contract carries
+`XH491` with `FYC491` in `callsign`, because `flight` resolves both forms through the `airlines`
+table. The current cache stores only FR24's raw `num`, so today the client receives one form and
+not the other.
 
 ---
 
