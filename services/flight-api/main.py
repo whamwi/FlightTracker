@@ -436,7 +436,13 @@ async def build_board(date: str) -> dict:
         sd, sa = iso(f["sched_dep"]), iso(f["sched_arr"])
         if not sd or not sa:
             continue
-        dep_local, arr_local = sd.astimezone(TZ).date(), sa.astimezone(TZ).date()
+        # Selected on the days the flight ACTUALLY used, not the ones it was filed for — the same
+        # basis the +1/-1 flags use, or the two contradict each other. XH524 was filed
+        # 22:30 -> 00:10 and landed at 23:59: it belongs to the 11th alone, and picking it for
+        # the 12th put a completed flight on the wrong day's arrivals.
+        eff_dep = iso(f.get("real_dep")) or sd
+        eff_arr = iso(f.get("real_arr")) or iso(f.get("est_arr")) or sa
+        dep_local, arr_local = eff_dep.astimezone(TZ).date(), eff_arr.astimezone(TZ).date()
         if dep_local != want and arr_local != want:
             continue
         al = als.get(f.get("airline_iata") or "")
