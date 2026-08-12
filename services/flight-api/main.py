@@ -295,9 +295,13 @@ def terminal(v: str | None) -> str | None:
     return v[1:] if len(v) > 1 and v[0].upper() == "T" and v[1:].isalnum() else v
 
 
-def to_contract(f: dict, al: dict | None, pos: dict | None) -> dict:
+def to_contract(f: dict, al: dict | None, pos: dict | None, board_day) -> dict:
     sd, sa = iso(f["sched_dep"]), iso(f["sched_arr"])
-    dep_local, arr_local = sd.astimezone(TZ).date(), sa.astimezone(TZ).date()
+    # Effective, not scheduled. XH524 was filed 22:30 -> 00:10 and actually landed 23:59, same
+    # day: a +1 taken from the schedule contradicts the arrival time printed beside it.
+    eff_dep = iso(f.get("real_dep")) or sd
+    eff_arr = iso(f.get("real_arr")) or iso(f.get("est_arr")) or sa
+    dep_local, arr_local = eff_dep.astimezone(TZ).date(), eff_arr.astimezone(TZ).date()
     return {
         # Both identifiers, always. FR24 files some carriers under one form and some the other.
         "iata_number":   f["iata_number"],
@@ -327,11 +331,14 @@ def to_contract(f: dict, al: dict | None, pos: dict | None) -> dict:
         # that had not yet departed. A belt shown before arrival is not early information, it is
         # the wrong carousel.
         "arr_baggage":   f.get("arr_baggage") if f.get("real_arr") else None,
-        # Derived, never carried: a flight due today that lands after midnight belongs at the end
-        # of today rather than the start.
-        "arr_next_day":  arr_local > dep_local,
-        # The mirror, for the arrivals view. One flight, two board appearances.
-        "dep_prev_day":  dep_local < arr_local,
+        # Both relative to the board being read, not to each other.
+        #
+        # They were `arr_local > dep_local` and `dep_local < arr_local` — the same condition, so
+        # every midnight-crossing flight carried both flags on every board. On the 11th's board a
+        # flight landing at 00:56 on the 12th is arr_next_day; on the 12th's board the same flight
+        # is dep_prev_day. Never both.
+        "arr_next_day":  arr_local > board_day,
+        "dep_prev_day":  dep_local < board_day,
         "dep_confirmed": dep_confirmed(f, pos),
     }
 
@@ -433,7 +440,7 @@ async def build_board(date: str) -> dict:
         if dep_local != want and arr_local != want:
             continue
         al = als.get(f.get("airline_iata") or "")
-        out.append(to_contract(f, al, pos_by_id.get(f.get("fr24_id"))))
+        out.append(to_contract(f, al, pos_by_id.get(f.get("fr24_id")), want))
 
     out.sort(key=lambda x: x["sched_dep_unix"])
     return {"as_of": now_iso(), "date": date, "flights": out}
