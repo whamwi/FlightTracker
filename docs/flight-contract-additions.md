@@ -79,10 +79,33 @@ card reads "Taxi to gate". Phase and position derive from the same fix, so they 
 
 | field | type | notes |
 |---|---|---|
-| `progress` | 0–1 \| null | fraction of route flown; `null` when unknown |
+| `progress` | 0–1 \| null | fraction of route flown |
+| `progress_basis` | `"fix"` \| `"clock"` | how `progress` was derived — **not for display** |
 | `eta_utc` | ISO 8601 \| null | the single arrival estimate every surface renders |
+| `eta_basis` | `"feed"` \| `"observed"` \| `"schedule"` | where `eta_utc` came from — **not for display** |
 | `delay_min` | integer \| null | signed; negative is early |
 | `delay_basis` | `"departure"` \| `"arrival"` \| null | which end `delay_min` refers to |
+
+### The basis fields
+
+`progress` is **always published** — the bar must never freeze. With a live fix it is the fix
+projected onto the stored corridor (`"fix"`); without one it is elapsed time against block time
+(`"clock"`). Both are legitimate answers to "roughly how far along is it", which is what a
+progress bar claims.
+
+`position`, by contrast, is published **only when a fix exists**. A bar saying *about halfway*
+is supportable by a clock; a marker saying *the aircraft is at this point on the earth* is not.
+Pretending otherwise is what drew FYC728 over Jordan while the real aircraft was 110 km east of
+Damascus.
+
+`eta_basis` distinguishes FR24's own estimate (`"feed"`), an arrival projected from observed
+along-track rate (`"observed"`, once the anchor-plus-rate model exists), and the padded schedule
+(`"schedule"`).
+
+**The basis fields are for the map, not the user.** They let a surface decide how much to trust
+a value — whether to snap the marker or ease toward it, how wide a confidence band to draw —
+without ever surfacing the words "estimated" or "tracked", which are noise to a passenger. Same
+principle as `position.source`.
 
 `delay_basis` encodes the two-axis model: **on the ground, late is a state** (past the slot, not
 yet departed); **airborne, late is a number** (revised arrival against schedule). FR24 conflates
@@ -168,20 +191,39 @@ Arrivals need no equivalent flag.
 
 ---
 
-## 6. Open questions
+## 6. Delivery — decided 12 Aug
 
-- **Endpoint split.** Schedule and state move on the order of a minute; position moves
-  continuously. Serving both in one document forces the slow data to be refetched at the fast
-  rate. Two endpoints, each surface subscribing to both?
-- **One live document or per-flight?** One document is a single cache entry for everyone and
-  matches the publish model; per-flight is smaller but reintroduces per-user fan-out — the
-  O(users) problem we just removed upstream.
-- **Should `progress` be published when there is no fix?** Elapsed time against a padded schedule
-  is a weaker claim than a measured fraction, and a progress bar implies we know it.
+**Two endpoints, split by rate of change, not by subject.** The obvious split is "schedule vs
+position" and it is wrong: if `phase` is derived from position but ships in the schedule
+document, a client holds a phase from 60 seconds ago beside a position from 5 seconds ago — two
+snapshots, and the disagreement we are trying to remove has been reinvented.
+
+| document | carries | cadence |
+|---|---|---|
+| **schedule** | times, gates, terminals, aircraft, belt, `status`, `arr_next_day`, `dep_prev_day`, `dep_confirmed` | ~60 s |
+| **live** | `position` **and everything derived from it** — `phase`, `progress`, `eta_utc`, `delay_min`, and their basis fields | ~30 s |
+
+Source and derivation travel together, in one snapshot under one `as_of`. The card and the marker
+read the same document, so they cannot disagree even in principle.
+
+**One live document containing only what is live.** An arrived flight has no live state, so it
+drops out on its own — it stays in the schedule document, which is where someone checking whether
+a flight landed is looking anyway.
+
+Measured 12 Aug: **87 flights across the day, 6.6 live on average, 15 at peak, 3 at the quietest
+hour — 525 bytes for the 6 live at the time of measuring.** Under 2 KB even at peak. One cache
+entry served to everyone, with nothing per-user about it, so the O(users) fan-out we removed
+upstream does not reappear here. The cost this was guarding against is real in principle and
+absent at Syrian traffic levels.
+
+## 7. Open questions
+
+- Whether the live document should be keyed by `iata_number` or `fr24_id`. The latter is what
+  the position feed uses and needs no matching; the former is what every client already holds.
 
 ---
 
-## 7. Rollout
+## 8. Rollout
 
 Agreed sequence:
 
