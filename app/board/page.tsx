@@ -359,6 +359,12 @@ function StatusBadge({ status, view }: { status: string; view?: View }) {
  *
  * Renders nothing when it has nothing — most flights carry a type and no more, and an empty row
  * would add height to all 38 cards to say nothing on most of them.
+ *
+ * No dir override. It carried dir="ltr" at first, to keep the Latin aircraft code upright — which
+ * it never needed, since a Latin run renders left-to-right inside an RTL paragraph on its own.
+ * What the override did do was pin the item order to left-to-right on an Arabic page, so a reader
+ * scanning right-to-left met them backwards: حقائب 3، then مبنى 3، then the type. Inheriting the
+ * page direction puts them in the order they are written in, both ways round.
  */
 function MetaStrip({ items }: { items: { text: string | null | undefined; cls?: string }[] }) {
   const parts = items
@@ -366,7 +372,7 @@ function MetaStrip({ items }: { items: { text: string | null | undefined; cls?: 
     .filter(i => i.text)
   if (!parts.length) return null
   return (
-    <div dir="ltr" style={{
+    <div style={{
       display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'baseline',
       gap: '2px 10px', maxWidth: '100%',
     }}>
