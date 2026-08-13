@@ -406,6 +406,9 @@ function FlightCard({ f, view, isPinned, onTogglePin, boardDate }: { f: Flight; 
   const status  = effectiveStatus(f)
   const cfg     = STATUS[status] ?? STATUS.Unknown
   const isCancelled = status === 'Cancelled'
+  // Not showArrived below: that one also requires a duration, because it gates a progress
+  // bar. The belt only needs the flight to be down.
+  const isArrived   = status === 'Arrived'
 
   const depOff = isArr ? tzOffset(f.dep_iata) : 3
   const arrOff = isArr ? 3 : tzOffset(f.arr_iata)
@@ -613,14 +616,22 @@ function FlightCard({ f, view, isPinned, onTogglePin, boardDate }: { f: Flight; 
             </span>
           </div>
           {/*
-           * The one field a person waiting in arrivals is actually there for. Gated to the
-           * arrivals view because on a departures board it is the carousel at the other end of
-           * the flight, which is nobody's business in this hall.
+           * The carousel at the destination, shown once the flight is down — on either board.
            *
-           * Only ever set once the flight is down — the cache used to republish belts from
-           * earlier instances of a number and print one against a flight still in the air.
+           * My first cut gated this to the arrivals view, on the reasoning that a belt belongs
+           * to the hall you are standing in. The data says otherwise: all 16 belts published on
+           * 13 Aug were departures out of Syria — DAM→IST belt 21B, ALP→SAW CAR2 — because FR24
+           * carries the belt for the foreign end. Damascus and Aleppo publish none of their own,
+           * so the arrivals-only gate rendered this field exactly never.
+           *
+           * Which makes the reader obvious once you stop guessing: not someone waiting in this
+           * terminal, but someone here who watched a flight leave and wants to know where its
+           * bags come out at the other end.
+           *
+           * Still gated on Arrived. A belt against a flight in the air is the cache's old habit
+           * of republishing one from an earlier instance of the same number.
            */}
-          {isArr && f.arr_baggage && !isCancelled && (
+          {f.arr_baggage && isArrived && !isCancelled && (
             <span style={{ font: `600 10.5px/1 'Instrument Sans', system-ui`, color: C.goldenText }}>
               {t('label.belt')} {f.arr_baggage}
             </span>
