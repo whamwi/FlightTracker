@@ -421,6 +421,18 @@ function FlightCard({ f, view, isPinned, onTogglePin, boardDate }: { f: Flight; 
   const hasEstArr    = !!f.revised_arr_utc && !hasActualArr
   const hasComputedETA = !!computedETA(f) && !hasActualArr && !hasEstArr
 
+  /*
+   * One label for both ends, because only one is ever populated — the foreign airport's.
+   * Damascus and Aleppo do not publish a terminal, so "Terminal 3 / —" would be a column of
+   * blanks; joining whichever side has a value says the same thing in the space of a word.
+   * The app derives it identically, and the two must agree because a passenger reads one and
+   * then the other.
+   */
+  const terminalLabel = (() => {
+    const parts = [f.dep_terminal, f.arr_terminal].map(v => (v ?? '').trim()).filter(Boolean)
+    return parts.length ? `${t('label.terminal')} ${parts.join(' / ')}` : null
+  })()
+
   const depForProgress = f.actual_dep_utc ?? f.revised_dep_utc
     ?? (f.sched_dep_unix ? new Date(f.sched_dep_unix * 1000).toISOString() : null)
   const showProgress = (status === 'Departed' || status === 'En Route' || status === 'Approaching')
@@ -483,6 +495,7 @@ function FlightCard({ f, view, isPinned, onTogglePin, boardDate }: { f: Flight; 
             {f.iata_number}
             {f.callsign && f.callsign !== f.iata_number ? ` · ${f.callsign}` : ''}
             {f.aircraft_type ? ` (${f.aircraft_type})` : ''}
+            {terminalLabel ? ` · ${terminalLabel}` : ''}
           </span>
         </div>
 
@@ -599,6 +612,19 @@ function FlightCard({ f, view, isPinned, onTogglePin, boardDate }: { f: Flight; 
               )}
             </span>
           </div>
+          {/*
+           * The one field a person waiting in arrivals is actually there for. Gated to the
+           * arrivals view because on a departures board it is the carousel at the other end of
+           * the flight, which is nobody's business in this hall.
+           *
+           * Only ever set once the flight is down — the cache used to republish belts from
+           * earlier instances of a number and print one against a flight still in the air.
+           */}
+          {isArr && f.arr_baggage && !isCancelled && (
+            <span style={{ font: `600 10.5px/1 'Instrument Sans', system-ui`, color: C.goldenText }}>
+              {t('label.belt')} {f.arr_baggage}
+            </span>
+          )}
         </div>
       </div>
 

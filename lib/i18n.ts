@@ -115,6 +115,10 @@ const en: Dict = {
   'label.elapsed':        'elapsed',
   'label.flight_time':    'Flight time',
   'label.gate':           'Gate',
+  // Same strings the app uses, so a passenger reading the board and then the phone
+  // sees one vocabulary. 'label.terminal' is copied verbatim from the app's dictionary.
+  'label.terminal':       'Terminal',
+  'label.belt':           'Belt',
   'label.scheduled':      'Scheduled',
   'label.actual':         'Actual',
   'label.estimated':      'Estimated',
@@ -320,6 +324,8 @@ const ar: Dict = {
   'label.elapsed':        'مضت',
   'label.flight_time':    'زمن الرحلة',
   'label.gate':           'البوابة',
+  'label.terminal':       'مبنى',
+  'label.belt':           'السير',
   'label.scheduled':      'المجدول',
   'label.actual':         'الفعلي',
   'label.estimated':      'المتوقع',
