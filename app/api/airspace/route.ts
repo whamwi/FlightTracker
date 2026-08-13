@@ -112,6 +112,85 @@ interface BoardFlight {
   airline_iata:    string | null // IATA code for airline logo
 }
 
+const V2_API = process.env.FLIGHT_API_URL ?? 'https://flight-api-production-5124.up.railway.app'
+
+/**
+ * The board layer from `flight`, three days of it, or null if the service cannot answer.
+ *
+ * This is the half of the map that was still reading `fr24_daily_cache` — a table warmed by
+ * whichever visitor happens to open the site. It is why a flight could be airborne with the map
+ * drawing nothing: XH728's cache row for 12 Aug carried the 11th's arrival times, so the map
+ * treated a flight over Saudi Arabia as landed. The mobile map was moved off it on 13 Aug; this
+ * is the same move for the web.
+ *
+ * Three dates because a flight that crosses midnight belongs to two of them, which is the reason
+ * the cache path pulled three as well. v2's board already resolves what belongs to a given date,
+ * so the day-window filtering the cache parser had to do is not repeated here — the downstream
+ * `boardDeparted` filter still applies its own expiry rules.
+ */
+async function boardFromV2(dates: string[]): Promise<BoardFlight[] | null> {
+  try {
+    const pages = await Promise.all(dates.map(async d => {
+      const r = await fetch(`${V2_API}/v2/board?date=${d}`, { cache: 'no-store' })
+      if (!r.ok) throw new Error(`v2 board ${d} -> ${r.status}`)
+      const body = await r.json()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return ((body?.flights ?? []) as any[]).map(f => ({ f, d }))
+    }))
+
+    const out: BoardFlight[] = []
+    const seen = new Set<string>()
+    for (const { f, d } of pages.flat()) {
+      // A flight number appears on two dates when it crosses midnight; keep the first, which is
+      // today's page because of the order the dates are passed.
+      const key = `${f.iata_number}|${f.sched_dep_unix ?? ''}`
+      if (seen.has(key)) continue
+      seen.add(key)
+
+      /*
+       * Scheduled arrival as unix. v2 publishes it as UTC HH:MM plus arr_next_day rather than a
+       * timestamp, so it is reassembled here against the board date it came from — the only
+       * consumer is the HH:MM the map hands back, so a day-boundary slip would be visible and
+       * harmless rather than silent.
+       */
+      let schedArr: number | null = null
+      if (f.arr_time_utc) {
+        const ms = Date.parse(`${d}T${f.arr_time_utc}:00Z`)
+        if (Number.isFinite(ms)) schedArr = Math.floor((ms + (f.arr_next_day ? 86_400_000 : 0)) / 1000)
+      }
+
+      // The cache carried this ready-made; `flight` carries the two numbers it is made of.
+      const depDelay = (f.sched_dep_unix && f.actual_dep_utc)
+        ? Math.round((Date.parse(f.actual_dep_utc) / 1000 - f.sched_dep_unix) / 60)
+        : null
+
+      out.push({
+        // `num` existed to match rows back into fr24_daily_cache for the departure writeback.
+        // Nothing reads it on this path; the callsign keeps it a meaningful value rather than ''.
+        num:             f.callsign ?? f.iata_number,
+        flight_date:     d,
+        iata_num:        f.iata_number,
+        callsign:        f.callsign ?? '',
+        dep_iata:        f.dep_iata ?? null,
+        arr_iata:        f.arr_iata ?? null,
+        sched_dep:       f.sched_dep_unix ?? null,
+        sched_arr:       schedArr,
+        duration_min:    f.duration_min ?? null,
+        status:          (f.status ?? '').toLowerCase(),
+        actual_dep_utc:  f.actual_dep_utc ?? null,
+        actual_arr_utc:  f.actual_arr_utc ?? null,
+        revised_arr_utc: f.revised_arr_utc ?? null,
+        dep_delay_min:   depDelay,
+        airline_iata:    f.airline_iata ?? null,
+      })
+    }
+    return out.length ? out : null
+  } catch (e) {
+    console.warn(`[airspace] v2 board unavailable (${e}) — falling back to the cache`)
+    return null
+  }
+}
+
 let boardCache: { flights: BoardFlight[]; date: string; ts: number } | null = null
 
 async function fetchBoardFlights(iataToIcao: Record<string, string>, lookup: CallsignLookup): Promise<BoardFlight[]> {
@@ -130,6 +209,13 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>, lookup: Cal
   //   tomorrowMidnightMs  = next Syria midnight         (start of tomorrow's Syria date)
   const syriaMidnightMs    = new Date(date     + 'T00:00:00+03:00').getTime()
   const tomorrowMidnightMs = new Date(tomorrow + 'T00:00:00+03:00').getTime()
+
+  // Today first, so a midnight-crosser present on two pages keeps today's row.
+  const v2 = await boardFromV2([date, yesterday, tomorrow])
+  if (v2) {
+    boardCache = { flights: v2, date, ts: Date.now() }
+    return v2
+  }
 
   const res = await fetch(
     `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=in.(${yesterday},${date},${tomorrow})&airport_iata=in.(${SYRIA_AIRPORTS_CSV})&select=airport_iata,flight_date,departures,arrivals`,
