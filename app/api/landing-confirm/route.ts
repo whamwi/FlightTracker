@@ -37,10 +37,24 @@ function syriaDate(offsetDays = 0): string {
  * the three tiers and the only one where nobody saw anything.
  */
 async function assumeFromEstimate(): Promise<number> {
+  /*
+   * Not restricted to Syrian arrival airports, unlike the two tiers above.
+   *
+   * Those confirm an arrival *into* Syria, where FR24 is blind and our own receivers will one day
+   * answer. This tier only reads FR24's own revised estimate, and the destination does not change
+   * that reasoning — it changes how often it is needed, which is rarely for a well-covered
+   * airport. F3742 DAM→JED on 13 Aug is the case: departed 08:44, estimate 10:39, nothing after,
+   * and the board called it Arrived with a blank time because derive_status infers an arrival
+   * from est_arr + 15 min while no time was ever recorded. 45 such flights over 20 days, all
+   * outbound, about two a day.
+   *
+   * Every flight in this table touches a Syrian airport at one end — verified, zero rows with
+   * neither — so dropping the filter widens this to our own departures and no further.
+   */
   const estCutoff = new Date(Date.now() - 3 * 3_600_000).toISOString()
   const res = await fetch(
     `${SB_URL}/rest/v1/flight?flight_date=in.(${syriaDate(-1)},${syriaDate(0)})`
-      + `&arr_iata=in.(${SYRIAN_AIRPORTS.join(',')})&real_arr=is.null&arr_confirmed_at=is.null`
+      + `&real_arr=is.null&arr_confirmed_at=is.null`
       + `&real_dep=not.is.null&est_arr=not.is.null&est_arr=lt.${estCutoff}`
       + `&outcome=not.in.(cancelled,diverted)`
       + `&select=flight_date,iata_number,arr_iata,est_arr`,
