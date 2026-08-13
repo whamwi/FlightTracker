@@ -127,8 +127,15 @@ def derive_phase(f: dict, pos: dict | None) -> str:
     That is what prevents the failure we named: a marker projected over Jordan while the card
     reads "Taxi to gate". Phase and position derive from the same fix, so they cannot disagree.
     """
-    if (f.get("outcome") or "") == "cancelled":
+    outcome = f.get("outcome") or ""
+    if outcome == "cancelled":
         return "cancelled"
+    # Deliberately a phase this build's clients do not know. PhaseChip renders nothing for an
+    # unrecognised key and the caller falls back to the status badge, which says Diverted — the
+    # fallback that exists so the server can introduce a state without a client deploy. Better a
+    # correct word from the older path than a confident wrong one from the newer.
+    if outcome == "diverted":
+        return "diverted"
 
     on_ground = bool(pos and pos.get("on_ground"))
     moving = bool(pos and (pos.get("ground_speed_kts") or 0) > 3)
@@ -261,8 +268,21 @@ def derive_status(f: dict) -> str:
     text is worse still — 74 arrived flights were still reading "Departed" and 28 legs carried no
     status at all — which is why this is derived from the times instead.
     """
-    if (f.get("outcome") or "") == "cancelled":
+    outcome = f.get("outcome") or ""
+    if outcome == "cancelled":
         return "Cancelled"
+    # Diverted outranks Arrived, and that is the point of it.
+    #
+    # A diverted flight often does land, and FR24 may publish a real_arr for it — at the airport
+    # it went to, not the one on the ticket. Returning "Arrived" there would be true about the
+    # aircraft and false about the journey. The web map also ACTS on this word rather than only
+    # displaying it: boardDeparted drops diverted flights so the predictor stops carrying them
+    # toward a destination they have already turned away from. G9375 was drawn heading for
+    # Damascus while it was over Jordan bound for Amman.
+    #
+    # Untested against live data — there is no diversion in the retained tape.
+    if outcome == "diverted":
+        return "Diverted"
     if f.get("real_arr"):
         return "Arrived"
     dep, est_arr = iso(f.get("real_dep")), iso(f.get("est_arr"))
