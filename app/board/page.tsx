@@ -348,9 +348,14 @@ function StatusBadge({ status, view }: { status: string; view?: View }) {
 /**
  * The small print under the rail: aircraft type, terminal, gate, belt.
  *
- * Flex-wrapped with the separators as their own elements rather than a joined string, because a
- * joined string that overflows puts a middot at the start of the next line and reads as a fault.
- * Here a wrap simply produces a second centred row of labels.
+ * No separator characters at all. The app joins these with middots, and this column is too narrow
+ * to copy that: between two 96px time columns the strip gets 89px on a 375px screen, so "Terminal
+ * 3" always wraps below the type. Any middot then leads the wrapped line and reads as a fault —
+ * which it did twice, first from a joined string and then from separators bound to the item that
+ * follows them, so they wrapped along with it.
+ *
+ * Whitespace separates instead. Every label but the aircraft type already carries its own noun
+ * ("Terminal 3", "Gate B1"), so nothing is lost, and a wrap simply produces a second centred row.
  *
  * Renders nothing when it has nothing — most flights carry a type and no more, and an empty row
  * would add height to all 38 cards to say nothing on most of them.
@@ -361,16 +366,13 @@ function MetaStrip({ items }: { items: (string | null | undefined)[] }) {
   return (
     <div dir="ltr" style={{
       display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'baseline',
-      gap: '1px 6px', maxWidth: '100%',
+      gap: '2px 10px', maxWidth: '100%',
     }}>
       {parts.map((p, i) => (
-        <span key={p + i} style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-          {i > 0 && <span style={{ color: C.trackEmpty, fontSize: 10.5 }} aria-hidden>·</span>}
-          <span style={{
-            fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: C.muted,
-            letterSpacing: '.04em', whiteSpace: 'nowrap',
-          }}>{p}</span>
-        </span>
+        <span key={p + i} style={{
+          fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: C.muted,
+          letterSpacing: '.04em', whiteSpace: 'nowrap',
+        }}>{p}</span>
       ))}
     </div>
   )
