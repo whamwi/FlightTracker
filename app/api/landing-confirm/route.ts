@@ -15,6 +15,57 @@ function syriaDate(offsetDays = 0): string {
   return new Date(ms).toISOString().slice(0, 10)
 }
 
+/**
+ * The last resort: FR24's own estimate, for flights it never resolves.
+ *
+ * Aleppo's board on 13 Aug had four Landed and five Unknown, every Unknown carrying a live
+ * estimate — RJ431 05:20 against a 05:40 schedule, J9175 13:48 against 14:10. Those are revised
+ * figures, not the timetable repeated: FR24 updates them while the aircraft is flying and then
+ * stops, because its coverage ends before touchdown. Waiting for a landing that will not come
+ * leaves half the Aleppo board permanently unfinished.
+ *
+ * Three hours past the estimate, and never over a value already present. Three hours because
+ * FR24 does backfill — its site carries RJ431's arrival on every day but today — so this must
+ * not pre-empt a real landing that is merely late.
+ *
+ * Its own function, and called before the early return above rather than after it. Inlined at
+ * the end it never ran: `if (!pending.length) return` fires whenever the summary window is
+ * empty, which is most of the time, and that is exactly when the estimate is the only thing
+ * left to work with.
+ *
+ * Recorded as `fr24_estimate` so it is never mistaken for an observation. It is the weakest of
+ * the three tiers and the only one where nobody saw anything.
+ */
+async function assumeFromEstimate(): Promise<number> {
+  const estCutoff = new Date(Date.now() - 3 * 3_600_000).toISOString()
+  const res = await fetch(
+    `${SB_URL}/rest/v1/flight?flight_date=in.(${syriaDate(-1)},${syriaDate(0)})`
+      + `&arr_iata=in.(${SYRIAN_AIRPORTS.join(',')})&real_arr=is.null&arr_confirmed_at=is.null`
+      + `&real_dep=not.is.null&est_arr=not.is.null&est_arr=lt.${estCutoff}`
+      + `&outcome=not.in.(cancelled,diverted)`
+      + `&select=flight_date,iata_number,arr_iata,est_arr`,
+    { headers: HEADERS, cache: 'no-store' },
+  )
+  if (!res.ok) return 0
+  const rows = (await res.json()) as
+    { flight_date: string; iata_number: string; arr_iata: string; est_arr: string }[]
+  let n = 0
+  for (const r of rows) {
+    const w = await fetch(
+      `${SB_URL}/rest/v1/flight?iata_number=eq.${encodeURIComponent(r.iata_number)}`
+        + `&flight_date=eq.${r.flight_date}&arr_iata=eq.${r.arr_iata}`
+        + `&real_arr=is.null&arr_confirmed_at=is.null`,
+      {
+        method: 'PATCH',
+        headers: { ...HEADERS, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+        body: JSON.stringify({ arr_confirmed_at: r.est_arr, arr_confirmed_src: 'fr24_estimate' }),
+      },
+    )
+    if (w.ok) n++
+  }
+  return n
+}
+
 export async function GET() {
   if (!FR24_TOKEN) {
     return NextResponse.json({ ok: false, error: 'FR24_API_KEY not configured' }, { status: 500 })
@@ -58,7 +109,9 @@ export async function GET() {
     }
   }
 
-  if (!pending.length) return NextResponse.json({ ok: true, checked: 0, confirmed: 0 })
+  if (!pending.length) {
+    return NextResponse.json({ ok: true, checked: 0, confirmed: 0, assumed: await assumeFromEstimate() })
+  }
 
   /*
    * Ask FR24 by broadcast callsign, not by commercial flight number.
@@ -199,49 +252,7 @@ export async function GET() {
     if (writeRes.ok) confirmed++
   }
 
-  /*
-   * The last resort: FR24's own estimate, for flights it never resolves.
-   *
-   * Aleppo's board on 13 Aug had four Landed and five Unknown, every Unknown carrying a live
-   * estimate — RJ431 05:20 against a 05:40 schedule, J9175 13:48 against 14:10. Those are
-   * revised figures, not the timetable repeated: FR24 updates them while the aircraft is
-   * flying and then simply stops, because its coverage ends before touchdown. Waiting for a
-   * landing that will not come leaves half the Aleppo board permanently unfinished.
-   *
-   * Applied only after the summary above has had its chance, only three hours past the
-   * estimate, and never over a value already present. Three hours because FR24 does backfill —
-   * its site carries RJ431's arrival on every day but today — so this must not pre-empt a real
-   * landing that is merely late.
-   *
-   * Recorded as `fr24_estimate` so it is never mistaken for an observation. It is the weakest
-   * of the three and the only one that claims no one saw anything.
-   */
-  const estCutoff = new Date(Date.now() - 3 * 3_600_000).toISOString()
-  const estRes = await fetch(
-    `${SB_URL}/rest/v1/flight?flight_date=in.(${syriaDate(-1)},${syriaDate(0)})`
-      + `&arr_iata=in.(${SYRIAN_AIRPORTS.join(',')})&real_arr=is.null&arr_confirmed_at=is.null`
-      + `&real_dep=not.is.null&est_arr=not.is.null&est_arr=lt.${estCutoff}`
-      + `&outcome=not.in.(cancelled,diverted)`
-      + `&select=id,flight_date,iata_number,arr_iata,est_arr`,
-    { headers: HEADERS, cache: 'no-store' },
-  )
-  let assumed = 0
-  if (estRes.ok) {
-    const rows = (await estRes.json()) as { flight_date: string; iata_number: string; arr_iata: string; est_arr: string }[]
-    for (const r of rows) {
-      const w = await fetch(
-        `${SB_URL}/rest/v1/flight?iata_number=eq.${encodeURIComponent(r.iata_number)}`
-          + `&flight_date=eq.${r.flight_date}&arr_iata=eq.${r.arr_iata}`
-          + `&real_arr=is.null&arr_confirmed_at=is.null`,
-        {
-          method: 'PATCH',
-          headers: { ...HEADERS, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
-          body: JSON.stringify({ arr_confirmed_at: r.est_arr, arr_confirmed_src: 'fr24_estimate' }),
-        },
-      )
-      if (w.ok) assumed++
-    }
-  }
+  const assumed = await assumeFromEstimate()
 
   return NextResponse.json({ ok: true, checked: pending.length, confirmed, assumed, callsigns })
 }
