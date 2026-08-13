@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { SYRIA_AIRPORT_SET } from '@/lib/syria-airports'
 
 /**
  * Everything the Statistics tab shows, in one response.
@@ -49,7 +50,7 @@ export async function GET(req: Request) {
    */
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Damascus' })
 
-  const [dailyRes, cacheRes, gacaRes] = await Promise.all([
+  const [dailyRes, cacheRes, gacaRes, alRes] = await Promise.all([
     fetch(`${SB_URL}/rest/v1/daily_stats?stat_date=gte.${from}&select=*&order=stat_date.asc`,
       { headers: HEADERS, cache: 'no-store' }),
     /*
@@ -62,7 +63,25 @@ export async function GET(req: Request) {
      * now, by which point a route that stopped flying in August would keep its rank forever
      * and the count would compare with nothing.
      */
-    fetch(`${SB_URL}/rest/v1/fr24_daily_cache?airport_iata=in.(DAM,ALP)&flight_date=gte.${from}&flight_date=lte.${today}&select=flight_date,airport_iata,arrivals,departures`,
+    /*
+     * `flight`, not fr24_daily_cache.
+     *
+     * The cache was warmed by whichever visitor happened to open the site, so a day's row froze
+     * at whatever moment that was — measured across 22 days, departures survived well and
+     * arrivals did not, because an arrival is published later than a departure. `flight` is
+     * maintained by the harvester on a schedule and holds one row per leg, which removes three
+     * workarounds this endpoint carried:
+     *
+     *   - the num|sched_dep dedup, for legs FR24 files under two dates (49 of them);
+     *   - parsing unix strings out of JSONB;
+     *   - the in.(DAM,ALP) literal, which silently excluded DEZ from every public figure since
+     *     the airport opened on 7 Aug.
+     *
+     * Read straight from the table rather than through /v2/board: these are aggregates over
+     * weeks, not the live contract, and the board endpoint answers one date per call.
+     */
+    fetch(`${SB_URL}/rest/v1/flight?flight_date=gte.${from}&flight_date=lte.${today}`
+        + `&select=flight_date,iata_number,airline_iata,dep_iata,arr_iata,sched_dep,real_dep,outcome`,
       { headers: HEADERS, cache: 'no-store' }),
     /*
      * What the authority published, month by month.
@@ -73,61 +92,70 @@ export async function GET(req: Request) {
      */
     fetch(`${SB_URL}/rest/v1/gaca_monthly?select=*&order=month.desc`,
       { headers: HEADERS, cache: 'no-store' }),
+    /*
+     * Carrier names, because `flight` stores the code and the cache stored a display name.
+     *
+     * This changes the names slightly and for the better: they now come from the same table
+     * every other surface reads, so "Syrian Arab Airlines" rather than FR24's "Syrian Air" and
+     * "Anadolujet" rather than "AJet". The old comment below noted that these names matched
+     * nothing and could not be looked up — that is no longer true.
+     */
+    fetch(`${SB_URL}/rest/v1/airlines?select=iata,name_en`,
+      { headers: HEADERS, next: { revalidate: 3600 } }),
   ])
 
   const daily: Record<string, unknown>[] = dailyRes.ok ? await dailyRes.json() : []
   const gaca: GacaRow[] = gacaRes.ok ? await gacaRes.json() : []
-  const cache: { flight_date: string; airport_iata: string; arrivals: Leg[]; departures: Leg[] }[] =
-    cacheRes.ok ? await cacheRes.json() : []
+  const airlineName: Record<string, string> = {}
+  if (alRes.ok) {
+    for (const a of (await alRes.json()) as { iata: string; name_en: string }[]) {
+      if (a.iata) airlineName[a.iata] = a.name_en
+    }
+  }
+  type FlightRow = {
+    flight_date: string; iata_number: string; airline_iata: string | null
+    dep_iata: string | null; arr_iata: string | null
+    sched_dep: string | null; real_dep: string | null; outcome: string | null
+  }
+  const rows: FlightRow[] = cacheRes.ok ? await cacheRes.json() : []
 
-  // ── Live detail from whatever the cache still holds ────────────────────────
-  const seen = new Set<string>()
+  // ── Detail from `flight`, one row per leg ─────────────────────────────────
   const legs: { airline: string; airlineIata: string | null; route: string; delay: number | null }[] = []
   let cacheFrom = '', cacheTo = ''
 
-  for (const row of cache) {
+  for (const row of rows) {
     if (!cacheFrom || row.flight_date < cacheFrom) cacheFrom = row.flight_date
     if (!cacheTo   || row.flight_date > cacheTo)   cacheTo   = row.flight_date
-    for (const l of [...(row.arrivals ?? []), ...(row.departures ?? [])]) {
-      /*
-       * Keyed on the flight, not on the day it was filed under.
-       *
-       * sched_dep is an absolute timestamp, so one physical departure has one value for it
-       * however FR24 dates the row — and FR24 re-dates them: a service leaving Istanbul at
-       * 22:47 and landing in Damascus after midnight was filed under the 9th, then moved to
-       * the 10th. With the date in the key those are two flights and the month counts both.
-       *
-       * Forty-nine legs in the cache are currently filed under more than one date. None fall
-       * inside the window the tables read, so no published figure is wrong today — this makes
-       * that structural rather than lucky.
-       *
-       * The date stays in the key when sched_dep is missing, because without a timestamp there
-       * is nothing else to tell two operations of the same number apart.
-       */
-      const key = l.sched_dep
-        ? `${l.num ?? ''}|${l.sched_dep}`
-        : `${row.flight_date}|${l.num ?? ''}|`
-      if (seen.has(key)) continue
-      seen.add(key)
-      const sched = Number(l.sched_dep)
-      const real  = l.real_dep == null || l.real_dep === '' ? NaN : Number(l.real_dep)
-      let delay: number | null = null
-      if (Number.isFinite(sched) && Number.isFinite(real)) {
-        const d = (real - sched) / 60
-        if (Math.abs(d) <= 12 * 60) delay = d
-      }
-      const other = l.arr_iata ?? l.dep_iata
-      legs.push({
-        airline: l.airline ?? l.airline_iata ?? '—',
-        // Carried alongside the display name, not instead of it. The name is what this
-        // endpoint has always returned and something may still be reading it; the code is what
-        // a client needs to look the carrier up in its own table.
-        airlineIata: l.airline_iata ?? null,
-        route: other ? `${row.airport_iata}–${other}` : '—',
-        delay,
-      })
+
+    // A cancelled flight has no punctuality and should not dilute a carrier's average. It was
+    // counted before only because the cache gave no way to tell one apart.
+    if (row.outcome === 'cancelled') continue
+
+    /*
+     * The route is named from the Syrian end outward, as it always has been: every flight here
+     * has one foot in Syria, so the other end is the information. Previously this came from the
+     * cache row's own airport; now it is read off the leg, which is also what lets DEZ appear.
+     */
+    const dep = row.dep_iata ?? '', arr = row.arr_iata ?? ''
+    const home  = SYRIA_AIRPORT_SET.has(dep) ? dep : SYRIA_AIRPORT_SET.has(arr) ? arr : ''
+    const other = home === dep ? arr : dep
+
+    let delay: number | null = null
+    if (row.sched_dep && row.real_dep) {
+      const d = (Date.parse(row.real_dep) - Date.parse(row.sched_dep)) / 60_000
+      // Same bound as before: beyond twelve hours it is more plausibly a date error than a delay.
+      if (Number.isFinite(d) && Math.abs(d) <= 12 * 60) delay = d
     }
+
+    legs.push({
+      // The code where the name is unknown, rather than a dash: a reader recognises RJ.
+      airline:     (row.airline_iata ? airlineName[row.airline_iata] : null) ?? row.airline_iata ?? '—',
+      airlineIata: row.airline_iata ?? null,
+      route:       home && other ? `${home}–${other}` : '—',
+      delay,
+    })
   }
+
 
   type Group = { n: number; measured: number; onTime: number; total: number; name: string; iata: string | null }
 
