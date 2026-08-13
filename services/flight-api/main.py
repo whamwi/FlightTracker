@@ -54,6 +54,10 @@ TZ = timezone(timedelta(hours=3))
 # feed has stopped carrying it, and a stale position is worse than none because the phase derived
 # from it would still read as confident.
 FIX_STALE_SEC = 300
+# How long a landed flight stays in the live document after touchdown. See build_live: the ground
+# phases only exist for a flight that has stopped moving, which is exactly when FIX_STALE_SEC has
+# already dropped it.
+ARRIVED_LINGER_SEC = 3600
 # How much older our own ADS-B may be and still be preferred over FR24's feed. One harvester
 # sweep is 60s, so a fix from the previous sweep still counts as current; anything older means
 # our receivers have lost the aircraft and the feed is simply better informed.
@@ -458,8 +462,46 @@ async def build_live() -> dict:
         if pos_by_id:
             ids = ",".join(f'"{i}"' for i in pos_by_id)
             flights = await sb(client, f"flight?select=*&fr24_id=in.({ids})")
+
+        # Plus anything that landed recently, fix or no fix.
+        #
+        # Without this the ground phases derive_phase computes are unreachable. This document was
+        # built only from positions newer than FIX_STALE_SEC, five minutes — and a landed aircraft
+        # stops producing fixes, so it left the document about five minutes after touchdown and
+        # took bags_on_belt, at_gate, taxi_to_gate and landed with it. Every one of them describes
+        # a flight that has stopped moving, which is precisely when there is no fresh fix.
+        #
+        # An hour, because the belt is the last thing to arrive and arrives late: VF341's carousel
+        # was published twenty minutes after it landed. The window has to outlast that gap by
+        # enough that a reader who walks to arrivals still finds the number waiting.
+        #
+        # Both arrival columns. real_arr is FR24's published landing; arr_confirmed_at is ours,
+        # for the flights it never resolves — Aleppo is silent on 22 of 35, and those readers need
+        # the belt more than anyone, not less.
+        #
+        # Two queries rather than one or=(): the values are ISO timestamps full of characters
+        # PostgREST treats as syntax inside or(), and quoting them correctly there is a footgun
+        # for whoever edits this next. Cheap — this document is cached for LIVE_TTL.
+        arr_cutoff = quote(
+            (datetime.now(timezone.utc) - timedelta(seconds=ARRIVED_LINGER_SEC)).isoformat(), safe="")
+        for column in ("real_arr", "arr_confirmed_at"):
+            flights += await sb(client, f"flight?select=*&{column}=gte.{arr_cutoff}")
+
         if not flights:
             return {"as_of": now_iso(), "flights": []}
+
+        # A flight can arrive by both routes — a fresh on-ground fix and a recent arrival, or both
+        # arrival columns — and the reader must not see it twice. Keyed on the row's identity,
+        # which is the table's own primary key.
+        seen: set[tuple] = set()
+        deduped: list[dict] = []
+        for f in flights:
+            key = (f.get("flight_date"), f.get("iata_number"), f.get("dep_iata"), f.get("arr_iata"))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(f)
+        flights = deduped
 
     out = []
     for f in flights:
