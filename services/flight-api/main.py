@@ -54,6 +54,10 @@ TZ = timezone(timedelta(hours=3))
 # feed has stopped carrying it, and a stale position is worse than none because the phase derived
 # from it would still read as confident.
 FIX_STALE_SEC = 300
+# How much older our own ADS-B may be and still be preferred over FR24's feed. One harvester
+# sweep is 60s, so a fix from the previous sweep still counts as current; anything older means
+# our receivers have lost the aircraft and the feed is simply better informed.
+ADSB_PREFER_TOLERANCE_SEC = 75
 
 # Concurrent readers share one database read. This is the publish model in miniature: the cost of
 # a poll is paid once per interval, not once per subscriber, which is the same inversion the
@@ -364,13 +368,28 @@ async def latest_positions(client: httpx.AsyncClient) -> dict[str, dict]:
         "track_deg,vertical_speed_fpm,on_ground,fix_at,source"
         f"&fix_at=gte.{cutoff}&order=fix_at.desc",
     )
-    # Direct reception beats a network aggregate up to a minute old, so source decides before
-    # recency does — otherwise a flight both sources can see jitters between them as first one
-    # then the other happens to hold the newest row.
+    # Direct reception beats a network aggregate *of comparable age*, and only that.
+    #
+    # This preferred `source='adsb'` over recency unconditionally, which is wrong the moment the
+    # two diverge in age: on 13 Aug it served five flights from ADS-B fixes four minutes old
+    # while four-second-old feed rows sat unused. At 450 kts that is ~55 km of error, and when
+    # the stale row finally crossed FIX_STALE_SEC the marker jumped to the feed position — a
+    # visible lurch produced entirely by this preference.
+    #
+    # So the tolerance is the whole rule: take our own reception when it is within a sweep of the
+    # freshest thing we have, and the newest fix otherwise. Preferring one source still stops a
+    # flight both can see from jittering between them poll to poll, which is why the preference
+    # exists at all.
     out: dict[str, dict] = {}
     for r in rows:                            # ordered desc, so first of a kind is the newest
         cur = out.get(r["fr24_id"])
-        if cur is None or (cur.get("source") != "adsb" and r.get("source") == "adsb"):
+        if cur is None:
+            out[r["fr24_id"]] = r
+            continue
+        if cur.get("source") == "adsb" or r.get("source") != "adsb":
+            continue                          # already ours, or this one is not
+        newest, ours = iso(cur.get("fix_at")), iso(r.get("fix_at"))
+        if newest and ours and (newest - ours).total_seconds() <= ADSB_PREFER_TOLERANCE_SEC:
             out[r["fr24_id"]] = r
     return out
 

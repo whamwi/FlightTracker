@@ -619,12 +619,18 @@ def collect_adsb(live_by_callsign: dict[str, tuple[str, int]]) -> int:
             })
         if not rows:
             return 0
-        r = cr.post(
-            f"{SB_URL}/rest/v1/fr24_live_position?select=id",
+        res2 = cr.post(
+            f"{SB_URL}/rest/v1/fr24_live_position?select=id&on_conflict=fr24_id,fix_at",
             headers={**SB_HEADERS, "Prefer": "resolution=ignore-duplicates,return=representation"},
             data=json.dumps(rows), impersonate=IMPERSONATE, timeout=60,
         )
-        return len(r.json()) if r.status_code < 300 else 0
+        if res2.status_code >= 300:
+            # Loud, unlike the silent `return 0` this used to do. The ingest died at 01:49 on
+            # 13 Aug and said nothing for four minutes; the only clue was positions quietly
+            # ageing out.
+            log(f"  adsb write failed {res2.status_code}: {res2.text[:200]}")
+            return 0
+        return len(res2.json())
     except Exception as e:                     # noqa: BLE001 — positions must not end the sweep
         log(f"  adsb ingest failed: {type(e).__name__}: {e}")
         return 0
@@ -670,9 +676,17 @@ def collect_positions(live: dict[str, int]) -> None:
         return
 
     res = cr.post(
-        f"{SB_URL}/rest/v1/fr24_live_position?select=id",
+        f"{SB_URL}/rest/v1/fr24_live_position?select=id&on_conflict=fr24_id,fix_at",
         # The same fix asked for twice is one observation. Anything moving changes between polls,
         # so this only collapses a parked aircraft or a repeated response.
+        #
+        # `on_conflict` is not optional. PostgREST applies resolution=ignore-duplicates to the
+        # PRIMARY KEY unless told otherwise, and ours is the surrogate `id` — so a clash on the
+        # (fr24_id, fix_at) unique index came back 409 and rejected the WHOLE batch, fresh rows
+        # included. The feed path mostly escaped it because a moving aircraft always has a new
+        # fix_at; the ADS-B path re-reads the same table every sweep and so repeats a key
+        # whenever an aircraft has not been heard since, which is most sweeps at the edge of
+        # coverage.
         headers={**SB_HEADERS, "Prefer": "resolution=ignore-duplicates,return=representation"},
         data=json.dumps(rows), impersonate=IMPERSONATE, timeout=60,
     )
