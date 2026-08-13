@@ -360,8 +360,10 @@ function StatusBadge({ status, view }: { status: string; view?: View }) {
  * Renders nothing when it has nothing — most flights carry a type and no more, and an empty row
  * would add height to all 38 cards to say nothing on most of them.
  */
-function MetaStrip({ items }: { items: (string | null | undefined)[] }) {
-  const parts = items.map(v => (v ?? '').trim()).filter(Boolean)
+function MetaStrip({ items }: { items: { text: string | null | undefined; cls?: string }[] }) {
+  const parts = items
+    .map(i => ({ ...i, text: (i.text ?? '').trim() }))
+    .filter(i => i.text)
   if (!parts.length) return null
   return (
     <div dir="ltr" style={{
@@ -369,10 +371,10 @@ function MetaStrip({ items }: { items: (string | null | undefined)[] }) {
       gap: '2px 10px', maxWidth: '100%',
     }}>
       {parts.map((p, i) => (
-        <span key={p + i} style={{
+        <span key={p.text + i} className={p.cls} style={{
           fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: C.muted,
           letterSpacing: '.04em', whiteSpace: 'nowrap',
-        }}>{p}</span>
+        }}>{p.text}</span>
       ))}
     </div>
   )
@@ -628,12 +630,15 @@ function FlightCard({ f, view, isPinned, onTogglePin, boardDate }: { f: Flight; 
         )}
         <MetaStrip
           items={[
-            f.aircraft_type,
-            terminalLabel,
-            (isArr ? f.arr_gate : f.dep_gate) ? `${t('label.gate')} ${isArr ? f.arr_gate : f.dep_gate}` : null,
+            // Desktop only. On a phone this column is 89px wide, so the type pushed the terminal
+            // onto a second line on every card that had one — and of the four labels here it is
+            // the one nobody is looking for. The others are things a passenger acts on.
+            { text: f.aircraft_type, cls: 'ft-ac-type' },
+            { text: terminalLabel },
+            { text: (isArr ? f.arr_gate : f.dep_gate) ? `${t('label.gate')} ${isArr ? f.arr_gate : f.dep_gate}` : null },
             // Gated on Arrived: a belt against a flight still in the air is the cache's old
             // habit of republishing one from an earlier instance of the same number.
-            f.arr_baggage && isArrived && !isCancelled ? `${t('label.belt')} ${f.arr_baggage}` : null,
+            { text: f.arr_baggage && isArrived && !isCancelled ? `${t('label.belt')} ${f.arr_baggage}` : null },
           ]}
         />
         </div>
@@ -1139,7 +1144,10 @@ export default function BoardPage() {
         .ft-spacer { display: none !important; }
         .ft-airport-menu  { display: block; }
         .ft-sort-btns { display: none !important; }
+        /* Aircraft type is desktop-only — see the MetaStrip call site for why. */
+        .ft-ac-type { display: none; }
         @media (min-width: 768px) {
+          .ft-ac-type { display: inline; }
           .ft-body { padding: 26px 28px 40px !important; }
           .ft-title { font-size: 34px !important; }
           .ft-content { flex-direction: row !important; align-items: flex-start !important; }

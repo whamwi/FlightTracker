@@ -339,7 +339,7 @@ const ar: Dict = {
   'label.flight_time':    'زمن الرحلة',
   'label.gate':           'البوابة',
   'label.terminal':       'مبنى',
-  'label.belt':           'السير',
+  'label.belt':           'حقائب',
   'label.scheduled':      'المجدول',
   'label.actual':         'الفعلي',
   'label.estimated':      'المتوقع',
