@@ -29,6 +29,24 @@ export const dynamic     = 'force-dynamic'
 export const maxDuration = 60
 
 const SB_URL = process.env.SUPABASE_URL!
+
+/**
+ * The board the alert rules read.
+ *
+ * Was `/api/flightboard`, which serves `fr24_daily_cache` — a table warmed by whichever visitor
+ * happens to open the website. On 13 Aug FZ1115 landed at 05:50:56 and the cache had last been
+ * warmed at 05:41, nine minutes earlier; at 06:09 it still carried real_arr null and "Estimated
+ * 08:48", so the LANDED rule — `!was.actual_arr_utc && now.actual_arr_utc` — had nothing to fire
+ * on. The subscriber was never told, and would not have been until some stranger loaded the site.
+ *
+ * A stale board is visibly wrong and corrects itself when someone opens the page. A notification
+ * that never arrives is silent and unrecoverable, and it fails worst for early arrivals — exactly
+ * when someone waiting at the airport needs it. So this is the first consumer moved off the cache.
+ *
+ * No fallback to the old endpoint on failure, deliberately: a stale source does not produce a
+ * late alert, it produces a wrong one. Failing loudly costs a minute — the cron runs every minute.
+ */
+const V2_API = process.env.FLIGHT_API_URL ?? 'https://flight-api-production-5124.up.railway.app'
 const SB_KEY = process.env.SUPABASE_ANON_KEY!
 const HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, 'Content-Type': 'application/json' }
 
@@ -43,7 +61,6 @@ const ETA_MOVE_MIN = 15
  * before writing a row. The other crons here already use this constant; this one should have
  * from the start.
  */
-const SELF = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.flysyria.app'
 
 type Board = {
   iata_number: string
@@ -151,9 +168,9 @@ export async function GET(req: Request) {
 
   const date = new URL(req.url).searchParams.get('date') ?? syriaDate()
 
-  const boardRes = await fetch(`${SELF}/api/flightboard?date=${date}`, { cache: 'no-store' })
+  const boardRes = await fetch(`${V2_API}/v2/board?date=${date}`, { cache: 'no-store' })
   if (!boardRes.ok) {
-    return NextResponse.json({ ok: false, error: `flightboard ${boardRes.status}` }, { status: 502 })
+    return NextResponse.json({ ok: false, error: `v2 board ${boardRes.status}` }, { status: 502 })
   }
   const flights: Board[] = (await boardRes.json()).flights ?? []
 
