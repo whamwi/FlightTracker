@@ -100,11 +100,28 @@ export function middleware(request: NextRequest) {
   }
 
   /*
+   * ?lang=ar — Arabic without moving the path.
+   *
+   * The mobile app shares links in the reader's language, and an /ar path would be the natural
+   * way to say so. It cannot use one: iOS matches universal links against the AASA it fetched
+   * when the app was last installed, so a path we add today is not claimed by any copy of the
+   * app already on a phone until that phone updates. Until then the link opens Safari — for a
+   * link whose whole purpose is to be forwarded to people who may or may not have the app.
+   *
+   * A query string is invisible to AASA path matching, so /flight/… keeps being claimed exactly
+   * as it always has been, while everything downstream — title, description, and the /ar image
+   * the crawler is pointed at — reads this header and cannot tell the difference.
+   *
+   * The /ar prefix stays the canonical Arabic URL for the website and for search.
+   */
+  const wantsAr = request.nextUrl.searchParams.get('lang') === 'ar'
+
+  /*
    * The bare root is the one URL with no language in it, so it is the one place a default has
    * to be chosen rather than read. Everything else unprefixed is English, as it always was.
    */
   const headers = new Headers(request.headers)
-  headers.set(LOCALE_HEADER, pathname === '/' ? ROOT_LOCALE : DEFAULT_LOCALE)
+  headers.set(LOCALE_HEADER, wantsAr ? 'ar' : pathname === '/' ? ROOT_LOCALE : DEFAULT_LOCALE)
   headers.set(PATH_HEADER, pathname)
   return NextResponse.next({ request: { headers } })
 }
