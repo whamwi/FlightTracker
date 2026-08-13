@@ -58,7 +58,9 @@ async function assumeFromEstimate(): Promise<number> {
       {
         method: 'PATCH',
         headers: { ...HEADERS, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
-        body: JSON.stringify({ arr_confirmed_at: r.est_arr, arr_confirmed_src: 'fr24_estimate' }),
+        body: JSON.stringify({
+        arr_confirmed_at: r.est_arr, arr_confirmed_src: 'fr24_estimate', outcome: 'arrived',
+      }),
       },
     )
     if (w.ok) n++
@@ -238,6 +240,16 @@ export async function GET() {
       patch.arr_confirmed_src = 'fr24_last_seen'
     }
     if (tookOff) patch.real_dep = tookOff
+    /*
+     * Set here rather than left to the trigger, which fires on fr24_flight_raw and so never
+     * sees a direct PATCH of `flight`. Without it the board says Arrived while outcome still
+     * says departed — the disagreement this pass exists to remove.
+     *
+     * Safe against a stale cancel because the queries above already exclude cancelled and
+     * diverted, and safe against being undone because the trigger now yields to
+     * arr_confirmed_at.
+     */
+    patch.outcome = 'arrived'
 
     const cond = `iata_number=eq.${encodeURIComponent(p.num)}&flight_date=eq.${p.date}`
       + `&arr_iata=eq.${p.airport}`
