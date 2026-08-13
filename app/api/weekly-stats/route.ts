@@ -31,44 +31,40 @@ export async function GET(req: Request) {
   const toDate   = new Date(todayMs).toLocaleDateString('en-CA', { timeZone: 'Asia/Damascus' })
   const fromDate = new Date(todayMs - (days - 1) * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Asia/Damascus' })
 
-  const [res, alRes] = await Promise.all([
-    fetch(
-      `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=gte.${fromDate}&flight_date=lte.${toDate}&airport_iata=eq.${airport}&select=arrivals,departures`,
-      { headers: HEADERS, next: { revalidate: 3600 } }
-    ),
-    fetch(
-      `${SB_URL}/rest/v1/airlines?select=iata`,
-      { headers: HEADERS, next: { revalidate: 3600 } }
-    ),
-  ])
+  /*
+   * `flight`, not fr24_daily_cache.
+   *
+   * One row per leg with both ends named, so the two JSONB arrays collapse into a single query
+   * and the direction is read off the leg rather than off which array it sat in.
+   *
+   * The airline allow-list goes with the cache: fr24_daily_cache held whatever FR24 returned,
+   * including carriers we do not recognise, so this endpoint had to re-filter. The trigger that
+   * builds `flight` already refuses a leg whose airline is not in the table — the codeshare
+   * filter agreed on 11 Aug — so anything present here has passed it once already.
+   */
+  const res = await fetch(
+    `${SB_URL}/rest/v1/flight?flight_date=gte.${fromDate}&flight_date=lte.${toDate}`
+      + `&or=(dep_iata.eq.${airport},arr_iata.eq.${airport})`
+      + `&select=dep_iata,arr_iata,outcome`,
+    { headers: HEADERS, next: { revalidate: 3600 } },
+  )
   if (!res.ok) {
-    return NextResponse.json({ ok: false, error: `cache fetch failed: ${res.status}` }, { status: 502 })
+    return NextResponse.json({ ok: false, error: `flight fetch failed: ${res.status}` }, { status: 502 })
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows: { arrivals: any[]; departures: any[] }[] = await res.json()
-  const knownAirlines = new Set<string>(
-    alRes.ok ? (await alRes.json() as { iata: string }[]).map(r => r.iata) : []
-  )
+  const rows: { dep_iata: string | null; arr_iata: string | null; outcome: string | null }[] =
+    await res.json()
 
   const arrMap: Record<string, number> = {}
   const depMap: Record<string, number> = {}
 
-  for (const row of rows) {
-    for (const f of (row.arrivals ?? [])) {
-      const iata = f.dep_iata
-      if (!iata || SYRIAN.has(iata)) continue
-      if ((f.status ?? '').toLowerCase().includes('cancel')) continue
-      if (!knownAirlines.has(flightAirlineIata(f))) continue
-      arrMap[iata] = (arrMap[iata] ?? 0) + 1
-    }
-    for (const f of (row.departures ?? [])) {
-      const iata = f.arr_iata
-      if (!iata || SYRIAN.has(iata)) continue
-      if ((f.status ?? '').toLowerCase().includes('cancel')) continue
-      if (!knownAirlines.has(flightAirlineIata(f))) continue
-      depMap[iata] = (depMap[iata] ?? 0) + 1
-    }
+  for (const r of rows) {
+    // A flight that never operated is not a destination served.
+    if (r.outcome === 'cancelled') continue
+    const dep = r.dep_iata ?? '', arr = r.arr_iata ?? ''
+    // Domestic legs count as neither: both ends are Syrian, so there is no destination to name.
+    if (arr === airport && dep && !SYRIAN.has(dep)) arrMap[dep] = (arrMap[dep] ?? 0) + 1
+    if (dep === airport && arr && !SYRIAN.has(arr)) depMap[arr] = (depMap[arr] ?? 0) + 1
   }
 
   const ranked = (m: Record<string, number>) =>
