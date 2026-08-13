@@ -1350,9 +1350,11 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
             actual_dep_utc: string | null; actual_arr_utc: string | null
             revised_arr_utc: string | null
             iata_number: string; dep_delay_min: number | null; airline_iata: string | null
+            aircraft_reg: string | null; aircraft_type: string | null
           }[]) {
             const { callsign: cs, dep_iata, arr_iata, duration_min, dep_time_utc, arr_time_utc,
-                    actual_dep_utc, actual_arr_utc, revised_arr_utc, iata_number, dep_delay_min, airline_iata } = bd
+                    actual_dep_utc, actual_arr_utc, revised_arr_utc, iata_number, dep_delay_min, airline_iata,
+                    aircraft_reg, aircraft_type } = bd
             if (!cs || !dep_iata || !arr_iata) continue
             const existing = flightStatusRef.current[cs]
             // Synthesize estimated arrival from actual_dep + duration when no explicit revised/actual arr
@@ -1372,8 +1374,8 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
               revised_arr_utc:   revised_arr_utc ?? estimatedArr ?? carryArrival(existing?.revised_arr_utc, effectiveDep),
               dep_delay_min:     dep_delay_min ?? existing?.dep_delay_min ?? null,
               arr_delay_min:     carriedArr ? existing?.arr_delay_min ?? null : null,
-              aircraft_reg:      existing?.aircraft_reg  ?? null,
-              aircraft_type:     existing?.aircraft_type ?? null,
+              aircraft_reg:      aircraft_reg  ?? existing?.aircraft_reg  ?? null,
+              aircraft_type:     aircraft_type ?? existing?.aircraft_type ?? null,
               flight_number:     iata_number,
               dep_iata, arr_iata, airline_iata,
             }
@@ -2254,17 +2256,34 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           }
         } else {
           const m = addToMap(L.marker([lat, lon], { icon }), map)
+          /*
+           * A hit is cached forever; a miss is not cached at all.
+           *
+           * The guard used to be `cacheKey in photoCacheRef.current`, which is true for a stored
+           * `null` — so one miss meant the airline logo for the life of the page, and the retry
+           * that would have fixed it never fired. That mattered because the miss was usually not
+           * about the aircraft: the key was `cs:<callsign>`, a position-history lookup that fails
+           * for roughly one flight in ten, chosen only because no registration had reached the
+           * map. Now that the board supplies one, the same flight resolves through
+           * /api/photo/{reg} — but only if it is allowed to ask again.
+           *
+           * Deleting the request marker rather than keeping a negative entry: the next poll
+           * rebuilds the popup anyway, and by then `reg` may have arrived, which changes the key.
+           */
           const fetchSchedPhoto = (cacheKey: string, apiUrl: string, onLoad: (url: string) => void) => {
-            if (cacheKey in photoCacheRef.current || photoRequestedRef.current.has(cacheKey)) return
+            if (photoCacheRef.current[cacheKey] || photoRequestedRef.current.has(cacheKey)) return
             photoRequestedRef.current.add(cacheKey)
+            const miss = () => {
+              delete photoCacheRef.current[cacheKey]
+              photoRequestedRef.current.delete(cacheKey)
+            }
             fetch(apiUrl)
               .then(r => r.ok ? r.json() : null)
               .then(d => {
                 const url: string | null = d?.url ?? null
-                photoCacheRef.current[cacheKey] = url
-                if (url) onLoad(url)
+                if (url) { photoCacheRef.current[cacheKey] = url; onLoad(url) } else miss()
               })
-              .catch(() => { photoCacheRef.current[cacheKey] = null })
+              .catch(miss)
           }
           if (embed) {
             m.on('click', () => {

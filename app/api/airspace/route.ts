@@ -110,6 +110,19 @@ interface BoardFlight {
   revised_arr_utc: string | null // FR24 est_arr or "Estimated HH:MM" status
   dep_delay_min:   number | null // actual_dep_utc − sched_dep
   airline_iata:    string | null // IATA code for airline logo
+  /**
+   * Registration and type, from the board rather than from whichever feed supplied the fix.
+   *
+   * The position sources disagree about these: the raw ADS-B feed carries both, /v2/live carries
+   * neither. So the same aircraft had a photo while our receivers could hear it and lost it the
+   * moment FR24 took over — ETD562 did exactly that on 13 Aug, and FYC728, SYR382 and RB382 never
+   * had one at all. The board knows the registration for every flight it lists, which is why the
+   * app has a photo for all of them: it reads /v2/board and joins this itself.
+   *
+   * Identity belongs to the board; the fix only says where the aircraft is.
+   */
+  reg:             string | null
+  aircraft_type:   string | null
 }
 
 const V2_API = process.env.FLIGHT_API_URL ?? 'https://flight-api-production-5124.up.railway.app'
@@ -243,6 +256,8 @@ async function boardFromV2(dates: string[]): Promise<BoardFlight[] | null> {
         revised_arr_utc: f.revised_arr_utc ?? null,
         dep_delay_min:   depDelay,
         airline_iata:    f.airline_iata ?? null,
+        reg:             f.aircraft_reg  ?? null,
+        aircraft_type:   f.aircraft_type ?? null,
       })
     }
     return out.length ? out : null
@@ -445,6 +460,8 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>, lookup: Cal
           revised_arr_utc,
           dep_delay_min,
           airline_iata:   icaoToIata[icaoPrefix] ?? null,
+          reg:            f.reg      || null,
+          aircraft_type:  f.aircraft || null,
         })
       }
     }
@@ -731,8 +748,8 @@ async function fetchLastKnownPositions(boardMap: Map<string, BoardFlight>): Prom
       alt_baro:       r.alt_baro,
       gs:             r.gs,
       track:          r.track,
-      t:              r.aircraft_type,
-      r:              r.registration,
+      t:              r.aircraft_type ?? info.aircraft_type ?? null,
+      r:              r.registration  ?? info.reg           ?? null,
       board_match:    true,
       dep_iata:       info.dep_iata,
       arr_iata:       info.arr_iata,
@@ -1095,8 +1112,8 @@ export async function GET() {
           gs:             p.gs,
           track:          p.track,
           true_heading:   p.track,
-          t:              null,
-          r:              null,
+          t:              info.aircraft_type ?? null,
+          r:              info.reg           ?? null,
           // Not marked `fr24: true`: that flag means an out-of-band fix the client should
           // dead-reckon from. This one is current — the server discards anything older than
           // five minutes before publishing it.
@@ -1135,8 +1152,8 @@ export async function GET() {
         gs:             p.gs,
         track:          p.track,
         true_heading:   p.track,
-        t:              null,
-        r:              null,
+        t:              info?.aircraft_type ?? null,
+        r:              info?.reg           ?? null,
         fr24:           true,          // out-of-band fix: dead-reckon from fix_at, don't treat as live
         fix_at:         p.captured_at,
         board_match:    true,
@@ -1237,6 +1254,8 @@ export async function GET() {
           iata_number:     f.iata_num,
           dep_delay_min:   f.dep_delay_min,
           airline_iata:    f.airline_iata,
+          aircraft_reg:    f.reg,
+          aircraft_type:   f.aircraft_type,
         }
       })
 
