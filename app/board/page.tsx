@@ -139,6 +139,17 @@ function durationLabel(min: number, locale: Locale): string {
   return h > 0 ? `${h}h ${m}m` : `${m}m`
 }
 
+/*
+ * Hours and minutes, for the flown time on an arrived card.
+ *
+ * Separate from durationLabel, which renders "3h 40m" in English and switches format under an
+ * hour. The app keeps the same two helpers apart for the same reason: this number sits under a
+ * label, where "Flight time 2:15" reads as a clock and "Flight time 2h 15m" reads twice.
+ */
+function hhmm(min: number): string {
+  return `${Math.floor(min / 60)}:${String(Math.round(min % 60)).padStart(2, '0')}`
+}
+
 function effectiveStatus(f: Flight): string {
   const s = STATUS_ALIAS[f.status] ?? f.status
   if (f.actual_arr_utc) return 'Arrived'
@@ -291,12 +302,21 @@ function ProgressRoute({ depUtc, durationMin }: { depUtc: string; durationMin: n
 
 // ── Arrived route ─────────────────────────────────────────────────────────────
 function ArrivedRoute({ durationMin }: { durationMin: number }) {
-  const locale = useLocale()
+  const t      = useT()
+  const locale = useLocale()   // still read below, for which way the plane points
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+      {/*
+        Labelled, and in the track's own colour — both copied from the app, whose comment gives
+        the reason: once a flight is down, "Arrived" only repeats the status badge and the filled
+        bar, so how long it took is the one thing the card cannot otherwise tell you.
+
+        The web printed the bare number. "2:15" under a finished bar could be the block time, the
+        time it landed, or anything else; the label is what makes it an answer.
+      */}
       {durationMin > 0 && (
-        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: C.muted, whiteSpace: 'nowrap' }}>
-          {durationLabel(durationMin, locale)}
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: C.forestMid, whiteSpace: 'nowrap' }}>
+          {t('label.flight_time')} {hhmm(durationMin)}
         </span>
       )}
       <div style={{ display: 'flex', flexDirection: 'row', width: '100%', alignItems: 'center', height: 20 }}>
