@@ -134,7 +134,23 @@ function fmtLocal(raw: string | null | undefined, offsetH: number): string {
 function durationLabel(min: number, locale: Locale): string {
   if (!min) return ''
   const h = Math.floor(min / 60), m = min % 60
-  if (locale === 'ar') return h > 0 ? `${h}:${String(m).padStart(2, '0')}` : counted('ar', m, 'noun.minute')
+  if (locale === 'ar') {
+    /*
+     * Spelled out, because `1:03` in Arabic reads as a clock time rather than a duration — and
+     * this string sits next to real clock times on the same card, so a reader has nothing to tell
+     * them apart. The app has always spelled it out and its comment claimed "same rule as the
+     * web's twin"; the twin had drifted, and said 1:03 على الوصول where the app said
+     * ١ ساعة و٣ دقائق على الوصول.
+     *
+     * The dual is marked on the noun — ساعتان *is* "two hours" — which counted() handles by
+     * dropping the numeral at two, so this cannot say the 2 twice.
+     */
+    if (h > 0) {
+      const hours = counted('ar', h, 'noun.hour')
+      return m > 0 ? `${hours} و${counted('ar', m, 'noun.minute')}` : hours
+    }
+    return counted('ar', m, 'noun.minute')
+  }
   // No leading "0h" under an hour — see the twin on the map.
   return h > 0 ? `${h}h ${m}m` : `${m}m`
 }

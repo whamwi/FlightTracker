@@ -283,6 +283,7 @@ const en: Dict = {
   'noun.flight.one':  'flight',      'noun.flight.other':  'flights',
   'noun.route.one':   'route',       'noun.route.other':   'routes',
   'noun.minute.one':  'minute',      'noun.minute.other':  'minutes',
+  'noun.hour.one':    'hour',        'noun.hour.other':    'hours',
   // News
   'news.title':      'Aviation Authority Updates',
   'news.blurb':      'Photos and videos from the Syrian General Authority of Civil Aviation, alongside selected clips from the airlines flying Syria.',
@@ -481,6 +482,8 @@ const ar: Dict = {
   'noun.route.few':    'خطوط',  'noun.route.many':  'خط',   'noun.route.other': 'خط',
   'noun.minute.zero':  'دقائق', 'noun.minute.one':  'دقيقة','noun.minute.two':  'دقيقتان',
   'noun.minute.few':   'دقائق', 'noun.minute.many': 'دقيقة','noun.minute.other':'دقيقة',
+  'noun.hour.zero':    'ساعات', 'noun.hour.one':    'ساعة', 'noun.hour.two':    'ساعتان',
+  'noun.hour.few':     'ساعات', 'noun.hour.many':   'ساعة', 'noun.hour.other':  'ساعة',
   'news.title':      'أخبار الهيئة العامة للطيران المدني',
   'news.blurb':      'صور ومقاطع من الهيئة العامة للطيران المدني، إلى جانب مقاطع مختارة من شركات الطيران العاملة في سوريا.',
   'news.authority':  'الهيئة العامة للطيران المدني',
