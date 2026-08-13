@@ -2,14 +2,49 @@
   "applinks": {
     "details": [
       {
-        "appIDs": ["94AKZA7R4S.com.hamwi.syriaflights"],
+        "appIDs": [
+          "94AKZA7R4S.com.hamwi.syriaflights"
+        ],
         "components": [
-          { "/": "/admin/*", "exclude": true, "comment": "Admin stays in the browser" },
-          { "/": "/api/*", "exclude": true, "comment": "Never hand an API call to the app" },
-          { "#": "no_app", "exclude": true, "comment": "Escape hatch: append #no_app to force the website" },
-          { "/": "/flight/*", "comment": "A shared flight" },
-          { "/": "/map*", "comment": "Live map, optionally with ?flight=" },
-          { "/": "/board*", "comment": "Arrivals and departures" }
+          {
+            "/": "/admin/*",
+            "exclude": true,
+            "comment": "Admin stays in the browser"
+          },
+          {
+            "/": "/api/*",
+            "exclude": true,
+            "comment": "Never hand an API call to the app"
+          },
+          {
+            "#": "no_app",
+            "exclude": true,
+            "comment": "Escape hatch: append #no_app to force the website"
+          },
+          {
+            "/": "/flight/*",
+            "comment": "A shared flight"
+          },
+          {
+            "/": "/map*",
+            "comment": "Live map, optionally with ?flight="
+          },
+          {
+            "/": "/board*",
+            "comment": "Arrivals and departures"
+          },
+          {
+            "/": "/ar/flight/*",
+            "comment": "A shared flight, Arabic path"
+          },
+          {
+            "/": "/ar/map*",
+            "comment": "Live map, Arabic path"
+          },
+          {
+            "/": "/ar/board*",
+            "comment": "Arrivals and departures, Arabic path"
+          }
         ]
       }
     ]
