@@ -140,7 +140,7 @@ def derive_phase(f: dict, pos: dict | None) -> str:
     on_ground = bool(pos and pos.get("on_ground"))
     moving = bool(pos and (pos.get("ground_speed_kts") or 0) > 3)
 
-    if f.get("real_arr"):
+    if f.get("real_arr") or f.get("arr_confirmed_at"):
         # Belt first: it is the last thing to arrive and the thing a person waiting cares about.
         # VF341 got CAR4 twenty minutes after landing, so arrival is not the end of the story.
         if f.get("arr_baggage"):
@@ -285,6 +285,11 @@ def derive_status(f: dict) -> str:
         return "Diverted"
     if f.get("real_arr"):
         return "Arrived"
+    # An arrival we established when FR24 did not — landing-confirm writes it, and it is kept in
+    # its own column precisely so real_arr can supersede it the moment FR24 publishes one. FR24
+    # is silent on 22 of 35 Aleppo arrivals; without this, half that board never finishes.
+    if f.get("arr_confirmed_at"):
+        return "Arrived"
     dep, est_arr = iso(f.get("real_dep")), iso(f.get("est_arr"))
     if dep and est_arr:
         eff = (est_arr - dep).total_seconds() / 60
@@ -361,7 +366,14 @@ def to_contract(f: dict, al: dict | None, pos: dict | None, board_day) -> dict:
         "duration_min":  effective_duration(f),
         "status":        derive_status(f),
         "actual_dep_utc":  zulu(f.get("real_dep")),
-        "actual_arr_utc":  zulu(f.get("real_arr")),
+        # FR24's landing where there is one, ours where there is not. A consumer asking "has it
+        # arrived" wants one field, and `arr_confirmed` below says which kind of answer this is.
+        "actual_arr_utc":  zulu(f.get("real_arr") or f.get("arr_confirmed_at")),
+        # False when FR24 published the landing, true when we established it — from FR24's
+        # last_seen, or from its own estimate for a flight it never resolved. Never shown as a
+        # caveat; it is here so a surface can choose, and so punctuality figures can exclude it.
+        "arr_confirmed":   bool(not f.get("real_arr") and f.get("arr_confirmed_at")),
+        "arr_confirmed_src": f.get("arr_confirmed_src") if not f.get("real_arr") else None,
         "revised_dep_utc": zulu(revision(f.get("est_dep"), f.get("sched_dep"))),
         "revised_arr_utc": zulu(revision(f.get("est_arr"), f.get("sched_arr"))),
         "aircraft_type": f.get("aircraft_type"),

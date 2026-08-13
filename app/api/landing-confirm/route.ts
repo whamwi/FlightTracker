@@ -28,28 +28,32 @@ export async function GET() {
   type Pending = { airport: string; date: string; num: string; eta: number }
   const pending: Pending[] = []
 
-  for (const date of [syriaDate(-1), syriaDate(0)]) {
-    // For yesterday, only look at flights scheduled after Syria midnight (21:00 UTC)
-    // — daytime flights with no real_arr are simply missing data, not worth querying
-    const syriaMidnight = date === syriaDate(-1)
-      ? Math.floor(new Date(date + 'T21:00:00Z').getTime() / 1000)
-      : 0
-
+  /*
+   * The flights still owed an arrival, from `flight` rather than the cache.
+   *
+   * Yesterday and today: an arrival more than four hours past its estimate is not coming, and
+   * one less than thirty minutes past has not had time to be published.
+   */
+  {
     const res = await fetch(
-      `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${date}&airport_iata=in.(${SYRIAN_AIRPORTS.join(',')})&select=airport_iata,arrivals`,
-      { headers: HEADERS }
+      `${SB_URL}/rest/v1/flight?flight_date=in.(${syriaDate(-1)},${syriaDate(0)})`
+        + `&arr_iata=in.(${SYRIAN_AIRPORTS.join(',')})&real_arr=is.null&real_dep=not.is.null`
+        + `&select=flight_date,iata_number,arr_iata,est_arr,sched_arr,outcome`,
+      { headers: HEADERS, cache: 'no-store' },
     )
-    if (!res.ok) continue
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    for (const row of (await res.json() as any[])) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      for (const f of (row.arrivals ?? []) as any[]) {
-        if (f.real_arr) continue
-        if (!f.num)     continue
-        const eta = (f.est_arr ?? f.sched_arr) as number | null
-        if (!eta || eta > minAgeSec || eta < maxAgeSec) continue
-        if (syriaMidnight && eta < syriaMidnight) continue
-        pending.push({ airport: row.airport_iata as string, date, num: String(f.num), eta })
+    if (res.ok) {
+      type Row = {
+        flight_date: string; iata_number: string; arr_iata: string
+        est_arr: string | null; sched_arr: string | null; outcome: string | null
+      }
+      for (const f of (await res.json()) as Row[]) {
+        // A cancelled flight has no arrival, and a diverted one did not arrive here.
+        if (f.outcome === 'cancelled' || f.outcome === 'diverted') continue
+        const stamp = f.est_arr ?? f.sched_arr
+        if (!stamp) continue
+        const eta = Math.floor(Date.parse(stamp) / 1000)
+        if (!Number.isFinite(eta) || eta > minAgeSec || eta < maxAgeSec) continue
+        pending.push({ airport: f.arr_iata, date: f.flight_date, num: f.iata_number, eta })
       }
     }
   }
@@ -156,68 +160,88 @@ export async function GET() {
     const landedStamp = match.datetime_landed ?? match.last_seen
     const landedAt    = Math.floor(new Date(landedStamp).getTime() / 1000)
 
-    const rowRes = await fetch(
-      `${SB_URL}/rest/v1/fr24_daily_cache?airport_iata=eq.${p.airport}&flight_date=eq.${p.date}&select=arrivals,departures`,
-      { headers: HEADERS }
-    )
-    if (!rowRes.ok) continue
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const rows: any[] = await rowRes.json()
-    if (!rows.length) continue
-
-    const d    = new Date(landedAt * 1000)
-    const hhmm = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
-
-    /*
-     * The departure comes from the same response and was being thrown away.
-     *
-     * flight-summary returns datetime_takeoff beside the landing, and this cron ignored it
-     * because it was written to confirm arrivals. RB516 on 6 August had its takeoff — 09:20Z —
-     * sitting in a response we had already paid for and discarded, while the board showed the
-     * flight as Scheduled with no departure at all.
-     *
-     * Only filled in, never overwritten: a departure already on the row came from the widget
-     * or from a live ADS-B confirmation, and both are closer to the source than a summary
-     * fetched hours later.
-     */
     const tookOff = match.datetime_takeoff
-      ? Math.floor(new Date(match.datetime_takeoff).getTime() / 1000)
+      ? new Date(match.datetime_takeoff).toISOString()
       : null
 
-    // Status says what is actually known. A track-derived arrival is not a published landing,
-    // and labelling it as one would put a precise time behind a claim FR24 never made.
-    const arrStatus = fromTrack ? `Landed ${hhmm}` : `Arrived ${hhmm}`
+    /*
+     * Written to `flight`, and into two different columns, because they are two different claims.
+     *
+     * datetime_landed is a landing FR24 computed — that is what real_arr means, and it is the
+     * same fact the harvester writes when FR24 publishes one on the board.
+     *
+     * last_seen is where coverage stopped. Over Syria that is close to the airport but it is not
+     * a landing, and putting it in real_arr would make a published fact and an observation
+     * indistinguishable — the same reason the inferred-departure writeback was deleted rather
+     * than pointed at real_dep. It goes to arr_confirmed_at with its source named.
+     *
+     * Neither ever overwrites a value already there: the harvester reads FR24's board every
+     * sweep and is closer to the source than a summary fetched hours later.
+     */
+    const patch: Record<string, unknown> = {}
+    if (fromTrack) patch.real_arr = new Date(landedAt * 1000).toISOString()
+    else {
+      patch.arr_confirmed_at  = new Date(landedAt * 1000).toISOString()
+      patch.arr_confirmed_src = 'fr24_last_seen'
+    }
+    if (tookOff) patch.real_dep = tookOff
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const arrivals = (rows[0].arrivals ?? [] as any[]).map((f: any) =>
-      f.num === p.num
-        ? {
-            ...f,
-            fr24_id:  match.fr24_id,
-            real_arr: landedAt,
-            real_dep: f.real_dep ?? tookOff ?? null,
-            // Published by FR24, so it supersedes anything we estimated from position.
-            dep_source: f.real_dep ? (f.dep_source ?? 'fr24') : tookOff ? 'fr24' : (f.dep_source ?? null),
-            reg:      f.reg || match.reg || null,
-            status:   arrStatus,
-          }
-        : f
-    )
+    const cond = `iata_number=eq.${encodeURIComponent(p.num)}&flight_date=eq.${p.date}`
+      + `&arr_iata=eq.${p.airport}`
+      + (fromTrack ? '&real_arr=is.null' : '&arr_confirmed_at=is.null&real_arr=is.null')
+      + (tookOff ? '' : '')
 
-    const writeRes = await fetch(`${SB_URL}/rest/v1/fr24_daily_cache`, {
-      method:  'POST',
-      headers: { ...HEADERS, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' },
-      body: JSON.stringify({
-        airport_iata: p.airport,
-        flight_date:  p.date,
-        arrivals,
-        departures:   rows[0].departures ?? [],
-        arr_count:    arrivals.length,
-        fetched_at:   new Date().toISOString(),
-      }),
+    const writeRes = await fetch(`${SB_URL}/rest/v1/flight?${cond}`, {
+      method:  'PATCH',
+      headers: { ...HEADERS, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify(patch),
     })
     if (writeRes.ok) confirmed++
   }
 
-  return NextResponse.json({ ok: true, checked: pending.length, confirmed, callsigns })
+  /*
+   * The last resort: FR24's own estimate, for flights it never resolves.
+   *
+   * Aleppo's board on 13 Aug had four Landed and five Unknown, every Unknown carrying a live
+   * estimate — RJ431 05:20 against a 05:40 schedule, J9175 13:48 against 14:10. Those are
+   * revised figures, not the timetable repeated: FR24 updates them while the aircraft is
+   * flying and then simply stops, because its coverage ends before touchdown. Waiting for a
+   * landing that will not come leaves half the Aleppo board permanently unfinished.
+   *
+   * Applied only after the summary above has had its chance, only three hours past the
+   * estimate, and never over a value already present. Three hours because FR24 does backfill —
+   * its site carries RJ431's arrival on every day but today — so this must not pre-empt a real
+   * landing that is merely late.
+   *
+   * Recorded as `fr24_estimate` so it is never mistaken for an observation. It is the weakest
+   * of the three and the only one that claims no one saw anything.
+   */
+  const estCutoff = new Date(Date.now() - 3 * 3_600_000).toISOString()
+  const estRes = await fetch(
+    `${SB_URL}/rest/v1/flight?flight_date=in.(${syriaDate(-1)},${syriaDate(0)})`
+      + `&arr_iata=in.(${SYRIAN_AIRPORTS.join(',')})&real_arr=is.null&arr_confirmed_at=is.null`
+      + `&real_dep=not.is.null&est_arr=not.is.null&est_arr=lt.${estCutoff}`
+      + `&outcome=not.in.(cancelled,diverted)`
+      + `&select=id,flight_date,iata_number,arr_iata,est_arr`,
+    { headers: HEADERS, cache: 'no-store' },
+  )
+  let assumed = 0
+  if (estRes.ok) {
+    const rows = (await estRes.json()) as { flight_date: string; iata_number: string; arr_iata: string; est_arr: string }[]
+    for (const r of rows) {
+      const w = await fetch(
+        `${SB_URL}/rest/v1/flight?iata_number=eq.${encodeURIComponent(r.iata_number)}`
+          + `&flight_date=eq.${r.flight_date}&arr_iata=eq.${r.arr_iata}`
+          + `&real_arr=is.null&arr_confirmed_at=is.null`,
+        {
+          method: 'PATCH',
+          headers: { ...HEADERS, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+          body: JSON.stringify({ arr_confirmed_at: r.est_arr, arr_confirmed_src: 'fr24_estimate' }),
+        },
+      )
+      if (w.ok) assumed++
+    }
+  }
+
+  return NextResponse.json({ ok: true, checked: pending.length, confirmed, assumed, callsigns })
 }
