@@ -33,11 +33,17 @@ const CHUNK = 100
  * Written when the transition is detected and carried through storage, so the retry sweep
  * composes exactly the same sentence an hour later as the inline send would have.
  */
+export type Locale = 'en' | 'ar'
+
 export type AlertContext = {
   dep_iata: string | null
   arr_iata: string | null
   dep_city: string | null
   arr_city: string | null
+  /** Arabic names, from the same airports/airlines rows. Null falls back to the English value. */
+  dep_city_ar?: string | null
+  arr_city_ar?: string | null
+  airline_ar?: string | null
   /** Hours from UTC at each end, so times can be shown in the local clock of their own airport. */
   dep_offset: number | null
   arr_offset: number | null
@@ -102,14 +108,21 @@ const SYRIAN = new Set(['DAM', 'ALP', 'LTK', 'DEZ'])
  * Returns null when neither end is Syrian, or when the city is unknown — in which case the
  * copy falls back to naming nothing rather than printing a bare IATA code at someone.
  */
-function farEnd(ctx: AlertContext | null | undefined): { preposition: 'to' | 'from'; city: string } | null {
+function farEnd(
+  ctx: AlertContext | null | undefined,
+  locale: Locale = 'en',
+): { preposition: 'to' | 'from'; city: string } | null {
   if (!ctx) return null
   const depSyrian = !!ctx.dep_iata && SYRIAN.has(ctx.dep_iata)
   const arrSyrian = !!ctx.arr_iata && SYRIAN.has(ctx.arr_iata)
+  // Arabic where we have it, English where we do not — a name in the wrong language beats a
+  // sentence with a hole in it.
+  const dep = (locale === 'ar' ? ctx.dep_city_ar : null) ?? ctx.dep_city
+  const arr = (locale === 'ar' ? ctx.arr_city_ar : null) ?? ctx.arr_city
 
   // Domestic (DAM→ALP) names the destination: "from Damascus" would be the half already known.
-  if (depSyrian && ctx.arr_city) return { preposition: 'to',   city: ctx.arr_city }
-  if (arrSyrian && ctx.dep_city) return { preposition: 'from', city: ctx.dep_city }
+  if (depSyrian && arr) return { preposition: 'to',   city: arr }
+  if (arrSyrian && dep) return { preposition: 'from', city: dep }
   return null
 }
 
@@ -119,9 +132,17 @@ function farEnd(ctx: AlertContext | null | undefined): { preposition: 'to' | 'fr
  * Big delays switch to hours because minutes stop being readable: RB516 was 296 minutes late
  * tonight, which nobody converts to "nearly five hours" while glancing at a lock screen.
  */
-function lateness(min: number | null | undefined): string | null {
+function lateness(min: number | null | undefined, locale: Locale = 'en'): string | null {
   if (min === null || min === undefined) return null
   const n = Math.abs(min)
+  if (locale === 'ar') {
+    // Feminine, agreeing with الرحلة. Western numerals throughout, per the standing rule.
+    if (n < 3) return 'في موعدها'
+    const word = min > 0 ? 'متأخرة' : 'مبكرة'
+    if (n < 90) return `${word} ${n} دقيقة`
+    const h = Math.floor(n / 60), m = n % 60
+    return m ? `${word} ${h} ساعة و${m} دقيقة` : `${word} ${h} ساعة`
+  }
   if (n < 3) return 'on time'
   const word = min > 0 ? 'late' : 'early'
   if (n < 90) return `${n} ${n === 1 ? 'minute' : 'minutes'} ${word}`
@@ -135,22 +156,38 @@ export function compose(
   num: string,
   detail: string | null,
   ctx?: AlertContext | null,
+  locale: Locale = 'en',
 ): { title: string; body: string } | null {
   // The detail carries an ISO timestamp for the movement events; fall back to the bare phrase
   // when it does not, rather than printing a half-parsed time.
   const stamp = detail?.match(/\d{4}-\d{2}-\d{2}T[\d:.]+Z?/)?.[0] ?? null
-  const far   = farEnd(ctx)
+  const far   = farEnd(ctx, locale)
   const where = far ? ` ${far.preposition} ${far.city}` : ''
+  const ar    = locale === 'ar'
+  /*
+   * Arabic names the flight, then qualifies it — الرحلة X المتجهة إلى / القادمة من — where
+   * English hangs the preposition off the number. Same two facts, different join, so the
+   * sentences are written out per language rather than assembled from shared fragments.
+   */
+  const arWhere = far ? ` ${far.preposition === 'to' ? 'المتجهة إلى' : 'القادمة من'} ${far.city}` : ''
+  const arFlight = `الرحلة ${num}${arWhere}`
 
   switch (event) {
     case 'DEPARTED': {
       const at   = localTime(stamp, ctx?.dep_offset ?? null)
-      const late = lateness(ctx?.dep_delay_min)
+      const late = lateness(ctx?.dep_delay_min, locale)
       const eta  = localTime(ctx?.eta_utc ?? null, ctx?.arr_offset ?? null)
 
-      // "XY592 to Jeddah has departed"
-      const title = `${num}${where} has departed`
+      // "XY592 to Jeddah has departed" / "أقلعت الرحلة XY592 المتجهة إلى جدة"
+      const title = ar ? `أقلعت ${arFlight}` : `${num}${where} has departed`
       const parts: string[] = []
+      if (ar) {
+        // غادرت, not أقلعت — the title already said أقلعت, and a lock screen showing the same
+        // verb twice in two lines reads as a glitch.
+        if (at)  parts.push(late && late !== 'في موعدها' ? `غادرت ${at}، ${late}` : `غادرت ${at}`)
+        if (eta) parts.push(far?.preposition === 'to' ? `الوصول المتوقع إلى ${far.city} ${eta}` : `الوصول المتوقع ${eta}`)
+        return { title, body: parts.length ? `${parts.join('، ')}.` : 'في الجو الآن.' }
+      }
       if (at)   parts.push(late && late !== 'on time' ? `Took off ${at}, ${late}` : `Took off ${at}`)
       // Naming the arrival city carries which clock the time is in without saying so.
       // The city is named only when it is the far end, and it is what says which clock the
@@ -161,7 +198,7 @@ export function compose(
 
     case 'LANDED': {
       const at   = localTime(stamp, ctx?.arr_offset ?? null)
-      const late = lateness(ctx?.arr_delay_min)
+      const late = lateness(ctx?.arr_delay_min, locale)
 
       /*
        * Landing into Syria names where it came FROM; landing abroad names where it landed.
@@ -171,11 +208,19 @@ export function compose(
        * something the reader already knew when they tapped the bell.
        */
       const arrSyrian = !!ctx?.arr_iata && SYRIAN.has(ctx.arr_iata)
-      const title = arrSyrian || !ctx?.arr_city
-        ? `${num}${where} has landed`
-        : `${num} has landed in ${ctx.arr_city}`
+      const arrCity = (ar ? ctx?.arr_city_ar : null) ?? ctx?.arr_city
+      const title = ar
+        ? (arrSyrian || !arrCity ? `هبطت ${arFlight}` : `هبطت الرحلة ${num} في ${arrCity}`)
+        : (arrSyrian || !ctx?.arr_city
+            ? `${num}${where} has landed`
+            : `${num} has landed in ${ctx.arr_city}`)
 
       const parts: string[] = []
+      if (ar) {
+        if (at)   parts.push(`وصلت ${at}`)
+        if (late) parts.push(late)
+        return { title, body: parts.length ? `${parts.join('، ')}.` : 'على الأرض الآن.' }
+      }
       if (at)   parts.push(`Touched down ${at}`)
       if (late) parts.push(late)
       return { title, body: parts.length ? `${parts.join(', ')}.` : 'Now on the ground.' }
@@ -189,6 +234,14 @@ export function compose(
       const n    = Math.abs(mins)
       const unit = n === 1 ? 'minute' : 'minutes'
 
+      if (ar) {
+        return {
+          title: mins > 0 ? `تأخرت ${arFlight}` : `ستصل ${arFlight} مبكراً`,
+          body: eta
+            ? `الوصول المتوقع الآن ${eta}${far?.preposition === 'to' ? ` في ${far.city}` : ''}، ${mins > 0 ? 'متأخرة' : 'مبكرة'} ${n} دقيقة.`
+            : `${mins > 0 ? 'متأخرة' : 'مبكرة'} ${n} دقيقة عن الموعد المحدد.`,
+        }
+      }
       return {
         title: `${num}${where} is ${mins > 0 ? 'delayed' : 'arriving earlier'}`,
         body: eta
@@ -197,11 +250,19 @@ export function compose(
       }
     }
 
-    case 'CANCELLED':
+    case 'CANCELLED': {
+      const carrier = (ar ? ctx?.airline_ar : null) ?? ctx?.airline
+      if (ar) {
+        return {
+          title: `أُلغيت ${arFlight}`,
+          body: carrier ? `يرجى مراجعة ${carrier} للبدائل.` : 'يرجى مراجعة شركة الطيران للبدائل.',
+        }
+      }
       return {
         title: `${num}${where} is cancelled`,
         body: ctx?.airline ? `Check with ${ctx.airline} for options.` : 'Check with the airline for options.',
       }
+    }
 
     default:
       return null
@@ -226,6 +287,30 @@ export async function deliver(events: Transition[]): Promise<DeliveryResult> {
   )
   const subs: Sub[] = subRes.ok ? await subRes.json() : []
   if (!subs.length) return empty
+
+  /*
+   * Each device's language, so the message is written in the one the reader chose.
+   *
+   * Held on the device rather than the subscription deliberately: someone who switches the app
+   * to Arabic should get Arabic for the flights they were already following, not only for the
+   * ones they follow next. The app refreshes this row on launch, so it corrects itself.
+   *
+   * A device we have no row for falls back to English, which is what every device was before
+   * this column existed.
+   */
+  const tokens = [...new Set(subs.map(s => s.token))]
+  const locales: Record<string, Locale> = {}
+  if (tokens.length) {
+    const devRes = await fetch(
+      `${SB_URL}/rest/v1/push_devices?select=token,locale&token=in.(${tokens.map(encodeURIComponent).join(',')})`,
+      { headers: HEADERS, cache: 'no-store' },
+    )
+    if (devRes.ok) {
+      for (const d of (await devRes.json()) as { token: string; locale: string | null }[]) {
+        if (d.locale === 'ar') locales[d.token] = 'ar'
+      }
+    }
+  }
 
   // Already-sent pairs, so the inline send and the sweep cannot both buzz the same phone.
   const since = new Date(Date.now() - 60 * 60_000).toISOString()
@@ -262,7 +347,7 @@ export async function deliver(events: Transition[]): Promise<DeliveryResult> {
       const key = `${s.token}|${e.iata_number}|${e.flight_date}|${e.event}`
       if (already.has(key)) continue
       already.add(key)   // guards against two rows for the same transition in one call
-      const text = compose(e.event, e.iata_number, e.detail, e.context)
+      const text = compose(e.event, e.iata_number, e.detail, e.context, locales[s.token] ?? 'en')
       if (!text) continue
       messages.push({
         to: s.token, ...text, sound: 'default',

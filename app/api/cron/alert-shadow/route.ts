@@ -86,7 +86,7 @@ type ShadowRow = {
   context: AlertContext | null
 }
 
-type Airport = { city: string | null; utc_offset: number | null }
+type Airport = { city: string | null; city_ar: string | null; utc_offset: number | null }
 
 /**
  * City names and UTC offsets, cached for an hour.
@@ -99,13 +99,13 @@ let airportCache: { map: Record<string, Airport>; ts: number } | null = null
 async function fetchAirports(): Promise<Record<string, Airport>> {
   if (airportCache && Date.now() - airportCache.ts < 3_600_000) return airportCache.map
   try {
-    const res = await fetch(`${SB_URL}/rest/v1/airports?select=iata,city,utc_offset`, {
+    const res = await fetch(`${SB_URL}/rest/v1/airports?select=iata,city,city_ar,utc_offset`, {
       headers: HEADERS, cache: 'no-store',
     })
     if (!res.ok) return airportCache?.map ?? {}
-    const rows: { iata: string; city: string | null; utc_offset: number | null }[] = await res.json()
+    const rows: { iata: string; city: string | null; city_ar: string | null; utc_offset: number | null }[] = await res.json()
     const map: Record<string, Airport> = {}
-    for (const r of rows) if (r.iata) map[r.iata.toUpperCase()] = { city: r.city, utc_offset: r.utc_offset }
+    for (const r of rows) if (r.iata) map[r.iata.toUpperCase()] = { city: r.city, city_ar: r.city_ar, utc_offset: r.utc_offset }
     airportCache = { map, ts: Date.now() }
     return map
   } catch {
@@ -200,6 +200,10 @@ export async function GET(req: Request) {
       arr_iata:   f.arr_iata ?? null,
       dep_city:   dep?.city ?? null,
       arr_city:   arr?.city ?? null,
+      // Carried alongside rather than instead: delivery picks per recipient, and one flight's
+      // transition can go to an Arabic phone and an English one in the same batch.
+      dep_city_ar: dep?.city_ar ?? null,
+      arr_city_ar: arr?.city_ar ?? null,
       dep_offset: dep?.utc_offset ?? null,
       arr_offset: arr?.utc_offset ?? null,
       airline:    f.airline_name ?? null,

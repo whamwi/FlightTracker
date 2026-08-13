@@ -22,7 +22,7 @@ const TOKEN_RE = /^Expo(nent)?PushToken\[[A-Za-z0-9_-]+\]$/
 
 export async function POST(req: Request) {
   let body: {
-    token?: string; platform?: string; app_version?: string
+    token?: string; platform?: string; app_version?: string; locale?: string
     iata_number?: string; flight_date?: string; events?: string[]; on?: boolean
   }
   try {
@@ -46,6 +46,14 @@ export async function POST(req: Request) {
       token,
       platform: body.platform ?? null,
       app_version: body.app_version ?? null,
+      /*
+       * The language notifications will be written in.
+       *
+       * Allow-listed rather than stored as sent: this value is chosen by the composer later, and
+       * an unrecognised one would silently fall through to English on every future alert with
+       * nothing to show why. A device that sends nothing keeps whatever it had.
+       */
+      ...(body.locale === 'ar' || body.locale === 'en' ? { locale: body.locale } : {}),
       last_seen_at: new Date().toISOString(),
       disabled_at: null,   // a device asking again is alive, whatever Expo said before
     }),
