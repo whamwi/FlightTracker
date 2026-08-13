@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { fetchCallsignLookup, fetchIataToIcao, resolveCallsign } from '@/lib/callsign'
 import { SYRIA_AIRPORT_SET, SYRIA_AIRPORTS_CSV } from '@/lib/syria-airports'
+import { boardFromV2, type BoardFlightV2 } from '@/lib/board-v2'
 
 export const dynamic = 'force-dynamic'
 
@@ -136,6 +137,55 @@ function buildFlight(f: any, num: string, status: string, airlineMap: Record<str
   }
 }
 
+/**
+ * The detail card for one flight, from the same board document the board tab renders.
+ *
+ * The cache path below asked a different question — it scanned every Syrian airport's arrivals
+ * and departures for a matching number — and so could answer differently for the same flight.
+ * Reading the board means the card and the row can no longer disagree.
+ *
+ * Two things the cache path needed disappear here. Matching no longer has to guess which
+ * identifier FR24 filed under, because v2 publishes `iata_number` and `callsign` side by side.
+ * And the second pass that re-read the origin airport's cache for `est_dep`/`est_arr` is gone:
+ * those live on the flight row itself. That pass was also the reason Latakia and Deir ez-Zor
+ * detail pages lost their estimates once browser warming stopped — only DAM and ALP were still
+ * being written, so there was no origin row left to read.
+ *
+ * Ranked by STATUS_RANK when a number appears twice on one day, which keeps the cache path's
+ * behaviour of showing the most-progressed instance.
+ */
+function flightFromBoard(
+  board: BoardFlightV2[],
+  aliases: Set<string>,
+  num: string,
+  airlineMap: Record<string, { name: string; flag: string; icao: string }>,
+  date: string,
+) {
+  let best: BoardFlightV2 | null = null
+  let bestRank = -1
+  for (const f of board) {
+    const forms = [f.iata_number, f.callsign]
+      .filter(Boolean)
+      .map(s => (s as string).replace(/\s+/g, '').toUpperCase())
+    if (!forms.some(s => aliases.has(s))) continue
+    const rank = STATUS_RANK[f.status] ?? 0
+    if (rank > bestRank) { best = f; bestRank = rank }
+  }
+  if (!best) return null
+
+  /*
+   * airline_icao and date are not on the board contract, and both are load-bearing: the card
+   * builds the ICAO callsign from the first to look up an aircraft photo, and calcDelayMin
+   * needs the second to place an HH:MM against the right day.
+   */
+  return {
+    ...best,
+    airline_icao: airlineMap[best.airline_iata]?.icao ?? '',
+    iata_number: num,
+    date,
+  }
+}
+
 async function fetchCaches(date: string): Promise<{ airport_iata: string; arrivals: unknown[]; departures: unknown[] }[]> {
   const res = await fetch(
     `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${date}&airport_iata=in.(${SYRIA_AIRPORTS_CSV})&select=airport_iata,arrivals,departures`,
@@ -186,6 +236,16 @@ export async function GET(req: Request) {
   }
 
   for (const date of dates) {
+    const board = await boardFromV2(date, 'flight')
+    if (board) {
+      const hit = flightFromBoard(board, aliases, num, airlineMap, date)
+      if (hit) return NextResponse.json({ ok: true, flight: hit, date, source: 'v2' })
+      // A board that answered and does not contain this number is a real "not found" for that
+      // day — fall through to the next date rather than to the cache, which would reintroduce
+      // the disagreement this route was migrated to remove.
+      continue
+    }
+
     const rows = await fetchCaches(date)
     let bestFlight = null
     let bestRank   = -1

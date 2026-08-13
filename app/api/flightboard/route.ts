@@ -1,64 +1,12 @@
 import { NextResponse } from 'next/server'
 import { fetchCallsignLookup, fetchIataToIcao, resolveCallsign, resolveIata } from '@/lib/callsign'
 import { SYRIA_AIRPORTS_CSV, SYRIA_AIRPORT_SET } from '@/lib/syria-airports'
+import { boardFromV2 } from '@/lib/board-v2'
 
 export const dynamic = 'force-dynamic'
 
 const SB_URL = process.env.SUPABASE_URL!
 
-/**
- * The board's real source, as of 13 Aug 2026.
- *
- * Everything below this line reads `fr24_daily_cache` — a table warmed by whichever visitor
- * happens to open the site — and `flight`, maintained by the harvester on a schedule, is simply
- * better. Compared field by field on 13 Aug across 95 flights, identical set, no flight in one
- * and missing from the other:
- *
- *   actual_arr_utc    22 flights the cache did not know had landed
- *   revised_arr_utc   27 still carrying an estimate for a flight already down
- *   duration_min      28 following from those two
- *   aircraft_reg      10 blank in the cache
- *   status             5 e.g. 3L505 Departed in the cache, Arrived in v2
- *   airline_iata       4 e.g. 3L456 called G9 — a different airline, wrong name and logo
- *   arr_baggage        9 shown by the cache before the flight had arrived, which is the wrong
- *                        carousel: FR24 republishes belts from earlier instances of a number
- *
- * The contract is field-for-field identical — /v2/board was written to mirror this response —
- * so this is a source swap, not a reshape. Two additive fields ride along, dep_prev_day and
- * dep_confirmed, which no current consumer reads.
- */
-const V2_API = process.env.FLIGHT_API_URL ?? 'https://flight-api-production-5124.up.railway.app'
-
-/**
- * The board from `flight`, or null if the service cannot answer.
- *
- * Null rather than throwing, because the caller falls back to the cache path below. That
- * fallback is deliberate here and deliberately absent in the alert path: a stale board is
- * visibly wrong and corrects itself on the next refresh, while a stale alert is silent and
- * unrecoverable. It is scaffolding — once this has run without falling back, the 400 lines
- * underneath can go, and the cache with them.
- */
-async function boardFromV2(date: string): Promise<unknown[] | null> {
-  try {
-    const res = await fetch(`${V2_API}/v2/board?date=${date}`, { cache: 'no-store' })
-    if (!res.ok) {
-      console.warn(`[flightboard] v2 answered ${res.status} for ${date} — falling back to cache`)
-      return null
-    }
-    const body = await res.json()
-    const flights = body?.flights
-    if (!Array.isArray(flights) || flights.length === 0) {
-      // An empty board is indistinguishable from a broken one at this layer, and a day with no
-      // flights does not happen here. Treat it as a failure rather than publishing a blank page.
-      console.warn(`[flightboard] v2 returned ${flights?.length ?? 'no'} flights for ${date} — falling back`)
-      return null
-    }
-    return flights
-  } catch (e) {
-    console.warn(`[flightboard] v2 unreachable for ${date}: ${e} — falling back to cache`)
-    return null
-  }
-}
 const SB_KEY = process.env.SUPABASE_ANON_KEY!
 const HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 
@@ -181,7 +129,7 @@ export async function GET(req: Request) {
   const date = searchParams.get('date')
   if (!date) return NextResponse.json({ ok: false, error: 'date required' }, { status: 400 })
 
-  const v2 = await boardFromV2(date)
+  const v2 = await boardFromV2(date, 'flightboard')
   if (v2) {
     return NextResponse.json(
       { ok: true, date, flights: v2, source: 'v2' },
