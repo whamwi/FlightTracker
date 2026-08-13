@@ -295,16 +295,23 @@ export default async function Image(
             </span>
           </div>
 
-          {/* Status badge */}
+          {/*
+            * Status badge.
+            *
+            * Sized up: this is the one thing on the card that changes, and the card is what most
+            * people see — usually the only thing they see. At 17px it read as a caption beside a
+            * 90px flight number; the state of the flight is the reason the card is worth looking
+            * at at all.
+            */}
           <div style={{
             display: 'flex', alignItems: 'center',
-            padding: '8px 20px',
+            padding: '12px 28px',
             background: sc.bg,
             borderRadius: 99,
-            border: `1.5px solid ${sc.dot}44`,
+            border: `2px solid ${sc.dot}44`,
           }}>
-            <div style={{ width: 8, height: 8, borderRadius: '50%', background: sc.dot, marginRight: 8, display: 'flex', flexShrink: 0 }} />
-            <span style={{ fontSize: 17, fontWeight: 700, color: sc.text, display: 'flex' }}>{ar ? statusAr(status) : status}</span>
+            <div style={{ width: 11, height: 11, borderRadius: '50%', background: sc.dot, marginRight: 11, display: 'flex', flexShrink: 0 }} />
+            <span style={{ fontSize: 24, fontWeight: 700, color: sc.text, display: 'flex' }}>{ar ? statusAr(status) : status}</span>
           </div>
         </div>
 
