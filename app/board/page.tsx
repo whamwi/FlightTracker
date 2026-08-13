@@ -579,7 +579,14 @@ function FlightCard({ f, view, isPinned, onTogglePin, boardDate }: { f: Flight; 
           Wrapping is centred and the separators are their own elements, so a wrapped line reads
           as a second row of labels rather than a stray character.
         */}
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+        {/*
+          alignItems is stretch, not center. ProgressRoute and ArrivedRoute are separate
+          components carrying `flex: 1`, which stretched them while this column was a row child.
+          Wrapping them in a centred column made that `flex: 1` mean vertical growth instead, and
+          left their width to shrink to content — so the rail, sized `width: 100%`, collapsed to a
+          stub beside the plane. MetaStrip centres its own contents, so nothing needs centring here.
+        */}
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
         {isCancelled ? (
           <div style={{ alignSelf: 'stretch', display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 5 }}>
             <span style={{ font: `500 11px/1 'Instrument Sans', system-ui`, color: C.muted, textAlign: 'center' }}>
