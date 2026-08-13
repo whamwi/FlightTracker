@@ -840,16 +840,22 @@ export default function BoardPage() {
   useEffect(() => { load(tab) }, [tab, load])
   useEffect(() => {
     if (tab !== 0) return
+    /*
+     * The board no longer warms the cache from the visitor's browser.
+     *
+     * Every reader that matters now comes from `flight`, filled by the harvester on a schedule
+     * of our choosing. Warming from a browser is what made freshness track whoever happened to
+     * open the site: on 10 Aug RJ434 left Aleppo at 10:06:45Z and did not reach the cache until
+     * 10:17:51Z, the moment someone opened /fr24 on a desktop. It is also why the historical
+     * rows froze around 21:00 each day and lost the late arrivals.
+     *
+     * warmFR24Cache is left in place, unused, until the remaining cache readers are migrated —
+     * /api/flight, /api/weekly-stats, landing-confirm and three crons still read the table, and
+     * cron/fr24-sync still fills it server-side.
+     */
     const loadTimer = setInterval(() => load(0, true), 60_000)
-    const warmTimer = setInterval(() => {
-      AIRPORTS.forEach(ap => warmFR24Cache(ap))
-    }, 5 * 60_000)
-    return () => { clearInterval(loadTimer); clearInterval(warmTimer) }
-  }, [tab, load, warmFR24Cache])
-
-  useEffect(() => {
-    AIRPORTS.forEach(ap => warmFR24Cache(ap))
-  }, [warmFR24Cache])
+    return () => { clearInterval(loadTimer) }
+  }, [tab, load])
 
   // Read at fire time, not captured. The refresh below is armed when the airport changes and
   // only cancelled when it changes again — so changing day inside those four seconds used to
@@ -861,7 +867,9 @@ export default function BoardPage() {
   const mountedRef = useRef(false)
   useEffect(() => {
     if (!mountedRef.current) { mountedRef.current = true; return }
-    warmFR24Cache(airport)
+    // The four-second delay used to give the warm above time to land before reloading. Nothing
+    // is being warmed now, but the delay stays: /api/flightboard is CDN-cached for 30s, so an
+    // immediate reload would answer from the edge with the previous airport's board.
     const timer = setTimeout(() => load(tabRef.current, true), 4000)
     return () => clearTimeout(timer)
   }, [airport]) // eslint-disable-line react-hooks/exhaustive-deps

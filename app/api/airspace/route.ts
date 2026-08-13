@@ -772,7 +772,6 @@ let feedInflight: Promise<{ aircraft: any[]; live: boolean }> | null = null
 //   the plane leaves the radius.
 // One write per callsign per Vercel instance lifetime (depSynced guard).
 const SYRIAN_AIRPORTS_SET = SYRIA_AIRPORT_SET
-const depSynced = new Set<string>()
 
 /**
  * Estimate when a flight departed, for a board flight we have just seen airborne but for
@@ -815,57 +814,7 @@ function inferDepartureTs(
   return Math.max(floor, Math.min(est, nowSec))
 }
 
-async function writeInboundDep(info: BoardFlight, depTs: number): Promise<void> {
-  const arrAp = info.arr_iata
-  if (!arrAp || !SYRIAN_AIRPORTS_SET.has(arrAp)) return
-  // The flight's own date, not today's — see BoardFlight.flight_date.
-  const date = info.flight_date
-  const rowRes = await fetch(
-    `${SB_URL}/rest/v1/fr24_daily_cache?airport_iata=eq.${arrAp}&flight_date=eq.${date}&select=arrivals,departures`,
-    { headers: SB_HEADERS },
-  )
-  if (!rowRes.ok) return
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows: any[] = await rowRes.json()
-  if (!rows.length) return
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  // dep_source records that this is our estimate, not a published time. Without it a value
-  // we invented is indistinguishable from one FR24 gave us, which makes "no departure yet"
-  // impossible to ask and leaves a drifting number looking authoritative.
-  const list = ((rows[0].arrivals ?? []) as any[]).map((f: any) =>
-    f.num === info.num ? { ...f, real_dep: depTs, dep_source: 'adsb' } : f,
-  )
-  await fetch(`${SB_URL}/rest/v1/fr24_daily_cache`, {
-    method:  'POST',
-    headers: { ...SB_HEADERS, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' },
-    body: JSON.stringify({ airport_iata: arrAp, flight_date: date, arrivals: list, departures: rows[0].departures ?? [] }),
-  })
-}
 
-async function writeOutboundDep(info: BoardFlight, depTs: number): Promise<void> {
-  const depAp = info.dep_iata
-  if (!depAp || !SYRIAN_AIRPORTS_SET.has(depAp)) return
-  // The flight's own date, not today's — see BoardFlight.flight_date.
-  const date = info.flight_date
-  const rowRes = await fetch(
-    `${SB_URL}/rest/v1/fr24_daily_cache?airport_iata=eq.${depAp}&flight_date=eq.${date}&select=arrivals,departures`,
-    { headers: SB_HEADERS },
-  )
-  if (!rowRes.ok) return
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows: any[] = await rowRes.json()
-  if (!rows.length) return
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  // See writeInboundDep — this is an estimate from position, not a published departure.
-  const list = ((rows[0].departures ?? []) as any[]).map((f: any) =>
-    f.num === info.num ? { ...f, real_dep: depTs, dep_source: 'adsb' } : f,
-  )
-  await fetch(`${SB_URL}/rest/v1/fr24_daily_cache`, {
-    method:  'POST',
-    headers: { ...SB_HEADERS, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' },
-    body: JSON.stringify({ airport_iata: depAp, flight_date: date, arrivals: rows[0].arrivals ?? [], departures: list }),
-  })
-}
 
 /**
  * The cron's positions, read back.
@@ -1057,11 +1006,15 @@ export async function GET() {
        * tonight's row with a real departure — putting a flight on the board as departed, then
        * arrived, hours before it boards.
        *
-       * An hour of tolerance, because a flight that leaves slightly early is ordinary and a
-       * flight that leaves a day early is not.
+       * Both harms are now prevented upstream instead of guarded here. boardFromV2 ranks the
+       * instances of a callsign — airborne beats not-yet-departed beats arrived — so the
+       * airborne row is the one that reaches this point, and tonight's is never matched to an
+       * aircraft already in the air. The writeback that the second harm described is gone with
+       * the cache it wrote to.
+       *
+       * Kept as a comment rather than deleted with the code: it is the case that motivated the
+       * ranking, and the next person to touch instance selection should know FYC781 exists.
        */
-      const schedDepMs   = info?.sched_dep ? info.sched_dep * 1000 : null
-      const notYetDue    = schedDepMs !== null && schedDepMs > Date.now() + 60 * 60_000
 
       if (!actual_dep_utc && info && isAirborne) {
         if (info.arr_iata && SYRIAN_AIRPORTS_SET.has(info.arr_iata)
@@ -1069,23 +1022,24 @@ export async function GET() {
           // Inbound
           const depTs    = inferDepartureTs(info, a.lat, a.lon, apCoords, Math.floor(Date.now() / 1000))
           actual_dep_utc = new Date(depTs * 1000).toISOString()
-          // Not written back when the matched row is still in the future: stamping real_dep
-          // there would put tonight's flight on the board as departed, then arrived, hours
-          // before it boards. The marker is drawn either way — the aircraft is real.
-          if (!depSynced.has(cs) && !notYetDue) {
-            depSynced.add(cs)
-            writeInboundDep(info, depTs).catch(() => {})
-          }
+          /*
+           * The writeback is gone. It stamped this inferred departure into fr24_daily_cache so
+           * the board would show it, and the board reads `flight` now — it was writing to a
+           * table nothing consults. The inference stays: it is what draws the marker for a
+           * flight FR24 has not yet declared departed.
+           *
+           * Note what is deliberately NOT replacing it. This never wrote to `flight` and should
+           * not start: a departure guessed from a position is not the same fact as one FR24
+           * published, and `flight` is the record of what is true. If inferred departures should
+           * survive, they need a field that says they were inferred — `dep_confirmed` in the v2
+           * contract already draws that line.
+           */
         } else if (info.dep_iata && SYRIAN_AIRPORTS_SET.has(info.dep_iata)
             && !SYRIAN_AIRPORTS_SET.has(info.arr_iata ?? '')) {
           // Outbound
           const depTs    = inferDepartureTs(info, a.lat, a.lon, apCoords, Math.floor(Date.now() / 1000))
           actual_dep_utc = new Date(depTs * 1000).toISOString()
-          // See above — no writeback onto a flight that has not left yet.
-          if (!depSynced.has(cs) && !notYetDue) {
-            depSynced.add(cs)
-            writeOutboundDep(info, depTs).catch(() => {})
-          }
+          // See above — the writeback is gone, the inference stays.
         }
       }
 
