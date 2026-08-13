@@ -7,7 +7,7 @@ import { airportCity, cityFor, airlineNameFor, airportFlag as _apFlag, airportOf
 import SiteNav from '@/components/SiteNav'
 import LanguageSwitch from '@/components/LanguageSwitch'
 import { useT, useLocale, useHref } from '@/components/LocaleProvider'
-import { STATUS_KEY, counted, type Locale } from '@/lib/i18n'
+import { STATUS_KEY, counted, dateLocaleOf, type Locale } from '@/lib/i18n'
 import { BOARD_AIRPORTS, type BoardAirport } from '@/lib/syria-airports'
 
 const city = (iata: string) => cityFor(iata)
@@ -765,9 +765,9 @@ const REGION_KEY: Record<string, string> = {
 }
 
 // ── Tab date label ────────────────────────────────────────────────────────────
-function tabDateLabel(offset: number): string {
+function tabDateLabel(offset: number, locale: Locale): string {
   const d = syriaDate(offset)
-  return new Date(d + 'T12:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+  return new Date(d + 'T12:00:00Z').toLocaleDateString(dateLocaleOf(locale), { day: 'numeric', month: 'short' })
 }
 
 // ── Plane SVG ─────────────────────────────────────────────────────────────────
@@ -1091,7 +1091,7 @@ export default function BoardPage() {
   }, [loading, tab, view, airport])
 
   const dateLabel = date
-    ? new Date(date + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
+    ? new Date(date + 'T12:00:00Z').toLocaleDateString(dateLocaleOf(locale), { weekday: 'long', day: 'numeric', month: 'long' })
     : ''
 
   const viewTitle    = t(view === 'arr' ? 'board.arrivals_for' : 'board.departures_for')
@@ -1210,7 +1210,7 @@ export default function BoardPage() {
                 }}>
                   <span style={{ font: `${tab === tb ? 700 : 600} 13px/1 'Instrument Sans', system-ui`, color: tab === tb ? '#fff' : C.secondary }}>
                     {tb === -1 ? t('day.yesterday')
-                      : tb === 0 ? `${t('label.today_prefix')} · ${tabDateLabel(0)}`
+                      : tb === 0 ? `${t('label.today_prefix')} · ${tabDateLabel(0, locale)}`
                       : t('day.tomorrow')}
                   </span>
                   {tab === tb && total > 0 && (

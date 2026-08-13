@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import SiteNav from '@/components/SiteNav'
 import { useT, useLocale } from '@/components/LocaleProvider'
-import type { Locale } from '@/lib/i18n'
+import { dateLocaleOf, type Locale } from '@/lib/i18n'
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 const C = {
@@ -40,16 +40,11 @@ type Media = {
 
 const isArabic = (s: string) => /[؀-ۿ]/.test(s)
 
-/*
- * Dates in the reader's own calendar vocabulary.
- *
- * ar-SY gives the Levantine month names a Syrian reader actually uses — آب, not أغسطس — and
- * the -u-nu-latn extension keeps the digits Latin, which is the house rule everywhere numbers
- * carry meaning. Plain 'ar-SY' would render ٨ آب ٢٠٢٦.
- */
+// Dates in the reader's own calendar vocabulary — the rule itself lives in dateLocaleOf, which
+// the board now shares. It was this file's local knowledge, which is why the board never had it.
 function fmtDate(iso: string | null, locale: Locale) {
   if (!iso) return ''
-  return new Date(iso).toLocaleDateString(locale === 'ar' ? 'ar-SY-u-nu-latn' : 'en-GB', {
+  return new Date(iso).toLocaleDateString(dateLocaleOf(locale), {
     day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Damascus',
   })
 }

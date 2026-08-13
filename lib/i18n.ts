@@ -62,6 +62,20 @@ export function alternatesFor(visiblePath: string) {
 /** Text direction. Drives `dir` on <html>, which is what mirrors the flexbox layout. */
 export const dirOf = (l: Locale): 'rtl' | 'ltr' => (l === 'ar' ? 'rtl' : 'ltr')
 
+/**
+ * The tag to format dates under, for a reader of this locale.
+ *
+ * `ar-SY` gives the Levantine month names a Syrian reader actually uses — آب, not أغسطس — and
+ * `-u-nu-latn` keeps the digits Latin, the house rule everywhere a number carries meaning. Plain
+ * 'ar-SY' would render ٨ آب ٢٠٢٦.
+ *
+ * A tag rather than a formatter, because the three call sites want different parts of a date:
+ * the day chip wants "13 Aug", the page heading wants a weekday too, the news list wants a year.
+ * Only the locale decision is shared, and it is the part that was being got wrong — the board
+ * had 'en-GB' hard-coded in both of its formatters, so the Arabic board read اليوم · 13 Aug.
+ */
+export const dateLocaleOf = (l: Locale): string => (l === 'ar' ? 'ar-SY-u-nu-latn' : 'en-GB')
+
 type Dict = Record<string, string>
 
 const en: Dict = {
