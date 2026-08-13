@@ -180,14 +180,33 @@ async function boardFromV2(dates: string[]): Promise<BoardFlight[] | null> {
       return ((body?.flights ?? []) as any[]).map(f => ({ f, d }))
     }))
 
-    const out: BoardFlight[] = []
-    const seen = new Set<string>()
+    /*
+     * One row per CALLSIGN, ranked — not one per callsign-and-schedule.
+     *
+     * A daily rotation appears on two of the three dates: today's leg and tomorrow's. Keying the
+     * dedup on iata_number plus sched_dep let both through, and `boardMap` keeps whichever it
+     * sees last — tomorrow's, because of the order the dates are passed. FZ1192 was arriving at
+     * Dubai while the map held its 14 Aug row, and inferDepartureTs then stamped a synthetic
+     * departure onto it from the aircraft's position: a departure time in the future, on a
+     * flight already nearly down.
+     *
+     * Ranked airborne > not yet departed > arrived, ties to the earlier date in the order passed.
+     * The same rule lib/index-by-iata.ts applies in the app, for the same reason — this is one
+     * fact about the domain and I failed to carry it across.
+     */
+    const best = new Map<string, { f: any; d: string; rank: number }>()
+    const rankOf = (f: any) =>
+      f.actual_arr_utc ? 0 : f.actual_dep_utc ? 2 : 1
     for (const { f, d } of pages.flat()) {
-      // A flight number appears on two dates when it crosses midnight; keep the first, which is
-      // today's page because of the order the dates are passed.
-      const key = `${f.iata_number}|${f.sched_dep_unix ?? ''}`
-      if (seen.has(key)) continue
-      seen.add(key)
+      const cs = (f.callsign ?? '').trim().toUpperCase()
+      if (!cs) continue
+      const rank = rankOf(f)
+      const held = best.get(cs)
+      if (!held || rank > held.rank) best.set(cs, { f, d, rank })
+    }
+
+    const out: BoardFlight[] = []
+    for (const { f, d } of best.values()) {
 
       /*
        * Scheduled arrival as unix. v2 publishes it as UTC HH:MM plus arr_next_day rather than a
