@@ -115,6 +115,48 @@ interface BoardFlight {
 const V2_API = process.env.FLIGHT_API_URL ?? 'https://flight-api-production-5124.up.railway.app'
 
 /**
+ * Live positions from the one canonical table, for flights our own receivers cannot hear.
+ *
+ * The circles below are direct reception and stay the primary source: they are 2-4 seconds old,
+ * while `fr24_live_position` is written on the harvester's 60-second sweep, so for an aircraft we
+ * can hear ourselves the sweep is simply fresher. This fills the gap instead — FR24's feed covers
+ * flights outside our coverage, and without it the web drew 8 aircraft where the mobile app drew
+ * 13 for the same sky.
+ *
+ * Append-only, never overwrite: two sources for one aircraft is how a marker starts jittering
+ * between them, and the server already picks between FR24's feed and our ADS-B before answering.
+ */
+async function livePositionsFromV2(): Promise<Map<string, {
+  lat: number; lon: number; alt: number | null; gs: number | null; track: number | null
+  fix_at: string | null; on_ground: boolean | null
+}> | null> {
+  try {
+    const r = await fetch(`${V2_API}/v2/live`, { cache: 'no-store' })
+    if (!r.ok) return null
+    const body = await r.json()
+    const out = new Map<string, any>()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const f of (body?.flights ?? []) as any[]) {
+      const cs = (f.callsign ?? '').trim().toUpperCase()
+      const p = f.position
+      if (!cs || !p) continue
+      // On the ground is a real state but not a useful marker: the aircraft is at an airport the
+      // map already draws, and a plane icon sitting on the field reads as a bug.
+      if (p.on_ground) continue
+      out.set(cs, {
+        lat: p.lat, lon: p.lon, alt: p.altitude_ft ?? null,
+        gs: p.ground_speed_kts ?? null, track: p.track_deg ?? null,
+        fix_at: p.fix_at ?? null, on_ground: p.on_ground ?? null,
+      })
+    }
+    return out
+  } catch (e) {
+    console.warn(`[airspace] v2 live unavailable (${e}) — circles only`)
+    return null
+  }
+}
+
+/**
  * The board layer from `flight`, three days of it, or null if the service cannot answer.
  *
  * This is the half of the map that was still reading `fr24_daily_cache` — a table warmed by
@@ -1058,6 +1100,49 @@ export async function GET() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       annotated.map((a: any) => (a.flight ?? '').trim().toUpperCase()),
     )
+    /*
+     * Flights FR24 can see and our receivers cannot.
+     *
+     * Added before the logged-position fallback below, because a live fix from the merged table
+     * is better than a stored one — and `emittedCs` stops both paths emitting the same aircraft.
+     */
+    const v2Live = await livePositionsFromV2()
+    if (v2Live) {
+      for (const [cs, p] of v2Live) {
+        if (emittedCs.has(cs)) continue          // we can hear it ourselves; that fix is fresher
+        const info = boardMap.get(cs)
+        if (!info) continue                      // identity comes from the board, never the fix
+        emittedCs.add(cs)
+        trackedExtra.push({
+          hex:            null,
+          flight:         cs,
+          lat:            p.lat,
+          lon:            p.lon,
+          alt_baro:       p.alt,
+          gs:             p.gs,
+          track:          p.track,
+          true_heading:   p.track,
+          t:              null,
+          r:              null,
+          // Not marked `fr24: true`: that flag means an out-of-band fix the client should
+          // dead-reckon from. This one is current — the server discards anything older than
+          // five minutes before publishing it.
+          fix_at:         p.fix_at,
+          board_match:    true,
+          dep_iata:       info.dep_iata,
+          arr_iata:       info.arr_iata,
+          dep_time_utc:   info.sched_dep    ? unixToHHMM(info.sched_dep) : null,
+          arr_time_utc:   info.sched_arr    ? unixToHHMM(info.sched_arr) : null,
+          duration_min:   info.duration_min ?? null,
+          iata_number:    info.iata_num     ?? null,
+          actual_dep_utc: info.actual_dep_utc ?? null,
+          actual_arr_utc: info.actual_arr_utc ?? null,
+          dep_delay_min:  info.dep_delay_min  ?? null,
+          airline_iata:   info.airline_iata   ?? null,
+        })
+      }
+    }
+
     const loggedMap = await fetchLoggedPositions()
     for (const sig of signalFlights) {
       const cs = sig.callsign.trim().toUpperCase()
