@@ -319,6 +319,78 @@ function ArrivedRoute({ durationMin }: { durationMin: number }) {
 }
 
 // ── Status badge ──────────────────────────────────────────────────────────────
+/**
+ * Where the flight is right now, when a live fix can say — otherwise the status badge.
+ *
+ * Mirrors the app's PhaseChip, including the parts that look like details and are not:
+ *
+ * The airborne pair has no strings of its own. It reads status.departed / status.in_air from the
+ * dictionary the rest of the site already uses, because the alternative is a fourth word for one
+ * state. Which of the two depends on the board: on arrivals the fact a reader wants is that it is
+ * still coming (في الجو); on departures, that it has gone (أقلعت).
+ *
+ * An unrecognised phase renders nothing and the caller keeps the status badge. That is the rule
+ * that lets the server introduce a phase later without a web deploy — the same contract the app
+ * relies on for a build already on someone's phone.
+ *
+ * Only the phases a reader acts on get colour. A board where every chip shouts tells you nothing;
+ * the point is that "at the gate" stands out from "scheduled".
+ */
+const PHASE_KEY: Record<string, string> = {
+  taxiing:      'phase.taxiing',
+  landed:       'phase.landed',
+  taxi_to_gate: 'phase.taxi_to_gate',
+  at_gate:      'phase.at_gate',
+  bags_on_belt: 'phase.bags_on_belt',
+  cancelled:    'status.cancelled',
+  scheduled:    'status.scheduled',
+}
+const PHASE_AIRBORNE = new Set(['departed', 'en_route'])
+const PHASE_TONE: Record<string, { bg: string; fg: string }> = {
+  taxiing:      { bg: '#EAF2FB', fg: '#1B4F87' },
+  departed:     { bg: '#EAF2FB', fg: '#1B4F87' },
+  en_route:     { bg: '#EAF2FB', fg: '#1B4F87' },
+  landed:       { bg: '#E9F3EC', fg: '#215E37' },
+  taxi_to_gate: { bg: '#E9F3EC', fg: '#215E37' },
+  at_gate:      { bg: '#E9F3EC', fg: '#215E37' },
+  bags_on_belt: { bg: '#E9F3EC', fg: '#215E37' },
+  cancelled:    { bg: '#FBECEC', fg: '#8A2B2B' },
+  scheduled:    { bg: '#EFEEE8', fg: '#5C5A52' },
+}
+
+/**
+ * Whether a phase is one this build knows how to name.
+ *
+ * The caller needs this to choose between the chip and the status badge, and it must be the same
+ * test the chip applies — an unknown phase has to fall back to the badge, not leave a blank space
+ * where a status used to be.
+ */
+function hasPhase(phase: string | null | undefined): boolean {
+  return !!phase && (phase in PHASE_KEY || PHASE_AIRBORNE.has(phase))
+}
+
+function PhaseChip({ phase, view }: { phase: string | null | undefined; view?: View }) {
+  const t = useT()
+  if (!phase) return null
+  const airborne = PHASE_AIRBORNE.has(phase)
+  const key = PHASE_KEY[phase]
+  if (!key && !airborne) return null
+  const tone = PHASE_TONE[phase] ?? PHASE_TONE.scheduled
+  const word = airborne
+    ? t(view === 'dep' ? 'status.departed' : 'status.in_air')
+    : t(key)
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', flexShrink: 0,
+      padding: '5px 11px', borderRadius: 999, background: tone.bg,
+    }}>
+      <span style={{ font: `600 11.5px/1 'Instrument Sans', system-ui`, color: tone.fg, whiteSpace: 'nowrap' }}>
+        {word}
+      </span>
+    </div>
+  )
+}
+
 function StatusBadge({ status, view }: { status: string; view?: View }) {
   const t = useT()
   const cfg = (() => {
@@ -439,7 +511,7 @@ const PinSVG = () => (
  * the later one. Only sent when it is not today — a link to a flight happening now should
  * stay live rather than freeze to a date.
  */
-function FlightCard({ f, view, isPinned, onTogglePin, boardDate }: { f: Flight; view: View; isPinned: boolean; onTogglePin: () => void; boardDate?: string }) {
+function FlightCard({ f, view, isPinned, onTogglePin, boardDate, phase }: { f: Flight; view: View; isPinned: boolean; onTogglePin: () => void; boardDate?: string; phase?: string | null }) {
   const t      = useT()
   const href   = useHref()
   const locale = useLocale()
@@ -541,7 +613,12 @@ function FlightCard({ f, view, isPinned, onTogglePin, boardDate }: { f: Flight; 
           </span>
         </div>
 
-        <StatusBadge status={status} view={view} />
+        {/* The live phase when we have one we understand, the board's own status otherwise.
+            hasPhase is the same test PhaseChip makes internally — exposed so the fallback is
+            decided here rather than by rendering the chip and inspecting the result. */}
+        {hasPhase(phase)
+          ? <PhaseChip phase={phase} view={view} />
+          : <StatusBadge status={status} view={view} />}
       </div>
 
       {/* Footer */}
@@ -933,6 +1010,39 @@ export default function BoardPage() {
       })
       .catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /*
+   * The live layer, on its own 30s clock.
+   *
+   * Separate from the board's 60s load because it answers a different question and changes at a
+   * different rate: the board is a timetable, this is where the aircraft is now. 30s matches the
+   * app, so a reader with both open does not see one lead the other.
+   *
+   * Keyed by both identifiers. A flight is filed under XH728 on the board and FYC728 in the feed,
+   * and looking it up by one form only is the single most repeated bug in this codebase.
+   */
+  const [phases, setPhases] = useState<Record<string, string>>({})
+  useEffect(() => {
+    let alive = true
+    const pull = async () => {
+      try {
+        const r = await fetch('/api/live')
+        if (!r.ok) return
+        const body = await r.json()
+        if (!alive) return
+        const next: Record<string, string> = {}
+        for (const f of (body?.flights ?? []) as { iata_number?: string; callsign?: string; phase?: string }[]) {
+          if (!f.phase) continue
+          if (f.iata_number) next[f.iata_number.toUpperCase()] = f.phase
+          if (f.callsign)    next[f.callsign.toUpperCase()]    = f.phase
+        }
+        setPhases(next)
+      } catch { /* an absent phase is a normal state; the card keeps its status badge */ }
+    }
+    pull()
+    const t = setInterval(pull, 30_000)
+    return () => { alive = false; clearInterval(t) }
+  }, [])
 
   useEffect(() => { loadGeoData() }, [])
   useEffect(() => { load(tab) }, [tab, load])
@@ -1446,7 +1556,7 @@ export default function BoardPage() {
                 <Fragment key={`${f.iata_number}-${f.dep_iata}-${f.arr_iata}-${f.dep_time_utc}-${f.arr_time_utc}`}>
                   {i === nowDisplayIdx && nowLine(false)}
                   <div ref={i === nowDisplayIdx - 1 ? prevNowRef : undefined}>
-                    <FlightCard f={f} view={view} isPinned={pins.has(f.iata_number)} onTogglePin={() => togglePin(f.iata_number)} boardDate={tab === 0 ? undefined : date} />
+                    <FlightCard f={f} view={view} isPinned={pins.has(f.iata_number)} onTogglePin={() => togglePin(f.iata_number)} boardDate={tab === 0 ? undefined : date} phase={phases[f.iata_number?.toUpperCase()] ?? (f.callsign ? phases[f.callsign.toUpperCase()] : undefined)} />
                   </div>
                 </Fragment>
               ))}

@@ -106,6 +106,20 @@ const en: Dict = {
   'board.updated':        'Schedule data updated every 60s',
 
   // Status. The board's own vocabulary — kept short because it sits in a badge.
+  /*
+   * Live phases. Only the ones with no equivalent already — the airborne pair deliberately has
+   * no entry and reads from status.departed / status.in_air instead.
+   *
+   * The app's PhaseChip records why: the status badge said في الجو, the map popup said في الجو,
+   * the NOW chip said في الجو, and the chip added last said في الطريق. A reader watching one
+   * flight across three surfaces saw three vocabularies and reasonably assumed they meant
+   * different things. These strings are copied from the app so the web cannot become a fourth.
+   */
+  'phase.taxiing':      'Taxi to take off',
+  'phase.landed':       'Landed',
+  'phase.taxi_to_gate': 'Taxi to gate',
+  'phase.at_gate':      'At the gate',
+  'phase.bags_on_belt': 'Bags on belt',
   'status.scheduled':  'Scheduled',
   'status.expected':   'Expected',
   'status.departed':   'Departed',
@@ -315,6 +329,14 @@ const ar: Dict = {
   // matters most for times, where ١٠:١٥ against a departure board is actively confusing.
   'board.updated':        'تُحدَّث بيانات الجدول كل 60 ثانية',
 
+  // Feminine throughout, agreeing with الرحلة — the app's rule.
+  'phase.taxiing':      'تستعد للإقلاع',
+  'phase.landed':       'هبطت',
+  'phase.taxi_to_gate': 'في الطريق إلى البوابة',
+  'phase.at_gate':      'على البوابة',
+  // حقائب rather than the app's أمتعة, following the belt label you corrected. The app still
+  // says 'الأمتعة على السير' and should be aligned to whichever of the two you settle on.
+  'phase.bags_on_belt': 'الحقائب على السير',
   'status.scheduled':  'مجدولة',
   'status.expected':   'متوقعة',
   'status.departed':   'أقلعت',
