@@ -345,6 +345,37 @@ function StatusBadge({ status, view }: { status: string; view?: View }) {
 }
 
 // ── Delay chip ────────────────────────────────────────────────────────────────
+/**
+ * The small print under the rail: aircraft type, terminal, gate, belt.
+ *
+ * Flex-wrapped with the separators as their own elements rather than a joined string, because a
+ * joined string that overflows puts a middot at the start of the next line and reads as a fault.
+ * Here a wrap simply produces a second centred row of labels.
+ *
+ * Renders nothing when it has nothing — most flights carry a type and no more, and an empty row
+ * would add height to all 38 cards to say nothing on most of them.
+ */
+function MetaStrip({ items }: { items: (string | null | undefined)[] }) {
+  const parts = items.map(v => (v ?? '').trim()).filter(Boolean)
+  if (!parts.length) return null
+  return (
+    <div dir="ltr" style={{
+      display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'baseline',
+      gap: '1px 6px', maxWidth: '100%',
+    }}>
+      {parts.map((p, i) => (
+        <span key={p + i} style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+          {i > 0 && <span style={{ color: C.trackEmpty, fontSize: 10.5 }} aria-hidden>·</span>}
+          <span style={{
+            fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: C.muted,
+            letterSpacing: '.04em', whiteSpace: 'nowrap',
+          }}>{p}</span>
+        </span>
+      ))}
+    </div>
+  )
+}
+
 function DelayChip({ min }: { min: number | null }) {
   const locale = useLocale()
   if (!min || Math.abs(min) < 1) return null
@@ -497,8 +528,6 @@ function FlightCard({ f, view, isPinned, onTogglePin, boardDate }: { f: Flight; 
           <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: C.muted, letterSpacing: '.07em' }}>
             {f.iata_number}
             {f.callsign && f.callsign !== f.iata_number ? ` · ${f.callsign}` : ''}
-            {f.aircraft_type ? ` (${f.aircraft_type})` : ''}
-            {terminalLabel ? ` · ${terminalLabel}` : ''}
           </span>
         </div>
 
@@ -531,9 +560,26 @@ function FlightCard({ f, view, isPinned, onTogglePin, boardDate }: { f: Flight; 
           </div>
         </div>
 
-        {/* Middle: track */}
+        {/*
+          Middle: the track, and under it the small print about the journey.
+          
+          The strip sits below the rail rather than beside the flight number, matching the app:
+          that line is what a flight is looked up by, and the aircraft type, terminal, gate and
+          belt are facts about this particular journey. Appending the terminal to the identity
+          line was my first attempt and it was wrong twice over — it read as part of the flight's
+          name, and at 375px it overflowed a 172px box and wrapped to a second line led by an
+          orphaned middot, which looks like a rendering fault.
+
+          Which end the terminal refers to is never ambiguous: only one end ever has one. Every
+          terminal published on 13 Aug was at the foreign airport, because DAM, ALP and DEZ
+          publish none — so it is always the airport that is not in Syria.
+
+          Wrapping is centred and the separators are their own elements, so a wrapped line reads
+          as a second row of labels rather than a stray character.
+        */}
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
         {isCancelled ? (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 5 }}>
+          <div style={{ alignSelf: 'stretch', display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 5 }}>
             <span style={{ font: `500 11px/1 'Instrument Sans', system-ui`, color: C.muted, textAlign: 'center' }}>
               {t('status.cancelled')}
             </span>
@@ -543,7 +589,7 @@ function FlightCard({ f, view, isPinned, onTogglePin, boardDate }: { f: Flight; 
         ) : showArrived ? (
           <ArrivedRoute durationMin={f.duration_min} />
         ) : (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, paddingTop: 5 }}>
+          <div style={{ alignSelf: 'stretch', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, paddingTop: 5 }}>
             {f.duration_min > 0 && (
               <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: C.muted, whiteSpace: 'nowrap' }}>
                 {durationLabel(f.duration_min, locale)}
@@ -569,13 +615,19 @@ function FlightCard({ f, view, isPinned, onTogglePin, boardDate }: { f: Flight; 
               </div>
               <div style={{ flex: 1, height: 4, borderRadius: 99, background: C.trackEmpty }} />
             </div>
-            {(isArr ? f.arr_gate : f.dep_gate) && (
-              <span style={{ font: `600 10.5px/1 'Instrument Sans', system-ui`, color: C.goldenText }}>
-                {t('label.gate')} {isArr ? f.arr_gate : f.dep_gate}
-              </span>
-            )}
           </div>
         )}
+        <MetaStrip
+          items={[
+            f.aircraft_type,
+            terminalLabel,
+            (isArr ? f.arr_gate : f.dep_gate) ? `${t('label.gate')} ${isArr ? f.arr_gate : f.dep_gate}` : null,
+            // Gated on Arrived: a belt against a flight still in the air is the cache's old
+            // habit of republishing one from an earlier instance of the same number.
+            f.arr_baggage && isArrived && !isCancelled ? `${t('label.belt')} ${f.arr_baggage}` : null,
+          ]}
+        />
+        </div>
 
         {/* Arr */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5, width: 96, alignItems: 'flex-end', minWidth: 0 }}>
@@ -615,27 +667,6 @@ function FlightCard({ f, view, isPinned, onTogglePin, boardDate }: { f: Flight; 
               )}
             </span>
           </div>
-          {/*
-           * The carousel at the destination, shown once the flight is down — on either board.
-           *
-           * My first cut gated this to the arrivals view, on the reasoning that a belt belongs
-           * to the hall you are standing in. The data says otherwise: all 16 belts published on
-           * 13 Aug were departures out of Syria — DAM→IST belt 21B, ALP→SAW CAR2 — because FR24
-           * carries the belt for the foreign end. Damascus and Aleppo publish none of their own,
-           * so the arrivals-only gate rendered this field exactly never.
-           *
-           * Which makes the reader obvious once you stop guessing: not someone waiting in this
-           * terminal, but someone here who watched a flight leave and wants to know where its
-           * bags come out at the other end.
-           *
-           * Still gated on Arrived. A belt against a flight in the air is the cache's old habit
-           * of republishing one from an earlier instance of the same number.
-           */}
-          {f.arr_baggage && isArrived && !isCancelled && (
-            <span style={{ font: `600 10.5px/1 'Instrument Sans', system-ui`, color: C.goldenText }}>
-              {t('label.belt')} {f.arr_baggage}
-            </span>
-          )}
         </div>
       </div>
 
