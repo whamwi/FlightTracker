@@ -121,11 +121,11 @@ export async function GET(req: Request) {
 
   // ── Detail from `flight`, one row per leg ─────────────────────────────────
   const legs: { airline: string; airlineIata: string | null; route: string; delay: number | null }[] = []
-  let cacheFrom = '', cacheTo = ''
+  let seenFrom = '', seenTo = ''
 
   for (const row of rows) {
-    if (!cacheFrom || row.flight_date < cacheFrom) cacheFrom = row.flight_date
-    if (!cacheTo   || row.flight_date > cacheTo)   cacheTo   = row.flight_date
+    if (!seenFrom || row.flight_date < seenFrom) seenFrom = row.flight_date
+    if (!seenTo   || row.flight_date > seenTo)   seenTo   = row.flight_date
 
     // A cancelled flight has no punctuality and should not dilute a carrier's average. It was
     // counted before only because the cache gave no way to tell one apart.
@@ -209,14 +209,15 @@ export async function GET(req: Request) {
     avg_delay_min: measured.length
       ? Math.round(measured.reduce((s, l) => s + (l.delay as number), 0) / measured.length)
       : null,
-    from: cacheFrom,
-    to: cacheTo,
+    from: seenFrom,
+    to: seenTo,
   }
 
   return NextResponse.json({
     ok: true,
     // Two different periods in one payload, labelled: the totals go back as far as the rollup
-    // has been running, the rankings only as far as the cache still reaches.
+    // has been running, the rankings only as far as `flight` reaches — 25 Jul, where the
+    // backfill starts.
     daily,
     overall,
     airlines,

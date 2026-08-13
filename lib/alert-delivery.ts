@@ -1,3 +1,4 @@
+import { SYRIA_AIRPORT_SET } from './syria-airports'
 /**
  * Turning a detected transition into a push notification.
  *
@@ -95,7 +96,9 @@ function localTime(iso: string | null, utcOffsetHours: number | null): string | 
   return new Date(t + off * 3_600_000).toISOString().slice(11, 16)
 }
 
-const SYRIAN = new Set(['DAM', 'ALP', 'LTK', 'DEZ'])
+// The shared list, not a fourth transcription of it. Correct today; the point is that it cannot
+// quietly stop being correct — DEZ has been missed three separate times since it opened.
+const SYRIAN = SYRIA_AIRPORT_SET
 
 /**
  * The city worth naming, and how to introduce it.

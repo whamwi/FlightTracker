@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { SYRIA_AIRPORTS } from '@/lib/syria-airports'
 
 export const dynamic   = 'force-dynamic'
 export const maxDuration = 60
@@ -7,7 +8,15 @@ const SB_URL = process.env.SUPABASE_URL!
 const SB_KEY = process.env.SUPABASE_ANON_KEY!
 const FR24_KEY = process.env.FR24_API_KEY!
 
-const AIRPORTS = ['DAM', 'ALP']
+/*
+ * The shared list, not a copy. This read ['DAM','ALP'] and so has never synced Deir ez-Zor,
+ * which opened on 7 Aug — the web's DEZ rows existed only because a visitor's browser warmed
+ * them, which is the dependency this cron exists to remove.
+ *
+ * This whole route retires with fr24_daily_cache: the board and map read `flight` now and the
+ * cache is only a fallback. Correct while it lives.
+ */
+const AIRPORTS = [...SYRIA_AIRPORTS]
 const TZ       = 'Asia/Damascus'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { SYRIA_AIRPORT_SET } from '@/lib/syria-airports'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -6,7 +7,12 @@ export const maxDuration = 60
 const SB_URL = process.env.SUPABASE_URL!
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_ANON_KEY!
 const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
-const SY_AIRPORTS = new Set(['DAM', 'ALP'])
+/*
+ * Which end of a route carries the authoritative time — the Syrian one, because that is the
+ * airport whose own board this is. The shared set rather than a copy: a domestic DAM-DEZ or
+ * DAM-LTK leg would otherwise have been read from the wrong end.
+ */
+const SY_AIRPORTS = SYRIA_AIRPORT_SET
 
 // Flights excluded from damairport ingest — wrong airport code in source data.
 // PC770/771 and VF340/341 are listed as IST but actually operate via SAW.
