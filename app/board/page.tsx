@@ -765,9 +765,19 @@ const REGION_KEY: Record<string, string> = {
 }
 
 // ── Tab date label ────────────────────────────────────────────────────────────
+/*
+ * The day chip: "Today · Thu 13 Aug", "اليوم · الخميس، 13 آب".
+ *
+ * weekday 'short' rather than 'long' for the width — this chip sits in a row of three and the
+ * row has overflowed onto a third line before, when DEZ was added to the airport list. Arabic
+ * ignores the distinction and returns الخميس either way, since it has no abbreviated weekday;
+ * the shortening is a saving in English only, which is the script that needed it.
+ */
 function tabDateLabel(offset: number, locale: Locale): string {
   const d = syriaDate(offset)
-  return new Date(d + 'T12:00:00Z').toLocaleDateString(dateLocaleOf(locale), { day: 'numeric', month: 'short' })
+  return new Date(d + 'T12:00:00Z').toLocaleDateString(dateLocaleOf(locale), {
+    weekday: 'short', day: 'numeric', month: 'short',
+  })
 }
 
 // ── Plane SVG ─────────────────────────────────────────────────────────────────
