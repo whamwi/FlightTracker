@@ -154,6 +154,10 @@ FEED_CAP     = 1500
 FEED_RETRIES = 6
 FEED_DEAD_COUNT = 22684
 
+# Below this, an aircraft is on the ground whatever its altitude reports. Airliner stall speeds
+# are 110-140 kts, so there is a wide margin; taxi is 10-25.
+GROUND_SPEED_KTS = 50
+
 
 def log(msg: str) -> None:
     print(f"{datetime.now(timezone.utc).isoformat(timespec='seconds')}  {msg}", flush=True)
@@ -600,18 +604,32 @@ def collect_adsb(live_by_callsign: dict[str, tuple[str, int]]) -> int:
                 continue                       # not one of ours; the sweep decides what is
             fid, frow = hit
             alt = a.get("alt_baro")
+            gs  = a.get("gs")
             rows.append({
                 "fr24_id": fid, "fr24_row": frow,
                 "hex": (a.get("hex") or "").upper() or None, "callsign": cs,
                 "lat": a["lat"], "lon": a["lon"],
                 "altitude_ft": alt,
-                "ground_speed_kts": round(a["gs"]) if a.get("gs") is not None else None,
+                "ground_speed_kts": round(gs) if gs is not None else None,
                 "track_deg": round(a["track"]) if a.get("track") is not None else None,
                 "vertical_speed_fpm": None,
-                # Only when altitude actually says so. A null alt_baro is a transponder that did
-                # not report one — half the ground vehicles at DAM look like that — and reading
-                # it as zero would land an airborne aircraft on the map.
-                "on_ground": (alt <= 0) if alt is not None else None,
+                # Two signals, because altitude alone cannot see this.
+                #
+                # A null alt_baro means the transponder reported none, which is common precisely
+                # WHILE an aircraft is on the ground — so refusing to decide left FZ1115 taxiing
+                # at Dubai at 9 knots marked as neither, and the map drew it as though airborne.
+                # Reading null as zero was the earlier mistake in the other direction: it landed
+                # airborne aircraft whose altitude happened to be missing.
+                #
+                # Ground speed settles it without needing airport coordinates. Nothing we track
+                # flies below 50 knots — airliner stall speeds are 110-140 — so a slow aircraft
+                # is on the ground whatever its altitude says. Still None when we have neither,
+                # because that is genuinely unknown.
+                "on_ground": (
+                    True if (gs is not None and gs < GROUND_SPEED_KTS)
+                    else (alt <= 0) if alt is not None
+                    else None
+                ),
                 "fix_at": a.get("seen_at"),
                 # Named so a reader can prefer it: direct reception beats a network aggregate.
                 "source": "adsb",

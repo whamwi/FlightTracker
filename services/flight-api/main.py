@@ -275,9 +275,29 @@ def derive_status(f: dict) -> str:
         return "Departed"
     # "Expected", not "Estimated" — production's vocabulary is Arrived / Departed / Expected /
     # Scheduled, and every client's dictionary keys off those four words.
-    if f.get("est_dep") or f.get("est_arr"):
+    if revision(f.get("est_dep"), f.get("sched_dep")) or revision(f.get("est_arr"), f.get("sched_arr")):
         return "Expected"
     return "Scheduled"
+
+
+def revision(est: str | None, sched: str | None) -> str | None:
+    """
+    An estimate only counts when it says something the schedule does not.
+
+    FR24 publishes `est_dep` equal to the filed time and keeps it there — FZ1115 carried
+    est_dep 02:50 against sched_dep 02:50 for eleven hours on 13 Aug, then dropped it. Reading
+    the mere presence of the field as "there is an estimate" made us call the flight Expected
+    while FR24's own board said Scheduled, and put a `revised_dep_utc` in the contract that
+    revised nothing.
+
+    Strictly more than a minute, not at least: the same flight's tape carries est_dep 02:51
+    against sched 02:50 one sweep later. A minute either way is FR24 rounding, and a status that
+    flips on it would flicker between Scheduled and Expected while nothing changed.
+    """
+    e, s_ = iso(est), iso(sched)
+    if e is None or s_ is None:
+        return est
+    return est if abs((e - s_).total_seconds()) > 60 else None
 
 
 def effective_duration(f: dict) -> int:
@@ -322,8 +342,8 @@ def to_contract(f: dict, al: dict | None, pos: dict | None, board_day) -> dict:
         "status":        derive_status(f),
         "actual_dep_utc":  zulu(f.get("real_dep")),
         "actual_arr_utc":  zulu(f.get("real_arr")),
-        "revised_dep_utc": zulu(f.get("est_dep")),
-        "revised_arr_utc": zulu(f.get("est_arr")),
+        "revised_dep_utc": zulu(revision(f.get("est_dep"), f.get("sched_dep"))),
+        "revised_arr_utc": zulu(revision(f.get("est_arr"), f.get("sched_arr"))),
         "aircraft_type": f.get("aircraft_type"),
         "aircraft_reg":  f.get("registration") or "",
         "dep_terminal":  terminal(f.get("dep_terminal")),
