@@ -359,30 +359,36 @@ function bestHeading(a: Aircraft): number {
  * under dir=rtl a joined "3 وصول" puts the numeral wherever it likes, and the same mistake has
  * already been made twice on this map with the delay chip and the altitude line.
  */
-function arrivalsBadge(L: typeof import('leaflet'), count: number, hub: BoardAirport) {
+function arrivalsBadge(L: typeof import('leaflet')) {
   const mobile = typeof window !== 'undefined' && window.matchMedia(PHONE_MQ).matches
-  const h      = mobile ? 20 : 22
-  const color  = MARKER_ACCENT[hub]
+  const dot    = mobile ? 9 : 10
+  const box    = mobile ? 14 : 16
   /*
-   * Absolutely positioned and pulled back by half itself, rather than given a measured iconSize.
+   * Built like planeIcon rather than as a pill, and for the same reason it works there.
    *
-   * The badge's width is not knowable here: the count is one or two digits and the word changes
-   * with the locale, so any fixed size would clip one case or off-centre another.
+   * The pill this replaces was 59 px wide and read as a large object on a map zoomed out to the
+   * region — bigger than the aircraft around it, for something that is only a place-holder. A dot
+   * with the word underneath is the shape every other marker on this map already uses, so it sits
+   * at the same visual weight as the arrivals it stands in for.
    *
-   * position:absolute with left/top is what makes it direction-proof. A plain translateX(-50%) on
-   * a static child was measured 59 px to the left of its airport on the Arabic map: the icon box
-   * is zero-width, so under dir=rtl the content starts at the right edge and grows leftward before
-   * the transform is applied at all. left:0 means left in both directions.
+   * A square iconSize with the anchor at its centre puts the dot exactly on the field and lets the
+   * label overflow below, centred by align-items rather than by any width we would have to know in
+   * advance. That is also what makes it direction-proof: the earlier version used a zero-width box
+   * and a transform, and landed 59 px west of its airport under dir=rtl, because the content
+   * starts at the right edge before any transform applies.
+   *
+   * Grey, not the hub colour: these markers are past tense, and the arrived aircraft beside them
+   * are drawn grey for the same reason.
    */
-  const html = `<div dir="ltr" style="position:absolute;left:0;top:0;
-      transform:translate(-50%,-50%);display:inline-flex;align-items:center;gap:4px;
-      height:${h}px;padding:0 8px;border-radius:${h / 2}px;
-      background:${color};color:#fff;border:1.5px solid #fff;
-      font-family:'IBM Plex Mono',monospace;font-size:${mobile ? 10 : 11}px;font-weight:700;
-      letter-spacing:.02em;white-space:nowrap;
-      box-shadow:0 2px 5px rgba(0,0,0,.4);cursor:pointer">
-      <span>${count}</span><span>${T('map.arrivals_badge')}</span></div>`
-  return L.divIcon({ className: '', html, iconSize: [0, 0], iconAnchor: [0, 0] })
+  const html = `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;
+      width:${box}px;cursor:pointer">
+      <div style="width:${dot}px;height:${dot}px;border-radius:50%;
+        background:#9ca3af;border:1.5px solid #fff;
+        box-shadow:0 1px 3px rgba(0,0,0,.4)"></div>
+      <div style="font-size:${mobile ? 8 : 9}px;font-weight:bold;color:#6b7280;
+        letter-spacing:.3px;line-height:1.2;white-space:nowrap">${T('map.arrivals_badge')}</div>
+    </div>`
+  return L.divIcon({ className: '', html, iconSize: [box, box], iconAnchor: [box / 2, box / 2] })
 }
 
 /**
@@ -2563,8 +2569,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         // Most recent first: the flight that just landed is the one someone is looking for.
         }).sort((a, b) => (b.at || '').localeCompare(a.at || ''))
 
-        const hub  = markerHub(null, iata)
-        const icon = arrivalsBadge(L, group.length, hub)
+        const icon = arrivalsBadge(L)
         const list = buildArrivalsPopup(iata, rows)
         let marker = arrivedClusterRef.current[iata]
         if (marker) {
