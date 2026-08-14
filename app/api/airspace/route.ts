@@ -7,6 +7,14 @@ import { inSyria } from '@/lib/syria-airspace'
 
 export const dynamic = 'force-dynamic'
 
+/**
+ * How long an arrived flight stays drawn. Same meaning as ARRIVED_HOLD_MS in components/Map.tsx,
+ * which governs it for aircraft we still hold a live fix for — they were four hours and thirty
+ * minutes respectively, so a flight left the map at a different moment depending on which path
+ * happened to draw it.
+ */
+const ARRIVED_HOLD_MS = 60 * 60_000
+
 const SB_URL     = process.env.SUPABASE_URL!
 const SB_KEY     = process.env.SUPABASE_ANON_KEY!
 const SB_HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
@@ -1225,6 +1233,23 @@ export async function GET() {
         // already turned off. G9375 was over Jordan bound for Amman while both maps carried
         // it toward Damascus. Terminal here, like an arrival.
         if ((f.status ?? '').toLowerCase().includes('divert')) return false
+
+        /*
+         * An arrived flight stays on the map for an hour, then goes — whatever else is true of it.
+         *
+         * This test used to sit at the bottom, reachable only by a flight with no departure
+         * record, so anything that had actually departed today returned true unconditionally and
+         * was never removed. On 14 Aug that left eleven arrived markers stacked on Damascus, the
+         * oldest landed 604 minutes earlier, overlapping into an unreadable pile.
+         *
+         * An hour is long enough that someone meeting a flight still sees it after it lands, and
+         * short enough that the field does not silt up over a day. It leaves three at Damascus
+         * where there were eleven.
+         */
+        if (f.actual_arr_utc) {
+          return NOW_MS - new Date(f.actual_arr_utc).getTime() < ARRIVED_HOLD_MS
+        }
+
         if (f.actual_dep_utc) {
           const depMs = new Date(f.actual_dep_utc).getTime()
           // Detect yesterday's flights: scheduled (or actual) departure is before Syria midnight
@@ -1240,8 +1265,6 @@ export async function GET() {
           }
           return true
         }
-        // Already landed without a departure record — still show ARRIVED for 4 h
-        if (f.actual_arr_utc && NOW_MS - new Date(f.actual_arr_utc).getTime() < 4 * 3_600_000) return true
         return false
       })
       .map(f => {

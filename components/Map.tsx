@@ -135,7 +135,10 @@ const STALE_TTL_MS       = 30 * 60 * 1000
  * and mobile independently used 90 — so an arrived flight lingered far longer than intended
  * on both. One constant now, and both surfaces use 30.
  */
-const ARRIVED_HOLD_MS    = 30 * 60 * 1000
+// One hour, matching the same constant in app/api/airspace/route.ts. These were 30 minutes here
+// and four hours there, so a flight left the map at a different moment depending on whether we
+// still held a fix for it.
+const ARRIVED_HOLD_MS    = 60 * 60 * 1000
 
 // Flights to and from these are "ours", and decide which half of a leg is worth drawing.
 const HOME_AIRPORTS = new Set(['DAM', 'ALP', 'LTK', 'DEZ'])
