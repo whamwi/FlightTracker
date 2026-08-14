@@ -1343,6 +1343,31 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
        * "the server said nothing" can never mean "we could not ask".
        */
       const vouchedCallsigns = new Set<string>()
+
+      /*
+       * Has this callsign arrived, according to the freshest thing we hold?
+       *
+       * The stored Aircraft is a snapshot of the poll that last carried a position, and a flight
+       * stops being carried at almost exactly the moment it lands — so that snapshot is precisely
+       * the copy that predates the arrival. QTR411 landed at 17:42:48; the server had it in
+       * boardDeparted as `arrived` within seconds, while the aircraft object frozen in trackedRef
+       * still said `departed`, and the marker read a stale field and stayed on the map.
+       *
+       * flightStatusRef first, because boardDeparted keeps refreshing it after the fixes stop.
+       * The snapshot is only a fallback, for a flight the board has never mentioned.
+       *
+       * This is the third shape of one mistake today — the ghost's own memory, then the aircraft
+       * snapshot here. Anything that answers "what is true now" from a stored copy is wrong by
+       * construction, because the copy is taken before the thing we care about happens.
+       */
+      const arrivedNow = (cs: string, a?: Aircraft | null) => {
+        const fs = flightStatusRef.current[cs]
+        return hasArrived({
+          status:         fs?.status ?? canonicalStatus(a?.board_status),
+          actual_arr_utc: fs?.actual_arr_utc ?? a?.actual_arr_utc ?? null,
+        })
+      }
+
       try {
         const res  = await fetch('/api/airspace')
         const data = await res.json()
@@ -1649,7 +1674,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
          * on a stand is not what a map of flights is for, and the reader was told twice — the tag
          * and the list — that the flight was over.
          */
-        if (hasArrived({ status: canonicalStatus(a.board_status), actual_arr_utc: a.actual_arr_utc })) {
+        if (arrivedNow(cs, a)) {
           markersRef.current[cs]?.remove(); delete markersRef.current[cs]
           linesRef.current[cs]?.forEach((l: any) => l.remove()); delete linesRef.current[cs]  // eslint-disable-line
           continue
