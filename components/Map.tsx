@@ -1025,8 +1025,6 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
   const schedMarkersRef = useRef<Record<string, any>>({})
   /** The "arrivals" badge standing in for a group of arrived flights, keyed by airport. */
   const arrivedClusterRef = useRef<Record<string, any>>({})
-  /** That badge's list markup, so a flight's card can go back to it without rebuilding. */
-  const arrivedListRef    = useRef<Record<string, string>>({})
   /** Which flight's card the badge is currently showing, if the reader has opened one. */
   const openArrivalRef    = useRef<Record<string, string>>({})
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2614,8 +2612,19 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
                 return
               }
               if (target?.closest?.('[data-arrback]')) {
+                /*
+                 * From the marker itself, not from a ref keyed by airport.
+                 *
+                 * The ref version shipped broken: its entry is deleted the moment a group thins
+                 * below two, so back could fire with nothing to go back to, write an empty string,
+                 * and collapse the popup — the reader clicked back and the panel vanished. Held on
+                 * the marker, the list cannot outlive or predecease the thing that shows it. The
+                 * guard is belt and braces: never blank a popup.
+                 */
+                const html = (marker as { _arrList?: string })._arrList
+                if (!html) return
                 delete openArrivalRef.current[iata]
-                marker.setPopupContent(arrivedListRef.current[iata] ?? '')
+                marker.setPopupContent(html)
               }
             })
           })
@@ -2624,15 +2633,16 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           marker.on('popupclose', () => { delete openArrivalRef.current[iata] })
           arrivedClusterRef.current[iata] = marker
         }
-        // Held so "back" can restore the list without rebuilding it from stale rows.
-        arrivedListRef.current[iata] = list
+        // Held on the marker so "back" always has something to return to, for exactly as long as
+        // there is a badge to return it to.
+        ;(marker as { _arrList?: string })._arrList = list
       }
       // Airports that no longer have a group lose their badge.
       for (const iata of Object.keys(arrivedClusterRef.current)) {
         if ((arrivedAt[iata]?.length ?? 0) < 2) {
           arrivedClusterRef.current[iata].remove()
           delete arrivedClusterRef.current[iata]
-          delete arrivedListRef.current[iata]
+          delete openArrivalRef.current[iata]
         }
       }
 
