@@ -979,6 +979,8 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
   // Schedule-based projected markers (key = callsign)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const schedMarkersRef = useRef<Record<string, any>>({})
+  /** Consecutive polls a ghost's callsign has been missing from the server's payload. */
+  const unvouchedRef    = useRef<Record<string, number>>({})
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const schedLinesRef   = useRef<Record<string, any[]>>({})
   // Last-known state keyed by callsign — replaces hex-keyed lastKnownRef
@@ -1322,6 +1324,25 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
 
       // ── 1. Fetch feed + update trackedRef (keyed by callsign) ─────────────
       const freshCallsigns = new Set<string>()  // callsigns in THIS cycle's live feed
+      /*
+       * Callsigns the server is vouching for in THIS poll — a live fix, or a board row it still
+       * considers en route.
+       *
+       * flightStatusRef is a write-only accumulator keyed by callsign: entries go in and never
+       * leave. That is fine while the server keeps talking about a flight, and wrong the moment it
+       * stops. KNE592 landed at 15:32:58; the server carried it for thirty minutes and then, quite
+       * correctly, went quiet. The client's last word on it was "Departed", so the schedule overlay
+       * went on projecting it — and the projection is allowed to run two hours past its arrival
+       * before it expires, which is why it sat parked at Jeddah at 17:13 with a popup reading
+       * "~ في الجو" while the board and the side panel both said Arrived.
+       *
+       * The panel was right because it reads the board directly. The map was reasoning from a
+       * memory nobody had corrected. So a ghost now requires the server to vouch for it right now;
+       * absence is treated as information, which it is — the server drops a flight precisely
+       * because it has arrived. Safe because a failed poll returns above without reaching here, so
+       * "the server said nothing" can never mean "we could not ask".
+       */
+      const vouchedCallsigns = new Set<string>()
       try {
         const res  = await fetch('/api/airspace')
         const data = await res.json()
@@ -1388,6 +1409,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
             if (!a.board_match || (!a.actual_dep_utc && !a.actual_arr_utc)) continue
             const cs = (a.flight ?? '').trim()
             if (!cs) continue
+            vouchedCallsigns.add(cs)
             const existing = flightStatusRef.current[cs]
             const legDep   = a.actual_dep_utc ?? existing?.actual_dep_utc ?? null
             const arrUtc   = a.actual_arr_utc ?? carryArrival(existing?.actual_arr_utc, legDep)
@@ -1441,6 +1463,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
                     iata_number, dep_delay_min, airline_iata,
                     aircraft_reg, aircraft_type } = bd
             if (!cs || !dep_iata || !arr_iata) continue
+            vouchedCallsigns.add(cs)
             const existing = flightStatusRef.current[cs]
             // Synthesize estimated arrival from actual_dep + duration when no explicit revised/actual arr
             const effectiveDep = actual_dep_utc ?? existing?.actual_dep_utc ?? null
@@ -2111,6 +2134,23 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
       }
 
       // ── 4. Schedule overlay (ESTIMATED / no signal) ───────────────────────
+      /*
+       * Tally, once per callsign, how many consecutive polls the server has said nothing about it.
+       *
+       * Counted here rather than inside the loop below: a callsign can hold several schedule
+       * entries — different days, different routes — and counting per entry would reach the
+       * threshold on the first poll for those flights and not for others, which is a rule that
+       * only looks like a rule.
+       *
+       * Two polls, not one. A single thin response — a partial board failure, a feed hiccup —
+       * would otherwise clear every ghost at once and restore them ten seconds later, and a whole
+       * map blinking is a worse fault than the twenty seconds of stale marker it saves.
+       */
+      for (const cs of Object.keys(flightStatusRef.current)) {
+        if (vouchedCallsigns.has(cs)) delete unvouchedRef.current[cs]
+        else unvouchedRef.current[cs] = (unvouchedRef.current[cs] ?? 0) + 1
+      }
+
       const activeSchedKeys    = new Set<string>()
       const activeSchedEnRoute = new Set<string>()
 
@@ -2151,6 +2191,15 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
 
       for (const entry of scheduleRef.current) {
         const { callsign, dep_iata, arr_iata, dep_time_utc, arr_time_utc, duration_min, days_of_week } = entry
+
+        // The server has stopped carrying this flight, so we stop drawing it — see the tally above.
+        if ((unvouchedRef.current[callsign] ?? 0) >= 2) {
+          if (schedMarkersRef.current[callsign]) {
+            schedMarkersRef.current[callsign].remove(); delete schedMarkersRef.current[callsign]
+            schedLinesRef.current[callsign]?.forEach((l: any) => l.remove()); delete schedLinesRef.current[callsign]  // eslint-disable-line
+          }
+          continue
+        }
 
         // Real data covers this callsign — clear any ghost marker
         if (realCallsigns.has(callsign)) {
