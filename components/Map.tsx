@@ -1027,6 +1027,8 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
   const arrivedClusterRef = useRef<Record<string, any>>({})
   /** That badge's list markup, so a flight's card can go back to it without rebuilding. */
   const arrivedListRef    = useRef<Record<string, string>>({})
+  /** Which flight's card the badge is currently showing, if the reader has opened one. */
+  const openArrivalRef    = useRef<Record<string, string>>({})
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const schedLinesRef   = useRef<Record<string, any[]>>({})
   // Last-known state keyed by callsign — replaces hex-keyed lastKnownRef
@@ -2576,41 +2578,50 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         let marker = arrivedClusterRef.current[iata]
         if (marker) {
           marker.setIcon(icon)
-          marker.setPopupContent(list)
+          // Only while the list is what is showing. A reader who has opened one of these flights is
+          // reading it, and the ten-second poll must not pull it out from under them.
+          if (!openArrivalRef.current[iata]) marker.setPopupContent(list)
         } else {
           marker = addToMap(L.marker(coords as [number, number], { icon, zIndexOffset: 400 }), map)
           marker.bindPopup(list, { className: 'fp-popup', closeButton: false, maxWidth: 320 })
           /*
-           * Clicks are wired on open, not in the markup: popup content is an HTML string here as
-           * it is everywhere else on this map, so a row cannot carry its own handler. Rebinding on
-           * every open also means the handlers always close over the current list rather than the
-           * one that happened to be built when the marker was created.
+           * One delegated listener on the popup container, not handlers on the rows.
+           *
+           * Popup content is an HTML string here as it is everywhere on this map, so a row cannot
+           * carry its own handler and something has to bind them afterwards. Binding them directly
+           * meant re-binding after every content swap, and the back arrow shipped dead because one
+           * of those re-binds did not take — it rendered, did nothing, and left the reader stuck on
+           * a flight card. The container outlives every swap, so a listener there does not care
+           * what replaced what.
            */
           marker.on('popupopen', () => {
             const el = marker.getPopup()?.getElement() as HTMLElement | null
-            if (!el) return
-            el.querySelectorAll<HTMLElement>('[data-cs]').forEach(btn => {
-              btn.onclick = () => {
-                const cs = btn.dataset.cs!
+            if (!el || el.dataset.arrWired) return
+            el.dataset.arrWired = '1'
+            el.addEventListener('click', (ev: Event) => {
+              const target = ev.target as HTMLElement | null
+              const row = target?.closest?.('[data-cs]') as HTMLElement | null
+              if (row) {
+                const cs = row.dataset.cs!
                 const e  = pickSchedule(scheduleRef.current, cs, Date.now())
-                const fs = flightStatusRef.current[cs]
                 if (!e) return
+                const fs    = flightStatusRef.current[cs]
                 const reg   = fs?.aircraft_reg ?? null
                 const photo = (reg ? photoCacheRef.current[reg] : null)
                            ?? photoCacheRef.current[`cs:${cs}`] ?? null
+                openArrivalRef.current[iata] = cs
                 marker.setPopupContent(arrivalsBackBar() + buildSchedulePopup(e, true, fs, 1, photo))
-                wireBack()
+                return
+              }
+              if (target?.closest?.('[data-arrback]')) {
+                delete openArrivalRef.current[iata]
+                marker.setPopupContent(arrivedListRef.current[iata] ?? '')
               }
             })
           })
-          const wireBack = () => {
-            const el = marker.getPopup()?.getElement() as HTMLElement | null
-            const back = el?.querySelector<HTMLElement>('[data-arrback]')
-            if (back) back.onclick = () => {
-              marker.setPopupContent(arrivedListRef.current[iata] ?? '')
-              marker.fire('popupopen')
-            }
-          }
+          // Back to the list when the reader dismisses the popup, so reopening the badge does not
+          // resume on whichever flight they last looked at.
+          marker.on('popupclose', () => { delete openArrivalRef.current[iata] })
           arrivedClusterRef.current[iata] = marker
         }
         // Held so "back" can restore the list without rebuilding it from stale rows.
