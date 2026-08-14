@@ -1635,6 +1635,26 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
       for (const [cs, entry] of Object.entries(trackedRef.current)) {
         const { a, lostAt, isFr24 } = entry
 
+        /*
+         * An arrival leaves the map here too, not only on the schedule overlay.
+         *
+         * I removed arrivals from the ghost path and reported the map clear of them. It was not:
+         * that only covered flights we had lost. An aircraft still transmitting on the apron kept
+         * its live marker, faded, with an ARRIVED tag — SYR504 sat at Damascus at 17:30 having
+         * landed at 17:20, on a fix nine minutes old, while the panel had already moved it to the
+         * وصلت list. When I checked earlier and saw no arrived markers, no landed aircraft happened
+         * to be in the feed; I read luck as proof.
+         *
+         * The position is real, which is what made this easy to leave alone. But a real position
+         * on a stand is not what a map of flights is for, and the reader was told twice — the tag
+         * and the list — that the flight was over.
+         */
+        if (hasArrived({ status: canonicalStatus(a.board_status), actual_arr_utc: a.actual_arr_utc })) {
+          markersRef.current[cs]?.remove(); delete markersRef.current[cs]
+          linesRef.current[cs]?.forEach((l: any) => l.remove()); delete linesRef.current[cs]  // eslint-disable-line
+          continue
+        }
+
         // TTL expiry — Syria flights: 6 h
         if (!isFr24 && lostAt > 0 && now - lostAt > STALE_TTL_SYRIA_MS) {
           markersRef.current[cs]?.remove(); delete markersRef.current[cs]
