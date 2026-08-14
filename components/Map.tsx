@@ -183,6 +183,21 @@ const ARRIVED_RING0_PX  = 64
 const ARRIVED_RING_PX   = 52
 
 /**
+ * The furthest an arrived marker may be drawn from the airport it landed at, on the ground.
+ *
+ * A pixel offset is constant on screen and therefore grows without limit on the ground as the map
+ * zooms out: 64 px over Kuwait at country zoom is about 100 km, which put an arrival in the desert
+ * north of the city — a marker claiming a position no aircraft was in, which is the same fault we
+ * spent this morning removing from the data.
+ *
+ * So the fan is capped by what six kilometres is worth in pixels right now. Zoomed in it makes no
+ * difference and the ring is drawn in full; zoomed out the ring closes up onto the field, and
+ * arrivals coincide rather than scatter. Coinciding is the honest failure — they really are all at
+ * that airport, and at that zoom the airport is a few pixels wide.
+ */
+const ARRIVED_MAX_DRIFT_KM = 6
+
+/**
  * Pick a spot for one arrived marker: the field if it is free, otherwise a clear place around it.
  *
  * `taken` holds the slots already handed out at this airport during this render pass, so collision
@@ -199,7 +214,7 @@ const ARRIVED_RING_PX   = 52
  * side because that is where it happened to start.
  */
 function arrivedFanOffset(
-  taken: Set<number>, remembered: number | undefined, approachDeg: number,
+  taken: Set<number>, remembered: number | undefined, approachDeg: number, maxPx: number,
 ): { offset: [number, number]; slot: number } {
   const STEP = 360 / ARRIVED_SLOTS
   let slot: number
@@ -231,10 +246,22 @@ function arrivedFanOffset(
   const ring  = Math.floor(idx / ARRIVED_SLOTS)
   // Odd rings sit half a step round, so a marker never lands directly outside its neighbour.
   const angle = (idx % ARRIVED_SLOTS) * STEP + (ring % 2 ? STEP / 2 : 0)
-  const r     = ARRIVED_RING0_PX + ring * ARRIVED_RING_PX
+  const r     = Math.min(ARRIVED_RING0_PX + ring * ARRIVED_RING_PX, maxPx)
   const rad   = (angle * Math.PI) / 180
   // Screen y grows downward while bearing 0 is north, hence the negated cosine.
   return { offset: [r * Math.sin(rad), -r * Math.cos(rad)], slot }
+}
+
+/**
+ * How many pixels six kilometres covers, here and now.
+ *
+ * Web Mercator, so the scale depends on latitude as well as zoom — Damascus and Dubai are not the
+ * same number. Read from the map on each pass rather than cached, which is what makes the cap
+ * follow a zoom instead of lagging a poll behind it.
+ */
+function maxDriftPx(map: { getZoom: () => number }, lat: number): number {
+  const mPerPx = (156543.03392 * Math.cos((lat * Math.PI) / 180)) / 2 ** map.getZoom()
+  return (ARRIVED_MAX_DRIFT_KM * 1000) / mPerPx
 }
 
 // One hour, matching the same constant in app/api/airspace/route.ts. These were 30 minutes here
@@ -2379,7 +2406,8 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         let fanPx: [number, number] | undefined
         if (arrived) {
           const fan = arrivedFanOffset(
-            (arrivedFan[arr_iata] ??= new Set()), arrivedSlotRef.current[callsign], track)
+            (arrivedFan[arr_iata] ??= new Set()), arrivedSlotRef.current[callsign], track,
+            maxDriftPx(map, arrC[0]))
           arrivedSlotRef.current[callsign] = fan.slot
           fanPx = fan.offset
         } else {
@@ -2576,9 +2604,30 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
     const onVisible = () => { if (document.visibilityState === 'visible') fetchAndUpdate() }
     document.addEventListener('visibilitychange', onVisible)
 
+    /*
+     * Re-lay the markers out after a zoom, because one of their offsets now depends on it.
+     *
+     * The arrived fan is capped by what six kilometres is worth in pixels, which changes with
+     * every zoom step. Without this the cap would lag up to ten seconds behind the gesture — and
+     * lagging means briefly drawing the wide offset at a zoom where it lands in the wrong country,
+     * which is the whole thing the cap exists to stop.
+     *
+     * Debounced, so a five-step zoom is one refresh rather than five. Zoom is a deliberate act on
+     * a map and happens far less often than the poll it borrows.
+     */
+    let zoomT: ReturnType<typeof setTimeout> | null = null
+    const mapInst = mapInstanceRef.current
+    const onZoom = () => {
+      if (zoomT) clearTimeout(zoomT)
+      zoomT = setTimeout(() => { fetchUpdateRef.current?.() }, 400)
+    }
+    mapInst?.on('zoomend', onZoom)
+
     return () => {
       clearInterval(interval)
       document.removeEventListener('visibilitychange', onVisible)
+      mapInst?.off('zoomend', onZoom)
+      if (zoomT) clearTimeout(zoomT)
       fetchUpdateRef.current = null
     }
   }, [])
