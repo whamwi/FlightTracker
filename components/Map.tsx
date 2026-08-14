@@ -135,6 +135,9 @@ const STALE_TTL_MS       = 30 * 60 * 1000
  * and mobile independently used 90 — so an arrived flight lingered far longer than intended
  * on both. One constant now, and both surfaces use 30.
  */
+/** How far back along its approach an arrived marker sits, so co-located arrivals separate. */
+const ARRIVED_OFFSET_KM = 8
+
 // One hour, matching the same constant in app/api/airspace/route.ts. These were 30 minutes here
 // and four hours there, so a flight left the map at a different moment depending on whether we
 // still held a fix for it.
@@ -2204,7 +2207,31 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           continue
         }
 
-        const fPos = arrived ? 1.0 : Math.min(fraction, 0.97)
+        /*
+         * An arrived flight sits a few kilometres short of the field, on the approach it flew.
+         *
+         * At exactly 1.0 every arrival lands on the same coordinate, so Damascus stacked its
+         * arrivals into one unreadable blob — three aircraft, three ARRIVED labels, one pixel.
+         * Backing each off along its own route separates them by where they came from: the Dubai
+         * arrival sits south-east of the field, the Istanbul one north-west. The arrangement
+         * carries meaning rather than being a fan of arbitrary offsets.
+         *
+         * A fixed distance, not a fixed fraction — routes here run from 300 km to 4,000, and a
+         * fraction would put the Amman arrival a few hundred metres out and the Amsterdam one
+         * sixty kilometres out. Clamped at 0.9 so a very short hop cannot be pushed back past its
+         * own halfway point.
+         *
+         * It also fixes the heading for free: bearingFromPath at exactly 1.0 has no segment left
+         * to read, while just short of it the marker points down the approach.
+         *
+         * Two arrivals from the same direction still coincide. That is rarer than the general
+         * pile-up and would need screen-space layout to solve properly.
+         */
+        const routeKm = greatCircleKm(depC[0], depC[1], arrC[0], arrC[1])
+        const arrivedF = routeKm > ARRIVED_OFFSET_KM
+          ? Math.max(0.9, 1 - ARRIVED_OFFSET_KM / routeKm)
+          : 1.0
+        const fPos = arrived ? arrivedF : Math.min(fraction, 0.97)
         const wps  = routePathsRef.current[`${dep_iata}|${arr_iata}`]
 
         // On final approach with a recent ADS-B fix, pin the ghost to the last
