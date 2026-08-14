@@ -113,3 +113,23 @@ export function rankInstance(f: StatusFacts, nowMs: number = Date.now()): number
   }
   return 1
 }
+
+/**
+ * Minutes a flight differs from its filed time — negative when early.
+ *
+ * The scheduled side is a bare HH:MM with no date, so an overnight leg would otherwise read as a
+ * 24-hour delay: a flight due 23:50 and landing 00:05 is fifteen minutes late, not 1,425 early.
+ * Twelve hours is the widest gap treated as a same-day comparison.
+ *
+ * Shared because the map's side card had no equivalent and printed bare times, while the board
+ * printed the same times with their variance beside them.
+ */
+export function calcDelay(schedHHMM: string | null | undefined, actualISO: string | null | undefined): number | null {
+  if (!actualISO || !schedHHMM) return null
+  const actualMs = Date.parse(actualISO)
+  if (!Number.isFinite(actualMs)) return null
+  let schedMs = Date.parse(`${actualISO.slice(0, 10)}T${schedHHMM}:00Z`)
+  if (!Number.isFinite(schedMs)) return null
+  if (schedMs - actualMs > 12 * 3_600_000) schedMs -= 86_400_000
+  return Math.round((actualMs - schedMs) / 60_000)
+}

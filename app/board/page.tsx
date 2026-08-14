@@ -8,7 +8,8 @@ import SiteNav from '@/components/SiteNav'
 import LanguageSwitch from '@/components/LanguageSwitch'
 import { useT, useLocale, useHref } from '@/components/LocaleProvider'
 import { STATUS_KEY, counted, dateLocaleOf, type Locale } from '@/lib/i18n'
-import { effectiveStatus } from '@/lib/flight-status'
+import { effectiveStatus, calcDelay } from '@/lib/flight-status'
+import { DelayChip, MetaStrip } from '@/components/FlightMeta'
 import { BOARD_AIRPORTS, type BoardAirport } from '@/lib/syria-airports'
 
 const city = (iata: string) => cityFor(iata)
@@ -171,15 +172,6 @@ function computedETA(f: Flight): string | null {
   if (f.actual_arr_utc || f.revised_arr_utc) return null
   const ms = new Date(f.actual_dep_utc).getTime() + f.duration_min * 60_000
   return new Date(ms).toISOString()
-}
-
-function calcDelay(schedHHMM: string, actualISO: string | null): number | null {
-  if (!actualISO || !schedHHMM) return null
-  const opDate   = actualISO.slice(0, 10)
-  const actualMs = new Date(actualISO).getTime()
-  let   schedMs  = new Date(`${opDate}T${schedHHMM}:00Z`).getTime()
-  if (schedMs - actualMs > 12 * 3_600_000) schedMs -= 86_400_000
-  return Math.round((actualMs - schedMs) / 60_000)
 }
 
 /*
@@ -440,76 +432,6 @@ function StatusBadge({ status, view }: { status: string; view?: View }) {
 }
 
 // ── Delay chip ────────────────────────────────────────────────────────────────
-/**
- * The small print under the rail: aircraft type, terminal, gate, belt.
- *
- * No separator characters at all. The app joins these with middots, and this column is too narrow
- * to copy that: between two 96px time columns the strip gets 89px on a 375px screen, so "Terminal
- * 3" always wraps below the type. Any middot then leads the wrapped line and reads as a fault —
- * which it did twice, first from a joined string and then from separators bound to the item that
- * follows them, so they wrapped along with it.
- *
- * Whitespace separates instead. Every label but the aircraft type already carries its own noun
- * ("Terminal 3", "Gate B1"), so nothing is lost, and a wrap simply produces a second centred row.
- *
- * Renders nothing when it has nothing — most flights carry a type and no more, and an empty row
- * would add height to all 38 cards to say nothing on most of them.
- *
- * No dir override. It carried dir="ltr" at first, to keep the Latin aircraft code upright — which
- * it never needed, since a Latin run renders left-to-right inside an RTL paragraph on its own.
- * What the override did do was pin the item order to left-to-right on an Arabic page, so a reader
- * scanning right-to-left met them backwards: حقائب 3، then مبنى 3، then the type. Inheriting the
- * page direction puts them in the order they are written in, both ways round.
- */
-function MetaStrip({ items }: { items: { text: string | null | undefined; cls?: string }[] }) {
-  const parts = items
-    .map(i => ({ ...i, text: (i.text ?? '').trim() }))
-    .filter(i => i.text)
-  if (!parts.length) return null
-  return (
-    <div style={{
-      display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'baseline',
-      gap: '2px 10px', maxWidth: '100%',
-    }}>
-      {parts.map((p, i) => (
-        <span key={p.text + i} className={p.cls} style={{
-          fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: C.muted,
-          letterSpacing: '.04em', whiteSpace: 'nowrap',
-        }}>{p.text}</span>
-      ))}
-    </div>
-  )
-}
-
-function DelayChip({ min }: { min: number | null }) {
-  const locale = useLocale()
-  if (!min || Math.abs(min) < 1) return null
-  const isLate = min > 0
-  const unit   = locale === 'ar' ? 'د' : 'm'
-  /*
-   * Three elements, not one string, and dir=ltr on the wrapper.
-   *
-   * Bidi will not lay this out: under dir=rtl it puts the Arabic letter rightmost and drops
-   * the lone sign at the far left, so "+6د" and "د6+" rendered identically. Separate spans in
-   * a flex row are positioned by DOM order alone, which is the only way to pin unit, number,
-   * sign and keep it pinned for a minus or a three-digit delay.
-   */
-  return (
-    <span dir="ltr" style={{ display: 'inline-flex',
-      fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, fontWeight: 600,
-      padding: '3px 5px', borderRadius: 5, lineHeight: 1,
-      background: isLate ? C.wineBg : '#E6EFEC',
-      color: isLate ? C.wineText : '#002623',
-    }}>
-      {locale === 'ar' ? (
-        <>
-          <span>{unit}</span><span>{Math.abs(min)}</span><span>{isLate ? '+' : '-'}</span>
-        </>
-      ) : (isLate ? `+${min}${unit}` : `${min}${unit}`)}
-    </span>
-  )
-}
-
 // ── WhatsApp SVG ──────────────────────────────────────────────────────────────
 const WhatsAppSVG = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#1E8E4C" strokeWidth="1.85" strokeLinecap="round" strokeLinejoin="round">
