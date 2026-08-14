@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { hasArrived, effectiveStatus, type StatusFacts } from './flight-status.ts'
+import { hasArrived, effectiveStatus, rankInstance, type StatusFacts } from './flight-status.ts'
 
 const T = (s: string) => Date.parse(`2026-08-14T${s}:00Z`)
 
@@ -76,4 +76,27 @@ test('a departed flight with an unknown status still reads as Departed', () => {
   assert.equal(
     effectiveStatus({ status: 'Unknown', actual_dep_utc: '2026-08-14T02:00:00Z' }, T('03:00')),
     'Departed')
+})
+
+/** Instance ranking — which copy of a daily rotation the map should draw. */
+test('a flight that landed minutes ago outranks tomorrow’s empty copy', () => {
+  // ABY433 on 14 Aug: landed 03:02:55, while the 15 Aug row had no times, no registration.
+  const today    = { actual_dep_utc: '2026-08-14T00:23:27Z', actual_arr_utc: '2026-08-14T03:02:55Z' }
+  const tomorrow = { actual_dep_utc: null, actual_arr_utc: null }
+  assert.ok(rankInstance(today, T('03:13')) > rankInstance(tomorrow, T('03:13')),
+    'the flight that actually operated must win')
+})
+
+test('an airborne flight outranks everything — the FZ1192 case', () => {
+  const airborne = { actual_dep_utc: '2026-08-14T01:00:00Z', actual_arr_utc: null }
+  const landed   = { actual_dep_utc: '2026-08-14T00:00:00Z', actual_arr_utc: '2026-08-14T02:00:00Z' }
+  const future   = { actual_dep_utc: null, actual_arr_utc: null }
+  assert.ok(rankInstance(airborne, T('03:00')) > rankInstance(landed, T('03:00')))
+  assert.ok(rankInstance(airborne, T('03:00')) > rankInstance(future,  T('03:00')))
+})
+
+test('an old arrival yields to tomorrow, because it is history', () => {
+  const yesterday = { actual_dep_utc: '2026-08-13T20:00:00Z', actual_arr_utc: '2026-08-13T22:00:00Z' }
+  const tomorrow  = { actual_dep_utc: null, actual_arr_utc: null }
+  assert.ok(rankInstance(yesterday, T('12:00')) < rankInstance(tomorrow, T('12:00')))
 })

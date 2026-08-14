@@ -75,3 +75,41 @@ export function effectiveStatus(f: StatusFacts, nowMs: number = Date.now()): str
   if (f.revised_arr_utc && (s === 'Scheduled' || s === 'Unknown')) return 'Expected'
   return s
 }
+
+/**
+ * How long after landing a flight still outranks tomorrow's copy of itself.
+ *
+ * Four hours, matching the window `boardDeparted` already uses to keep an arrived flight on the
+ * map. Beyond it the arrival is history and tomorrow's departure is the more useful instance.
+ */
+const ARRIVED_RELEVANT_MS = 4 * 3_600_000
+
+/**
+ * Which instance of a repeating flight number is the one to show.
+ *
+ * A daily rotation appears on several of the dates the map fetches, and only one may be drawn.
+ * Ranked by what a reader is looking for right now:
+ *
+ *   3  airborne          — the flight in the sky wins outright
+ *   2  landed recently   — still worth showing; the marker has not expired yet
+ *   1  not yet departed  — tomorrow's copy, or today's later leg
+ *   0  landed long ago   — history, and tomorrow is the better answer
+ *
+ * Rank 2 is what was missing. The rule was `arrived ? 0 : departed ? 2 : 1`, which put every
+ * completed flight below tomorrow's untouched row — so on 14 Aug the map drew ABY433 and THY848
+ * from their 15 Aug rows: no actual times, no registration, and for THY848 the wrong aircraft
+ * type (73J against the A332 that actually operated). Every popup defect on those two traced
+ * back to being handed a flight that had not happened yet.
+ *
+ * Airborne still outranks everything, which is the case this ranking was written for: FZ1192 was
+ * nearly down at Dubai while the map held its next-day row and stamped a departure time in the
+ * future onto it.
+ */
+export function rankInstance(f: StatusFacts, nowMs: number = Date.now()): number {
+  if (f.actual_dep_utc && !f.actual_arr_utc) return 3
+  if (f.actual_arr_utc) {
+    const arr = Date.parse(f.actual_arr_utc)
+    return Number.isFinite(arr) && nowMs - arr < ARRIVED_RELEVANT_MS ? 2 : 0
+  }
+  return 1
+}

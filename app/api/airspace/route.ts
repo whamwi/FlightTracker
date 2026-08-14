@@ -2,6 +2,7 @@ import { NextResponse, after } from 'next/server'
 import { sweepAllCircles } from '@/lib/adsb-feed'
 import { fetchIataToIcao, fetchCallsignLookup, resolveCallsign, type CallsignLookup } from '@/lib/callsign'
 import { SYRIA_AIRPORT_SET, SYRIA_AIRPORTS_CSV } from '@/lib/syria-airports'
+import { rankInstance } from '@/lib/flight-status'
 import { inSyria } from '@/lib/syria-airspace'
 
 export const dynamic = 'force-dynamic'
@@ -203,17 +204,21 @@ async function boardFromV2(dates: string[]): Promise<BoardFlight[] | null> {
      * departure onto it from the aircraft's position: a departure time in the future, on a
      * flight already nearly down.
      *
-     * Ranked airborne > not yet departed > arrived, ties to the earlier date in the order passed.
-     * The same rule lib/index-by-iata.ts applies in the app, for the same reason — this is one
-     * fact about the domain and I failed to carry it across.
+     * Ranked by rankInstance in lib/flight-status — airborne, then landed recently, then not yet
+     * departed, then landed long ago. Ties go to the earlier date in the order passed.
+     *
+     * The rank that mattered here was the second one. This function used to score every completed
+     * flight below tomorrow's untouched row, so on 14 Aug the map drew ABY433 and THY848 from
+     * their 15 Aug rows: no actual times, no registration, and the wrong aircraft type. The popup
+     * defects that surfaced them — one code instead of two, no photo, a countdown to an arrival
+     * that had already happened — were all the same flight-that-had-not-happened-yet.
      */
     const best = new Map<string, { f: any; d: string; rank: number }>()
-    const rankOf = (f: any) =>
-      f.actual_arr_utc ? 0 : f.actual_dep_utc ? 2 : 1
+    const nowMs = Date.now()
     for (const { f, d } of pages.flat()) {
       const cs = (f.callsign ?? '').trim().toUpperCase()
       if (!cs) continue
-      const rank = rankOf(f)
+      const rank = rankInstance(f, nowMs)
       const held = best.get(cs)
       if (!held || rank > held.rank) best.set(cs, { f, d, rank })
     }
