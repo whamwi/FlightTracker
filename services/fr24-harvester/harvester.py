@@ -49,6 +49,7 @@ Environment
 from __future__ import annotations
 
 import json
+import math
 import os
 import urllib.parse
 import signal
@@ -171,6 +172,66 @@ def log(msg: str) -> None:
 
 def ts(unix: int | None) -> str | None:
     return datetime.fromtimestamp(unix, timezone.utc).isoformat() if unix else None
+
+
+# ── Position plausibility ────────────────────────────────────────────────────
+
+# The fastest an aircraft we track can cover ground, including a strong tailwind. An A320 cruises
+# near 900 km/h; 1,200 leaves room for the jet stream and rounding, and nothing legitimate clears it.
+MAX_GROUND_SPEED_KMH = 1200
+# Below this the check is off: consecutive fixes a few hundred metres apart are noise, and dividing
+# by a two-second gap turns that noise into a spurious four-figure speed.
+MIN_JUMP_KM = 5
+# And above this gap it is off too — after half an hour of silence an aircraft is legitimately far
+# away, and the previous fix says nothing about whether the new one is real.
+MAX_GAP_SEC = 1800
+
+# Last accepted position per fr24_id, in process. Deliberately not persisted: after a restart the
+# first fix of each flight is accepted unchecked, which is the safe direction — this rejects data,
+# so it must never run on a stale reference.
+_last_fix: dict[str, tuple[float, float, float]] = {}
+
+
+def _km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    r1, r2 = math.radians(lat1), math.radians(lat2)
+    dlat, dlon = math.radians(lat2 - lat1), math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(r1) * math.cos(r2) * math.sin(dlon / 2) ** 2
+    return 2 * 6371 * math.asin(math.sqrt(a))
+
+
+def implausible_jump(fid: str, lat: float, lon: float, fix_at: str | None) -> bool:
+    """
+    True when this fix cannot follow the last one we accepted for the same flight.
+
+    KU551 on 14 Aug is the case. Its last credible position was 50 km from Damascus at 12,350 ft;
+    four minutes later it reported 1 km from Amman — 210 km away, an implied 3,000 km/h. FR24 read
+    that position, saw an aircraft on the ground at Amman and published "Diverted to AMM", and the
+    flight landed at Damascus eight minutes later.
+
+    Position, not ground speed. The spoofed rows carried a *plausible-looking* 10 knots and would
+    survive a speed test; what gives them away is that no aircraft can be where they claim, given
+    where it just was. This also catches the frozen-position case from 13 Aug, since a frozen
+    position eventually contradicts a moving one.
+
+    Applies to every source. The earlier ground-speed guard was scoped to our own receivers, and
+    these rows came from FR24's — which is exactly why they reached the map.
+    """
+    if lat is None or lon is None or not fix_at:
+        return False
+    try:
+        now_s = datetime.fromisoformat(fix_at.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return False
+    prev = _last_fix.get(fid)
+    if prev:
+        plat, plon, pts = prev
+        dt = now_s - pts
+        if 0 < dt <= MAX_GAP_SEC:
+            km = _km(plat, plon, lat, lon)
+            if km >= MIN_JUMP_KM and (km / dt) * 3600 > MAX_GROUND_SPEED_KMH:
+                return True
+    _last_fix[fid] = (lat, lon, now_s)
+    return False
 
 
 def fetch_airport(code: str, day: str, page: int = 1) -> tuple[dict, int, int]:
@@ -631,6 +692,9 @@ def collect_adsb(live_by_callsign: dict[str, tuple[str, int]]) -> int:
                and gs is not None and gs < BAD_FIX_MIN_GS_KTS:
                 bad_fixes += 1
                 continue
+            if implausible_jump(fid, a["lat"], a["lon"], a.get("seen_at")):
+                bad_fixes += 1
+                continue
 
             rows.append({
                 "fr24_id": fid, "fr24_row": frow,
@@ -706,9 +770,16 @@ def collect_positions(live: dict[str, int]) -> None:
             f"flights may be silently missing; narrow FR24_FEED_BOUNDS")
 
     rows = []
+    jumps = 0
     for fid, v in craft.items():
         if fid not in live:
             continue                          # not ours; the other ~1,160 are overflights
+        # Same test as our own receivers get. These rows are the ones that mattered: KU551's
+        # 210 km jump to Amman came in on this path, and the guard I shipped this morning was
+        # scoped to source='adsb', so it sailed straight past.
+        if implausible_jump(fid, v[1], v[2], ts(v[10])):
+            jumps += 1
+            continue
         rows.append({
             "fr24_id": fid, "fr24_row": live[fid],
             "hex": v[0] or None, "lat": v[1], "lon": v[2], "track_deg": v[3],
@@ -721,6 +792,8 @@ def collect_positions(live: dict[str, int]) -> None:
             "aircraft_seen": len(craft), "raw": v,
         })
 
+    if jumps:
+        log(f"  feed: dropped {jumps} fix(es) no aircraft could have flown to")
     if not rows:
         log(f"  feed: {len(craft)} aircraft, none of our {len(live)} live flights in the box")
         return
