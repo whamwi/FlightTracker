@@ -503,8 +503,32 @@ function buildPopup(
   const arr       = fs?.arr_iata ?? a.arr_iata ?? null
   const flightNum = fs?.flight_number ?? callsign
 
-  // Status badge
-  const [statusLabel, statusBg, statusFg] = lostAt && !projected
+  /*
+   * Arrived first, and from lib/flight-status — the rule the board, the panel and the schedule
+   * marker already share.
+   *
+   * This popup had no arrived state at all: the three branches below were signal-lost, projected
+   * and in-air, so an aircraft that had landed showed whichever of those last applied. ABY433 on
+   * 14 Aug read "انقطعت الإشارة" under a marker labelled ARRIVED, and THY848 read "~ في الجو"
+   * with its landing time printed directly underneath.
+   *
+   * Signal-lost is exactly the case that has to yield. Losing the track is how most of these
+   * flights end — FR24 drops them on approach at Aleppo — so reporting the loss instead of the
+   * landing describes our coverage rather than the flight.
+   */
+  const arrived = hasArrived({
+    status:          fs?.status,
+    actual_arr_utc:  fs?.actual_arr_utc ?? a.actual_arr_utc,
+    actual_dep_utc:  fs?.actual_dep_utc ?? a.actual_dep_utc,
+    revised_arr_utc: fs?.revised_arr_utc,
+    duration_min:    a.duration_min,
+  })
+
+  // Status badge. Same colours as buildSchedulePopup's arrived state, so a flight handing over
+  // between the two builders does not change appearance as it does so.
+  const [statusLabel, statusBg, statusFg] = arrived
+    ? [T('status.arrived'), '#1e3a5f', '#60a5fa']
+    : lostAt && !projected
     ? [T('status.signal_lost'), '#7f1d1d', '#f87171']
     // The tilde marks a projected position rather than an observed one.
     : projected
@@ -535,8 +559,8 @@ function buildPopup(
 
   const depMs       = Date.parse(depISO ?? '')
   const arrMs       = Date.parse(arrISO ?? '')
+  // Kept for the flown-time figure below; whether it has landed is `arrived`, decided above.
   const actualArrMs = Date.parse(fs?.actual_arr_utc ?? a.actual_arr_utc ?? '')
-  const hasArrived  = Number.isFinite(actualArrMs) && Date.now() >= actualArrMs
 
   // Progress from time, not from a.lat/a.lon. Those freeze at the instant the signal drops,
   // so on a dead-reckoned flight the bar froze with them — while the schedule overlay
@@ -544,7 +568,7 @@ function buildPopup(
   // position depending on which builder happened to render it that refresh. Geometry stays
   // only as a fallback for a live aircraft with no usable schedule.
   let fraction: number | null = null
-  if (hasArrived) {
+  if (arrived) {
     fraction = 1
   } else if (Number.isFinite(depMs) && Number.isFinite(arrMs) && arrMs > depMs) {
     fraction = Math.max(0.02, Math.min(0.97, (Date.now() - depMs) / (arrMs - depMs)))
@@ -559,13 +583,13 @@ function buildPopup(
   const arrOffset = _apOffset[arr ?? ''] ?? 3
 
   let etaStr = ''
-  if (hasArrived && Number.isFinite(depMs) && actualArrMs > depMs) {
+  if (arrived && Number.isFinite(actualArrMs) && Number.isFinite(depMs) && actualArrMs > depMs) {
     // Once it is down, time remaining is meaningless — how long it took is the useful number.
     etaStr = `${fmtHm(Math.round((actualArrMs - depMs) / 60_000))} ${T('label.flown')}`
-  } else if (!hasArrived && Number.isFinite(arrMs)) {
+  } else if (!arrived && Number.isFinite(arrMs)) {
     const remMin = Math.round((arrMs - Date.now()) / 60_000)
     if (remMin > 0) etaStr = `${fmtHm(remMin)} ${T('map.until_arrival')}`
-  } else if (!hasArrived && arrCoord && typeof a.lat === 'number' && typeof a.lon === 'number'
+  } else if (!arrived && arrCoord && typeof a.lat === 'number' && typeof a.lon === 'number'
              && typeof a.gs === 'number' && a.gs > 50) {
     // No arrival estimate anywhere — fall back to the geometric one. Only meaningful for a
     // genuinely live fix, which is the only case that reaches here.
@@ -616,7 +640,9 @@ function buildPopup(
   // diaspora audience that also made a signal-lost stamp read as later than the arrival
   // time beside it.
   const lostLocal = lostAt ? popupToLocal(new Date(lostAt).toISOString(), arrOffset) : ''
-  const lostLine = lostAt && !projected
+  // Suppressed once it is down: "⚠ signal lost 05:58" under an Arrived badge reads as a fault,
+  // when in fact the flight finished normally and only our view of it ended early.
+  const lostLine = lostAt && !projected && !arrived
     ? `<div style="color:#ef4444;font-size:11px;padding:5px 14px;text-align:center">⚠ ${T('map.signal_lost')} ${lostLocal}</div>`
     : ''
   const drLine = projected && lostAt
