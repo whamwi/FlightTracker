@@ -771,9 +771,26 @@ def collect_positions(live: dict[str, int]) -> None:
 
     rows = []
     jumps = 0
+    estimates = 0
     for fid, v in craft.items():
         if fid not in live:
             continue                          # not ours; the other ~1,160 are overflights
+        # FR24's own dead reckoning, not an observation, and never stored.
+        #
+        # ABY364 on 14 Aug: at 12:25 Damascus the app showed "21,750 قدم" from an F-EST fix 28
+        # minutes old, while the aircraft was actually at 35,000 ft and 700 km away. The giveaway
+        # is in the numbers — altitude pinned at exactly 21,750, ground speed at exactly 414,
+        # track locked at 112° for six consecutive minutes. Real fixes either side of it show
+        # altitude climbing and speed varying.
+        #
+        # It costs us nothing: across 48 hours it was 261 of 28,821 fixes, no flight relies on it
+        # alone, and the last real fix typically arrives 68 minutes AFTER the last estimate — so
+        # it bridges a gap that later fills in properly anyway. What it did cost was a number that
+        # looked measured and was invented, sitting in the same table and column as multilateration.
+        if (v[7] or "") == "F-EST":
+            estimates += 1
+            continue
+
         # Same test as our own receivers get. These rows are the ones that mattered: KU551's
         # 210 km jump to Amman came in on this path, and the guard I shipped this morning was
         # scoped to source='adsb', so it sailed straight past.
@@ -794,6 +811,8 @@ def collect_positions(live: dict[str, int]) -> None:
 
     if jumps:
         log(f"  feed: dropped {jumps} fix(es) no aircraft could have flown to")
+    if estimates:
+        log(f"  feed: dropped {estimates} estimated position(s) (F-EST)")
     if not rows:
         log(f"  feed: {len(craft)} aircraft, none of our {len(live)} live flights in the box")
         return
