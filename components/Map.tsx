@@ -361,8 +361,12 @@ function bestHeading(a: Aircraft): number {
  */
 function arrivalsBadge(L: typeof import('leaflet')) {
   const mobile = typeof window !== 'undefined' && window.matchMedia(PHONE_MQ).matches
+  // The box is the dot, not a container around it. planeIcon works because its svg fills the
+  // iconSize exactly, so the centre anchor lands on the aircraft; a box larger than the dot puts
+  // the anchor below it instead — measured 3 px, which is the airport's whole width when zoomed
+  // out to the region.
   const dot    = mobile ? 9 : 10
-  const box    = mobile ? 14 : 16
+  const box    = dot
   /*
    * Built like planeIcon rather than as a pill, and for the same reason it works there.
    *
