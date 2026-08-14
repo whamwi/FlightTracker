@@ -225,7 +225,11 @@ function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelecte
 
               It costs one distinction — Istanbul has two airports in this schedule, IST and SAW,
               and both render as إسطنبول here. The route line in the popup still separates them. */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 1, width: 64, flexShrink: 0 }}>
+          {/* alignItems, which the arrival column opposite has had all along and this one did not.
+              Without it a column flex box defaults to stretch, so the delay chip — an inline-flex
+              span — was pulled to the full 64px while its twin hugged its own text. The badge was
+              the right size; the box around it was not. */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 1, width: 64, flexShrink: 0, alignItems: 'flex-start' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 3, minWidth: 0 }}>
               <span style={{ fontSize: 10, flexShrink: 0 }}>{depFlag}</span>
               <span style={{ font: `700 11px/1.15 'Instrument Sans',system-ui`, color: C.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{depCity}</span>
