@@ -1278,9 +1278,32 @@ export async function GET() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const visible = annotated.filter((a: any) => a.board_match || inSyria(a.lat, a.lon))
 
+    /*
+     * One age for every aircraft, computed here so no surface has to work it out twice.
+     *
+     * The paths arrive with different clocks: the raw feed carries `seen`, seconds since the
+     * receiver last heard it, while the v2 and logged-position paths carry a `fix_at` timestamp.
+     * The marker faded on one signal and the side card had neither, so a flight could sit
+     * motionless for half an hour with nothing on screen admitting it — ABY364 on 14 Aug showed
+     * an altitude beside a fix 28 minutes old.
+     *
+     * Seconds, not a boolean. "Stale" is a threshold and every surface would pick its own;
+     * an age lets the card say how long and the marker keep its own cutoff.
+     */
+    const nowSec = Date.now() / 1000
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const withAge = (a: any) => {
+      const fixMs = a.fix_at ? Date.parse(a.fix_at) : NaN
+      const age = Number.isFinite(fixMs) ? (Date.now() - fixMs) / 1000
+                : typeof a.seen === 'number' ? a.seen
+                : null
+      return { ...a, fix_age_s: age == null ? null : Math.round(age) }
+    }
+    void nowSec
+
     return NextResponse.json({
       ok:           true,
-      aircraft:     [...visible, ...trackedExtra],
+      aircraft:     [...visible, ...trackedExtra].map(withAge),
       boardDeparted,
       ts:           feedCache!.ts,
       // Enough to tell "the feeds returned nothing" from "we filtered it all out".

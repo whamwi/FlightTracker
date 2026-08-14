@@ -170,7 +170,15 @@ function MiniProgress({ depUtc, arrMs, approaching, accentColor }: { depUtc: str
 }
 
 // ── Compact flight card for the panel ───────────────────────────────────────
-function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelected?: boolean; onSelect: (n: string) => void }) {
+/**
+ * Beyond this the marker is projected rather than observed, and the card says so.
+ *
+ * Five minutes, matching the window /v2/live uses to decide a fix is too old to describe the
+ * present. Below it the position is simply current; above it we are drawing a guess.
+ */
+const STALE_FIX_S = 300
+
+function MiniFlightCard({ f, isSelected, onSelect, fixAgeS }: { f: InAirFlight; isSelected?: boolean; onSelect: (n: string) => void; fixAgeS?: number }) {
   const t    = useT()
   const href = useHref()
   const status = effectiveStatus(f)
@@ -285,6 +293,19 @@ function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelecte
           </div>
         </div>
 
+        {/*
+          Only when it applies. The marker already fades, but a faded marker never said why, and
+          nothing outside the popup admitted the position was old — ABY364 on 14 Aug sat still for
+          28 minutes with an altitude printed beside it.
+        */}
+        {fixAgeS != null && fixAgeS > STALE_FIX_S && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: -3 }}>
+            <span style={{ width: 5, height: 5, borderRadius: 99, background: C.muted, display: 'block', flexShrink: 0 }} />
+            <span style={{ font: `500 10px/1.2 'Instrument Sans',system-ui`, color: C.muted }}>
+              {t('map.last_seen')} {durationLabel(Math.max(1, Math.round(fixAgeS / 60)))}
+            </span>
+          </div>
+        )}
       </div>
     </Link>
   )
@@ -301,6 +322,9 @@ function useInAirFlights() {
   const [flights, setFlights] = useState<InAirFlight[]>([])
   /** Soonest arrival on screen, in ms — what the poll loop reads to pick its next delay. */
   const soonestArrRef = useRef<number | null>(null)
+  /** Seconds since each callsign was last heard, for the staleness line on its card.
+   *  A plain object, not a Map — `Map` at this module's scope is the imported map component. */
+  const fixAgeRef = useRef<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [geoReady, setGeoReady] = useState(false)
 
@@ -332,12 +356,18 @@ function useInAirFlights() {
         fetch('/api/airspace').then(r => (r.ok ? r.json() : null)).catch(() => null),
       ])
 
-      const airborne = new Set<string>(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ((live?.aircraft ?? []) as any[])
-          .map(a => String(a?.flight ?? '').trim().toUpperCase())
-          .filter(Boolean),
-      )
+      const airborne = new Set<string>()
+      // How long since each was last actually seen. The set alone said whether a flight was up;
+      // it could not say whether we had heard from it in the last half hour.
+      const fixAge: Record<string, number> = {}
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const a of ((live?.aircraft ?? []) as any[])) {
+        const cs = String(a?.flight ?? '').trim().toUpperCase()
+        if (!cs) continue
+        airborne.add(cs)
+        if (typeof a?.fix_age_s === 'number') fixAge[cs] = a.fix_age_s
+      }
+      fixAgeRef.current = fixAge
 
       /*
        * One row per flight. The same service appears on both days around midnight, and a
@@ -404,7 +434,7 @@ function useInAirFlights() {
     return () => { alive = false; clearTimeout(timer) }
   }, [load])
 
-  return { flights, loading, geoReady }
+  return { flights, loading, geoReady, fixAge: fixAgeRef.current }
 }
 
 /**
