@@ -372,8 +372,17 @@ function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, s
   let html = svg
   if (label) {
     const textColor = stale ? '#6b7280' : estimated ? '#d97706' : '#166534'
+    /*
+     * The second line is quieter than the first, because it is answering a different question.
+     *
+     * Line one is which flight this is; line two is where it is going. Amber and bold on line two
+     * was for the old ARRIVED tag, which shouted for attention it needed — a destination does not,
+     * and every marker carrying one would have made the map a wall of yellow.
+     */
     const labelHtml = label.split('\n').map((line, i) =>
-      `<div style="font-size:${mobile ? 8 : (i>0?8:9)}px;font-weight:bold;color:${i>0?'#fbbf24':textColor};letter-spacing:0.3px;line-height:1.2;white-space:nowrap">${line}</div>`
+      `<div style="font-size:${mobile ? 8 : (i > 0 ? 8 : 9)}px;font-weight:${i > 0 ? 600 : 'bold'};`
+      + `color:${i > 0 ? '#6b7280' : textColor};letter-spacing:0.3px;line-height:1.2;`
+      + `white-space:nowrap">${line}</div>`
     ).join('')
     html = `<div style="display:flex;flex-direction:column;align-items:center;gap:2px">
       ${svg}<div style="text-align:center">${labelHtml}</div></div>`
@@ -1924,7 +1933,18 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           }
         }
 
-        const staleLabel    = arrSnapped ? `${cs}\nARRIVED` : cs
+        /*
+         * Callsign, then where it is heading.
+         *
+         * The destination and not the other end: an aircraft over Saudi labelled "إلى: دمشق" is
+         * telling you it is inbound, which is the thing worth knowing at a glance. It does mean
+         * every inbound marker says Damascus, which is repetition — see the note at the call site
+         * in the schedule overlay.
+         */
+        const destCs        = a.arr_iata ?? flightStatusRef.current[cs]?.arr_iata ?? null
+        const staleLabel    = arrSnapped ? `${cs}\nARRIVED`
+                            : destCs     ? `${cs}\n${T('map.to')} ${cityFor(destCs)}`
+                            : cs
         const isEstimated   = projected && !arrSnapped
         const isHighlighted = highlightedCSRef.current === cs
         const icon    = planeIcon(L, dispTrack, true, arrSnapped, staleLabel, hub, isEstimated, isHighlighted ? '#ef4444' : undefined)
@@ -2296,7 +2316,10 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         const track = wps?.length
           ? bearingFromPath(wps, fPos)
           : bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], fPos)
-        const label = callsign
+        // Same two lines as the live markers, so a ghost and a tracked flight read alike. Every
+        // inbound one says Damascus; the alternative — naming the far end instead — would give
+        // each marker a distinct second line but would stop saying which way the flight is going.
+        const label = arr_iata ? `${callsign}\n${T('map.to')} ${cityFor(arr_iata)}` : callsign
         const hub = markerHub(dep_iata, arr_iata)
         const isSchedHighlighted = highlightedCSRef.current === callsign
         const icon  = planeIcon(L, track, true, false, label, hub, true, isSchedHighlighted ? '#ef4444' : undefined)
