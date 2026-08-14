@@ -388,8 +388,11 @@ function arrivalsBadge(L: typeof import('leaflet'), count: number, hub: BoardAir
 /**
  * The list behind the badge: every flight that has landed here inside the hold window.
  *
- * Rows carry data-cs so the marker can wire clicks after the popup opens — the content is an HTML
- * string, as every popup on this map is, and handlers cannot be bound inside one.
+ * Read-only, and deliberately. I had each row open that flight's full card with a link back, and
+ * that swap is what kept breaking — handlers lost across content replacements, then a back button
+ * that blanked the popup when the list it wanted was gone. None of it was asked for. The list
+ * carries the number, where it came from, when it landed and how far off schedule, which is what
+ * the badge is for; the flight's own card is a marker again as soon as the group thins to one.
  */
 function buildArrivalsPopup(
   iata: string,
@@ -402,16 +405,15 @@ function buildArrivalsPopup(
            padding:2px 5px;border-radius:5px;
            background:${r.delay > 0 ? '#3f1d24' : '#14332b'};
            color:${r.delay > 0 ? '#fca5a5' : '#6ee7b7'}">${r.delay > 0 ? '+' : ''}${r.delay}</span>`
-    return `<button data-cs="${r.callsign}" style="all:unset;cursor:pointer;display:flex;
-        align-items:center;gap:8px;padding:7px 10px;border-radius:8px;width:100%;
-        box-sizing:border-box">
+    return `<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;
+        border-radius:8px;width:100%;box-sizing:border-box">
         <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:700;
           color:#e5e7eb;min-width:62px">${r.flightNo}</span>
         <span style="font-size:11px;color:#9ca3af;flex:1;overflow:hidden;text-overflow:ellipsis;
           white-space:nowrap">${r.from}</span>
         <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#e5e7eb">${r.at}</span>
         ${delay}
-      </button>`
+      </div>`
   }).join('')
   return `<div style="min-width:250px">
     <div style="display:flex;align-items:center;gap:8px;padding:2px 4px 8px">
@@ -421,13 +423,6 @@ function buildArrivalsPopup(
     </div>
     <div style="display:flex;flex-direction:column;gap:2px">${items}</div>
   </div>`
-}
-
-/** The header that lets one flight's card go back to the list it came from. */
-function arrivalsBackBar(): string {
-  return `<button data-arrback="1" style="all:unset;cursor:pointer;display:flex;align-items:center;
-    gap:6px;padding:4px 6px 8px;font-size:12px;color:#9ca3af">
-    <span>‹</span><span>${T('map.arrivals_title')}</span></button>`
 }
 
 function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, stale: boolean, label?: string, hub: BoardAirport = 'DAM', estimated = false, colorOverride?: string) {
@@ -1025,8 +1020,6 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
   const schedMarkersRef = useRef<Record<string, any>>({})
   /** The "arrivals" badge standing in for a group of arrived flights, keyed by airport. */
   const arrivedClusterRef = useRef<Record<string, any>>({})
-  /** Which flight's card the badge is currently showing, if the reader has opened one. */
-  const openArrivalRef    = useRef<Record<string, string>>({})
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const schedLinesRef   = useRef<Record<string, any[]>>({})
   // Last-known state keyed by callsign — replaces hex-keyed lastKnownRef
@@ -2576,73 +2569,18 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         let marker = arrivedClusterRef.current[iata]
         if (marker) {
           marker.setIcon(icon)
-          // Only while the list is what is showing. A reader who has opened one of these flights is
-          // reading it, and the ten-second poll must not pull it out from under them.
-          if (!openArrivalRef.current[iata]) marker.setPopupContent(list)
+          marker.setPopupContent(list)
         } else {
           marker = addToMap(L.marker(coords as [number, number], { icon, zIndexOffset: 400 }), map)
           marker.bindPopup(list, { className: 'fp-popup', closeButton: false, maxWidth: 320 })
-          /*
-           * One delegated listener on the popup container, not handlers on the rows.
-           *
-           * Popup content is an HTML string here as it is everywhere on this map, so a row cannot
-           * carry its own handler and something has to bind them afterwards. Binding them directly
-           * meant re-binding after every content swap, and the back arrow shipped dead because one
-           * of those re-binds did not take — it rendered, did nothing, and left the reader stuck on
-           * a flight card. The container outlives every swap, so a listener there does not care
-           * what replaced what.
-           */
-          marker.on('popupopen', () => {
-            const el = marker.getPopup()?.getElement() as HTMLElement | null
-            if (!el || el.dataset.arrWired) return
-            el.dataset.arrWired = '1'
-            el.addEventListener('click', (ev: Event) => {
-              const target = ev.target as HTMLElement | null
-              const row = target?.closest?.('[data-cs]') as HTMLElement | null
-              if (row) {
-                const cs = row.dataset.cs!
-                const e  = pickSchedule(scheduleRef.current, cs, Date.now())
-                if (!e) return
-                const fs    = flightStatusRef.current[cs]
-                const reg   = fs?.aircraft_reg ?? null
-                const photo = (reg ? photoCacheRef.current[reg] : null)
-                           ?? photoCacheRef.current[`cs:${cs}`] ?? null
-                openArrivalRef.current[iata] = cs
-                marker.setPopupContent(arrivalsBackBar() + buildSchedulePopup(e, true, fs, 1, photo))
-                return
-              }
-              if (target?.closest?.('[data-arrback]')) {
-                /*
-                 * From the marker itself, not from a ref keyed by airport.
-                 *
-                 * The ref version shipped broken: its entry is deleted the moment a group thins
-                 * below two, so back could fire with nothing to go back to, write an empty string,
-                 * and collapse the popup — the reader clicked back and the panel vanished. Held on
-                 * the marker, the list cannot outlive or predecease the thing that shows it. The
-                 * guard is belt and braces: never blank a popup.
-                 */
-                const html = (marker as { _arrList?: string })._arrList
-                if (!html) return
-                delete openArrivalRef.current[iata]
-                marker.setPopupContent(html)
-              }
-            })
-          })
-          // Back to the list when the reader dismisses the popup, so reopening the badge does not
-          // resume on whichever flight they last looked at.
-          marker.on('popupclose', () => { delete openArrivalRef.current[iata] })
           arrivedClusterRef.current[iata] = marker
         }
-        // Held on the marker so "back" always has something to return to, for exactly as long as
-        // there is a badge to return it to.
-        ;(marker as { _arrList?: string })._arrList = list
       }
       // Airports that no longer have a group lose their badge.
       for (const iata of Object.keys(arrivedClusterRef.current)) {
         if ((arrivedAt[iata]?.length ?? 0) < 2) {
           arrivedClusterRef.current[iata].remove()
           delete arrivedClusterRef.current[iata]
-          delete openArrivalRef.current[iata]
         }
       }
 
