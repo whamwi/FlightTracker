@@ -388,7 +388,13 @@ function useInAirFlights() {
       }
 
       const isFlying = (f: InAirFlight) => {
-        const status = effectiveStatus(f)
+        // Hand the rule what we last saw, so the stopwatch cannot drop a flight out of the panel
+        // while a recent fix still has it airborne. FAD742 on 14 Aug was declared arrived by the
+        // clock and vanished from the list; nothing had observed it landing.
+        const status = effectiveStatus({
+          ...f,
+          airborne_fix_age_s: fixAge[(f.callsign ?? '').toUpperCase()] ?? null,
+        })
         if (status === 'Arrived' || status === 'Cancelled') return false
         return IN_AIR.has(status)
           || airborne.has((f.callsign ?? '').toUpperCase())

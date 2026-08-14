@@ -37,6 +37,13 @@ export type StatusFacts = {
   actual_dep_utc?: string | null
   revised_arr_utc?: string | null
   duration_min?: number | null
+  /**
+   * Seconds since we last saw this aircraft airborne, from a real fix — never F-EST.
+   *
+   * Optional, and absent means "no opinion" rather than "not flying": most callers have no
+   * position to offer and must keep the behaviour they had.
+   */
+  airborne_fix_age_s?: number | null
 }
 
 /**
@@ -47,6 +54,21 @@ export type StatusFacts = {
  * estimate — an estimate frozen at the moment a track died is the thing least worth trusting here.
  */
 const ARRIVAL_GRACE_MS = 15 * 60_000
+
+/**
+ * How recently an airborne fix still overrules the clock.
+ *
+ * The grace rule below is a stopwatch: departure plus scheduled block plus fifteen minutes. It
+ * knows nothing about whether the aircraft is still up, so a flight that holds, goes around or
+ * simply runs long is declared arrived while it is still flying — and it then drops out of the
+ * in-air panel, which is exactly when someone watching it wants it most.
+ *
+ * A fix from the last ten minutes settles that: if we saw it airborne that recently, the clock
+ * does not get to say otherwise. Older than ten minutes and the fix has stopped being evidence
+ * about now — FAD742 on 14 Aug was last seen descending through 12,575 ft, and half an hour later
+ * that told us nothing except that it had been on approach.
+ */
+const AIRBORNE_FIX_TRUSTED_MS = 10 * 60_000
 
 /**
  * True when the flight is on the ground at its destination.
@@ -60,6 +82,10 @@ export function hasArrived(f: StatusFacts, nowMs: number = Date.now()): boolean 
   if (s === 'Arrived') return true
   if (s === 'Cancelled' || s === 'Diverted') return false
   if (f.actual_dep_utc && f.duration_min) {
+    // A recent sighting outranks the stopwatch. Only the clock is vetoed — an actual arrival
+    // above still wins, because a published landing is not a guess.
+    const age = f.airborne_fix_age_s
+    if (age != null && age * 1000 < AIRBORNE_FIX_TRUSTED_MS) return false
     const dep = Date.parse(f.actual_dep_utc)
     if (Number.isFinite(dep) && dep + f.duration_min * 60_000 + ARRIVAL_GRACE_MS < nowMs) return true
   }

@@ -100,3 +100,40 @@ test('an old arrival yields to tomorrow, because it is history', () => {
   const tomorrow  = { actual_dep_utc: null, actual_arr_utc: null }
   assert.ok(rankInstance(yesterday, T('12:00')) < rankInstance(tomorrow, T('12:00')))
 })
+
+/**
+ * FAD742, 14 Aug — the stopwatch reaching a conclusion the position contradicts.
+ *
+ * DAM→JED, departed 08:21:04 on a 112-minute block, so the grace rule fires at 10:28:04. No
+ * arrival was ever published. It was last seen at 10:00:25 descending through 12,575 ft, 45 km
+ * from Jeddah, and the marker sat frozen there while the card flipped to Arrived and the flight
+ * dropped out of the in-air panel.
+ */
+const FAD742: StatusFacts = {
+  status: 'Departed',
+  actual_dep_utc: '2026-08-14T08:21:04Z',
+  actual_arr_utc: null,
+  duration_min: 112,
+}
+
+test('a fresh airborne fix overrules the stopwatch', () => {
+  // Same flight, seen airborne two minutes ago: still flying, whatever the block says.
+  assert.equal(hasArrived({ ...FAD742, airborne_fix_age_s: 120 }, T('10:30')), false)
+  assert.equal(effectiveStatus({ ...FAD742, airborne_fix_age_s: 120 }, T('10:30')), 'Departed')
+})
+
+test('a stale airborne fix does not, because it no longer describes now', () => {
+  // The real case: last seen 30 minutes earlier on approach. By then it had almost certainly
+  // landed, and the clock is the best thing left.
+  assert.equal(hasArrived({ ...FAD742, airborne_fix_age_s: 1800 }, T('10:30')), true)
+})
+
+test('with no position at all the rule is unchanged', () => {
+  assert.equal(hasArrived(FAD742, T('10:30')), true, 'callers with nothing to offer keep old behaviour')
+  assert.equal(hasArrived(FAD742, T('10:20')), false, 'and the grace period still has to elapse')
+})
+
+test('a published arrival still wins over a fresh airborne fix', () => {
+  // Contradictory inputs, but one of them is an observation of the landing itself.
+  assert.equal(hasArrived({ ...FAD742, actual_arr_utc: '2026-08-14T10:07:00Z', airborne_fix_age_s: 60 }, T('10:30')), true)
+})
