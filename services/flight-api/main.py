@@ -296,9 +296,20 @@ def derive_status(f: dict) -> str:
         return "Arrived"
     dep, est_arr = iso(f.get("real_dep")), iso(f.get("est_arr"))
     if dep and est_arr:
-        eff = (est_arr - dep).total_seconds() / 60
-        # Down once actual departure plus effective block time is more than fifteen minutes past.
-        if eff > 30 and dep + timedelta(minutes=eff) < datetime.now(timezone.utc) - timedelta(minutes=15):
+        # Five minutes past the estimate, not fifteen.
+        #
+        # est_arr is a live figure: FR24 revises it while the aircraft flies, so a flight that
+        # holds or runs long already has a later estimate. Padding it by a quarter of an hour was
+        # protecting against something the estimate had itself accounted for.
+        #
+        # FAD742 on 14 Aug: departed 08:21:04, estimate 10:13:14, descending through 12,575 ft
+        # 45 km from Jeddah at 10:00, so down around 10:07. The old rule declared it arrived at
+        # 10:28 — twenty-one minutes after the fact. Five minutes puts that at 10:18.
+        #
+        # Not zero: the estimate freezes when a track dies, and measured at that moment it runs
+        # early — 0.7 min at Damascus, 5.7 at Aleppo where coverage ends far out. Five absorbs
+        # Damascus comfortably and most of Aleppo.
+        if est_arr < datetime.now(timezone.utc) - timedelta(minutes=5):
             return "Arrived"
     if dep:
         return "Departed"

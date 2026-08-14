@@ -38,10 +38,11 @@ test('a completed projection alone does not claim an arrival too early', () => {
   assert.equal(effectiveStatus(RJA431, T('02:45')), 'Departed')
 })
 
-test('an unconfirmed flight is called arrived once the block plus grace has elapsed', () => {
-  // dep 01:45:47 + 85m = 03:10:47, + 15m grace = 03:25:47. Never earlier.
-  assert.equal(hasArrived(RJA431, T('03:20')), false)
-  assert.equal(hasArrived(RJA431, T('03:30')), true, 'so it cannot sit airborne for three hours')
+test('the client never infers an arrival from the clock — the server decides', () => {
+  // Was: dep + block + 15 min made this true at 03:25:47. That stopwatch now lives only on the
+  // server, which runs it against est_arr and the live positions the client cannot see.
+  assert.equal(hasArrived(RJA431, T('03:30')), false, 'no server word, no arrival')
+  assert.equal(hasArrived({ ...RJA431, status: 'Arrived' }, T('03:30')), true, 'the server said so')
 })
 
 test('the arrival, once published, wins over the grace clock', () => {
@@ -116,21 +117,17 @@ const FAD742: StatusFacts = {
   duration_min: 112,
 }
 
-test('a fresh airborne fix overrules the stopwatch', () => {
-  // Same flight, seen airborne two minutes ago: still flying, whatever the block says.
-  assert.equal(hasArrived({ ...FAD742, airborne_fix_age_s: 120 }, T('10:30')), false)
-  assert.equal(effectiveStatus({ ...FAD742, airborne_fix_age_s: 120 }, T('10:30')), 'Departed')
+test('FAD742 stays flying until the server says otherwise', () => {
+  // The clock said arrived at 10:28:04 and the card dropped it from the in-air panel while the
+  // marker sat 45 km from Jeddah. With no inference left, all three surfaces wait for one word.
+  assert.equal(hasArrived(FAD742, T('10:30')), false, 'no stopwatch on the client')
+  assert.equal(effectiveStatus(FAD742, T('10:30')), 'Departed')
 })
 
-test('a stale airborne fix does not, because it no longer describes now', () => {
-  // The real case: last seen 30 minutes earlier on approach. By then it had almost certainly
-  // landed, and the clock is the best thing left.
-  assert.equal(hasArrived({ ...FAD742, airborne_fix_age_s: 1800 }, T('10:30')), true)
-})
-
-test('with no position at all the rule is unchanged', () => {
-  assert.equal(hasArrived(FAD742, T('10:30')), true, 'callers with nothing to offer keep old behaviour')
-  assert.equal(hasArrived(FAD742, T('10:20')), false, 'and the grace period still has to elapse')
+test('and flips the moment the server says so — every surface at once', () => {
+  const told = { ...FAD742, status: 'Arrived' }
+  assert.equal(hasArrived(told, T('10:30')), true)
+  assert.equal(effectiveStatus(told, T('10:30')), 'Arrived')
 })
 
 test('a published arrival still wins over a fresh airborne fix', () => {

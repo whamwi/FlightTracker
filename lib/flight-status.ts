@@ -16,11 +16,18 @@
  * Both came from one line, `fraction >= 1.0 && confirmedArr`, which is only right when the
  * projection and the confirmation happen to agree.
  *
- * The rule below is the board's, which two of the three surfaces already used, and it is the
- * conservative one: it never calls a flight arrived before an actual time says so or the block
- * plus a grace period has fully elapsed. Adopting it makes the map slower to claim an arrival and
- * never earlier — the right direction, given that FR24's frozen estimates ran 16 and 19 minutes
- * early on the two flights measured that morning.
+ * As of 14 Aug the client stops deriving this at all. The server decides — it is the only place
+ * holding every input: real_arr, arr_confirmed_at, est_arr, the block and the live positions —
+ * and every surface renders that one answer.
+ *
+ * The client used to run its own stopwatch, departure plus block plus fifteen minutes, and that
+ * was the trouble. Sharing a function is not sharing an answer: on 14 Aug the panel was given a
+ * flight's last fix age and the popup and marker were not, so the same rule returned different
+ * results on the same flight in the same second. FAD742 flipped to Arrived on the card while its
+ * marker sat 45 km from Jeddah.
+ *
+ * What is left here is a reading of the server's word plus the one fact a client can be certain
+ * of: an actual arrival time it was handed.
  */
 
 /** FR24 spells the same state more than one way. */
@@ -46,29 +53,6 @@ export type StatusFacts = {
   airborne_fix_age_s?: number | null
 }
 
-/**
- * How long after the scheduled block elapses before an unconfirmed flight is called arrived.
- *
- * Fifteen minutes, inherited from the board. It absorbs a block that runs slightly long without
- * leaving a landed aircraft drawn in the air, and it is deliberately not tuned against the
- * estimate — an estimate frozen at the moment a track died is the thing least worth trusting here.
- */
-const ARRIVAL_GRACE_MS = 15 * 60_000
-
-/**
- * How recently an airborne fix still overrules the clock.
- *
- * The grace rule below is a stopwatch: departure plus scheduled block plus fifteen minutes. It
- * knows nothing about whether the aircraft is still up, so a flight that holds, goes around or
- * simply runs long is declared arrived while it is still flying — and it then drops out of the
- * in-air panel, which is exactly when someone watching it wants it most.
- *
- * A fix from the last ten minutes settles that: if we saw it airborne that recently, the clock
- * does not get to say otherwise. Older than ten minutes and the fix has stopped being evidence
- * about now — FAD742 on 14 Aug was last seen descending through 12,575 ft, and half an hour later
- * that told us nothing except that it had been on approach.
- */
-const AIRBORNE_FIX_TRUSTED_MS = 10 * 60_000
 
 /**
  * True when the flight is on the ground at its destination.
@@ -76,20 +60,10 @@ const AIRBORNE_FIX_TRUSTED_MS = 10 * 60_000
  * An actual arrival ends the flight outright, whatever a projection says. That single clause is
  * what FYC492 needed; everything after it is for flights with no arrival time at all.
  */
-export function hasArrived(f: StatusFacts, nowMs: number = Date.now()): boolean {
+export function hasArrived(f: StatusFacts, _nowMs: number = Date.now()): boolean {
   if (f.actual_arr_utc) return true
   const s = STATUS_ALIAS[f.status ?? ''] ?? f.status
-  if (s === 'Arrived') return true
-  if (s === 'Cancelled' || s === 'Diverted') return false
-  if (f.actual_dep_utc && f.duration_min) {
-    // A recent sighting outranks the stopwatch. Only the clock is vetoed — an actual arrival
-    // above still wins, because a published landing is not a guess.
-    const age = f.airborne_fix_age_s
-    if (age != null && age * 1000 < AIRBORNE_FIX_TRUSTED_MS) return false
-    const dep = Date.parse(f.actual_dep_utc)
-    if (Number.isFinite(dep) && dep + f.duration_min * 60_000 + ARRIVAL_GRACE_MS < nowMs) return true
-  }
-  return false
+  return s === 'Arrived'
 }
 
 /** The word a surface shows. Cancelled and Diverted outrank everything: the flight is not coming. */
