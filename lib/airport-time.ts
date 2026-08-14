@@ -24,6 +24,21 @@ import { getActiveLocale, airportOffset, airportTimezone } from '@/lib/geo-data'
 const AR_AM = 'ص'
 const AR_PM = 'م'
 
+/*
+ * A time and its meridiem are one token, and bidi will take them apart if allowed to.
+ *
+ * "8:19 م" in an Arabic card renders as "م 8:19": the digits are an LTR run and م is RTL, so under
+ * a right-to-left base direction the digits go rightmost and the meridiem lands to their left,
+ * reading as "PM 8:19". Measured on the deployed card — meridiem at x 252, digits at 267.
+ *
+ * Wrapped in a left-to-right isolate the pair is laid out on its own terms, digits then meridiem,
+ * and the isolate keeps that decision from leaking into the Arabic around it. Both characters are
+ * zero-width, so this stays a plain string and every caller is unchanged — which matters, because
+ * the alternative is a flex row and there are a dozen call sites that want a string.
+ */
+const LRI = '\u2066'
+const PDI = '\u2069'
+
 function offsetFallback(iso: string, iata: string): { h: number; m: number } {
   const off = airportOffset[iata] ?? 3
   const d = new Date(new Date(iso).getTime() + Math.round(off * 3_600_000))
@@ -62,7 +77,7 @@ export function formatAirportTime12(iso: string | null | undefined, iata: string
   const c = airportClock(iso, iata)
   if (!c) return '—'
   const meridiem = getActiveLocale() === 'ar' ? (c.h < 12 ? AR_AM : AR_PM) : (c.h < 12 ? 'AM' : 'PM')
-  return `${c.h % 12 || 12}:${String(c.m).padStart(2, '0')} ${meridiem}`
+  return `${LRI}${c.h % 12 || 12}:${String(c.m).padStart(2, '0')} ${meridiem}${PDI}`
 }
 
 /** The same instant as 24-hour HH:MM, for anywhere a compact fixed-width time is wanted. */

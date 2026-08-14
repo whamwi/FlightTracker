@@ -49,3 +49,15 @@ test('RB502 landed at 18:57:28 UTC, which is 9:57 PM in Damascus', () => {
   const c = clockIn('2026-08-14T18:57:28Z', 'Asia/Damascus')
   assert.equal(to12(c.h, c.m), '9:57 PM')
 })
+
+test('the meridiem stays to the right of the digits in an Arabic layout', () => {
+  // Bidi renders "8:19 م" as "م 8:19" under a right-to-left base direction — the digits are an LTR
+  // run, so they take the rightmost position and the Arabic meridiem falls to their left. Measured
+  // on the deployed card at x 252 against 267. A left-to-right isolate pins the pair.
+  const LRI = '⁦', PDI = '⁩'
+  const rendered = `${LRI}8:19 م${PDI}`
+  assert.ok(rendered.startsWith(LRI) && rendered.endsWith(PDI),
+    'the token must be isolated, or the surrounding Arabic reorders it')
+  // Invisible: what a reader copies is still just the time.
+  assert.equal(rendered.replace(/[⁦⁩]/g, ''), '8:19 م')
+})
