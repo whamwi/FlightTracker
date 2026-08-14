@@ -320,6 +320,19 @@ const SLOW_POLL_MS = 60_000
 
 function useInAirFlights() {
   const [flights, setFlights] = useState<InAirFlight[]>([])
+  /**
+   * The other half of the same fetch: what has landed, newest first.
+   *
+   * Arrived flights used to be drawn on the map and lingered there for half an hour, which is how
+   * Damascus ended up with eleven overlapping ARRIVED tags. A map answers "where is it now", and
+   * for a landed flight the honest answer is a line in a list. So they leave the map the moment
+   * they land and appear here in the same moment.
+   *
+   * No window: the board is keyed on arrival date, so this is the day's arrivals and the list
+   * scrolls. A cutoff here would be a number invented to look tidy, and the newest is always on
+   * top anyway.
+   */
+  const [arrived, setArrived] = useState<InAirFlight[]>([])
   /** Soonest arrival on screen, in ms — what the poll loop reads to pick its next delay. */
   const soonestArrRef = useRef<number | null>(null)
   /** Seconds since each callsign was last heard, for the staleness line on its card.
@@ -403,6 +416,15 @@ function useInAirFlights() {
 
       const shown = Object.values(best).filter(isFlying).sort((a, b) => etaMs(a) - etaMs(b))
       setFlights(shown)
+
+      // Landed, and ordered by when — the flight that just touched down leads the list.
+      const landedAt = (f: InAirFlight) =>
+        Date.parse(f.actual_arr_utc ?? f.revised_arr_utc ?? '') || 0
+      setArrived(
+        Object.values(best)
+          .filter(f => effectiveStatus(f) === 'Arrived')
+          .sort((a, b) => landedAt(b) - landedAt(a)),
+      )
       // The soonest arrival decides how hard the next poll works. Read from the list we just
       // rendered, so the cadence always reflects what is actually on screen.
       soonestArrRef.current = shown.length ? etaMs(shown[0]) : null
@@ -440,7 +462,7 @@ function useInAirFlights() {
     return () => { alive = false; clearTimeout(timer) }
   }, [load])
 
-  return { flights, loading, geoReady, fixAge: fixAgeRef.current }
+  return { flights, arrived, loading, geoReady, fixAge: fixAgeRef.current }
 }
 
 /**
@@ -673,8 +695,14 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
 function InAirPanel({ selectedFlight, open, setOpen, onSelect, onClear }: { selectedFlight?: string; open: boolean; setOpen: (v: boolean) => void; onSelect: (n: string) => void; onClear: () => void }) {
   const t      = useT()
   const locale = useLocale()
-  const { flights, loading } = useInAirFlights()
-  const count = flights.length
+  const { flights, arrived, loading } = useInAirFlights()
+  /*
+   * Which half of the panel is showing. Airborne by default: the map beside it is drawing those
+   * same flights, and the panel exists first to name what is on screen.
+   */
+  const [tab, setTab] = useState<'air' | 'arrived'>('air')
+  const shown = tab === 'air' ? flights : arrived
+  const count = shown.length
 
   // ── Closed: pill FAB ─────────────────────────────────────────────────────
   if (!open) {
@@ -748,11 +776,14 @@ function InAirPanel({ selectedFlight, open, setOpen, onSelect, onClear }: { sele
       <div style={{ padding: '14px 14px 11px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'flex-start', gap: 10, flexShrink: 0 }}>
         <div style={{ flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-            <span className="live-dot" style={{ width: 7, height: 7, borderRadius: 99, background: count > 0 ? C.forestMid : C.muted, display: 'block', flexShrink: 0 }} />
-            <span style={{ font: `700 13.5px/1 'Instrument Sans',system-ui`, color: C.ink }}>{t('map.panel_title')}</span>
+            <span className="live-dot" style={{ width: 7, height: 7, borderRadius: 99, background: tab === 'air' && count > 0 ? C.forestMid : C.muted, display: 'block', flexShrink: 0 }} />
+            <span style={{ font: `700 13.5px/1 'Instrument Sans',system-ui`, color: C.ink }}>
+              {t(tab === 'air' ? 'map.panel_title' : 'map.panel_title_arrived')}
+            </span>
           </div>
           <span style={{ font: `500 10.5px/1 'Instrument Sans',system-ui`, color: C.muted, marginTop: 5, display: 'block' }}>
-            {loading ? t('label.loading') : `${counted(locale, count, 'noun.flight')} · ${t('map.sorted')}`}
+            {loading ? t('label.loading')
+              : `${counted(locale, count, 'noun.flight')} · ${t(tab === 'air' ? 'map.sorted' : 'map.sorted_arrived')}`}
           </span>
         </div>
         {/* Clearing a selection. The obvious spellings — <Link href="/"> and router.replace('/')
@@ -785,6 +816,33 @@ function InAirPanel({ selectedFlight, open, setOpen, onSelect, onClear }: { sele
         </button>
       </div>
 
+      {/*
+        * The two halves of the panel.
+        *
+        * A segmented pair rather than a dropdown: there are two, both are worth naming, and on a
+        * surface that is 72% phone a control you can hit without opening anything first is worth
+        * the row it costs. The count sits in the subtitle above rather than on each tab — it
+        * changes every poll, and numbers that move inside a control make it look unstable.
+        */}
+      <div style={{ display: 'flex', gap: 4, padding: '8px 10px 0', flexShrink: 0 }}>
+        {(['air', 'arrived'] as const).map(k => (
+          <button
+            key={k}
+            onClick={() => setTab(k)}
+            style={{
+              flex: 1, height: 30, borderRadius: 9, cursor: 'pointer',
+              border: `1px solid ${tab === k ? C.forest : C.border}`,
+              background: tab === k ? C.forest : C.sunken,
+              color: tab === k ? '#fff' : C.muted,
+              font: `600 11px/1 'Instrument Sans',system-ui`,
+              transition: 'background .15s, color .15s, border-color .15s',
+            }}
+          >
+            {t(k === 'air' ? 'map.tab_in_air' : 'map.tab_arrived')}
+          </button>
+        ))}
+      </div>
+
       {/* Card list */}
       <div style={{ overflowY: 'auto', overscrollBehavior: 'contain', padding: '10px', display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minHeight: 0 }}>
         {loading && (
@@ -796,10 +854,12 @@ function InAirPanel({ selectedFlight, open, setOpen, onSelect, onClear }: { sele
         {!loading && count === 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '48px 0', gap: 10, textAlign: 'center' }}>
             <span style={{ fontSize: 36 }}>✈</span>
-            <span style={{ font: `600 12.5px/1.4 'Instrument Sans',system-ui`, color: C.muted }}>{t('map.none_currently')}</span>
+            <span style={{ font: `600 12.5px/1.4 'Instrument Sans',system-ui`, color: C.muted }}>
+              {t(tab === 'air' ? 'map.none_currently' : 'map.none_arrived')}
+            </span>
           </div>
         )}
-        {!loading && flights.map(f => (
+        {!loading && shown.map(f => (
           <MiniFlightCard key={`${f.iata_number}-${f.dep_iata}-${f.arr_iata}`} f={f} isSelected={f.iata_number === selectedFlight} onSelect={onSelect} />
         ))}
       </div>

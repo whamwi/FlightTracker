@@ -202,9 +202,12 @@ const en: Dict = {
    * Short deliberately: it sits inside a pill next to a count, on a map where the airport label is
    * already competing for the same few pixels.
    */
-  'map.arrivals_badge': 'arrived',
-  'map.arrivals_title': 'Arrivals',
-  'map.panel_title':   'Flights in air',
+  'map.panel_title':         'Flights in air',
+  'map.panel_title_arrived': 'Arrived flights',
+  'map.tab_in_air':          'In air',
+  'map.tab_arrived':         'Arrived',
+  'map.sorted_arrived':      'latest first',
+  'map.none_arrived':        'Nothing has landed yet today',
   // The panel only ever holds airborne flights, so Departed and En Route both say the same
   // thing here. Approaching keeps its own word — that one is telling you something new.
   'status.in_air':     'In air',
@@ -433,9 +436,12 @@ const ar: Dict = {
   'label.flown':       'زمن الرحلة',
   'label.next_day':    'يصل في اليوم التالي',
   'label.prev_day':    'أقلعت في اليوم السابق',
-  'map.arrivals_badge': 'وصول',
-  'map.arrivals_title': 'الوصول',
-  'map.panel_title':   'رحلات في الجو',
+  'map.panel_title':         'رحلات في الجو',
+  'map.panel_title_arrived': 'رحلات وصلت',
+  'map.tab_in_air':          'في الجو',
+  'map.tab_arrived':         'وصلت',
+  'map.sorted_arrived':      'الأحدث أولاً',
+  'map.none_arrived':        'لم تصل أي رحلة اليوم بعد',
   'status.in_air':     'في الجو',
   'map.until_arrival': 'على الوصول',
   'map.arriving_soon': 'يقترب من الهبوط',

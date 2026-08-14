@@ -160,7 +160,6 @@ const STALE_TTL_MS       = 30 * 60 * 1000
  * approaches are too close together the second is stepped around the field until it is clear.
  * Once a full turn is used up the next one goes to a wider ring.
  */
-const ARRIVED_OFFSET_KM = 8   // still used to read the approach heading, not to place the marker
 
 /*
  * Several arrivals at one airport become one badge, not a fan around it.
@@ -350,90 +349,6 @@ function bestHeading(a: Aircraft): number {
 
 
 // ── Icon & popup ──────────────────────────────────────────────────────────────
-
-/**
- * The badge that stands in for several arrived flights at one airport.
- *
- * Small and deliberately not a plane: it is not one aircraft and should not be read as one. Count
- * and word are separate spans in a flex row rather than one string, so bidi cannot reorder them —
- * under dir=rtl a joined "3 وصول" puts the numeral wherever it likes, and the same mistake has
- * already been made twice on this map with the delay chip and the altitude line.
- */
-function arrivalsBadge(L: typeof import('leaflet')) {
-  const mobile = typeof window !== 'undefined' && window.matchMedia(PHONE_MQ).matches
-  // The box is the dot, not a container around it. planeIcon works because its svg fills the
-  // iconSize exactly, so the centre anchor lands on the aircraft; a box larger than the dot puts
-  // the anchor below it instead — measured 3 px, which is the airport's whole width when zoomed
-  // out to the region.
-  const dot    = mobile ? 9 : 10
-  const box    = dot
-  /*
-   * Built like planeIcon rather than as a pill, and for the same reason it works there.
-   *
-   * The pill this replaces was 59 px wide and read as a large object on a map zoomed out to the
-   * region — bigger than the aircraft around it, for something that is only a place-holder. A dot
-   * with the word underneath is the shape every other marker on this map already uses, so it sits
-   * at the same visual weight as the arrivals it stands in for.
-   *
-   * A square iconSize with the anchor at its centre puts the dot exactly on the field and lets the
-   * label overflow below, centred by align-items rather than by any width we would have to know in
-   * advance. That is also what makes it direction-proof: the earlier version used a zero-width box
-   * and a transform, and landed 59 px west of its airport under dir=rtl, because the content
-   * starts at the right edge before any transform applies.
-   *
-   * Grey, not the hub colour: these markers are past tense, and the arrived aircraft beside them
-   * are drawn grey for the same reason.
-   */
-  const html = `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;
-      width:${box}px;cursor:pointer">
-      <div style="width:${dot}px;height:${dot}px;border-radius:50%;
-        background:#9ca3af;border:1.5px solid #fff;
-        box-shadow:0 1px 3px rgba(0,0,0,.4)"></div>
-      <div style="font-size:${mobile ? 8 : 9}px;font-weight:bold;color:#6b7280;
-        letter-spacing:.3px;line-height:1.2;white-space:nowrap">${T('map.arrivals_badge')}</div>
-    </div>`
-  return L.divIcon({ className: '', html, iconSize: [box, box], iconAnchor: [box / 2, box / 2] })
-}
-
-/**
- * The list behind the badge: every flight that has landed here inside the hold window.
- *
- * Read-only, and deliberately. I had each row open that flight's full card with a link back, and
- * that swap is what kept breaking — handlers lost across content replacements, then a back button
- * that blanked the popup when the list it wanted was gone. None of it was asked for. The list
- * carries the number, where it came from, when it landed and how far off schedule, which is what
- * the badge is for; the flight's own card is a marker again as soon as the group thins to one.
- */
-function buildArrivalsPopup(
-  iata: string,
-  rows: { callsign: string; flightNo: string; from: string; at: string; delay: number | null }[],
-): string {
-  const city = _apFlag[iata] || '✈'
-  const items = rows.map(r => {
-    const delay = r.delay == null || Math.abs(r.delay) < 1 ? ''
-      : `<span style="font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;
-           padding:2px 5px;border-radius:5px;
-           background:${r.delay > 0 ? '#3f1d24' : '#14332b'};
-           color:${r.delay > 0 ? '#fca5a5' : '#6ee7b7'}">${r.delay > 0 ? '+' : ''}${r.delay}</span>`
-    return `<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;
-        border-radius:8px;width:100%;box-sizing:border-box">
-        <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:700;
-          color:#e5e7eb;min-width:62px">${r.flightNo}</span>
-        <span style="font-size:11px;color:#9ca3af;flex:1;overflow:hidden;text-overflow:ellipsis;
-          white-space:nowrap">${r.from}</span>
-        <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#e5e7eb">${r.at}</span>
-        ${delay}
-      </div>`
-  }).join('')
-  return `<div style="min-width:250px">
-    <div style="display:flex;align-items:center;gap:8px;padding:2px 4px 8px">
-      <span style="font-size:18px">${city}</span>
-      <span style="font-size:13px;font-weight:700;color:#e5e7eb">${T('map.arrivals_title')}</span>
-      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#9ca3af">${iata}</span>
-    </div>
-    <div style="display:flex;flex-direction:column;gap:2px">${items}</div>
-  </div>`
-}
 
 function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, stale: boolean, label?: string, hub: BoardAirport = 'DAM', estimated = false, colorOverride?: string) {
   const mobile  = typeof window !== 'undefined' && window.matchMedia(PHONE_MQ).matches
@@ -1028,8 +943,6 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
   // Schedule-based projected markers (key = callsign)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const schedMarkersRef = useRef<Record<string, any>>({})
-  /** The "arrivals" badge standing in for a group of arrived flights, keyed by airport. */
-  const arrivedClusterRef = useRef<Record<string, any>>({})
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const schedLinesRef   = useRef<Record<string, any[]>>({})
   // Last-known state keyed by callsign — replaces hex-keyed lastKnownRef
@@ -2151,10 +2064,6 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
       // ── 4. Schedule overlay (ESTIMATED / no signal) ───────────────────────
       const activeSchedKeys    = new Set<string>()
       const activeSchedEnRoute = new Set<string>()
-      // Arrived flights, held back until the loop ends: whether each is drawn on its own or
-      // folded into a badge depends on how many others share its airport, which is not known
-      // until every entry has been seen.
-      const arrivedAt: Record<string, { callsign: string; place: () => void }[]> = {}
 
       // When actual_dep_utc is known, a callsign may have multiple schedule entries
       // (different dep times for different days). Pre-compute the best-matching
@@ -2338,6 +2247,24 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           revised_arr_utc: fs?.revised_arr_utc,
           duration_min,
         })
+        /*
+         * An arrival leaves the map the moment it lands; the panel's arrivals tab has it from
+         * that same moment.
+         *
+         * It used to linger — half an hour of ARRIVED tags piling onto Damascus, which three
+         * separate attempts tried to arrange into something readable: 8 km along the route, a
+         * fixed pixel fan, then a badge standing in for the group. All of them were solving the
+         * wrong problem. A map answers "where is it now", and the answer for a landed flight is
+         * a line in a list, not a mark on a country.
+         */
+        if (arrived) {
+          if (schedMarkersRef.current[callsign]) {
+            schedMarkersRef.current[callsign].remove(); delete schedMarkersRef.current[callsign]
+            schedLinesRef.current[callsign]?.forEach((l: any) => l.remove()); delete schedLinesRef.current[callsign]  // eslint-disable-line
+          }
+          continue
+        }
+
         if (fraction >= 1.0 && !confirmedArr && !fs?.actual_dep_utc) {
           if (schedMarkersRef.current[callsign]) {
             schedMarkersRef.current[callsign].remove(); delete schedMarkersRef.current[callsign]
@@ -2346,19 +2273,8 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           continue
         }
 
-        /*
-         * An arrived flight sits at its field, and its marker is drawn a little back down the
-         * approach it flew — see ARRIVED_OFFSET_PX for why that offset is in pixels.
-         *
-         * arrivedF is still a fraction just short of 1.0, but it is now only read for the heading:
-         * bearingFromPath at exactly 1.0 has no segment left to work with, while a step before it
-         * the aircraft is pointing down the approach. The position comes from the airport itself.
-         */
-        const routeKm = greatCircleKm(depC[0], depC[1], arrC[0], arrC[1])
-        const arrivedF = routeKm > ARRIVED_OFFSET_KM
-          ? Math.max(0.9, 1 - ARRIVED_OFFSET_KM / routeKm)
-          : 1.0
-        const fPos = arrived ? arrivedF : Math.min(fraction, 0.97)
+        // Everything past this point is airborne — the arrival case returned above.
+        const fPos = Math.min(fraction, 0.97)
         const wps  = routePathsRef.current[`${dep_iata}|${arr_iata}`]
 
         // On final approach with a recent ADS-B fix, pin the ghost to the last
@@ -2367,38 +2283,34 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         // airways (e.g. DAM→SHJ stored via Saudi Arabia; actual via Iraq/Kuwait),
         // causing the ghost to snap to the wrong side of the destination airport.
         const lastPos = lastADSBPosRef.current[callsign]
-        const pinToLastPos = !arrived && fPos >= 0.85
+        const pinToLastPos = fPos >= 0.85
           && !!lastPos && now - lastPos.lostAt < 15 * 60_000
 
-        const [lat, lon] = arrived
-          ? arrC
-          : pinToLastPos
-            ? [lastPos.lat, lastPos.lon]
-            : wps?.length
-              ? interpolatePath(wps, fPos)
-              : slerpGreatCircle(depC[0], depC[1], arrC[0], arrC[1], fPos)
+        const [lat, lon] = pinToLastPos
+          ? [lastPos.lat, lastPos.lon]
+          : wps?.length
+            ? interpolatePath(wps, fPos)
+            : slerpGreatCircle(depC[0], depC[1], arrC[0], arrC[1], fPos)
         const track = wps?.length
           ? bearingFromPath(wps, fPos)
           : bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], fPos)
-        // Was the literal 'ARRIVED', which stayed English on the Arabic map — the one surface
-        // where it is the primary language.
-        const label = arrived ? `${callsign}\n${T('status.arrived').toUpperCase()}` : callsign
+        const label = callsign
         const hub = markerHub(dep_iata, arr_iata)
         const isSchedHighlighted = highlightedCSRef.current === callsign
-        const icon  = planeIcon(L, track, true, arrived, label, hub, !arrived, isSchedHighlighted ? '#ef4444' : undefined)
+        const icon  = planeIcon(L, track, true, false, label, hub, true, isSchedHighlighted ? '#ef4444' : undefined)
         const schedReg   = fs?.aircraft_reg ?? null
         const schedPhoto = (schedReg ? photoCacheRef.current[schedReg] : null) ?? photoCacheRef.current[`cs:${callsign}`] ?? null
-        const popup = buildSchedulePopup(entry, arrived, fs, fPos, schedPhoto)
+        const popup = buildSchedulePopup(entry, false, fs, fPos, schedPhoto)
 
         activeSchedKeys.add(callsign)
-        if (!arrived) activeSchedEnRoute.add(callsign)
+        activeSchedEnRoute.add(callsign)
 
         // Schedule-overlay flights have no live fix at all — a departure time, a route and
         // an arrival estimate is everything they get, which is precisely what the rate
         // channel was built for. These are also the flights that step once per poll today,
         // since ADS-B is frequently returning nothing for the region.
         if (pinToLastPos) pinnedRef.current.add(callsign)
-        if (RAF_MOTION && !arrived) {
+        if (RAF_MOTION) {
           const depAt = fs?.actual_dep_utc ? Date.parse(fs.actual_dep_utc) : null
           if (depAt && Number.isFinite(depAt)) {
             const revised = fs?.revised_arr_utc ? Date.parse(fs.revised_arr_utc) : null
@@ -2418,15 +2330,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           }
         }
 
-        /*
-         * Drawing this marker is deferred, because an arrived flight may not get one.
-         *
-         * Whether it is drawn on its own or folded into an "arrivals" badge depends on how many
-         * others landed at the same airport, and that is not known until every schedule entry has
-         * been walked. Deferring the tail rather than pre-counting keeps the guards above as the
-         * single decider of what is drawn — a second pass replicating them would drift from them.
-         */
-        const place = () => {
+        {
           if (schedMarkersRef.current[callsign]) {
             // The animation loop owns position for flights the tracker manages.
             if (!(RAF_MOTION && storeRef.current.has(callsign))) schedMarkersRef.current[callsign].setLatLng([lat, lon])
@@ -2526,71 +2430,9 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
             if (mk && mi) { ((_z) => { const _w = mi.getSize().x; const _off = panelOpenRef.current && _w >= 480 ? Math.min(160, (_w - 320) / 2) : 0; const _p = mi.project(mk.getLatLng(), _z); mi.setView(mi.unproject(_p.subtract(L.point(_off, 0)), _z), _z) })(Math.max(mi.getZoom(), 8)); isAutoOpenRef.current = true; mk.openPopup(); drawTrackRoute(mk, dep_iata, arr_iata) }
           }
         }
-        if (arrived) (arrivedAt[arr_iata] ??= []).push({ callsign, place })
-        else place()
 
         schedLinesRef.current[callsign]?.forEach((l: any) => l.remove())  // eslint-disable-line
         schedLinesRef.current[callsign] = []
-      }
-
-      /*
-       * Now that every arrival is known, decide how each airport draws them.
-       *
-       * One arrival is drawn exactly as it always was — its own aircraft, its own label, sitting on
-       * the field. Two or more become a single badge on that same field which opens into a list.
-       * Nothing is displaced to make room and nothing is dropped; the only thing that changes is
-       * how many things are asking for the same few pixels.
-       */
-      for (const [iata, group] of Object.entries(arrivedAt)) {
-        const coords = _apCoords[iata]
-        if (group.length < 2 || !coords) {
-          group.forEach(g => g.place())
-          continue
-        }
-        // These flights get no marker of their own this pass, so retire any they had — a flight
-        // that was alone at its airport a moment ago still has one.
-        for (const g of group) {
-          const m = schedMarkersRef.current[g.callsign]
-          if (m) { m.remove(); delete schedMarkersRef.current[g.callsign] }
-          activeSchedKeys.delete(g.callsign)
-        }
-
-        const rows = group.map(g => {
-          const fs  = flightStatusRef.current[g.callsign]
-          const off = _apOffset[iata] ?? 3
-          const arrISO = fs?.actual_arr_utc ?? fs?.revised_arr_utc ?? null
-          const from   = fs?.dep_iata ?? ''
-          return {
-            callsign: g.callsign,
-            flightNo: fs?.flight_number ?? g.callsign,
-            from:     from ? `${_apFlag[from] || ''} ${cityFor(from)}`.trim() : '',
-            at:       popupToLocal(arrISO, off),
-            // Against the timetable, the same comparison the board's chips make. pickSchedule
-            // rather than the entry we saw in the loop: that one is out of scope by now, and this
-            // is the same day-aware lookup every other reader of scheduleRef uses.
-            delay:    calcDelay(pickSchedule(scheduleRef.current, g.callsign, now)?.arr_time_utc, arrISO),
-          }
-        // Most recent first: the flight that just landed is the one someone is looking for.
-        }).sort((a, b) => (b.at || '').localeCompare(a.at || ''))
-
-        const icon = arrivalsBadge(L)
-        const list = buildArrivalsPopup(iata, rows)
-        let marker = arrivedClusterRef.current[iata]
-        if (marker) {
-          marker.setIcon(icon)
-          marker.setPopupContent(list)
-        } else {
-          marker = addToMap(L.marker(coords as [number, number], { icon, zIndexOffset: 400 }), map)
-          marker.bindPopup(list, { className: 'fp-popup', closeButton: false, maxWidth: 320 })
-          arrivedClusterRef.current[iata] = marker
-        }
-      }
-      // Airports that no longer have a group lose their badge.
-      for (const iata of Object.keys(arrivedClusterRef.current)) {
-        if ((arrivedAt[iata]?.length ?? 0) < 2) {
-          arrivedClusterRef.current[iata].remove()
-          delete arrivedClusterRef.current[iata]
-        }
       }
 
       // Remove schedule markers that are no longer active
