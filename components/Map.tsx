@@ -163,54 +163,78 @@ const STALE_TTL_MS       = 30 * 60 * 1000
 const ARRIVED_OFFSET_KM = 8   // still used to read the approach heading, not to place the marker
 
 /*
- * Six slots to a ring, and the ring is sized so that six of them clear each other.
+ * The field first, and a ring around it only once the field is occupied.
  *
- * The marker is a 40 px aircraft under a two-line label, so neighbours need something like 50 px
- * between centres to read as two things. On a ring of radius r, n markers spread evenly sit
- * 2·r·sin(180/n) apart — so the count and the radius are not free of each other, and picking a
- * comfortable-looking small radius first is how the first version of this ended up putting
- * adjacent markers 14 px apart. Six at 52 px gives 52 px of separation; a seventh goes to the next
- * ring rather than squeezing the six.
+ * Slot 0 is the airport itself, no offset at all. That is where a lone arrival belongs, and the
+ * first version of this got it wrong in both directions: 8 km along the route vanished to a couple
+ * of pixels when zoomed out, and the fixed 52 px that replaced it moved *every* arrival off its
+ * airport at every zoom — including the single arrival, which is the ordinary case and has nothing
+ * to be separated from. Offsetting is a cost, so nothing pays it until a second flight turns up.
+ *
+ * Six slots to a ring, and the ring is sized so that six of them clear each other. A marker is a
+ * 40 px aircraft above a two-line label — about 40 wide and 64 tall from icon top to label bottom
+ * — and on a ring of radius r, n markers spread evenly sit 2·r·sin(180/n) apart. So count and
+ * radius are not independent, and choosing a comfortable-looking small radius first is how an
+ * earlier attempt put neighbours 14 px apart. Six at 64 px gives 64 px between ring neighbours and
+ * 64 px from each to the centre; a seventh goes to the next ring rather than squeezing the six.
  */
 const ARRIVED_SLOTS     = 6
-const ARRIVED_RING0_PX  = 52
-const ARRIVED_RING_PX   = 46
+const ARRIVED_RING0_PX  = 64
+const ARRIVED_RING_PX   = 52
 
 /**
- * Pick a clear spot around the field for one arrived marker, and remember it.
+ * Pick a spot for one arrived marker: the field if it is free, otherwise a clear place around it.
  *
  * `taken` holds the slots already handed out at this airport during this render pass, so collision
  * is only ever tested against markers already placed — which is what lets this run inside the
  * single pass that draws them rather than needing a second one.
  *
- * A slot is a (ring, angle) pair held as one number, which is what stops the overflow case from
- * doubling up: the same angle on a wider ring is a different place, and the search simply walks
+ * Beyond slot 0 a slot is a (ring, angle) pair held as one number, which is what stops the overflow
+ * case from doubling up: the same angle on a wider ring is a different place, and the search walks
  * outward until it finds a number nobody has taken.
+ *
+ * `remembered` is the slot this flight held last pass. Honouring it stops the ring reshuffling
+ * every ten seconds as flights land and expire — but the field always wins over it, so the moment
+ * a pile-up thins back to one the last marker returns to the airport instead of sitting off to the
+ * side because that is where it happened to start.
  */
-function arrivedFanOffset(taken: Set<number>, approachDeg: number): [number, number] {
+function arrivedFanOffset(
+  taken: Set<number>, remembered: number | undefined, approachDeg: number,
+): { offset: [number, number]; slot: number } {
   const STEP = 360 / ARRIVED_SLOTS
-  /*
-   * Back along the approach: the aircraft came from there, and that is where the eye looks for it.
-   *
-   * Rounded to the nearest of six, so the direction is only good to ±30°. That is a real loss
-   * against the old continuous bearing and it buys the guaranteed separation above — what survives
-   * is which side of the field a flight came in from, which is the part anyone reads.
-   */
-  const home  = (((approachDeg + 180) % 360) + 360) % 360
-  const start = Math.round(home / STEP) % ARRIVED_SLOTS
+  let slot: number
 
-  let k = 0
-  while (taken.has(Math.floor(k / ARRIVED_SLOTS) * ARRIVED_SLOTS + ((start + k) % ARRIVED_SLOTS))) k++
-  const ring = Math.floor(k / ARRIVED_SLOTS)
-  const slot = (start + k) % ARRIVED_SLOTS
-  taken.add(ring * ARRIVED_SLOTS + slot)
+  if (!taken.has(0)) {
+    slot = 0
+  } else if (remembered !== undefined && remembered !== 0 && !taken.has(remembered)) {
+    slot = remembered
+  } else {
+    /*
+     * Back along the approach: the aircraft came from there, and that is where the eye looks.
+     *
+     * Rounded to the nearest of six, so the direction is only good to ±30°. That is a real loss
+     * against a continuous bearing and it buys the guaranteed separation above — what survives is
+     * which side of the field a flight came in from, which is the part anyone reads.
+     */
+    const home  = (((approachDeg + 180) % 360) + 360) % 360
+    const start = Math.round(home / STEP) % ARRIVED_SLOTS
+    let k = 0
+    const at = (i: number) =>
+      1 + Math.floor(i / ARRIVED_SLOTS) * ARRIVED_SLOTS + ((start + i) % ARRIVED_SLOTS)
+    while (taken.has(at(k))) k++
+    slot = at(k)
+  }
+  taken.add(slot)
+  if (slot === 0) return { offset: [0, 0], slot }
 
+  const idx   = slot - 1
+  const ring  = Math.floor(idx / ARRIVED_SLOTS)
   // Odd rings sit half a step round, so a marker never lands directly outside its neighbour.
-  const angle = slot * STEP + (ring % 2 ? STEP / 2 : 0)
+  const angle = (idx % ARRIVED_SLOTS) * STEP + (ring % 2 ? STEP / 2 : 0)
   const r     = ARRIVED_RING0_PX + ring * ARRIVED_RING_PX
   const rad   = (angle * Math.PI) / 180
   // Screen y grows downward while bearing 0 is north, hence the negated cosine.
-  return [r * Math.sin(rad), -r * Math.cos(rad)]
+  return { offset: [r * Math.sin(rad), -r * Math.cos(rad)], slot }
 }
 
 // One hour, matching the same constant in app/api/airspace/route.ts. These were 30 minutes here
@@ -992,6 +1016,14 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
   // Schedule-based projected markers (key = callsign)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const schedMarkersRef = useRef<Record<string, any>>({})
+  /**
+   * Which slot around its airport each arrived marker held last pass, by callsign.
+   *
+   * Without it the ring reshuffles every ten seconds: allocation follows iteration order, so one
+   * flight landing or expiring moves every other marker at that airport. Pruned alongside the
+   * markers themselves, so a flight that has left the map stops reserving a place.
+   */
+  const arrivedSlotRef  = useRef<Record<string, number>>({})
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const schedLinesRef   = useRef<Record<string, any[]>>({})
   // Last-known state keyed by callsign — replaces hex-keyed lastKnownRef
@@ -2344,9 +2376,15 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         const label = arrived ? `${callsign}\nARRIVED` : callsign
         const hub = markerHub(dep_iata, arr_iata)
         const isSchedHighlighted = highlightedCSRef.current === callsign
-        const fanPx = arrived
-          ? arrivedFanOffset((arrivedFan[arr_iata] ??= new Set()), track)
-          : undefined
+        let fanPx: [number, number] | undefined
+        if (arrived) {
+          const fan = arrivedFanOffset(
+            (arrivedFan[arr_iata] ??= new Set()), arrivedSlotRef.current[callsign], track)
+          arrivedSlotRef.current[callsign] = fan.slot
+          fanPx = fan.offset
+        } else {
+          delete arrivedSlotRef.current[callsign]
+        }
         const icon  = planeIcon(L, track, true, arrived, label, hub, !arrived, isSchedHighlighted ? '#ef4444' : undefined, fanPx)
         const schedReg   = fs?.aircraft_reg ?? null
         const schedPhoto = (schedReg ? photoCacheRef.current[schedReg] : null) ?? photoCacheRef.current[`cs:${callsign}`] ?? null
@@ -2488,6 +2526,8 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         if (!activeSchedKeys.has(cs)) {
           schedMarkersRef.current[cs].remove(); delete schedMarkersRef.current[cs]
           schedLinesRef.current[cs]?.forEach((l: any) => l.remove()); delete schedLinesRef.current[cs]  // eslint-disable-line
+          // Its place around the airport goes back into the pool with it.
+          delete arrivedSlotRef.current[cs]
         }
       }
 
