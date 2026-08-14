@@ -722,10 +722,25 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
                   {t(outbound ? 'map.to' : 'map.from')} <span style={{ fontWeight: 700, color: C.ink }}>{otherCity}</span>
                 </span>
               </span>
-              <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, fontWeight: 600, color: C.muted, whiteSpace: 'nowrap' }}>
-                {f.dep_iata} {depTime}
-                {' '}<span style={{ color: C.forestLight }}>{locale === 'ar' ? '←' : '→'}</span>{' '}
-                {f.arr_iata} {arrTime}
+              {/*
+                * A flex row, not a line of text, and for the same reason the delay chip is one.
+                *
+                * Every character here is Latin or neutral — codes, times, an arrow — so bidi
+                * treats the whole line as one left-to-right run and lays it out that way inside
+                * an RTL card. FZ1192 (ALP→DXB) rendered "ALP 14:43 ← DXB 18:46", and an Arabic
+                * reader starting from the right meets DXB first with the arrow pointing away from
+                * it: the journey read backwards.
+                *
+                * Flexbox is not reordered by bidi. It follows `direction`, so the departure sits
+                * on the right in Arabic and on the left in English, which is what the desktop card
+                * has always done — that card uses columns and so never had the problem.
+                */}
+              <span style={{ display: 'flex', alignItems: 'baseline', gap: 5,
+                fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, fontWeight: 600,
+                color: C.muted, whiteSpace: 'nowrap' }}>
+                <span>{f.dep_iata} {depTime}</span>
+                <span style={{ color: C.forestLight }}>{locale === 'ar' ? '←' : '→'}</span>
+                <span>{f.arr_iata} {arrTime}</span>
               </span>
             </span>
             </span>
