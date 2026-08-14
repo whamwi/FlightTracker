@@ -644,11 +644,16 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
         // Read from the flag rather than a hardcoded airport list: DEZ is due to open and
         // Latakia and Qamishli come and go, and a stale list would silently label those
         // flights backwards. Every flight here has exactly one Syrian end.
-        // The same variance the board and the desktop card show. Only these two numbers, not the
-        // whole meta strip: this is a horizontal scroller sized to peek the next card, and four
-        // more labels would make it a card rather than a strip. The detail is one tap away.
-        const depDelay = calcDelay(f.dep_time_utc, f.actual_dep_utc ?? f.revised_dep_utc)
-        const arrDelay = calcDelay(f.arr_time_utc, f.actual_arr_utc ?? f.revised_arr_utc)
+        /*
+         * No variance chips here, and the times are the revised ones.
+         *
+         * The chips were added so the strip matched the board, and they made it the thing it was
+         * built not to be: a peek-the-next-card scroller grew a second line's worth of furniture
+         * per flight on the narrowest screen we serve. The times above are already the latest
+         * estimate — actual, else revised, else the timetable — so dropping the chips does not
+         * drop the information, it drops a second way of saying it. The popup carries the variance
+         * for anyone who wants the comparison, and it is one tap away.
+         */
         const outbound = (apFlag[f.dep_iata] ?? '') === '🇸🇾'
         const otherIata = outbound ? f.arr_iata : f.dep_iata
         const otherCity = cityFor(otherIata)
@@ -684,9 +689,9 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
                 </span>
               </span>
               <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, fontWeight: 600, color: C.muted, whiteSpace: 'nowrap' }}>
-                {f.dep_iata} {depTime}{depDelay ? <> <DelayChip min={depDelay} /></> : null}
+                {f.dep_iata} {depTime}
                 {' '}<span style={{ color: C.forestLight }}>{locale === 'ar' ? '←' : '→'}</span>{' '}
-                {f.arr_iata} {arrTime}{arrDelay ? <> <DelayChip min={arrDelay} /></> : null}
+                {f.arr_iata} {arrTime}
               </span>
             </span>
             </span>
