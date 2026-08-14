@@ -764,6 +764,7 @@ async function fetchLastKnownPositions(boardMap: Map<string, BoardFlight>): Prom
       iata_number:    info.iata_num,
       actual_dep_utc: info.actual_dep_utc,
       actual_arr_utc: info.actual_arr_utc,
+      revised_arr_utc: info.revised_arr_utc ?? null,
       dep_delay_min:  info.dep_delay_min,
       airline_iata:   info.airline_iata,
       seen_at:        r.seen_at,
@@ -1076,6 +1077,7 @@ export async function GET() {
         iata_number:    info?.iata_num       ?? null,
         actual_dep_utc,
         actual_arr_utc: info?.actual_arr_utc ?? null,
+        revised_arr_utc: info?.revised_arr_utc ?? null,
         dep_delay_min:  info?.dep_delay_min  ?? null,
         airline_iata:   info?.airline_iata   ?? null,
       })
@@ -1132,6 +1134,7 @@ export async function GET() {
           iata_number:    info.iata_num     ?? null,
           actual_dep_utc: info.actual_dep_utc ?? null,
           actual_arr_utc: info.actual_arr_utc ?? null,
+          revised_arr_utc: info.revised_arr_utc ?? null,
           dep_delay_min:  info.dep_delay_min  ?? null,
           airline_iata:   info.airline_iata   ?? null,
         })
@@ -1170,6 +1173,7 @@ export async function GET() {
         iata_number:    info?.iata_num     ?? null,
         actual_dep_utc: info?.actual_dep_utc ?? null,
         actual_arr_utc: info?.actual_arr_utc ?? null,
+        revised_arr_utc: info?.revised_arr_utc ?? null,
         dep_delay_min:  info?.dep_delay_min  ?? null,
         airline_iata:   info?.airline_iata   ?? null,
       })

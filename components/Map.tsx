@@ -53,6 +53,8 @@ interface Aircraft {
   iata_number:    string | null
   actual_dep_utc: string | null
   actual_arr_utc: string | null
+  /** The board's revised arrival, carried through so the popup need not synthesise one. */
+  revised_arr_utc?: string | null
   dep_delay_min:  number | null
   airline_iata:   string | null
   seen_at?: string
@@ -1381,7 +1383,12 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
               // countdown, so a stale one is just as visible as a stale "Arrived".
               scheduled_arr_utc: carryArrival(existing?.scheduled_arr_utc, legDep),
               revised_dep_utc:   existing?.revised_dep_utc   ?? null,
-              revised_arr_utc:   carryArrival(existing?.revised_arr_utc, legDep),
+              // From the aircraft first, not only carried forward. boardDeparted is the only
+              // other source of this field and it excludes any flight we hold a fix for, so a
+              // live aircraft never had one — and buildPopup then fell back to departure plus
+              // scheduled duration. RJ435 read ARRIVAL 07:40 in the popup against 07:13 on the
+              // side card, which is the revised time the board had all along.
+              revised_arr_utc:   a.revised_arr_utc ?? carryArrival(existing?.revised_arr_utc, legDep),
               dep_delay_min:     a.dep_delay_min ?? existing?.dep_delay_min ?? null,
               arr_delay_min:     arrUtc ? existing?.arr_delay_min ?? null : null,
               aircraft_reg:      a.r ?? existing?.aircraft_reg   ?? null,
