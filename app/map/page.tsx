@@ -292,8 +292,15 @@ function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelecte
 
 // ── In-air side panel ────────────────────────────────────────────────────────
 /** Shared by the desktop panel and the phone strip; only one of them is mounted at a time. */
+/** Below this much time to the nearest arrival, the panel refreshes on the faster clock. */
+const ARRIVING_SOON_MS = 6 * 60_000
+const FAST_POLL_MS = 15_000
+const SLOW_POLL_MS = 60_000
+
 function useInAirFlights() {
   const [flights, setFlights] = useState<InAirFlight[]>([])
+  /** Soonest arrival on screen, in ms — what the poll loop reads to pick its next delay. */
+  const soonestArrRef = useRef<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [geoReady, setGeoReady] = useState(false)
 
@@ -358,17 +365,43 @@ function useInAirFlights() {
           || airborne.has(f.iata_number.toUpperCase())
       }
 
-      setFlights(Object.values(best).filter(isFlying).sort((a, b) => etaMs(a) - etaMs(b)))
+      const shown = Object.values(best).filter(isFlying).sort((a, b) => etaMs(a) - etaMs(b))
+      setFlights(shown)
+      // The soonest arrival decides how hard the next poll works. Read from the list we just
+      // rendered, so the cadence always reflects what is actually on screen.
+      soonestArrRef.current = shown.length ? etaMs(shown[0]) : null
     } finally {
       setLoading(false)
     }
   }, [])
 
+  /*
+   * A minute between refreshes, except when something is about to land.
+   *
+   * JZR173 on 14 Aug: last position 3.4 km out at 148 knots, on the ground 47 seconds later. At
+   * that speed the whole final approach fits inside one sixty-second refresh, so the marker was
+   * either short of the field or gone — there was no in-between to watch, because the aircraft
+   * crossed it faster than the panel redrew. The positions themselves are already on 15 s; it was
+   * this loop, which carries the arrival times and the panel, that lagged.
+   *
+   * setTimeout rather than setInterval, because the cadence has to change between ticks.
+   *
+   * Damascus only, in effect. At Aleppo the track dies 32–50 km out and no polling rate reaches
+   * it — that one needs a receiver, not a shorter timer.
+   */
   useEffect(() => {
     loadGeoData().then(() => setGeoReady(true))
-    load()
-    const t = setInterval(load, 60_000)
-    return () => clearInterval(t)
+    let timer: ReturnType<typeof setTimeout>
+    let alive = true
+    const tick = async () => {
+      await load()
+      if (!alive) return
+      const eta = soonestArrRef.current
+      const soon = eta != null && eta - Date.now() < ARRIVING_SOON_MS
+      timer = setTimeout(tick, soon ? FAST_POLL_MS : SLOW_POLL_MS)
+    }
+    tick()
+    return () => { alive = false; clearTimeout(timer) }
   }, [load])
 
   return { flights, loading, geoReady }
