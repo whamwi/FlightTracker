@@ -82,10 +82,40 @@ async function assumeFromEstimate(): Promise<number> {
   return n
 }
 
+/**
+ * Diversions FR24 inferred from a position no aircraft was in.
+ *
+ * On 14 Aug both KU551 and G9375 were published as "Diverted to AMM" while descending into
+ * Damascus — 50 km out at 12,350 ft and 27 km out at 7,925 ft respectively. Both had just started
+ * reporting 31.720/36.000, the anchor of the GPS spoofing over southern Syria, which sits on top of
+ * Queen Alia. FR24 saw an aircraft come to rest at an airport and drew the obvious conclusion.
+ *
+ * It matters because the outcome was sticky: only a published real_arr could clear it, and FR24
+ * will never publish one for an aircraft it believes is parked at Amman. Left alone, both flights
+ * were permanently diverted in the punctuality figures.
+ *
+ * The work is in Postgres — it needs a window function over the position tape, and PostgREST has
+ * none. The airport list travels from lib/syria-airports.ts rather than being spelled out there.
+ */
+async function rebutDiversions(): Promise<number> {
+  const res = await fetch(`${SB_URL}/rest/v1/rpc/rebut_spoofed_diversions`, {
+    method: 'POST',
+    headers: { ...HEADERS, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ p_airports: SYRIAN_AIRPORTS }),
+    cache: 'no-store',
+  })
+  return res.ok ? Number(await res.json()) || 0 : 0
+}
+
 export async function GET() {
   if (!FR24_TOKEN) {
     return NextResponse.json({ ok: false, error: 'FR24_API_KEY not configured' }, { status: 500 })
   }
+
+  // Before the pending query and its early return, not after. The estimate tier was written
+  // downstream of `if (!pending.length) return` and so never ran once — the one place in this file
+  // where position in the function is load-bearing.
+  const rebutted = await rebutDiversions()
 
   const nowSec    = Math.floor(Date.now() / 1000)
   const minAgeSec = nowSec - 30 * 60   // at least 30 min past ETA
@@ -126,7 +156,7 @@ export async function GET() {
   }
 
   if (!pending.length) {
-    return NextResponse.json({ ok: true, checked: 0, confirmed: 0, assumed: await assumeFromEstimate() })
+    return NextResponse.json({ ok: true, checked: 0, confirmed: 0, rebutted, assumed: await assumeFromEstimate() })
   }
 
   /*
@@ -280,5 +310,5 @@ export async function GET() {
 
   const assumed = await assumeFromEstimate()
 
-  return NextResponse.json({ ok: true, checked: pending.length, confirmed, assumed, callsigns })
+  return NextResponse.json({ ok: true, checked: pending.length, confirmed, rebutted, assumed, callsigns })
 }

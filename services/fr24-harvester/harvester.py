@@ -186,10 +186,10 @@ MIN_JUMP_KM = 5
 # away, and the previous fix says nothing about whether the new one is real.
 MAX_GAP_SEC = 1800
 
-# Last accepted position per fr24_id, in process. Deliberately not persisted: after a restart the
-# first fix of each flight is accepted unchecked, which is the safe direction — this rejects data,
-# so it must never run on a stale reference.
-_last_fix: dict[str, tuple[float, float, float]] = {}
+# Last accepted position per fr24_id, in process: lat, lon, altitude, timestamp. Deliberately not
+# persisted: after a restart the first fix of each flight is accepted unchecked, which is the safe
+# direction — this rejects data, so it must never run on a stale reference.
+_last_fix: dict[str, tuple[float, float, float | None, float]] = {}
 
 
 def _km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -199,39 +199,57 @@ def _km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * 6371 * math.asin(math.sqrt(a))
 
 
-def implausible_jump(fid: str, lat: float, lon: float, fix_at: str | None) -> bool:
+def reject_fix(fid: str, lat: float, lon: float, alt: float | None,
+               fix_at: str | None) -> str | None:
     """
-    True when this fix cannot follow the last one we accepted for the same flight.
+    Why this fix cannot follow the last one we accepted for the same flight, or None to keep it.
 
-    KU551 on 14 Aug is the case. Its last credible position was 50 km from Damascus at 12,350 ft;
-    four minutes later it reported 1 km from Amman — 210 km away, an implied 3,000 km/h. FR24 read
-    that position, saw an aircraft on the ground at Amman and published "Diverted to AMM", and the
-    flight landed at Damascus eight minutes later.
+    Two impossibilities, because one of them was not enough.
 
-    Position, not ground speed. The spoofed rows carried a *plausible-looking* 10 knots and would
-    survive a speed test; what gives them away is that no aircraft can be where they claim, given
-    where it just was. This also catches the frozen-position case from 13 Aug, since a frozen
-    position eventually contradicts a moving one.
+    **jump** — KU551 on 14 Aug. Its last credible position was 50 km from Damascus at 12,350 ft;
+    four minutes later it reported 1 km from Amman, 210 km away, an implied 3,000 km/h. FR24 read
+    that position, saw an aircraft on the ground at Amman and published "Diverted to AMM"; the
+    flight landed at Damascus eight minutes later. Position, not ground speed: the spoofed rows
+    carried a plausible-looking 10 knots and survive a speed test. What gives them away is that no
+    aircraft can be where they claim, given where it just was.
 
-    Applies to every source. The earlier ground-speed guard was scoped to our own receivers, and
+    **frozen** — ABY375 the same morning, and the reason this second test exists. Same anchor, same
+    fabricated diversion, but the gap to the previous real fix was eleven minutes rather than four,
+    so 202 km worked out to 1,099 km/h and slipped under the ceiling. It has to: an A320 does about
+    870 km/h through the air, and a jet-stream tailwind can genuinely put a real fix near 1,070, so
+    the ceiling cannot come down far enough to catch this without rejecting true positions.
+
+    What catches it instead is that the aircraft then *stopped*. Four consecutive fixes at
+    31.720/36.000 to three decimals while the altitude fell 5,150 → 4,950 → 4,125 → 3,900. Descent
+    without horizontal movement is not a thing an aeroplane does, and unlike a speed ceiling it
+    needs no threshold — either the coordinate repeated exactly or it did not.
+
+    Altitude is what makes it safe. A parked aircraft holds a coordinate all day, and at Damascus,
+    2,020 ft up, its barometric altitude is not zero either; what it does not do is change. So the
+    test is a repeated position *with a moving altitude*, which is the spoof and the stuck
+    transmitter and nothing legitimate.
+
+    Both apply to every source. The first guard of this kind was scoped to our own receivers, and
     these rows came from FR24's — which is exactly why they reached the map.
     """
     if lat is None or lon is None or not fix_at:
-        return False
+        return None
     try:
         now_s = datetime.fromisoformat(fix_at.replace("Z", "+00:00")).timestamp()
     except ValueError:
-        return False
+        return None
     prev = _last_fix.get(fid)
     if prev:
-        plat, plon, pts = prev
+        plat, plon, palt, pts = prev
         dt = now_s - pts
         if 0 < dt <= MAX_GAP_SEC:
+            if lat == plat and lon == plon and alt is not None and palt is not None and alt != palt:
+                return "frozen"
             km = _km(plat, plon, lat, lon)
             if km >= MIN_JUMP_KM and (km / dt) * 3600 > MAX_GROUND_SPEED_KMH:
-                return True
-    _last_fix[fid] = (lat, lon, now_s)
-    return False
+                return "jump"
+    _last_fix[fid] = (lat, lon, alt, now_s)
+    return None
 
 
 def fetch_airport(code: str, day: str, page: int = 1) -> tuple[dict, int, int]:
@@ -692,7 +710,7 @@ def collect_adsb(live_by_callsign: dict[str, tuple[str, int]]) -> int:
                and gs is not None and gs < BAD_FIX_MIN_GS_KTS:
                 bad_fixes += 1
                 continue
-            if implausible_jump(fid, a["lat"], a["lon"], a.get("seen_at")):
+            if reject_fix(fid, a["lat"], a["lon"], alt, a.get("seen_at")):
                 bad_fixes += 1
                 continue
 
@@ -770,7 +788,7 @@ def collect_positions(live: dict[str, int]) -> None:
             f"flights may be silently missing; narrow FR24_FEED_BOUNDS")
 
     rows = []
-    jumps = 0
+    bad = {"jump": 0, "frozen": 0}
     estimates = 0
     for fid, v in craft.items():
         if fid not in live:
@@ -794,8 +812,9 @@ def collect_positions(live: dict[str, int]) -> None:
         # Same test as our own receivers get. These rows are the ones that mattered: KU551's
         # 210 km jump to Amman came in on this path, and the guard I shipped this morning was
         # scoped to source='adsb', so it sailed straight past.
-        if implausible_jump(fid, v[1], v[2], ts(v[10])):
-            jumps += 1
+        why = reject_fix(fid, v[1], v[2], v[4], ts(v[10]))
+        if why:
+            bad[why] += 1
             continue
         rows.append({
             "fr24_id": fid, "fr24_row": live[fid],
@@ -809,8 +828,12 @@ def collect_positions(live: dict[str, int]) -> None:
             "aircraft_seen": len(craft), "raw": v,
         })
 
-    if jumps:
-        log(f"  feed: dropped {jumps} fix(es) no aircraft could have flown to")
+    # Counted apart, because they mean different things: a jump is one bad reading, a frozen run is
+    # a transmitter that has stopped telling the truth and will keep doing so for several minutes.
+    if bad["jump"]:
+        log(f"  feed: dropped {bad['jump']} fix(es) no aircraft could have flown to")
+    if bad["frozen"]:
+        log(f"  feed: dropped {bad['frozen']} fix(es) descending without moving")
     if estimates:
         log(f"  feed: dropped {estimates} estimated position(s) (F-EST)")
     if not rows:

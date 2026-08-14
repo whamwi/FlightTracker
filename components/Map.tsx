@@ -135,8 +135,76 @@ const STALE_TTL_MS       = 30 * 60 * 1000
  * and mobile independently used 90 — so an arrived flight lingered far longer than intended
  * on both. One constant now, and both surfaces use 30.
  */
-/** How far back along its approach an arrived marker sits, so co-located arrivals separate. */
-const ARRIVED_OFFSET_KM = 8
+/**
+ * How arrived markers share the space around an airport they are all sitting on.
+ *
+ * Damascus can hold eleven of them inside the hour they linger, every one at the field's exact
+ * coordinate: eleven aircraft, eleven ARRIVED labels, one unreadable blob.
+ *
+ * The first attempt backed each one 8 km along the route it flew, so the Dubai arrival sat
+ * south-east of the field and the Istanbul one north-west — an arrangement that means something
+ * rather than a fan of arbitrary offsets. Measured on the deployed map it did almost nothing:
+ * 8 km is two to five pixels at the zoom the country is viewed at, and two flights on the same
+ * route — ABY434 and FYC741, both from Sharjah — came out exactly on top of each other, because
+ * the same route backs off in the same direction.
+ *
+ * So the distance moves into pixels and the direction keeps its meaning. Each marker still sits
+ * back along its own approach, now at a separation that survives zooming out, and when two
+ * approaches are too close together the second is stepped around the field until it is clear.
+ * Once a full turn is used up the next one goes to a wider ring.
+ */
+const ARRIVED_OFFSET_KM = 8   // still used to read the approach heading, not to place the marker
+
+/*
+ * Six slots to a ring, and the ring is sized so that six of them clear each other.
+ *
+ * The marker is a 40 px aircraft under a two-line label, so neighbours need something like 50 px
+ * between centres to read as two things. On a ring of radius r, n markers spread evenly sit
+ * 2·r·sin(180/n) apart — so the count and the radius are not free of each other, and picking a
+ * comfortable-looking small radius first is how the first version of this ended up putting
+ * adjacent markers 14 px apart. Six at 52 px gives 52 px of separation; a seventh goes to the next
+ * ring rather than squeezing the six.
+ */
+const ARRIVED_SLOTS     = 6
+const ARRIVED_RING0_PX  = 52
+const ARRIVED_RING_PX   = 46
+
+/**
+ * Pick a clear spot around the field for one arrived marker, and remember it.
+ *
+ * `taken` holds the slots already handed out at this airport during this render pass, so collision
+ * is only ever tested against markers already placed — which is what lets this run inside the
+ * single pass that draws them rather than needing a second one.
+ *
+ * A slot is a (ring, angle) pair held as one number, which is what stops the overflow case from
+ * doubling up: the same angle on a wider ring is a different place, and the search simply walks
+ * outward until it finds a number nobody has taken.
+ */
+function arrivedFanOffset(taken: Set<number>, approachDeg: number): [number, number] {
+  const STEP = 360 / ARRIVED_SLOTS
+  /*
+   * Back along the approach: the aircraft came from there, and that is where the eye looks for it.
+   *
+   * Rounded to the nearest of six, so the direction is only good to ±30°. That is a real loss
+   * against the old continuous bearing and it buys the guaranteed separation above — what survives
+   * is which side of the field a flight came in from, which is the part anyone reads.
+   */
+  const home  = (((approachDeg + 180) % 360) + 360) % 360
+  const start = Math.round(home / STEP) % ARRIVED_SLOTS
+
+  let k = 0
+  while (taken.has(Math.floor(k / ARRIVED_SLOTS) * ARRIVED_SLOTS + ((start + k) % ARRIVED_SLOTS))) k++
+  const ring = Math.floor(k / ARRIVED_SLOTS)
+  const slot = (start + k) % ARRIVED_SLOTS
+  taken.add(ring * ARRIVED_SLOTS + slot)
+
+  // Odd rings sit half a step round, so a marker never lands directly outside its neighbour.
+  const angle = slot * STEP + (ring % 2 ? STEP / 2 : 0)
+  const r     = ARRIVED_RING0_PX + ring * ARRIVED_RING_PX
+  const rad   = (angle * Math.PI) / 180
+  // Screen y grows downward while bearing 0 is north, hence the negated cosine.
+  return [r * Math.sin(rad), -r * Math.cos(rad)]
+}
 
 // One hour, matching the same constant in app/api/airspace/route.ts. These were 30 minutes here
 // and four hours there, so a flight left the map at a different moment depending on whether we
@@ -311,7 +379,7 @@ function bestHeading(a: Aircraft): number {
 
 // ── Icon & popup ──────────────────────────────────────────────────────────────
 
-function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, stale: boolean, label?: string, hub: BoardAirport = 'DAM', estimated = false, colorOverride?: string) {
+function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, stale: boolean, label?: string, hub: BoardAirport = 'DAM', estimated = false, colorOverride?: string, offsetPx?: [number, number]) {
   const mobile  = typeof window !== 'undefined' && window.matchMedia(PHONE_MQ).matches
   const size    = syria ? (mobile ? 36 : 40) : (mobile ? 26 : 30)
   // Was a boolean — Aleppo orange, any other Syrian airport green — which painted Deir ez-Zor
@@ -338,7 +406,20 @@ function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, s
       ${svg}<div style="text-align:center">${labelHtml}</div></div>`
   }
 
-  return L.divIcon({ className: '', html, iconSize: [size, size], iconAnchor: [size/2, size/2] })
+  /*
+   * The offset lives in the anchor, not in the marker's coordinates.
+   *
+   * iconAnchor names the point of the icon that sits on the marker's position, so subtracting
+   * moves the icon the other way — and it does so in pixels, which is the whole reason it is done
+   * here. A separation expressed in kilometres shrinks to nothing as the map zooms out, which is
+   * exactly what happened to the first attempt at this. Leaflet measures popupAnchor from
+   * iconAnchor, so the popup follows without being told.
+   */
+  const [ox, oy] = offsetPx ?? [0, 0]
+  return L.divIcon({
+    className: '', html, iconSize: [size, size],
+    iconAnchor: [size / 2 - ox, size / 2 - oy],
+  })
 }
 
 // Convert UTC ISO timestamp to local "HH:MM" using airport UTC offset
@@ -2016,6 +2097,9 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
       // ── 4. Schedule overlay (ESTIMATED / no signal) ───────────────────────
       const activeSchedKeys    = new Set<string>()
       const activeSchedEnRoute = new Set<string>()
+      // Angles handed out to arrived markers this pass, per airport. Reset every pass so a flight
+      // that has since left the map does not go on reserving a slot nobody is standing in.
+      const arrivedFan: Record<string, Set<number>> = {}
 
       // When actual_dep_utc is known, a callsign may have multiple schedule entries
       // (different dep times for different days). Pre-compute the best-matching
@@ -2208,24 +2292,12 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         }
 
         /*
-         * An arrived flight sits a few kilometres short of the field, on the approach it flew.
+         * An arrived flight sits at its field, and its marker is drawn a little back down the
+         * approach it flew — see ARRIVED_OFFSET_PX for why that offset is in pixels.
          *
-         * At exactly 1.0 every arrival lands on the same coordinate, so Damascus stacked its
-         * arrivals into one unreadable blob — three aircraft, three ARRIVED labels, one pixel.
-         * Backing each off along its own route separates them by where they came from: the Dubai
-         * arrival sits south-east of the field, the Istanbul one north-west. The arrangement
-         * carries meaning rather than being a fan of arbitrary offsets.
-         *
-         * A fixed distance, not a fixed fraction — routes here run from 300 km to 4,000, and a
-         * fraction would put the Amman arrival a few hundred metres out and the Amsterdam one
-         * sixty kilometres out. Clamped at 0.9 so a very short hop cannot be pushed back past its
-         * own halfway point.
-         *
-         * It also fixes the heading for free: bearingFromPath at exactly 1.0 has no segment left
-         * to read, while just short of it the marker points down the approach.
-         *
-         * Two arrivals from the same direction still coincide. That is rarer than the general
-         * pile-up and would need screen-space layout to solve properly.
+         * arrivedF is still a fraction just short of 1.0, but it is now only read for the heading:
+         * bearingFromPath at exactly 1.0 has no segment left to work with, while a step before it
+         * the aircraft is pointing down the approach. The position comes from the airport itself.
          */
         const routeKm = greatCircleKm(depC[0], depC[1], arrC[0], arrC[1])
         const arrivedF = routeKm > ARRIVED_OFFSET_KM
@@ -2243,18 +2315,23 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         const pinToLastPos = !arrived && fPos >= 0.85
           && !!lastPos && now - lastPos.lostAt < 15 * 60_000
 
-        const [lat, lon] = pinToLastPos
-          ? [lastPos.lat, lastPos.lon]
-          : wps?.length
-            ? interpolatePath(wps, fPos)
-            : slerpGreatCircle(depC[0], depC[1], arrC[0], arrC[1], fPos)
+        const [lat, lon] = arrived
+          ? arrC
+          : pinToLastPos
+            ? [lastPos.lat, lastPos.lon]
+            : wps?.length
+              ? interpolatePath(wps, fPos)
+              : slerpGreatCircle(depC[0], depC[1], arrC[0], arrC[1], fPos)
         const track = wps?.length
           ? bearingFromPath(wps, fPos)
           : bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], fPos)
         const label = arrived ? `${callsign}\nARRIVED` : callsign
         const hub = markerHub(dep_iata, arr_iata)
         const isSchedHighlighted = highlightedCSRef.current === callsign
-        const icon  = planeIcon(L, track, true, arrived, label, hub, !arrived, isSchedHighlighted ? '#ef4444' : undefined)
+        const fanPx = arrived
+          ? arrivedFanOffset((arrivedFan[arr_iata] ??= new Set()), track)
+          : undefined
+        const icon  = planeIcon(L, track, true, arrived, label, hub, !arrived, isSchedHighlighted ? '#ef4444' : undefined, fanPx)
         const schedReg   = fs?.aircraft_reg ?? null
         const schedPhoto = (schedReg ? photoCacheRef.current[schedReg] : null) ?? photoCacheRef.current[`cs:${callsign}`] ?? null
         const popup = buildSchedulePopup(entry, arrived, fs, fPos, schedPhoto)
