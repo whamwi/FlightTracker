@@ -118,20 +118,35 @@ function MiniLogo({ iata, name }: { iata: string; name: string }) {
 }
 
 // ── Live progress bar (mini) ─────────────────────────────────────────────────
-function MiniProgress({ depUtc, durationMin, approaching, accentColor }: { depUtc: string; durationMin: number; approaching: boolean; accentColor?: string }) {
+/*
+ * Departure and arrival as one resolved pair — the same rule buildPopup states for itself:
+ * one pair of instants drives the bar, the countdown and the arrival column, because keeping
+ * them on separate chains produces a card that is nonsense taken as a whole.
+ *
+ * This took `durationMin` and projected from the scheduled block, while the card printed an
+ * arrival from etaMs(), which prefers the revised time. RJ435 on 14 Aug showed both at once:
+ * arrival 07:16 with "38 دقيقة على الوصول" beside it, when 07:16 was fifteen minutes away. The
+ * popup for the same flight said fifteen, and was right.
+ *
+ * arrMs is whatever the card is displaying as the arrival. If the two ever diverge again it will
+ * be because someone passed something else.
+ */
+function MiniProgress({ depUtc, arrMs, approaching, accentColor }: { depUtc: string; arrMs: number | null; approaching: boolean; accentColor?: string }) {
   const t      = useT()
   const locale = useLocale()
-  const calc = () => Math.min(100, Math.max(0, ((Date.now() - new Date(depUtc).getTime()) / (durationMin * 60_000)) * 100))
+  const depMs  = new Date(depUtc).getTime()
+  const span   = arrMs && arrMs > depMs ? arrMs - depMs : 0
+  const calc = () => (span > 0 ? Math.min(100, Math.max(0, ((Date.now() - depMs) / span) * 100)) : 0)
   const [pct, setPct] = useState(calc)
   useEffect(() => {
     const t = setInterval(() => setPct(calc()), 30_000)
     return () => clearInterval(t)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [depUtc, durationMin])
+  }, [depUtc, arrMs])
 
   const fill  = Math.max(2, pct)
   const empty = Math.max(2, 100 - pct)
-  const rem   = Math.round((1 - pct / 100) * durationMin)
+  const rem   = arrMs ? Math.round((arrMs - Date.now()) / 60_000) : 0
   const dotColor = accentColor ?? (approaching ? C.forest : C.forestMid)
 
   return (
@@ -242,7 +257,7 @@ function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelecte
 
           {/* Progress */}
           {f.actual_dep_utc && f.duration_min > 0 ? (
-            <MiniProgress depUtc={f.actual_dep_utc} durationMin={f.duration_min} approaching={approaching} accentColor={hub === 'DAM' ? undefined : MARKER_ACCENT[hub]} />
+            <MiniProgress depUtc={f.actual_dep_utc} arrMs={arrMs} approaching={approaching} accentColor={hub === 'DAM' ? undefined : MARKER_ACCENT[hub]} />
           ) : (
             <div style={{ flex: 1, height: 3, borderRadius: 99, background: C.trackEmpty }} />
           )}
