@@ -214,6 +214,19 @@ function MiniFlightCard({ f, isSelected, onSelect, fixAgeS }: { f: InAirFlight; 
   const hub = markerHub(f.dep_iata, f.arr_iata)
   const railColor = hub === 'DAM' ? (approaching ? C.forest : C.forestMid) : MARKER_ACCENT[hub]
 
+  /*
+   * A landed flight's card does nothing when tapped, so it stops pretending it will.
+   *
+   * Selecting a flight pans the map to its marker and opens it. Arrivals no longer have a marker —
+   * they leave the map the moment they land — so the tap started the loading state and then had
+   * nothing to show. A card that looks like a control and answers with a spinner is worse than one
+   * that plainly is not a control.
+   *
+   * Rendered as a plain div rather than a Link with the click swallowed: a Link is still a link to
+   * a keyboard and to a screen reader, and still offers "open in new tab" on a long press.
+   */
+  const readOnly = status === 'Arrived'
+
   const depOff  = tzOffset(f.dep_iata)
   const arrOff  = tzOffset(f.arr_iata)
   const depTime = fmtLocal(f.actual_dep_utc ?? f.revised_dep_utc ?? f.dep_time_utc, depOff)
@@ -225,12 +238,11 @@ function MiniFlightCard({ f, isSelected, onSelect, fixAgeS }: { f: InAirFlight; 
   const depFlag  = apFlag[f.dep_iata] ?? ''
   const arrFlag  = apFlag[f.arr_iata] ?? ''
 
-  return (
-    <Link
-      href={href(`/map?flight=${encodeURIComponent(f.iata_number)}`)}
-      onClick={(e) => { e.preventDefault(); onSelect(f.iata_number) }}
-      style={{ display: 'block', textDecoration: 'none', background: isSelected ? '#D4EBD4' : C.surface, border: `${isSelected ? 2 : 1}px solid ${isSelected ? C.forest : C.border}`, borderRadius: 12, overflow: 'hidden', boxShadow: isSelected ? '0 6px 20px rgba(5,66,57,0.22), 0 1px 4px rgba(5,66,57,0.12)' : '0 1px 4px rgba(0,0,0,.06)', position: 'relative', transform: isSelected ? 'translateY(-1px)' : 'none', transition: 'box-shadow .2s, transform .2s, background .2s', flexShrink: 0 }}
-    >
+  const selected = isSelected && !readOnly
+  const cardStyle: React.CSSProperties = { display: 'block', textDecoration: 'none', background: selected ? '#D4EBD4' : C.surface, border: `${selected ? 2 : 1}px solid ${selected ? C.forest : C.border}`, borderRadius: 12, overflow: 'hidden', boxShadow: selected ? '0 6px 20px rgba(5,66,57,0.22), 0 1px 4px rgba(5,66,57,0.12)' : '0 1px 4px rgba(0,0,0,.06)', position: 'relative', transform: selected ? 'translateY(-1px)' : 'none', transition: 'box-shadow .2s, transform .2s, background .2s', flexShrink: 0 }
+
+  const body = (
+    <>
       {/* Status rail (top) */}
       <div className="ia-rail" style={{ height: 3, background: railColor }} />
 
@@ -323,7 +335,16 @@ function MiniFlightCard({ f, isSelected, onSelect, fixAgeS }: { f: InAirFlight; 
           </div>
         )}
       </div>
-    </Link>
+    </>
+  )
+
+  if (readOnly) return <div style={cardStyle}>{body}</div>
+  return (
+    <Link
+      href={href(`/map?flight=${encodeURIComponent(f.iata_number)}`)}
+      onClick={(e) => { e.preventDefault(); onSelect(f.iata_number) }}
+      style={cardStyle}
+    >{body}</Link>
   )
 }
 
