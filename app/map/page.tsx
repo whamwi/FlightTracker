@@ -9,7 +9,7 @@ import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { cityFor, airlineNameFor, getActiveLocale, airportFlag as apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
 import { useT, useLocale, useHref } from '@/components/LocaleProvider'
 import { effectiveStatus, calcDelay } from '@/lib/flight-status'
-import { DelayChip, MetaStrip } from '@/components/FlightMeta'
+import { DelayChip } from '@/components/FlightMeta'
 import { STATUS_KEY, counted } from '@/lib/i18n'
 import Wordmark from '@/components/Wordmark'
 import SiteNav from '@/components/SiteNav'
@@ -50,13 +50,9 @@ type InAirFlight = {
   revised_dep_utc: string | null
   revised_arr_utc: string | null
   aircraft_type: string | null
-  // Carried by /api/flightboard since 13 Aug. The panel never declared them, so the same flight
-  // was described to two different depths depending on which surface you read.
-  dep_terminal?: string | null
-  arr_terminal?: string | null
-  dep_gate?: string | null
-  arr_gate?: string | null
-  arr_baggage?: string | null
+  // The board sends terminal, gate and belt too. Deliberately not declared here: they were shown
+  // on this card briefly and removed — a third row on every card, where this is a summary. The
+  // popup carries them for anyone who wants that detail.
   arr_next_day?: boolean
 }
 
@@ -165,20 +161,15 @@ function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelecte
   const approaching = status === 'Approaching'
 
   /*
-   * Variance, terminal, gate and belt — the same four facts the board shows, derived the same
-   * way. The panel printed a bare 06:12 where the board printed 06:12 with -13m beside it: the
-   * half of the story that raises the question.
+   * Variance, and only variance.
    *
-   * One terminal label for both ends, because only one is ever populated and it is always the
-   * foreign airport — DAM, ALP and DEZ publish none of their own.
+   * The panel printed a bare 06:12 where the board printed 06:12 with -13m beside it — the half
+   * of the story that raises the question. Terminal, gate and belt were added here too and then
+   * taken out: they added a third row to every card and this is a summary, not the board. They
+   * are one tap away in the popup, which is where someone who wants them is already going.
    */
   const depDelay = calcDelay(f.dep_time_utc, f.actual_dep_utc ?? f.revised_dep_utc)
   const arrDelay = calcDelay(f.arr_time_utc, f.actual_arr_utc ?? f.revised_arr_utc)
-  const terminalLabel = (() => {
-    const parts = [f.dep_terminal, f.arr_terminal].map(v => (v ?? '').trim()).filter(Boolean)
-    return parts.length ? `${t('label.terminal')} ${parts.join(' / ')}` : null
-  })()
-  const gate = (f.arr_gate ?? '').trim() || (f.dep_gate ?? '').trim() || null
   // Damascus keeps the brand forest it has always had here — the rail sits on a pale panel,
   // not on a map, and #16a34a would be loud against it. The provincial hubs take the marker
   // colour, which is the whole point of having one.
@@ -266,15 +257,6 @@ function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelecte
           </div>
         </div>
 
-        {/* Row 3: the small print the board carries under its rail. */}
-        <MetaStrip
-          items={[
-            { text: f.aircraft_type },
-            { text: terminalLabel },
-            { text: gate ? `${t('label.gate')} ${gate}` : null },
-            { text: f.arr_baggage && status === 'Arrived' ? `${t('label.belt')} ${f.arr_baggage}` : null },
-          ]}
-        />
       </div>
     </Link>
   )
