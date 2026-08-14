@@ -3,7 +3,7 @@ import { PHONE_MQ } from '@/lib/breakpoints'
 import { carryArrival } from '@/lib/flight-leg'
 import { hasArrived, canonicalStatus, calcDelay } from '@/lib/flight-status'
 import { climbAdjustedFraction } from '@/lib/climb-profile'
-import { formatAirportTime } from '@/lib/airport-time'
+import { airportTimeParts } from '@/lib/airport-time'
 import { reportHandledError } from './ErrorReporter'
 
 import 'leaflet/dist/leaflet.css'
@@ -435,7 +435,13 @@ function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, s
  * because six call sites pass one; the argument is now ignored, and the IATA code decides.
  */
 function popupToLocal(iso: string | null, _offset: number, iata = 'DAM'): string {
-  return iso ? formatAirportTime(iso, iata) : ''
+  if (!iso) return ''
+  const { time, meridiem } = airportTimeParts(iso, iata)
+  if (!meridiem) return time
+  // Same intent as the panel card: the meridiem is a qualifier, so it takes the face used for
+  // airline names and a smaller size rather than competing with the digits at full weight.
+  return `<span dir="ltr">${time}<span style="font:500 9px/1 'Instrument Sans',system-ui;`
+       + `margin-inline-start:3px;opacity:.75">${meridiem}</span></span>`
 }
 
 // Convert UTC "HH:MM" schedule time to local using airport UTC offset

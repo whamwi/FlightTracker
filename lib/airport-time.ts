@@ -121,3 +121,25 @@ export function formatAirportTime(
   }
   return formatScheduleTime(value, iata, hour12)
 }
+
+/**
+ * The same time, split so a caller can style the meridiem apart from the digits.
+ *
+ * The digits are monospace and bold because a column of times should line up and be scannable; the
+ * meridiem is neither of those things — it is a qualifier, and at the same weight and size it
+ * competes with the number it qualifies. Callers render it smaller, in the face they use for
+ * airline names.
+ *
+ * No isolate characters here. A caller holding two pieces should put them in a dir="ltr" wrapper,
+ * which does the same job more plainly; the isolates exist for formatAirportTime, whose whole
+ * output is one string with nowhere to hang an attribute.
+ */
+export function airportTimeParts(
+  value: string | null | undefined, iata: string,
+): { time: string; meridiem: string } {
+  const full = formatAirportTime(value, iata).replace(/[⁦⁩]/g, '')
+  if (full === '—') return { time: '—', meridiem: '' }
+  const i = full.lastIndexOf(' ')
+  return i < 0 ? { time: full, meridiem: '' }
+               : { time: full.slice(0, i), meridiem: full.slice(i + 1) }
+}

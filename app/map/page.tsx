@@ -9,7 +9,7 @@ import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { cityFor, airlineNameFor, getActiveLocale, airportFlag as apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
 import { useT, useLocale, useHref } from '@/components/LocaleProvider'
 import { effectiveStatus, calcDelay } from '@/lib/flight-status'
-import { formatAirportTime } from '@/lib/airport-time'
+import { formatAirportTime, airportTimeParts } from '@/lib/airport-time'
 import { DelayChip } from '@/components/FlightMeta'
 import { STATUS_KEY, counted } from '@/lib/i18n'
 import Wordmark from '@/components/Wordmark'
@@ -189,6 +189,32 @@ function MiniProgress({ depUtc, arrMs, landedMs, approaching, accentColor }: { d
  */
 const STALE_FIX_S = 300
 
+/**
+ * A time with its meridiem set quieter than the digits.
+ *
+ * dir="ltr" on the wrapper rather than isolate characters: two elements need the wrapper anyway,
+ * and it is the plainer way to say "these belong together, lay them out on their own terms". The
+ * meridiem takes the airline-name face — Instrument Sans, weight 500 — so it reads as a label
+ * beside the number rather than as part of it.
+ */
+/** The meridiem alone, for lines that already lay their own digits out. */
+function Meridiem({ of }: { of: string }) {
+  if (!of) return null
+  return <span style={{ font: `500 8px/1 'Instrument Sans',system-ui`, marginInlineStart: 2 }}>{of}</span>
+}
+
+function TimeWithMeridiem({ value, iata, color }: { value: string | null | undefined; iata: string; color: string }) {
+  const { time, meridiem } = airportTimeParts(value, iata)
+  return (
+    <span dir="ltr" style={{ display: 'inline-flex', alignItems: 'baseline', gap: 3 }}>
+      <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, fontWeight: 700, color }}>{time}</span>
+      {meridiem && (
+        <span style={{ font: `500 8.5px/1 'Instrument Sans',system-ui`, color: C.muted }}>{meridiem}</span>
+      )}
+    </span>
+  )
+}
+
 function MiniFlightCard({ f, isSelected, onSelect, fixAgeS }: { f: InAirFlight; isSelected?: boolean; onSelect: (n: string) => void; fixAgeS?: number }) {
   const t    = useT()
   const href = useHref()
@@ -226,10 +252,8 @@ function MiniFlightCard({ f, isSelected, onSelect, fixAgeS }: { f: InAirFlight; 
 
   // Each end in its own airport's clock, resolved by zone rather than a stored offset — see
   // lib/airport-time for the European airports that were an hour out.
-  const depTime = formatAirportTime(f.actual_dep_utc ?? f.revised_dep_utc ?? f.dep_time_utc, f.dep_iata)
-  const arrMs   = etaMs(f)
-  const arrTime = arrMs ? formatAirportTime(new Date(arrMs).toISOString(), f.arr_iata)
-                        : formatAirportTime(f.arr_time_utc, f.arr_iata)
+  // TimeWithMeridiem resolves the zone itself; the card only needs the instant to hand it.
+  const arrMs = etaMs(f)
 
   const depCity  = cityFor(f.dep_iata)
   const arrCity  = cityFor(f.arr_iata)
@@ -282,8 +306,8 @@ function MiniFlightCard({ f, isSelected, onSelect, fixAgeS }: { f: InAirFlight; 
               <span style={{ fontSize: 10, flexShrink: 0 }}>{depFlag}</span>
               <span style={{ font: `700 11px/1.15 'Instrument Sans',system-ui`, color: C.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{depCity}</span>
             </div>
-            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, fontWeight: 700, color: C.ink, marginTop: 2 }}>
-              {depTime}
+            <span style={{ marginTop: 2 }}>
+              <TimeWithMeridiem value={f.actual_dep_utc ?? f.revised_dep_utc ?? f.dep_time_utc} iata={f.dep_iata} color={C.ink} />
               {/* Mirror of the arrival's +1 opposite — see the board card for the reasoning. */}
               {f.dep_prev_day && (
                 <sup dir="ltr" style={{ fontSize: 9, fontWeight: 700, marginInlineStart: 1, color: C.forest, verticalAlign: 'super' }}>−1</sup>
@@ -309,8 +333,9 @@ function MiniFlightCard({ f, isSelected, onSelect, fixAgeS }: { f: InAirFlight; 
               <span style={{ font: `700 11px/1.15 'Instrument Sans',system-ui`, color: C.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{arrCity}</span>
               <span style={{ fontSize: 10, flexShrink: 0 }}>{arrFlag}</span>
             </div>
-            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, fontWeight: 700, color: approaching ? C.forest : C.ink, marginTop: 2 }}>
-              {arrTime}
+            <span style={{ marginTop: 2 }}>
+              <TimeWithMeridiem value={arrMs ? new Date(arrMs).toISOString() : f.arr_time_utc}
+                                iata={f.arr_iata} color={approaching ? C.forest : C.ink} />
               {f.arr_next_day && (
                 <sup dir="ltr" style={{ fontSize: 9, fontWeight: 700, marginInlineStart: 1, color: C.forest, verticalAlign: 'super' }}>+1</sup>
               )}
@@ -665,10 +690,9 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
          */
         const readOnly = tab === 'arrived'
         const selected = !readOnly && f.iata_number === selectedFlight
-        const depTime = formatAirportTime(f.actual_dep_utc ?? f.revised_dep_utc ?? f.dep_time_utc, f.dep_iata)
+        const dep     = airportTimeParts(f.actual_dep_utc ?? f.revised_dep_utc ?? f.dep_time_utc, f.dep_iata)
         const arrMs   = etaMs(f)
-        const arrTime = arrMs ? formatAirportTime(new Date(arrMs).toISOString(), f.arr_iata)
-                              : formatAirportTime(f.arr_time_utc, f.arr_iata)
+        const arr     = airportTimeParts(arrMs ? new Date(arrMs).toISOString() : f.arr_time_utc, f.arr_iata)
         // Which end is home decides whether the other end is a destination or an origin.
         // Read from the flag rather than a hardcoded airport list: DEZ is due to open and
         // Latakia and Qamishli come and go, and a stale list would silently label those
@@ -735,9 +759,9 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
               <span style={{ display: 'flex', alignItems: 'baseline', gap: 5,
                 fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, fontWeight: 600,
                 color: C.muted, whiteSpace: 'nowrap' }}>
-                <span>{f.dep_iata} {depTime}</span>
+                <span>{f.dep_iata} {dep.time}<Meridiem of={dep.meridiem} /></span>
                 <span style={{ color: C.forestLight }}>{locale === 'ar' ? '←' : '→'}</span>
-                <span>{f.arr_iata} {arrTime}</span>
+                <span>{f.arr_iata} {arr.time}<Meridiem of={arr.meridiem} /></span>
               </span>
             </span>
             </span>
