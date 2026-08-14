@@ -517,7 +517,16 @@ function useInAirFlights() {
 function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: string; onSelect: (n: string) => void; onClear: () => void }) {
   const t      = useT()
   const locale = useLocale()
-  const { flights } = useInAirFlights()
+  const { flights, arrived } = useInAirFlights()
+  /*
+   * Same two halves as the desktop panel, in the shape a phone has room for.
+   *
+   * Without this the map page on a phone could not reach an arrived flight at all — arrivals left
+   * the map and the only list that had them was the desktop panel, which never mounts here. That
+   * is 72% of this audience, so the strip was the half of the change that mattered most.
+   */
+  const [tab, setTab] = useState<'air' | 'arrived'>('air')
+  const shown = tab === 'air' ? flights : arrived
   const scrollerRef = useRef<HTMLDivElement>(null)
   const setRef      = useRef<HTMLDivElement>(null)
   const [looping, setLooping] = useState(false)
@@ -534,7 +543,9 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
   // Selecting stops it too. A moving strip is hard to read once you have picked something
   // out of it, and with the list rendered twice the selected flight is highlighted in both
   // copies, so wrapping made the highlight appear to jump between first and second position.
-  const loop = looping && flights.length >= 3 && !selectedFlight
+  // Never on the arrived tab: that list is read-only, and motion on a list you cannot act on is
+  // just motion.
+  const loop = looping && tab === 'air' && shown.length >= 3 && !selectedFlight
 
   // Only worth animating when the cards actually overrun the screen.
   useEffect(() => {
@@ -545,7 +556,7 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
     const ro = new ResizeObserver(check)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [flights.length])
+  }, [shown.length])
 
   useEffect(() => {
     const el = scrollerRef.current
@@ -619,7 +630,7 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
       el.removeEventListener('pointerleave', release)
       el.removeEventListener('scroll', onScroll)
     }
-  }, [loop, flights.length])
+  }, [loop, shown.length])
 
   // Removing the duplicate can leave the scroll parked past the end of what remains, and
   // the card you just tapped may be off-screen anyway. Put it back in view.
@@ -627,14 +638,24 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
     if (!selectedFlight) return
     const card = scrollerRef.current?.querySelector(`[data-flight="${CSS.escape(selectedFlight)}"]`)
     card?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
-  }, [selectedFlight, flights.length])
+  }, [selectedFlight, shown.length])
 
-  if (flights.length === 0) return null
+  // The toggle survives an empty side, or a reader on the arrived tab with nothing landed yet
+  // would lose the way back.
+  if (flights.length === 0 && arrived.length === 0) return null
 
   const cards = (ghost: boolean) => (
     <div ref={ghost ? undefined : setRef} aria-hidden={ghost} style={{ display: 'flex', gap: 8, paddingInlineEnd: 8 }}>
-      {flights.map((f) => {
-        const selected = f.iata_number === selectedFlight
+      {shown.map((f) => {
+        /*
+         * A landed card does nothing when tapped, so it is not a button.
+         *
+         * Same reasoning as the desktop panel: selecting a flight pans the map to its marker, and
+         * arrivals no longer have one. A button that starts a loading state and shows nothing is
+         * worse than something that plainly is not a control.
+         */
+        const readOnly = tab === 'arrived'
+        const selected = !readOnly && f.iata_number === selectedFlight
         const depOff = tzOffset(f.dep_iata)
         const arrOff = tzOffset(f.arr_iata)
         const depTime = fmtLocal(f.actual_dep_utc ?? f.revised_dep_utc ?? f.dep_time_utc, depOff)
@@ -661,15 +682,17 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
         // agree at a glance. It was a boolean, which quietly gave Deir ez-Zor the Damascus rail.
         const hub = markerHub(f.dep_iata, f.arr_iata)
         const railColor = hub === 'DAM' ? C.forestMid : MARKER_ACCENT[hub]
+        const Card = readOnly ? 'div' : 'button'
         return (
-          <button
+          <Card
             key={`${ghost ? 'g' : ''}${f.iata_number}-${f.dep_iata}-${f.arr_iata}`}
-            onClick={() => (selected ? onClear() : onSelect(f.iata_number))}
+            {...(readOnly ? {} : { onClick: () => (selected ? onClear() : onSelect(f.iata_number)) })}
             aria-label={`${f.iata_number} — ${cityFor(f.dep_iata)} ${locale === 'ar' ? '←' : '→'} ${cityFor(f.arr_iata)}`}
             data-flight={ghost ? undefined : f.iata_number}
             style={{
               flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'stretch',
-              padding: 0, borderRadius: 12, overflow: 'hidden', cursor: 'pointer', textAlign: 'start',
+              padding: 0, borderRadius: 12, overflow: 'hidden',
+              cursor: readOnly ? 'default' : 'pointer', textAlign: 'start',
               background: selected ? '#D4EBD4' : 'rgba(255,255,255,0.94)',
               border: `${selected ? 2 : 1}px solid ${selected ? C.forest : C.border}`,
               backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
@@ -695,7 +718,7 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
               </span>
             </span>
             </span>
-          </button>
+          </Card>
         )
       })}
     </div>
@@ -703,18 +726,44 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
 
   return (
     <>
-      {/* Just the count. The old pill carried "N in air" beside it, but the strip below now
-          says what these are, so the words were repeating themselves. Sits top-left, the
-          corner the map credit vacated on phones. */}
-      <div style={{
-        position: 'absolute', left: 12, top: 12, zIndex: 1000,
-        minWidth: 30, height: 26, paddingLeft: 9, paddingRight: 9, borderRadius: 99,
-        background: C.forest, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        boxShadow: '0 2px 10px rgba(0,0,0,.18)',
-      }}>
-        <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: '#fff', lineHeight: 1 }}>
-          {flights.length}
-        </span>
+      {/*
+        * The two halves, as a pair of counters in the corner the map credit vacated on phones.
+        *
+        * The count used to stand alone with no word beside it — readable only because the strip
+        * underneath explained itself. With two lists that no longer holds: a bare number cannot
+        * say which of them it counts. So each carries its own label, and tapping one switches the
+        * strip.
+        *
+        * Number above word rather than beside it, which keeps both buttons narrow enough to sit in
+        * the corner without reaching into the map.
+        */}
+      <div style={{ position: 'absolute', left: 12, top: 12, zIndex: 1000, display: 'flex', gap: 6 }}>
+        {(['air', 'arrived'] as const).map(k => {
+          const on = tab === k
+          const n  = k === 'air' ? flights.length : arrived.length
+          return (
+            <button
+              key={k}
+              onClick={() => setTab(k)}
+              aria-pressed={on}
+              style={{
+                minWidth: 44, padding: '4px 9px 5px', borderRadius: 10, cursor: 'pointer',
+                border: `1px solid ${on ? C.forest : 'rgba(0,0,0,.08)'}`,
+                background: on ? C.forest : 'rgba(255,255,255,.94)',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
+                boxShadow: '0 2px 10px rgba(0,0,0,.18)',
+                transition: 'background .15s, border-color .15s',
+              }}
+            >
+              <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, lineHeight: 1, color: on ? '#fff' : C.ink }}>
+                {n}
+              </span>
+              <span style={{ font: `600 8.5px/1 'Instrument Sans',system-ui`, color: on ? 'rgba(255,255,255,.85)' : C.muted, whiteSpace: 'nowrap' }}>
+                {t(k === 'air' ? 'map.tab_in_air' : 'map.tab_arrived')}
+              </span>
+            </button>
+          )
+        })}
       </div>
 
     <div style={{
