@@ -8,6 +8,52 @@ import { inSyria } from '@/lib/syria-airspace'
 export const dynamic = 'force-dynamic'
 
 /**
+ * How far outside its own window a flight may still be, and still be the flight we are looking at.
+ *
+ * Two hours, or one block time for the long ones. Wide on purpose: this rejects identities, so it
+ * has to clear a badly delayed flight without hesitating.
+ */
+const AIRBORNE_SLACK_MS = 2 * 3_600_000
+
+/**
+ * Could this board row describe an aircraft that is in the air right now?
+ *
+ * On 14 Aug JY-RAN left Amman at 13:26 operating RJ437 to Damascus, and for the first two minutes
+ * its transponder sent RJA435 — the morning AMM–DAM service, which had landed at 04:16. We matched
+ * the fix to that row and drew a flight whose card counted down 14 hours to an arrival nine hours
+ * in the past. It cleared itself when the callsign corrected, but two minutes of a phantom is two
+ * minutes of the map being wrong, and a wrong flight ID is a common enough thing in a cockpit that
+ * this will happen again.
+ *
+ * The tell needed no cleverness: a 55-minute hop cannot be fourteen hours from landing. So the
+ * window is anchored on what the flight actually did — its real departure where we have one, its
+ * real or revised arrival, else the block from departure — and a fix arriving outside that window
+ * is not this flight. The identity is dropped rather than the position: with no board match the
+ * client draws nothing, which is the right answer while the aircraft is lying about who it is.
+ *
+ * Returns true when there is nothing to judge against. This rejects data; it must not reject on
+ * ignorance.
+ */
+function couldBeAirborne(f: BoardFlight, nowMs: number): boolean {
+  const depMs = f.actual_dep_utc ? Date.parse(f.actual_dep_utc)
+              : f.sched_dep      ? f.sched_dep * 1000
+              : NaN
+  if (!Number.isFinite(depMs)) return true
+
+  const blockMs = (f.duration_min ?? 0) * 60_000
+  const arrMs = f.actual_arr_utc  ? Date.parse(f.actual_arr_utc)
+              : f.revised_arr_utc ? Date.parse(f.revised_arr_utc)
+              : blockMs           ? depMs + blockMs
+              : f.sched_arr       ? f.sched_arr * 1000
+              : NaN
+
+  const slack = Math.max(AIRBORNE_SLACK_MS, blockMs)
+  if (nowMs < depMs - slack) return false
+  if (Number.isFinite(arrMs) && nowMs > arrMs + slack) return false
+  return true
+}
+
+/**
  * How long an arrived flight stays drawn. Same meaning as ARRIVED_HOLD_MS in components/Map.tsx,
  * which governs it for aircraft we still hold a live fix for — they were four hours and thirty
  * minutes respectively, so a flight left the map at a different moment depending on which path
@@ -734,7 +780,9 @@ const MAX_DELAY_OVER_SCHED_MIN = 4 * 60
 // which is a statement about who is in Syrian airspace *now* — a two-hour-old position
 // cannot answer that. Dropping them also takes the payload from 500 rows to a handful.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function fetchLastKnownPositions(boardMap: Map<string, BoardFlight>): Promise<any[]> {
+// Takes the guarded lookup, not the raw map: these rows are stale by definition — up to two hours
+// old — so a mismatched identity here outlives the fix that caused it.
+async function fetchLastKnownPositions(matchLive: (cs: string) => BoardFlight | undefined): Promise<any[]> {
   const cutoff = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
   const res = await fetch(
     `${SB_URL}/rest/v1/aircraft_last_seen?seen_at=gte.${cutoff}&order=seen_at.desc&limit=500`,
@@ -748,7 +796,7 @@ async function fetchLastKnownPositions(boardMap: Map<string, BoardFlight>): Prom
   const seen = new Set<string>()
   for (const r of rows) {
     const cs   = (r.callsign ?? '').trim().toUpperCase()
-    const info = cs ? boardMap.get(cs) : undefined
+    const info = cs ? matchLive(cs) : undefined
     if (!info) continue
     // Rows are newest-first; keep only the most recent fix per callsign.
     if (seen.has(cs)) continue
@@ -925,6 +973,18 @@ export async function GET() {
   // DB fallback. An empty map there just means the fallback returns nothing, which is the
   // same as the old behaviour rather than a regression.
   const boardMap = new Map<string, BoardFlight>()
+  /*
+   * The board row for a callsign we are hearing right now.
+   *
+   * Every live fix goes through here rather than reading boardMap directly, so the one rule about
+   * which identities a position may take lives in one place. boardMap itself is left whole: other
+   * readers want the row whatever the clock says.
+   */
+  const NOW_FOR_MATCH = Date.now()
+  const matchLive = (cs: string): BoardFlight | undefined => {
+    const f = boardMap.get(cs)
+    return f && couldBeAirborne(f, NOW_FOR_MATCH) ? f : undefined
+  }
   try {
     const [iataToIcao, apCoords, lookup] = await Promise.all([
       fetchIataToIcao(), fetchAirportCoords(), fetchCallsignLookup(),
@@ -1013,7 +1073,7 @@ export async function GET() {
     for (const a of visualAircraft) {
       seenHex.add(a.hex)
       const cs   = (a.flight ?? '').trim().toUpperCase()
-      const info = boardMap.get(cs)
+      const info = matchLive(cs)
 
       // Live departure confirmation — two cases, both require alt > 500 ft and gs > 80 kts:
       // 1. Inbound to Syrian airport: write real_dep to arrival-airport cache row.
@@ -1116,7 +1176,7 @@ export async function GET() {
     if (v2Live) {
       for (const [cs, p] of v2Live) {
         if (emittedCs.has(cs)) continue          // we can hear it ourselves; that fix is fresher
-        const info = boardMap.get(cs)
+        const info = matchLive(cs)
         if (!info) continue                      // identity comes from the board, never the fix
         emittedCs.add(cs)
         trackedExtra.push({
@@ -1160,7 +1220,7 @@ export async function GET() {
       if (!p) continue
       emittedCs.add(cs)
       if (p.hex) seenHex.add(p.hex.toLowerCase())
-      const info = boardMap.get(cs)
+      const info = matchLive(cs)
       trackedExtra.push({
         hex:            p.hex ?? sig.hex,
         flight:         cs,
@@ -1199,7 +1259,7 @@ export async function GET() {
     // aircraft_last_seen, and writing them back would stamp seen_at = now and make a stale
     // position look permanently fresh.
     if (!feedsLive) {
-      for (const a of await fetchLastKnownPositions(boardMap)) {
+      for (const a of await fetchLastKnownPositions(matchLive)) {
         const cs = (a.flight ?? '').trim().toUpperCase()
         if (!cs || emittedCs.has(cs)) continue
         emittedCs.add(cs)
@@ -1351,7 +1411,7 @@ export async function GET() {
       return NextResponse.json({ ok: true, aircraft: feedCache.aircraft, ts: feedCache.ts, warn: String(err) })
     }
     try {
-      const dbAc = await fetchLastKnownPositions(boardMap)
+      const dbAc = await fetchLastKnownPositions(matchLive)
       return NextResponse.json({ ok: true, aircraft: dbAc, ts: 0, warn: String(err), from_db: true, feeds_live: false })
     } catch {
       return NextResponse.json({ ok: false, aircraft: [], warn: String(err) })
