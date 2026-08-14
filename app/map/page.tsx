@@ -528,7 +528,6 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
   const [tab, setTab] = useState<'air' | 'arrived'>('air')
   const shown = tab === 'air' ? flights : arrived
   const scrollerRef = useRef<HTMLDivElement>(null)
-  const setRef      = useRef<HTMLDivElement>(null)
   const [looping, setLooping] = useState(false)
 
   // Three conditions before the strip is allowed to move.
@@ -540,9 +539,8 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
   // Count alone is not enough either — three cards fit outright on a tablet, and moving
   // them there would be motion for its own sake.
   //
-  // Selecting stops it too. A moving strip is hard to read once you have picked something
-  // out of it, and with the list rendered twice the selected flight is highlighted in both
-  // copies, so wrapping made the highlight appear to jump between first and second position.
+  // Selecting stops it too: a moving strip is hard to read once you have picked something out
+  // of it.
   // Never on the arrived tab: that list is read-only, and motion on a list you cannot act on is
   // just motion.
   const loop = looping && tab === 'air' && shown.length >= 3 && !selectedFlight
@@ -588,13 +586,17 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
      * addition then had somewhere to go. English was never affected, which is why this hid.
      */
     const sign = getComputedStyle(el).direction === 'rtl' ? -1 : 1
+    // 1 while travelling away from the first card, -1 on the way back.
+    let dir = 1
     const tick = (t: number) => {
-      const width = setRef.current?.offsetWidth ?? 0
+      const max = el.scrollWidth - el.clientWidth
       const dt = last ? t - last : 0
       last = t
-      if (!held && t >= resumeAt && width > 0) {
-        pos += sign * PX_PER_MS * dt
-        if (Math.abs(pos) >= width) pos -= sign * width
+      if (!held && t >= resumeAt && max > 0) {
+        pos += sign * dir * PX_PER_MS * dt
+        // A pause at each end, so the turn reads as a decision rather than a bounce.
+        if (Math.abs(pos) >= max) { pos = sign * max; dir = -1; resumeAt = t + 2000 }
+        else if (dir < 0 && Math.abs(pos) <= 0.5) { pos = 0; dir = 1; resumeAt = t + 2000 }
         el.scrollLeft = pos
         selfScrollTo = el.scrollLeft
       } else {
@@ -644,8 +646,17 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
   // would lose the way back.
   if (flights.length === 0 && arrived.length === 0) return null
 
-  const cards = (ghost: boolean) => (
-    <div ref={ghost ? undefined : setRef} aria-hidden={ghost} style={{ display: 'flex', gap: 8, paddingInlineEnd: 8 }}>
+  /*
+   * One copy of the list, not two.
+   *
+   * It used to render twice so the auto-scroll could jump back to the start invisibly — reach the
+   * end of the first set and you are already looking at an identical second one. That works while
+   * the strip is creeping on its own, and fails the moment a finger drives it: swipe to the end
+   * and every flight appears a second time, which is what it was reported as. The wrap was worth
+   * less than the confusion, so the strip turns around at the ends instead.
+   */
+  const cards = () => (
+    <div style={{ display: 'flex', gap: 8, paddingInlineEnd: 8 }}>
       {shown.map((f) => {
         /*
          * A landed card does nothing when tapped, so it is not a button.
@@ -685,10 +696,10 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
         const Card = readOnly ? 'div' : 'button'
         return (
           <Card
-            key={`${ghost ? 'g' : ''}${f.iata_number}-${f.dep_iata}-${f.arr_iata}`}
+            key={`${f.iata_number}-${f.dep_iata}-${f.arr_iata}`}
             {...(readOnly ? {} : { onClick: () => (selected ? onClear() : onSelect(f.iata_number)) })}
             aria-label={`${f.iata_number} — ${cityFor(f.dep_iata)} ${locale === 'ar' ? '←' : '→'} ${cityFor(f.arr_iata)}`}
-            data-flight={ghost ? undefined : f.iata_number}
+            data-flight={f.iata_number}
             style={{
               flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'stretch',
               padding: 0, borderRadius: 12, overflow: 'hidden',
@@ -775,8 +786,7 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
         className="ia-strip"
         style={{ display: 'flex', overflowX: 'auto', padding: '0 12px' }}
       >
-        {cards(false)}
-        {loop && cards(true)}
+        {cards()}
       </div>
     </div>
     </>
