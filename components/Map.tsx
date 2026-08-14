@@ -21,7 +21,7 @@ import PhotoBox from './PhotoBox'
 import { PANEL } from './MapBox'
 import { translate, counted } from '@/lib/i18n'
 import { getActiveLocale, cityFor } from '@/lib/geo-data'
-import { markerHub, MARKER_ACCENT, type BoardAirport } from '@/lib/syria-airports'
+import { markerHub, MARKER_ACCENT, isSyrianAirport, SYRIA_AIRPORT_SET, type BoardAirport } from '@/lib/syria-airports'
 
 /*
  * The popups are built as HTML strings from module-level functions, so there is no hook to
@@ -183,10 +183,35 @@ const STALE_TTL_MS       = 30 * 60 * 1000
  */
 const ARRIVED_HOLD_MS    = 30 * 60 * 1000
 
-// Flights to and from these are "ours", and decide which half of a leg is worth drawing.
-const HOME_AIRPORTS = new Set(['DAM', 'ALP', 'LTK', 'DEZ'])
+// Flights to and from these are "ours", and decide which half of a leg is worth drawing. From
+// lib/syria-airports rather than spelled out again — this file had its own copy, which is the
+// drift that module exists to stop, and DEZ opening in August is how it gets noticed.
+const HOME_AIRPORTS = SYRIA_AIRPORT_SET
 const STALE_TTL_SYRIA_MS = 6  * 60 * 60 * 1000
 
+
+
+/**
+ * The second line of a marker label: the end of the journey that is not Syria.
+ *
+ * Was always the destination, which meant every inbound marker read "إلى: دمشق" — 40 of the 74
+ * flights that departed on 14 Aug were inbound, and they share two destinations between them, so
+ * half the map would have carried the same line. Worse, it was saying a third time what the marker
+ * already says twice: the icon is green for Damascus and orange for Aleppo, so the Syrian end is
+ * in the colour before any text is read.
+ *
+ * The far end instead, with the preposition carrying the direction — من: دبي inbound, إلى: دبي
+ * outbound. This is the rule the phone strip has always used; the map disagreeing with it was a
+ * disagreement introduced by hand, in a codebase where the whole point is that surfaces agree.
+ *
+ * A domestic leg has two Syrian ends and takes the arrival, which is the one that differs.
+ */
+function destinationLine(dep: string | null, arr: string | null): string | null {
+  if (!dep || !arr) return null
+  const outbound = isSyrianAirport(dep)
+  const far = outbound ? arr : dep
+  return `${T(outbound ? 'map.to' : 'map.from')} ${cityFor(far)}`
+}
 
 // ── Geometry helpers ──────────────────────────────────────────────────────────
 
@@ -1941,9 +1966,11 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
          * every inbound marker says Damascus, which is repetition — see the note at the call site
          * in the schedule overlay.
          */
-        const destCs        = a.arr_iata ?? flightStatusRef.current[cs]?.arr_iata ?? null
+        const fsCs          = flightStatusRef.current[cs]
+        const destLine      = destinationLine(a.dep_iata ?? fsCs?.dep_iata ?? null,
+                                              a.arr_iata ?? fsCs?.arr_iata ?? null)
         const staleLabel    = arrSnapped ? `${cs}\nARRIVED`
-                            : destCs     ? `${cs}\n${T('map.to')} ${cityFor(destCs)}`
+                            : destLine   ? `${cs}\n${destLine}`
                             : cs
         const isEstimated   = projected && !arrSnapped
         const isHighlighted = highlightedCSRef.current === cs
@@ -2316,10 +2343,9 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         const track = wps?.length
           ? bearingFromPath(wps, fPos)
           : bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], fPos)
-        // Same two lines as the live markers, so a ghost and a tracked flight read alike. Every
-        // inbound one says Damascus; the alternative — naming the far end instead — would give
-        // each marker a distinct second line but would stop saying which way the flight is going.
-        const label = arr_iata ? `${callsign}\n${T('map.to')} ${cityFor(arr_iata)}` : callsign
+        // Same two lines as the live markers, so a ghost and a tracked flight read alike.
+        const schedDest = destinationLine(dep_iata, arr_iata)
+        const label = schedDest ? `${callsign}\n${schedDest}` : callsign
         const hub = markerHub(dep_iata, arr_iata)
         const isSchedHighlighted = highlightedCSRef.current === callsign
         const icon  = planeIcon(L, track, true, false, label, hub, true, isSchedHighlighted ? '#ef4444' : undefined)
