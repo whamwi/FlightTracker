@@ -132,7 +132,15 @@ function MiniLogo({ iata, name }: { iata: string; name: string }) {
  * arrMs is whatever the card is displaying as the arrival. If the two ever diverge again it will
  * be because someone passed something else.
  */
-function MiniProgress({ depUtc, arrMs, approaching, accentColor }: { depUtc: string; arrMs: number | null; approaching: boolean; accentColor?: string }) {
+/**
+ * `landedMs` is the whole difference between a flight in progress and one that is over.
+ *
+ * Without it the arrived cards kept counting: the line above the bar read "1 دقيقة على الوصول" for
+ * a flight already on stand, and "يقترب من الهبوط" for one that had landed twenty minutes ago —
+ * both because the countdown had nothing to tell it to stop. Once down, the useful number is not
+ * how long is left but how long it took, which is what the map popup has said since this morning.
+ */
+function MiniProgress({ depUtc, arrMs, landedMs, approaching, accentColor }: { depUtc: string; arrMs: number | null; landedMs?: number | null; approaching: boolean; accentColor?: string }) {
   const t      = useT()
   const locale = useLocale()
   const depMs  = new Date(depUtc).getTime()
@@ -145,15 +153,21 @@ function MiniProgress({ depUtc, arrMs, approaching, accentColor }: { depUtc: str
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [depUtc, arrMs])
 
-  const fill  = Math.max(2, pct)
-  const empty = Math.max(2, 100 - pct)
+  // A finished flight is finished: the bar is full and the aircraft sits at the far end, however
+  // the projection was running when it landed.
+  const shownPct = landedMs ? 100 : pct
+  const fill  = Math.max(2, shownPct)
+  const empty = Math.max(2, 100 - shownPct)
   const rem   = arrMs ? Math.round((arrMs - Date.now()) / 60_000) : 0
+  const blockMin = landedMs && landedMs > depMs ? Math.round((landedMs - depMs) / 60_000) : 0
   const dotColor = accentColor ?? (approaching ? C.forest : C.forestMid)
 
   return (
     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
       <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 9.5, color: C.muted, whiteSpace: 'nowrap' }}>
-        {rem > 0 ? `${durationLabel(rem)} ${t('map.until_arrival')}` : t('map.arriving_soon')}
+        {blockMin > 0 ? `${durationLabel(blockMin)} ${t('label.flown')}`
+          : rem > 0 ? `${durationLabel(rem)} ${t('map.until_arrival')}`
+          : t('map.arriving_soon')}
       </span>
       <div style={{ width: '100%', display: 'flex', alignItems: 'center', height: 16 }}>
         <div style={{ flex: fill, height: 3, borderRadius: 99, background: dotColor }} />
@@ -272,7 +286,9 @@ function MiniFlightCard({ f, isSelected, onSelect, fixAgeS }: { f: InAirFlight; 
 
           {/* Progress */}
           {f.actual_dep_utc && f.duration_min > 0 ? (
-            <MiniProgress depUtc={f.actual_dep_utc} arrMs={arrMs} approaching={approaching} accentColor={hub === 'DAM' ? undefined : MARKER_ACCENT[hub]} />
+            <MiniProgress depUtc={f.actual_dep_utc} arrMs={arrMs}
+              landedMs={status === 'Arrived' ? (Date.parse(f.actual_arr_utc ?? f.revised_arr_utc ?? '') || null) : null}
+              approaching={approaching} accentColor={hub === 'DAM' ? undefined : MARKER_ACCENT[hub]} />
           ) : (
             <div style={{ flex: 1, height: 3, borderRadius: 99, background: C.trackEmpty }} />
           )}
