@@ -66,6 +66,15 @@ interface Aircraft {
   dep_delay_min:  number | null
   airline_iata:   string | null
   seen_at?: string
+  /**
+   * When the position was actually taken, as opposed to when we received it.
+   *
+   * The airspace route has always emitted this; the type simply never declared it, so the one
+   * place that read it did so through an `as any`. It is the only honest way to tell two fixes
+   * apart — see the tracking update, which used to compare ground speeds instead and froze every
+   * arriving aircraft at its cruise reading.
+   */
+  fix_at?:  string
   stale?:   boolean
 }
 
@@ -1413,16 +1422,34 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
               // A poller fix carries its own capture time; fr24Ts is the batch-wide
               // fallback for sources that only stamp the whole response.
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const fixAt      = Date.parse((a as any).fix_at ?? '') || 0
+              const fixAt      = Date.parse(a.fix_at ?? '') || 0
               const fr24LostAt = fixAt || fr24Ts || now - 30_000
               const prevFr24   = trackedRef.current[cs]
               if (!prevFr24 || prevFr24.lostAt <= fr24LostAt) {
                 trackedRef.current[cs] = { a, lostAt: fr24LostAt, isFr24: true }
               }
             } else {
-              // Live ADS-B: prefer non-stale, then highest gs (freshest fix)
+              /*
+               * Newer wins, by the fix's own clock. Ground speed used to stand in for freshness
+               * and it is exactly backwards on an approach.
+               *
+               * `(a.gs ?? 0) >= (prev.a.gs ?? 0)` accepted a fix only if the aircraft was going at
+               * least as fast as the last time we heard from it. An arriving aircraft slows the
+               * whole way down, so once the cruise fix was stored every later one was refused:
+               * 484 knots, then 400, 300, 137, and the touchdown roll at 20, all discarded. The
+               * snapshot froze at the fastest moment of the flight.
+               *
+               * SYR502 on 14 Aug showed what that looks like. Its marker was snapped to Damascus
+               * on final while the popup read "36,025 ft · 484 kt" — a fix from 18:32:33, when it
+               * was 212 km away, printed as the present tense twenty-five minutes later. The
+               * altitude line is guarded against projected and lost flights precisely so it can
+               * never be invented, and here it was measured, current-looking, and half an hour
+               * stale.
+               */
               const prev = trackedRef.current[cs]
-              if (!prev || prev.lostAt > 0 || (a.gs ?? 0) >= (prev.a.gs ?? 0)) {
+              const tNew = Date.parse(a.fix_at ?? a.seen_at ?? '') || 0
+              const tOld = prev ? (Date.parse(prev.a.fix_at ?? prev.a.seen_at ?? '') || 0) : -1
+              if (!prev || prev.lostAt > 0 || tNew >= tOld) {
                 trackedRef.current[cs] = { a, lostAt: 0, isFr24: false }
               }
               freshCallsigns.add(cs)  // record as seen in this live cycle
