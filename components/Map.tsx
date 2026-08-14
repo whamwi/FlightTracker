@@ -1,7 +1,7 @@
 'use client'
 import { PHONE_MQ } from '@/lib/breakpoints'
 import { carryArrival } from '@/lib/flight-leg'
-import { hasArrived, canonicalStatus } from '@/lib/flight-status'
+import { hasArrived, canonicalStatus, calcDelay } from '@/lib/flight-status'
 import { reportHandledError } from './ErrorReporter'
 
 import 'leaflet/dist/leaflet.css'
@@ -163,111 +163,25 @@ const STALE_TTL_MS       = 30 * 60 * 1000
 const ARRIVED_OFFSET_KM = 8   // still used to read the approach heading, not to place the marker
 
 /*
- * The field first, and a ring around it only once the field is occupied.
+ * Several arrivals at one airport become one badge, not a fan around it.
  *
- * Slot 0 is the airport itself, no offset at all. That is where a lone arrival belongs, and the
- * first version of this got it wrong in both directions: 8 km along the route vanished to a couple
- * of pixels when zoomed out, and the fixed 52 px that replaced it moved *every* arrival off its
- * airport at every zoom — including the single arrival, which is the ordinary case and has nothing
- * to be separated from. Offsetting is a cost, so nothing pays it until a second flight turns up.
+ * Three attempts moved the marker instead: 8 km along the route (two pixels when zoomed out), a
+ * fixed 52 px (which put a Kuwait arrival in the Iraqi desert), then a capped version of the same.
+ * Every one of them traded a true position for legibility, and a marker's position is the one
+ * thing on this map that must not be traded.
  *
- * Six slots to a ring, and the ring is sized so that six of them clear each other. A marker is a
- * 40 px aircraft above a two-line label — about 40 wide and 64 tall from icon top to label bottom
- * — and on a ring of radius r, n markers spread evenly sit 2·r·sin(180/n) apart. So count and
- * radius are not independent, and choosing a comfortable-looking small radius first is how an
- * earlier attempt put neighbours 14 px apart. Six at 64 px gives 64 px between ring neighbours and
- * 64 px from each to the centre; a seventh goes to the next ring rather than squeezing the six.
+ * So nothing moves. A lone arrival is drawn as it always was, exactly on its field. Two or more
+ * collapse into a single badge sitting on that same field, which opens into a list. Nobody is
+ * displaced and nobody is hidden.
  */
-const ARRIVED_SLOTS     = 6
-const ARRIVED_RING0_PX  = 64
-const ARRIVED_RING_PX   = 52
 
-/**
- * The furthest an arrived marker may be drawn from the airport it landed at, on the ground.
- *
- * A pixel offset is constant on screen and therefore grows without limit on the ground as the map
- * zooms out: 64 px over Kuwait at country zoom is about 100 km, which put an arrival in the desert
- * north of the city — a marker claiming a position no aircraft was in, which is the same fault we
- * spent this morning removing from the data.
- *
- * So the fan is capped by what six kilometres is worth in pixels right now. Zoomed in it makes no
- * difference and the ring is drawn in full; zoomed out the ring closes up onto the field, and
- * arrivals coincide rather than scatter. Coinciding is the honest failure — they really are all at
- * that airport, and at that zoom the airport is a few pixels wide.
+/*
+ * How long an arrived flight stays drawn. Matches the same constant in app/api/airspace/route.ts,
+ * and now the mobile app's ARRIVED_HOLD_MIN too — these were 30 minutes in one place, an hour in
+ * another and four hours in a third, so a flight left the map at a different moment depending on
+ * which surface you were looking at and whether we still held a fix for it.
  */
-const ARRIVED_MAX_DRIFT_KM = 6
-
-/**
- * Pick a spot for one arrived marker: the field if it is free, otherwise a clear place around it.
- *
- * `taken` holds the slots already handed out at this airport during this render pass, so collision
- * is only ever tested against markers already placed — which is what lets this run inside the
- * single pass that draws them rather than needing a second one.
- *
- * Beyond slot 0 a slot is a (ring, angle) pair held as one number, which is what stops the overflow
- * case from doubling up: the same angle on a wider ring is a different place, and the search walks
- * outward until it finds a number nobody has taken.
- *
- * `remembered` is the slot this flight held last pass. Honouring it stops the ring reshuffling
- * every ten seconds as flights land and expire — but the field always wins over it, so the moment
- * a pile-up thins back to one the last marker returns to the airport instead of sitting off to the
- * side because that is where it happened to start.
- */
-function arrivedFanOffset(
-  taken: Set<number>, remembered: number | undefined, approachDeg: number, maxPx: number,
-): { offset: [number, number]; slot: number } {
-  const STEP = 360 / ARRIVED_SLOTS
-  let slot: number
-
-  if (!taken.has(0)) {
-    slot = 0
-  } else if (remembered !== undefined && remembered !== 0 && !taken.has(remembered)) {
-    slot = remembered
-  } else {
-    /*
-     * Back along the approach: the aircraft came from there, and that is where the eye looks.
-     *
-     * Rounded to the nearest of six, so the direction is only good to ±30°. That is a real loss
-     * against a continuous bearing and it buys the guaranteed separation above — what survives is
-     * which side of the field a flight came in from, which is the part anyone reads.
-     */
-    const home  = (((approachDeg + 180) % 360) + 360) % 360
-    const start = Math.round(home / STEP) % ARRIVED_SLOTS
-    let k = 0
-    const at = (i: number) =>
-      1 + Math.floor(i / ARRIVED_SLOTS) * ARRIVED_SLOTS + ((start + i) % ARRIVED_SLOTS)
-    while (taken.has(at(k))) k++
-    slot = at(k)
-  }
-  taken.add(slot)
-  if (slot === 0) return { offset: [0, 0], slot }
-
-  const idx   = slot - 1
-  const ring  = Math.floor(idx / ARRIVED_SLOTS)
-  // Odd rings sit half a step round, so a marker never lands directly outside its neighbour.
-  const angle = (idx % ARRIVED_SLOTS) * STEP + (ring % 2 ? STEP / 2 : 0)
-  const r     = Math.min(ARRIVED_RING0_PX + ring * ARRIVED_RING_PX, maxPx)
-  const rad   = (angle * Math.PI) / 180
-  // Screen y grows downward while bearing 0 is north, hence the negated cosine.
-  return { offset: [r * Math.sin(rad), -r * Math.cos(rad)], slot }
-}
-
-/**
- * How many pixels six kilometres covers, here and now.
- *
- * Web Mercator, so the scale depends on latitude as well as zoom — Damascus and Dubai are not the
- * same number. Read from the map on each pass rather than cached, which is what makes the cap
- * follow a zoom instead of lagging a poll behind it.
- */
-function maxDriftPx(map: { getZoom: () => number }, lat: number): number {
-  const mPerPx = (156543.03392 * Math.cos((lat * Math.PI) / 180)) / 2 ** map.getZoom()
-  return (ARRIVED_MAX_DRIFT_KM * 1000) / mPerPx
-}
-
-// One hour, matching the same constant in app/api/airspace/route.ts. These were 30 minutes here
-// and four hours there, so a flight left the map at a different moment depending on whether we
-// still held a fix for it.
-const ARRIVED_HOLD_MS    = 60 * 60 * 1000
+const ARRIVED_HOLD_MS    = 30 * 60 * 1000
 
 // Flights to and from these are "ours", and decide which half of a leg is worth drawing.
 const HOME_AIRPORTS = new Set(['DAM', 'ALP', 'LTK', 'DEZ'])
@@ -437,7 +351,83 @@ function bestHeading(a: Aircraft): number {
 
 // ── Icon & popup ──────────────────────────────────────────────────────────────
 
-function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, stale: boolean, label?: string, hub: BoardAirport = 'DAM', estimated = false, colorOverride?: string, offsetPx?: [number, number]) {
+/**
+ * The badge that stands in for several arrived flights at one airport.
+ *
+ * Small and deliberately not a plane: it is not one aircraft and should not be read as one. Count
+ * and word are separate spans in a flex row rather than one string, so bidi cannot reorder them —
+ * under dir=rtl a joined "3 وصول" puts the numeral wherever it likes, and the same mistake has
+ * already been made twice on this map with the delay chip and the altitude line.
+ */
+function arrivalsBadge(L: typeof import('leaflet'), count: number, hub: BoardAirport) {
+  const mobile = typeof window !== 'undefined' && window.matchMedia(PHONE_MQ).matches
+  const h      = mobile ? 20 : 22
+  const color  = MARKER_ACCENT[hub]
+  /*
+   * translateX(-50%) inside a zero-width icon, rather than a measured iconSize.
+   *
+   * The badge's width is not knowable here: the count is one or two digits and the word changes
+   * with the locale, so any fixed size would clip one case or off-centre another. A zero-width box
+   * anchored on the field, with the content shifted half its own width, sits centred on the
+   * airport whatever it ends up containing.
+   */
+  const html = `<div dir="ltr" style="display:inline-flex;align-items:center;gap:4px;
+      transform:translateX(-50%);
+      height:${h}px;padding:0 8px;border-radius:${h / 2}px;
+      background:${color};color:#fff;border:1.5px solid #fff;
+      font-family:'IBM Plex Mono',monospace;font-size:${mobile ? 10 : 11}px;font-weight:700;
+      letter-spacing:.02em;white-space:nowrap;
+      box-shadow:0 2px 5px rgba(0,0,0,.4);cursor:pointer">
+      <span>${count}</span><span>${T('map.arrivals_badge')}</span></div>`
+  return L.divIcon({ className: '', html, iconSize: [0, h], iconAnchor: [0, h / 2] })
+}
+
+/**
+ * The list behind the badge: every flight that has landed here inside the hold window.
+ *
+ * Rows carry data-cs so the marker can wire clicks after the popup opens — the content is an HTML
+ * string, as every popup on this map is, and handlers cannot be bound inside one.
+ */
+function buildArrivalsPopup(
+  iata: string,
+  rows: { callsign: string; flightNo: string; from: string; at: string; delay: number | null }[],
+): string {
+  const city = _apFlag[iata] || '✈'
+  const items = rows.map(r => {
+    const delay = r.delay == null || Math.abs(r.delay) < 1 ? ''
+      : `<span style="font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;
+           padding:2px 5px;border-radius:5px;
+           background:${r.delay > 0 ? '#3f1d24' : '#14332b'};
+           color:${r.delay > 0 ? '#fca5a5' : '#6ee7b7'}">${r.delay > 0 ? '+' : ''}${r.delay}</span>`
+    return `<button data-cs="${r.callsign}" style="all:unset;cursor:pointer;display:flex;
+        align-items:center;gap:8px;padding:7px 10px;border-radius:8px;width:100%;
+        box-sizing:border-box">
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:700;
+          color:#e5e7eb;min-width:62px">${r.flightNo}</span>
+        <span style="font-size:11px;color:#9ca3af;flex:1;overflow:hidden;text-overflow:ellipsis;
+          white-space:nowrap">${r.from}</span>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#e5e7eb">${r.at}</span>
+        ${delay}
+      </button>`
+  }).join('')
+  return `<div style="min-width:250px">
+    <div style="display:flex;align-items:center;gap:8px;padding:2px 4px 8px">
+      <span style="font-size:18px">${city}</span>
+      <span style="font-size:13px;font-weight:700;color:#e5e7eb">${T('map.arrivals_title')}</span>
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#9ca3af">${iata}</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:2px">${items}</div>
+  </div>`
+}
+
+/** The header that lets one flight's card go back to the list it came from. */
+function arrivalsBackBar(): string {
+  return `<button data-arrback="1" style="all:unset;cursor:pointer;display:flex;align-items:center;
+    gap:6px;padding:4px 6px 8px;font-size:12px;color:#9ca3af">
+    <span>‹</span><span>${T('map.arrivals_title')}</span></button>`
+}
+
+function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, stale: boolean, label?: string, hub: BoardAirport = 'DAM', estimated = false, colorOverride?: string) {
   const mobile  = typeof window !== 'undefined' && window.matchMedia(PHONE_MQ).matches
   const size    = syria ? (mobile ? 36 : 40) : (mobile ? 26 : 30)
   // Was a boolean — Aleppo orange, any other Syrian airport green — which painted Deir ez-Zor
@@ -464,20 +454,7 @@ function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, s
       ${svg}<div style="text-align:center">${labelHtml}</div></div>`
   }
 
-  /*
-   * The offset lives in the anchor, not in the marker's coordinates.
-   *
-   * iconAnchor names the point of the icon that sits on the marker's position, so subtracting
-   * moves the icon the other way — and it does so in pixels, which is the whole reason it is done
-   * here. A separation expressed in kilometres shrinks to nothing as the map zooms out, which is
-   * exactly what happened to the first attempt at this. Leaflet measures popupAnchor from
-   * iconAnchor, so the popup follows without being told.
-   */
-  const [ox, oy] = offsetPx ?? [0, 0]
-  return L.divIcon({
-    className: '', html, iconSize: [size, size],
-    iconAnchor: [size / 2 - ox, size / 2 - oy],
-  })
+  return L.divIcon({ className: '', html, iconSize: [size, size], iconAnchor: [size / 2, size / 2] })
 }
 
 // Convert UTC ISO timestamp to local "HH:MM" using airport UTC offset
@@ -1043,14 +1020,10 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
   // Schedule-based projected markers (key = callsign)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const schedMarkersRef = useRef<Record<string, any>>({})
-  /**
-   * Which slot around its airport each arrived marker held last pass, by callsign.
-   *
-   * Without it the ring reshuffles every ten seconds: allocation follows iteration order, so one
-   * flight landing or expiring moves every other marker at that airport. Pruned alongside the
-   * markers themselves, so a flight that has left the map stops reserving a place.
-   */
-  const arrivedSlotRef  = useRef<Record<string, number>>({})
+  /** The "arrivals" badge standing in for a group of arrived flights, keyed by airport. */
+  const arrivedClusterRef = useRef<Record<string, any>>({})
+  /** That badge's list markup, so a flight's card can go back to it without rebuilding. */
+  const arrivedListRef    = useRef<Record<string, string>>({})
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const schedLinesRef   = useRef<Record<string, any[]>>({})
   // Last-known state keyed by callsign — replaces hex-keyed lastKnownRef
@@ -2172,9 +2145,10 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
       // ── 4. Schedule overlay (ESTIMATED / no signal) ───────────────────────
       const activeSchedKeys    = new Set<string>()
       const activeSchedEnRoute = new Set<string>()
-      // Angles handed out to arrived markers this pass, per airport. Reset every pass so a flight
-      // that has since left the map does not go on reserving a slot nobody is standing in.
-      const arrivedFan: Record<string, Set<number>> = {}
+      // Arrived flights, held back until the loop ends: whether each is drawn on its own or
+      // folded into a badge depends on how many others share its airport, which is not known
+      // until every entry has been seen.
+      const arrivedAt: Record<string, { callsign: string; place: () => void }[]> = {}
 
       // When actual_dep_utc is known, a callsign may have multiple schedule entries
       // (different dep times for different days). Pre-compute the best-matching
@@ -2403,17 +2377,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         const label = arrived ? `${callsign}\nARRIVED` : callsign
         const hub = markerHub(dep_iata, arr_iata)
         const isSchedHighlighted = highlightedCSRef.current === callsign
-        let fanPx: [number, number] | undefined
-        if (arrived) {
-          const fan = arrivedFanOffset(
-            (arrivedFan[arr_iata] ??= new Set()), arrivedSlotRef.current[callsign], track,
-            maxDriftPx(map, arrC[0]))
-          arrivedSlotRef.current[callsign] = fan.slot
-          fanPx = fan.offset
-        } else {
-          delete arrivedSlotRef.current[callsign]
-        }
-        const icon  = planeIcon(L, track, true, arrived, label, hub, !arrived, isSchedHighlighted ? '#ef4444' : undefined, fanPx)
+        const icon  = planeIcon(L, track, true, arrived, label, hub, !arrived, isSchedHighlighted ? '#ef4444' : undefined)
         const schedReg   = fs?.aircraft_reg ?? null
         const schedPhoto = (schedReg ? photoCacheRef.current[schedReg] : null) ?? photoCacheRef.current[`cs:${callsign}`] ?? null
         const popup = buildSchedulePopup(entry, arrived, fs, fPos, schedPhoto)
@@ -2446,107 +2410,214 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           }
         }
 
-        if (schedMarkersRef.current[callsign]) {
-          // The animation loop owns position for flights the tracker manages.
-          if (!(RAF_MOTION && storeRef.current.has(callsign))) schedMarkersRef.current[callsign].setLatLng([lat, lon])
-          schedMarkersRef.current[callsign].setIcon(icon)
-          if (!embed) schedMarkersRef.current[callsign].setPopupContent(popup)
-          if (callsign === highlightedCSRef.current || callsign === selectedCSRef.current) {
-            drawTrackRoute(schedMarkersRef.current[callsign], dep_iata, arr_iata)
-          }
-        } else {
-          const m = addToMap(L.marker([lat, lon], { icon }), map)
-          /*
-           * A hit is cached forever; a miss is not cached at all.
-           *
-           * The guard used to be `cacheKey in photoCacheRef.current`, which is true for a stored
-           * `null` — so one miss meant the airline logo for the life of the page, and the retry
-           * that would have fixed it never fired. That mattered because the miss was usually not
-           * about the aircraft: the key was `cs:<callsign>`, a position-history lookup that fails
-           * for roughly one flight in ten, chosen only because no registration had reached the
-           * map. Now that the board supplies one, the same flight resolves through
-           * /api/photo/{reg} — but only if it is allowed to ask again.
-           *
-           * Deleting the request marker rather than keeping a negative entry: the next poll
-           * rebuilds the popup anyway, and by then `reg` may have arrived, which changes the key.
-           */
-          const fetchSchedPhoto = (cacheKey: string, apiUrl: string, onLoad: (url: string) => void) => {
-            if (photoCacheRef.current[cacheKey] || photoRequestedRef.current.has(cacheKey)) return
-            photoRequestedRef.current.add(cacheKey)
-            const miss = () => {
-              delete photoCacheRef.current[cacheKey]
-              photoRequestedRef.current.delete(cacheKey)
+        /*
+         * Drawing this marker is deferred, because an arrived flight may not get one.
+         *
+         * Whether it is drawn on its own or folded into an "arrivals" badge depends on how many
+         * others landed at the same airport, and that is not known until every schedule entry has
+         * been walked. Deferring the tail rather than pre-counting keeps the guards above as the
+         * single decider of what is drawn — a second pass replicating them would drift from them.
+         */
+        const place = () => {
+          if (schedMarkersRef.current[callsign]) {
+            // The animation loop owns position for flights the tracker manages.
+            if (!(RAF_MOTION && storeRef.current.has(callsign))) schedMarkersRef.current[callsign].setLatLng([lat, lon])
+            schedMarkersRef.current[callsign].setIcon(icon)
+            if (!embed) schedMarkersRef.current[callsign].setPopupContent(popup)
+            if (callsign === highlightedCSRef.current || callsign === selectedCSRef.current) {
+              drawTrackRoute(schedMarkersRef.current[callsign], dep_iata, arr_iata)
             }
-            fetch(apiUrl)
-              .then(r => r.ok ? r.json() : null)
-              .then(d => {
-                const url: string | null = d?.url ?? null
-                if (url) { photoCacheRef.current[cacheKey] = url; onLoad(url) } else miss()
-              })
-              .catch(miss)
-          }
-          if (embed) {
-            m.on('click', () => {
-              const fs  = flightStatusRef.current[callsign]
-              const reg = fs?.aircraft_reg ?? null
-              const ph  = reg ? photoCacheRef.current[reg] ?? null : photoCacheRef.current[`cs:${callsign}`] ?? null
-              selectedCSRef.current = callsign
-              rnPost({ type: 'SELECT', flight: buildEmbedFlight(callsign, entry, fs ?? null, ph) })
-              const cacheKey = reg ?? `cs:${callsign}`
-              const apiUrl   = reg ? `/api/photo/${encodeURIComponent(reg)}` : `/api/photo-cs/${encodeURIComponent(callsign)}`
-              fetchSchedPhoto(cacheKey, apiUrl, url => {
-                if (selectedCSRef.current === callsign) {
-                  const fsNow = flightStatusRef.current[callsign]
-                  rnPost({ type: 'SELECT', flight: buildEmbedFlight(callsign, entry, fsNow ?? null, url) })
-                }
-              })
-            })
           } else {
-            m.bindPopup(popup, { className: 'fp-popup', closeButton: false, maxWidth: 300 })
-            m.on('click', () => {
-              const fs  = flightStatusRef.current[callsign]
-              const reg = fs?.aircraft_reg ?? null
-              const cacheKey = reg ?? `cs:${callsign}`
-              const apiUrl   = reg ? `/api/photo/${encodeURIComponent(reg)}` : `/api/photo-cs/${encodeURIComponent(callsign)}`
-              fetchSchedPhoto(cacheKey, apiUrl, url => {
-                if (schedMarkersRef.current[callsign]) {
-                  const fsNow = flightStatusRef.current[callsign]
-                  schedMarkersRef.current[callsign].setPopupContent(
-                    buildSchedulePopup(entry, arrived, fsNow, fPos, url)
-                  )
-                }
+            const m = addToMap(L.marker([lat, lon], { icon }), map)
+            /*
+             * A hit is cached forever; a miss is not cached at all.
+             *
+             * The guard used to be `cacheKey in photoCacheRef.current`, which is true for a stored
+             * `null` — so one miss meant the airline logo for the life of the page, and the retry
+             * that would have fixed it never fired. That mattered because the miss was usually not
+             * about the aircraft: the key was `cs:<callsign>`, a position-history lookup that fails
+             * for roughly one flight in ten, chosen only because no registration had reached the
+             * map. Now that the board supplies one, the same flight resolves through
+             * /api/photo/{reg} — but only if it is allowed to ask again.
+             *
+             * Deleting the request marker rather than keeping a negative entry: the next poll
+             * rebuilds the popup anyway, and by then `reg` may have arrived, which changes the key.
+             */
+            const fetchSchedPhoto = (cacheKey: string, apiUrl: string, onLoad: (url: string) => void) => {
+              if (photoCacheRef.current[cacheKey] || photoRequestedRef.current.has(cacheKey)) return
+              photoRequestedRef.current.add(cacheKey)
+              const miss = () => {
+                delete photoCacheRef.current[cacheKey]
+                photoRequestedRef.current.delete(cacheKey)
+              }
+              fetch(apiUrl)
+                .then(r => r.ok ? r.json() : null)
+                .then(d => {
+                  const url: string | null = d?.url ?? null
+                  if (url) { photoCacheRef.current[cacheKey] = url; onLoad(url) } else miss()
+                })
+                .catch(miss)
+            }
+            if (embed) {
+              m.on('click', () => {
+                const fs  = flightStatusRef.current[callsign]
+                const reg = fs?.aircraft_reg ?? null
+                const ph  = reg ? photoCacheRef.current[reg] ?? null : photoCacheRef.current[`cs:${callsign}`] ?? null
+                selectedCSRef.current = callsign
+                rnPost({ type: 'SELECT', flight: buildEmbedFlight(callsign, entry, fs ?? null, ph) })
+                const cacheKey = reg ?? `cs:${callsign}`
+                const apiUrl   = reg ? `/api/photo/${encodeURIComponent(reg)}` : `/api/photo-cs/${encodeURIComponent(callsign)}`
+                fetchSchedPhoto(cacheKey, apiUrl, url => {
+                  if (selectedCSRef.current === callsign) {
+                    const fsNow = flightStatusRef.current[callsign]
+                    rnPost({ type: 'SELECT', flight: buildEmbedFlight(callsign, entry, fsNow ?? null, url) })
+                  }
+                })
               })
-            })
-          }
-          schedMarkersRef.current[callsign] = m
+            } else {
+              m.bindPopup(popup, { className: 'fp-popup', closeButton: false, maxWidth: 300 })
+              m.on('click', () => {
+                const fs  = flightStatusRef.current[callsign]
+                const reg = fs?.aircraft_reg ?? null
+                const cacheKey = reg ?? `cs:${callsign}`
+                const apiUrl   = reg ? `/api/photo/${encodeURIComponent(reg)}` : `/api/photo-cs/${encodeURIComponent(callsign)}`
+                fetchSchedPhoto(cacheKey, apiUrl, url => {
+                  if (schedMarkersRef.current[callsign]) {
+                    const fsNow = flightStatusRef.current[callsign]
+                    schedMarkersRef.current[callsign].setPopupContent(
+                      buildSchedulePopup(entry, arrived, fsNow, fPos, url)
+                    )
+                  }
+                })
+              })
+            }
+            schedMarkersRef.current[callsign] = m
 
-          // Auto-pan + open popup for deep-linked flight (new schedule marker)
-          const fNum = flightStatusRef.current[callsign]?.flight_number ?? null
-          if (!embed && !autoOpenDoneRef.current && matchesTarget(fNum, callsign)) {
+            // Auto-pan + open popup for deep-linked flight (new schedule marker)
+            const fNum = flightStatusRef.current[callsign]?.flight_number ?? null
+            if (!embed && !autoOpenDoneRef.current && matchesTarget(fNum, callsign)) {
+              autoOpenDoneRef.current = true
+              highlightedCSRef.current = callsign
+              setLoading(false)
+              const capCs2 = callsign; const capTrack2 = track; const capLabel2 = label; const capHub2 = hub
+              setTimeout(() => {
+                const mk = schedMarkersRef.current[capCs2]; const mi = mapInstanceRef.current
+                if (mk && mi) { mk.setIcon(planeIcon(L, capTrack2, true, false, capLabel2, capHub2, false, '#ef4444')); ((_z) => { const _w = mi.getSize().x; const _off = panelOpenRef.current && _w >= 480 ? Math.min(160, (_w - 320) / 2) : 0; const _p = mi.project(mk.getLatLng(), _z); mi.setView(mi.unproject(_p.subtract(L.point(_off, 0)), _z), _z) })(Math.max(mi.getZoom(), 8)); isAutoOpenRef.current = true; mk.openPopup(); drawTrackRoute(mk, dep_iata, arr_iata) }
+              }, 300)
+            }
+          }
+
+          // Auto-open for existing schedule marker
+          const fNumEx = flightStatusRef.current[callsign]?.flight_number ?? null
+          if (!embed && !autoOpenDoneRef.current && matchesTarget(fNumEx, callsign) && schedMarkersRef.current[callsign]) {
             autoOpenDoneRef.current = true
             highlightedCSRef.current = callsign
             setLoading(false)
-            const capCs2 = callsign; const capTrack2 = track; const capLabel2 = label; const capHub2 = hub
-            setTimeout(() => {
-              const mk = schedMarkersRef.current[capCs2]; const mi = mapInstanceRef.current
-              if (mk && mi) { mk.setIcon(planeIcon(L, capTrack2, true, false, capLabel2, capHub2, false, '#ef4444')); ((_z) => { const _w = mi.getSize().x; const _off = panelOpenRef.current && _w >= 480 ? Math.min(160, (_w - 320) / 2) : 0; const _p = mi.project(mk.getLatLng(), _z); mi.setView(mi.unproject(_p.subtract(L.point(_off, 0)), _z), _z) })(Math.max(mi.getZoom(), 8)); isAutoOpenRef.current = true; mk.openPopup(); drawTrackRoute(mk, dep_iata, arr_iata) }
-            }, 300)
+            const mk = schedMarkersRef.current[callsign]; const mi = mapInstanceRef.current
+            mk.setIcon(planeIcon(L, track, true, false, label, hub, false, '#ef4444'))
+            if (mk && mi) { ((_z) => { const _w = mi.getSize().x; const _off = panelOpenRef.current && _w >= 480 ? Math.min(160, (_w - 320) / 2) : 0; const _p = mi.project(mk.getLatLng(), _z); mi.setView(mi.unproject(_p.subtract(L.point(_off, 0)), _z), _z) })(Math.max(mi.getZoom(), 8)); isAutoOpenRef.current = true; mk.openPopup(); drawTrackRoute(mk, dep_iata, arr_iata) }
           }
         }
-
-        // Auto-open for existing schedule marker
-        const fNumEx = flightStatusRef.current[callsign]?.flight_number ?? null
-        if (!embed && !autoOpenDoneRef.current && matchesTarget(fNumEx, callsign) && schedMarkersRef.current[callsign]) {
-          autoOpenDoneRef.current = true
-          highlightedCSRef.current = callsign
-          setLoading(false)
-          const mk = schedMarkersRef.current[callsign]; const mi = mapInstanceRef.current
-          mk.setIcon(planeIcon(L, track, true, false, label, hub, false, '#ef4444'))
-          if (mk && mi) { ((_z) => { const _w = mi.getSize().x; const _off = panelOpenRef.current && _w >= 480 ? Math.min(160, (_w - 320) / 2) : 0; const _p = mi.project(mk.getLatLng(), _z); mi.setView(mi.unproject(_p.subtract(L.point(_off, 0)), _z), _z) })(Math.max(mi.getZoom(), 8)); isAutoOpenRef.current = true; mk.openPopup(); drawTrackRoute(mk, dep_iata, arr_iata) }
-        }
+        if (arrived) (arrivedAt[arr_iata] ??= []).push({ callsign, place })
+        else place()
 
         schedLinesRef.current[callsign]?.forEach((l: any) => l.remove())  // eslint-disable-line
         schedLinesRef.current[callsign] = []
+      }
+
+      /*
+       * Now that every arrival is known, decide how each airport draws them.
+       *
+       * One arrival is drawn exactly as it always was — its own aircraft, its own label, sitting on
+       * the field. Two or more become a single badge on that same field which opens into a list.
+       * Nothing is displaced to make room and nothing is dropped; the only thing that changes is
+       * how many things are asking for the same few pixels.
+       */
+      for (const [iata, group] of Object.entries(arrivedAt)) {
+        const coords = _apCoords[iata]
+        if (group.length < 2 || !coords) {
+          group.forEach(g => g.place())
+          continue
+        }
+        // These flights get no marker of their own this pass, so retire any they had — a flight
+        // that was alone at its airport a moment ago still has one.
+        for (const g of group) {
+          const m = schedMarkersRef.current[g.callsign]
+          if (m) { m.remove(); delete schedMarkersRef.current[g.callsign] }
+          activeSchedKeys.delete(g.callsign)
+        }
+
+        const rows = group.map(g => {
+          const fs  = flightStatusRef.current[g.callsign]
+          const off = _apOffset[iata] ?? 3
+          const arrISO = fs?.actual_arr_utc ?? fs?.revised_arr_utc ?? null
+          const from   = fs?.dep_iata ?? ''
+          return {
+            callsign: g.callsign,
+            flightNo: fs?.flight_number ?? g.callsign,
+            from:     from ? `${_apFlag[from] || ''} ${cityFor(from)}`.trim() : '',
+            at:       popupToLocal(arrISO, off),
+            // Against the timetable, the same comparison the board's chips make. pickSchedule
+            // rather than the entry we saw in the loop: that one is out of scope by now, and this
+            // is the same day-aware lookup every other reader of scheduleRef uses.
+            delay:    calcDelay(pickSchedule(scheduleRef.current, g.callsign, now)?.arr_time_utc, arrISO),
+          }
+        // Most recent first: the flight that just landed is the one someone is looking for.
+        }).sort((a, b) => (b.at || '').localeCompare(a.at || ''))
+
+        const hub  = markerHub(null, iata)
+        const icon = arrivalsBadge(L, group.length, hub)
+        const list = buildArrivalsPopup(iata, rows)
+        let marker = arrivedClusterRef.current[iata]
+        if (marker) {
+          marker.setIcon(icon)
+          marker.setPopupContent(list)
+        } else {
+          marker = addToMap(L.marker(coords as [number, number], { icon, zIndexOffset: 400 }), map)
+          marker.bindPopup(list, { className: 'fp-popup', closeButton: false, maxWidth: 320 })
+          /*
+           * Clicks are wired on open, not in the markup: popup content is an HTML string here as
+           * it is everywhere else on this map, so a row cannot carry its own handler. Rebinding on
+           * every open also means the handlers always close over the current list rather than the
+           * one that happened to be built when the marker was created.
+           */
+          marker.on('popupopen', () => {
+            const el = marker.getPopup()?.getElement() as HTMLElement | null
+            if (!el) return
+            el.querySelectorAll<HTMLElement>('[data-cs]').forEach(btn => {
+              btn.onclick = () => {
+                const cs = btn.dataset.cs!
+                const e  = pickSchedule(scheduleRef.current, cs, Date.now())
+                const fs = flightStatusRef.current[cs]
+                if (!e) return
+                const reg   = fs?.aircraft_reg ?? null
+                const photo = (reg ? photoCacheRef.current[reg] : null)
+                           ?? photoCacheRef.current[`cs:${cs}`] ?? null
+                marker.setPopupContent(arrivalsBackBar() + buildSchedulePopup(e, true, fs, 1, photo))
+                wireBack()
+              }
+            })
+          })
+          const wireBack = () => {
+            const el = marker.getPopup()?.getElement() as HTMLElement | null
+            const back = el?.querySelector<HTMLElement>('[data-arrback]')
+            if (back) back.onclick = () => {
+              marker.setPopupContent(arrivedListRef.current[iata] ?? '')
+              marker.fire('popupopen')
+            }
+          }
+          arrivedClusterRef.current[iata] = marker
+        }
+        // Held so "back" can restore the list without rebuilding it from stale rows.
+        arrivedListRef.current[iata] = list
+      }
+      // Airports that no longer have a group lose their badge.
+      for (const iata of Object.keys(arrivedClusterRef.current)) {
+        if ((arrivedAt[iata]?.length ?? 0) < 2) {
+          arrivedClusterRef.current[iata].remove()
+          delete arrivedClusterRef.current[iata]
+          delete arrivedListRef.current[iata]
+        }
       }
 
       // Remove schedule markers that are no longer active
@@ -2554,8 +2625,6 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         if (!activeSchedKeys.has(cs)) {
           schedMarkersRef.current[cs].remove(); delete schedMarkersRef.current[cs]
           schedLinesRef.current[cs]?.forEach((l: any) => l.remove()); delete schedLinesRef.current[cs]  // eslint-disable-line
-          // Its place around the airport goes back into the pool with it.
-          delete arrivedSlotRef.current[cs]
         }
       }
 
@@ -2604,30 +2673,9 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
     const onVisible = () => { if (document.visibilityState === 'visible') fetchAndUpdate() }
     document.addEventListener('visibilitychange', onVisible)
 
-    /*
-     * Re-lay the markers out after a zoom, because one of their offsets now depends on it.
-     *
-     * The arrived fan is capped by what six kilometres is worth in pixels, which changes with
-     * every zoom step. Without this the cap would lag up to ten seconds behind the gesture — and
-     * lagging means briefly drawing the wide offset at a zoom where it lands in the wrong country,
-     * which is the whole thing the cap exists to stop.
-     *
-     * Debounced, so a five-step zoom is one refresh rather than five. Zoom is a deliberate act on
-     * a map and happens far less often than the poll it borrows.
-     */
-    let zoomT: ReturnType<typeof setTimeout> | null = null
-    const mapInst = mapInstanceRef.current
-    const onZoom = () => {
-      if (zoomT) clearTimeout(zoomT)
-      zoomT = setTimeout(() => { fetchUpdateRef.current?.() }, 400)
-    }
-    mapInst?.on('zoomend', onZoom)
-
     return () => {
       clearInterval(interval)
       document.removeEventListener('visibilitychange', onVisible)
-      mapInst?.off('zoomend', onZoom)
-      if (zoomT) clearTimeout(zoomT)
       fetchUpdateRef.current = null
     }
   }, [])

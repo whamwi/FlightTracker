@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic'
  * minutes respectively, so a flight left the map at a different moment depending on which path
  * happened to draw it.
  */
-const ARRIVED_HOLD_MS = 60 * 60_000
+const ARRIVED_HOLD_MS = 30 * 60_000
 
 const SB_URL     = process.env.SUPABASE_URL!
 const SB_KEY     = process.env.SUPABASE_ANON_KEY!

@@ -57,7 +57,12 @@ FIX_STALE_SEC = 300
 # How long a landed flight stays in the live document after touchdown. See build_live: the ground
 # phases only exist for a flight that has stopped moving, which is exactly when FIX_STALE_SEC has
 # already dropped it.
-ARRIVED_LINGER_SEC = 3600
+#
+# Thirty minutes, matching ARRIVED_HOLD_MS on the web and ARRIVED_HOLD_MIN in the mobile app. It
+# was an hour here while the app used thirty, so the same flight left one surface half an hour
+# before the other — and this document is what the phase chip reads, so the two disagreed on
+# screen at once.
+ARRIVED_LINGER_SEC = 1800
 # How much older our own ADS-B may be and still be preferred over FR24's feed. One harvester
 # sweep is 60s, so a fix from the previous sweep still counts as current; anything older means
 # our receivers have lost the aircraft and the feed is simply better informed.

@@ -196,6 +196,14 @@ const en: Dict = {
   'label.flown':       'flight time',
   'label.next_day':    'Arrives the next day',
   'label.prev_day':    'Departed the previous day',
+  /*
+   * The badge that replaces several arrived markers at one airport, and the list it opens.
+   *
+   * Short deliberately: it sits inside a pill next to a count, on a map where the airport label is
+   * already competing for the same few pixels.
+   */
+  'map.arrivals_badge': 'arrived',
+  'map.arrivals_title': 'Arrivals',
   'map.panel_title':   'Flights in air',
   // The panel only ever holds airborne flights, so Departed and En Route both say the same
   // thing here. Approaching keeps its own word — that one is telling you something new.
@@ -425,6 +433,8 @@ const ar: Dict = {
   'label.flown':       'زمن الرحلة',
   'label.next_day':    'يصل في اليوم التالي',
   'label.prev_day':    'أقلعت في اليوم السابق',
+  'map.arrivals_badge': 'وصول',
+  'map.arrivals_title': 'الوصول',
   'map.panel_title':   'رحلات في الجو',
   'status.in_air':     'في الجو',
   'map.until_arrival': 'على الوصول',
