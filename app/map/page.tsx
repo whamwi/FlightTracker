@@ -59,7 +59,21 @@ type InAirFlight = {
 
 const IN_AIR = new Set(['Departed', 'En Route', 'Approaching'])
 
+/**
+ * When this flight arrives, or arrived — observation first, estimate second.
+ *
+ * The actual arrival was not consulted at all until 14 Aug, and did not need to be: this was only
+ * ever asked about flights in the air, where there is no such time. Then the panel grew an arrived
+ * tab and started asking it about flights that had landed.
+ *
+ * FR24 retires its estimate on touchdown, so an arrived flight fell straight through to departure
+ * plus block — a projection — and the card printed that as the arrival. RB502 landed at 18:57:28
+ * and the card read 23:04, which is its 16:19:54 departure plus the scheduled 3h45m, an hour after
+ * the reader was looking at it. The variance chip beside it read -48, correctly, because that is
+ * computed from the real arrival: one card, one row, two different answers to when it landed.
+ */
 function etaMs(f: InAirFlight): number {
+  if (f.actual_arr_utc)  return new Date(f.actual_arr_utc).getTime()
   if (f.revised_arr_utc) return new Date(f.revised_arr_utc).getTime()
   if (f.actual_dep_utc && f.duration_min)
     return new Date(f.actual_dep_utc).getTime() + f.duration_min * 60_000
