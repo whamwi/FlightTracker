@@ -8,6 +8,8 @@ export type AirportRow = {
   lat: number
   lon: number
   utc_offset: number | null
+  /** IANA zone name. Preferred over utc_offset, which cannot describe daylight saving. */
+  timezone: string | null
 }
 
 export type AirlineRow = {
@@ -26,6 +28,13 @@ export const airportCoords: Record<string, [number, number]> = {
   ALP: [36.1807, 37.2244],
 }
 export const airportOffset: Record<string, number>          = { DAM: 3, ALP: 3 }
+/**
+ * IANA zone per airport — the thing that actually knows when a clock changes.
+ *
+ * airportOffset is kept as the fallback for any airport without one. See lib/airport-time.ts for
+ * why a stored number is not enough: Berlin was an hour out on 14 Aug 2026 and Bucharest with it.
+ */
+export const airportTimezone: Record<string, string>        = { DAM: 'Asia/Damascus', ALP: 'Asia/Damascus' }
 
 /*
  * Arabic names, filled from the same fetch.
@@ -106,6 +115,7 @@ export async function loadGeoData(): Promise<void> {
       if (r.country_flag) airportFlag[r.iata]  = r.country_flag
       if (r.lat != null && r.lon != null) airportCoords[r.iata] = [r.lat, r.lon]
       if (r.utc_offset != null) airportOffset[r.iata] = Number(r.utc_offset)
+      if (r.timezone)           airportTimezone[r.iata] = r.timezone
     }
   }
 

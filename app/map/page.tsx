@@ -9,6 +9,7 @@ import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { cityFor, airlineNameFor, getActiveLocale, airportFlag as apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
 import { useT, useLocale, useHref } from '@/components/LocaleProvider'
 import { effectiveStatus, calcDelay } from '@/lib/flight-status'
+import { formatAirportTime } from '@/lib/airport-time'
 import { DelayChip } from '@/components/FlightMeta'
 import { STATUS_KEY, counted } from '@/lib/i18n'
 import Wordmark from '@/components/Wordmark'
@@ -89,24 +90,6 @@ function durationLabel(min: number) {
   if (getActiveLocale() === 'ar') return h > 0 ? `${h}:${String(m).padStart(2, '0')}` : counted('ar', m, 'noun.minute')
   // No leading "0h": under an hour this read "0h 47m left", which the other cards never did.
   return h > 0 ? `${h}h ${m}m` : `${m}m`
-}
-
-function tzOffset(iata: string): number { return airportOffset[iata] ?? 3 }
-
-function utcHHMMtoLocal(hhmm: string, offsetH: number): string {
-  const [h, m] = hhmm.slice(0, 5).split(':').map(Number)
-  const total = ((h * 60 + m + Math.round(offsetH * 60)) % 1440 + 1440) % 1440
-  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
-}
-
-function fmtLocal(raw: string | null | undefined, offsetH: number): string {
-  if (!raw) return '—'
-  if (raw.includes('T')) {
-    const ms = new Date(raw).getTime() + Math.round(offsetH * 3_600_000)
-    const d = new Date(ms)
-    return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
-  }
-  return utcHHMMtoLocal(raw, offsetH)
 }
 
 // ── Airline logo (compact) ───────────────────────────────────────────────────
@@ -241,11 +224,12 @@ function MiniFlightCard({ f, isSelected, onSelect, fixAgeS }: { f: InAirFlight; 
    */
   const readOnly = status === 'Arrived'
 
-  const depOff  = tzOffset(f.dep_iata)
-  const arrOff  = tzOffset(f.arr_iata)
-  const depTime = fmtLocal(f.actual_dep_utc ?? f.revised_dep_utc ?? f.dep_time_utc, depOff)
+  // Each end in its own airport's clock, resolved by zone rather than a stored offset — see
+  // lib/airport-time for the European airports that were an hour out.
+  const depTime = formatAirportTime(f.actual_dep_utc ?? f.revised_dep_utc ?? f.dep_time_utc, f.dep_iata)
   const arrMs   = etaMs(f)
-  const arrTime = arrMs ? fmtLocal(new Date(arrMs).toISOString(), arrOff) : fmtLocal(f.arr_time_utc, arrOff)
+  const arrTime = arrMs ? formatAirportTime(new Date(arrMs).toISOString(), f.arr_iata)
+                        : formatAirportTime(f.arr_time_utc, f.arr_iata)
 
   const depCity  = cityFor(f.dep_iata)
   const arrCity  = cityFor(f.arr_iata)
@@ -681,11 +665,10 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
          */
         const readOnly = tab === 'arrived'
         const selected = !readOnly && f.iata_number === selectedFlight
-        const depOff = tzOffset(f.dep_iata)
-        const arrOff = tzOffset(f.arr_iata)
-        const depTime = fmtLocal(f.actual_dep_utc ?? f.revised_dep_utc ?? f.dep_time_utc, depOff)
+        const depTime = formatAirportTime(f.actual_dep_utc ?? f.revised_dep_utc ?? f.dep_time_utc, f.dep_iata)
         const arrMs   = etaMs(f)
-        const arrTime = arrMs ? fmtLocal(new Date(arrMs).toISOString(), arrOff) : fmtLocal(f.arr_time_utc, arrOff)
+        const arrTime = arrMs ? formatAirportTime(new Date(arrMs).toISOString(), f.arr_iata)
+                              : formatAirportTime(f.arr_time_utc, f.arr_iata)
         // Which end is home decides whether the other end is a destination or an origin.
         // Read from the flag rather than a hardcoded airport list: DEZ is due to open and
         // Latakia and Qamishli come and go, and a stale list would silently label those

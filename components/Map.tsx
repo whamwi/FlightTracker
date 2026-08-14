@@ -3,6 +3,7 @@ import { PHONE_MQ } from '@/lib/breakpoints'
 import { carryArrival } from '@/lib/flight-leg'
 import { hasArrived, canonicalStatus, calcDelay } from '@/lib/flight-status'
 import { climbAdjustedFraction } from '@/lib/climb-profile'
+import { formatAirportTime } from '@/lib/airport-time'
 import { reportHandledError } from './ErrorReporter'
 
 import 'leaflet/dist/leaflet.css'
@@ -426,14 +427,17 @@ function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, s
 }
 
 // Convert UTC ISO timestamp to local "HH:MM" using airport UTC offset
-function popupToLocal(iso: string | null, offset: number): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  const total = d.getUTCHours() * 60 + d.getUTCMinutes() + Math.round(offset * 60)
-  const h = Math.floor(((total % 1440) + 1440) % 1440 / 60)
-  const m = ((total % 1440) + 1440) % 1440 % 60
-  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`
+/**
+ * Kept as a thin shim over lib/airport-time so the popup resolves zones like every other surface.
+ *
+ * It used to add a stored number of hours, which is right for every Middle Eastern airport we serve
+ * and an hour out for the European ones half the year. The signature keeps its offset argument
+ * because six call sites pass one; the argument is now ignored, and the IATA code decides.
+ */
+function popupToLocal(iso: string | null, _offset: number, iata = 'DAM'): string {
+  return iso ? formatAirportTime(iso, iata) : ''
 }
+
 // Convert UTC "HH:MM" schedule time to local using airport UTC offset
 function schedToLocal(hhmm: string | null, offset: number): string {
   // A synthesised schedule entry has no times. An em dash is the honest render; the old
@@ -621,10 +625,10 @@ function buildPopup(
   // popup rendered a bare dash while the schedule panel showed a time for the same flight
   // at the same moment: a flight surfaced as an *aircraft* is excluded from boardDeparted,
   // and boardDeparted is what populates revised_arr_utc.
-  const depTimeLocal = popupToLocal(fs?.actual_dep_utc ?? fs?.revised_dep_utc ?? fs?.scheduled_dep_utc ?? null, depOffset)
+  const depTimeLocal = popupToLocal(fs?.actual_dep_utc ?? fs?.revised_dep_utc ?? fs?.scheduled_dep_utc ?? null, depOffset, dep ?? 'DAM')
                     || (a.dep_time_utc ? schedToLocal(a.dep_time_utc, depOffset) : '')
   // arrISO above, not a second chain — this is the value the countdown is measured against.
-  const arrTimeLocal = popupToLocal(arrISO, arrOffset)
+  const arrTimeLocal = popupToLocal(arrISO, arrOffset, arr ?? 'DAM')
                     || (a.arr_time_utc ? schedToLocal(a.arr_time_utc, arrOffset) : '')
 
   // `before` puts the gap on the side facing the number, and the margin is logical: the
@@ -659,7 +663,7 @@ function buildPopup(
   // in the origin's, arrival in the destination's, this one in the reader's. On a mostly
   // diaspora audience that also made a signal-lost stamp read as later than the arrival
   // time beside it.
-  const lostLocal = lostAt ? popupToLocal(new Date(lostAt).toISOString(), arrOffset) : ''
+  const lostLocal = lostAt ? popupToLocal(new Date(lostAt).toISOString(), arrOffset, arr ?? 'DAM') : ''
   // Suppressed once it is down: "⚠ signal lost 05:58" under an Arrived badge reads as a fault,
   // when in fact the flight finished normally and only our view of it ended early.
   const lostLine = lostAt && !projected && !arrived
@@ -772,7 +776,7 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
   const arrOffset = _apOffset[e.arr_iata] ?? 3
 
   const depTimeLocal = fs?.actual_dep_utc
-    ? popupToLocal(fs.actual_dep_utc, depOffset)
+    ? popupToLocal(fs.actual_dep_utc, depOffset, e.dep_iata)
     : schedToLocal(e.dep_time_utc, depOffset)
   // Same rule as buildPopup: one resolved arrival instant feeds both the ARRIVAL column and
   // the countdown below. The synthesised leg (actual departure + block time) matters for a
@@ -786,7 +790,7 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
         : null
     })()
   const arrTimeLocal = bestArrISO
-    ? popupToLocal(bestArrISO, arrOffset)
+    ? popupToLocal(bestArrISO, arrOffset, e.arr_iata)
     : schedToLocal(e.arr_time_utc, arrOffset)
 
   /**
