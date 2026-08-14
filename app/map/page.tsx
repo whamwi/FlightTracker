@@ -6,11 +6,11 @@ import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { Suspense, useState, useEffect, useCallback, useRef } from 'react'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
-import { cityFor, airlineNameFor, getActiveLocale, airportFlag as apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
+import { cityFor, airlineNameFor, getActiveLocale, airportFlag as apFlag, loadGeoData } from '@/lib/geo-data'
 import { useT, useLocale, useHref } from '@/components/LocaleProvider'
 import { effectiveStatus, calcDelay } from '@/lib/flight-status'
 import { formatAirportTime, airportTimeParts } from '@/lib/airport-time'
-import { DelayChip } from '@/components/FlightMeta'
+import { DelayChip, Meridiem } from '@/components/FlightMeta'
 import { STATUS_KEY, counted } from '@/lib/i18n'
 import Wordmark from '@/components/Wordmark'
 import SiteNav from '@/components/SiteNav'
@@ -197,20 +197,12 @@ const STALE_FIX_S = 300
  * meridiem takes the airline-name face — Instrument Sans, weight 500 — so it reads as a label
  * beside the number rather than as part of it.
  */
-/** The meridiem alone, for lines that already lay their own digits out. */
-function Meridiem({ of }: { of: string }) {
-  if (!of) return null
-  return <span style={{ font: `500 8px/1 'Instrument Sans',system-ui`, marginInlineStart: 2 }}>{of}</span>
-}
-
 function TimeWithMeridiem({ value, iata, color }: { value: string | null | undefined; iata: string; color: string }) {
   const { time, meridiem } = airportTimeParts(value, iata)
   return (
     <span dir="ltr" style={{ display: 'inline-flex', alignItems: 'baseline', gap: 3 }}>
       <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, fontWeight: 700, color }}>{time}</span>
-      {meridiem && (
-        <span style={{ font: `500 8.5px/1 'Instrument Sans',system-ui`, color: C.muted }}>{meridiem}</span>
-      )}
+      <Meridiem of={meridiem} />
     </span>
   )
 }
@@ -759,9 +751,9 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
               <span style={{ display: 'flex', alignItems: 'baseline', gap: 5,
                 fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, fontWeight: 600,
                 color: C.muted, whiteSpace: 'nowrap' }}>
-                <span>{f.dep_iata} {dep.time}<Meridiem of={dep.meridiem} /></span>
+                <span>{f.dep_iata} {dep.time}<Meridiem of={dep.meridiem} size={8} /></span>
                 <span style={{ color: C.forestLight }}>{locale === 'ar' ? '←' : '→'}</span>
-                <span>{f.arr_iata} {arr.time}<Meridiem of={arr.meridiem} /></span>
+                <span>{f.arr_iata} {arr.time}<Meridiem of={arr.meridiem} size={8} /></span>
               </span>
             </span>
             </span>

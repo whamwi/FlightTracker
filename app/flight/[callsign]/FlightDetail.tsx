@@ -4,14 +4,15 @@ import { useEffect, useState, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
-import { airportCity, cityFor, airlineNameFor, airportLabelFor, airportFlag as apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
+import { airportCity, cityFor, airlineNameFor, airportLabelFor, airportFlag as apFlag, loadGeoData } from '@/lib/geo-data'
+import { airportTimeParts } from '@/lib/airport-time'
+import { Meridiem } from '@/components/FlightMeta'
 import { isSyrianAirport } from '@/lib/syria-airports'
 import { useT, useHref, useLocale } from '@/components/LocaleProvider'
 import { STATUS_KEY, type Locale } from '@/lib/i18n'
 
 const cityOf = (iata: string) => cityFor(iata)
 const flagOf = (iata: string) => apFlag[iata] ?? ''
-const tzOff  = (iata: string) => airportOffset[iata] ?? 3
 
 const BLUE = '#3b82f6'
 
@@ -113,20 +114,6 @@ function durationLabel(min: number, locale: Locale) {
   const h = Math.floor(min / 60), m = min % 60
   if (locale === 'ar') return h > 0 ? `${h}:${String(m).padStart(2, '0')}` : `${m} د`
   return m > 0 ? `${h}h ${m}m` : `${h}h`
-}
-
-function utcHHMMtoLocal(hhmm: string, offsetH: number) {
-  if (!hhmm) return '—'
-  const [h, m] = hhmm.slice(0, 5).split(':').map(Number)
-  const t = ((h * 60 + m + Math.round(offsetH * 60)) % 1440 + 1440) % 1440
-  return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`
-}
-
-function isoToLocal(iso: string | null, offsetH: number) {
-  if (!iso) return '—'
-  const ms = new Date(iso).getTime() + Math.round(offsetH * 3_600_000)
-  const d  = new Date(ms)
-  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
 }
 
 function calcDelayMin(schedHHMM: string, actualISO: string, date: string) {
@@ -274,25 +261,20 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
   const isArrived   = flight && ['Arrived', 'Landed'].includes(flight.status)
   const statusCfg   = flight ? (STATUS[flight.status] ?? STATUS.Unknown) : null
 
-  const depOffset = flight ? tzOff(flight.dep_iata) : 3
-  const arrOffset = flight ? tzOff(flight.arr_iata) : 3
-
   // Estimated arrival: actual_dep + duration when no explicit revised/actual arr is available
   const estimatedArrUtc = flight && !flight.actual_arr_utc && !flight.revised_arr_utc && flight.actual_dep_utc && flight.duration_min > 0
     ? new Date(new Date(flight.actual_dep_utc).getTime() + flight.duration_min * 60_000).toISOString()
     : null
 
-  const depDisplay = flight
-    ? (flight.actual_dep_utc ? isoToLocal(flight.actual_dep_utc, depOffset)
-      : flight.revised_dep_utc ? isoToLocal(flight.revised_dep_utc, depOffset)
-      : utcHHMMtoLocal(flight.dep_time_utc, depOffset))
-    : '—'
-  const arrDisplay = flight
-    ? (flight.actual_arr_utc ? isoToLocal(flight.actual_arr_utc, arrOffset)
-      : flight.revised_arr_utc ? isoToLocal(flight.revised_arr_utc, arrOffset)
-      : estimatedArrUtc ? isoToLocal(estimatedArrUtc, arrOffset)
-      : utcHHMMtoLocal(flight.arr_time_utc, arrOffset))
-    : '—'
+  // Zone-resolved and 12-hour, like the board and the map — see lib/airport-time.
+  const depPart = airportTimeParts(
+    flight ? (flight.actual_dep_utc ?? flight.revised_dep_utc ?? flight.dep_time_utc) : null,
+    flight?.dep_iata ?? 'DAM')
+  const arrPart = airportTimeParts(
+    flight ? (flight.actual_arr_utc ?? flight.revised_arr_utc ?? estimatedArrUtc ?? flight.arr_time_utc) : null,
+    flight?.arr_iata ?? 'DAM')
+  const depDisplay = depPart.time
+  const arrDisplay = arrPart.time
 
   const depDelay = flight?.actual_dep_utc ? calcDelayMin(flight.dep_time_utc, flight.actual_dep_utc, flight.date)
     : flight?.revised_dep_utc ? calcDelayMin(flight.dep_time_utc, flight.revised_dep_utc, flight.date) : 0
@@ -317,8 +299,10 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
                 : (flight?.revised_arr_utc || estimatedArrUtc) ? 'label.estimated' : 'label.scheduled'
 
   // The scheduled time, shown struck through only when the displayed one differs from it.
-  const depSched = flight ? utcHHMMtoLocal(flight.dep_time_utc, depOffset) : '—'
-  const arrSched = flight ? utcHHMMtoLocal(flight.arr_time_utc, arrOffset) : '—'
+  const depSchedPart = airportTimeParts(flight?.dep_time_utc, flight?.dep_iata ?? 'DAM')
+  const arrSchedPart = airportTimeParts(flight?.arr_time_utc, flight?.arr_iata ?? 'DAM')
+  const depSched = depSchedPart.time
+  const arrSched = arrSchedPart.time
   const depMoved = depSched !== depDisplay
   const arrMoved = arrSched !== arrDisplay
 
@@ -497,7 +481,7 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
               </div>
               <div style={{ display: 'flex', alignItems: 'baseline' }}>
                 <span style={{ fontSize: 20, fontWeight: 700, color: isCancelled ? C.muted : C.ink, fontVariantNumeric: 'tabular-nums', textDecoration: isCancelled ? 'line-through' : 'none' }}>
-                  {depDisplay}
+                  {depDisplay}<Meridiem of={depPart.meridiem} size={11} />
                 </span>
                 {!isCancelled && <DelayBadge min={depDelay} />}
               </div>
@@ -505,7 +489,7 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
               {!isCancelled && depMoved && (
                 <div style={{ fontSize: 10, color: C.muted, marginTop: 2, display: 'flex', gap: 5, alignItems: 'baseline' }}>
                   <span>{t('label.scheduled')}</span>
-                  <span style={{ textDecoration: 'line-through', fontVariantNumeric: 'tabular-nums' }}>{depSched}</span>
+                  <span style={{ textDecoration: 'line-through', fontVariantNumeric: 'tabular-nums' }}>{depSched}<Meridiem of={depSchedPart.meridiem} size={8} /></span>
                 </div>
               )}
             </div>
@@ -519,12 +503,12 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end' }}>
                 {!isCancelled && <DelayBadge min={arrDelay} />}
                 <span style={{ fontSize: 20, fontWeight: 700, color: isCancelled ? C.muted : C.ink, fontVariantNumeric: 'tabular-nums', textDecoration: isCancelled ? 'line-through' : 'none' }}>
-                  {arrDisplay}
+                  {arrDisplay}<Meridiem of={arrPart.meridiem} size={11} />
                 </span>
               </div>
               {!isCancelled && arrMoved && (
                 <div style={{ fontSize: 10, color: C.muted, marginTop: 2, display: 'flex', gap: 5, alignItems: 'baseline', justifyContent: 'flex-end' }}>
-                  <span style={{ textDecoration: 'line-through', fontVariantNumeric: 'tabular-nums' }}>{arrSched}</span>
+                  <span style={{ textDecoration: 'line-through', fontVariantNumeric: 'tabular-nums' }}>{arrSched}<Meridiem of={arrSchedPart.meridiem} size={8} /></span>
                   <span>{t('label.scheduled')}</span>
                 </div>
               )}

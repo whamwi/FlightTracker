@@ -3,13 +3,14 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react'
 import Link from 'next/link'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
-import { airportCity, cityFor, airlineNameFor, airportFlag as _apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
+import { airportCity, cityFor, airlineNameFor, airportFlag as _apFlag, loadGeoData } from '@/lib/geo-data'
+import { airportTimeParts } from '@/lib/airport-time'
 import SiteNav from '@/components/SiteNav'
 import LanguageSwitch from '@/components/LanguageSwitch'
 import { useT, useLocale, useHref } from '@/components/LocaleProvider'
 import { STATUS_KEY, counted, dateLocaleOf, type Locale } from '@/lib/i18n'
 import { effectiveStatus, calcDelay } from '@/lib/flight-status'
-import { DelayChip, MetaStrip } from '@/components/FlightMeta'
+import { DelayChip, MetaStrip, Meridiem } from '@/components/FlightMeta'
 import { BOARD_AIRPORTS, type BoardAirport } from '@/lib/syria-airports'
 
 const city = (iata: string) => cityFor(iata)
@@ -112,24 +113,6 @@ const AIRPORTS: readonly Airport[] = BOARD_AIRPORTS.map(a => a.iata)
 function syriaDate(offsetDays: number): string {
   const ms = Date.now() + 3 * 3_600_000 + offsetDays * 86_400_000
   return new Date(ms).toISOString().slice(0, 10)
-}
-
-function tzOffset(iata: string): number { return airportOffset[iata] ?? 3 }
-
-function utcHHMMtoLocal(hhmm: string, offsetH: number): string {
-  const [h, m] = hhmm.slice(0, 5).split(':').map(Number)
-  const total = ((h * 60 + m + Math.round(offsetH * 60)) % 1440 + 1440) % 1440
-  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
-}
-
-function fmtLocal(raw: string | null | undefined, offsetH: number): string {
-  if (!raw) return '—'
-  if (raw.includes('T')) {
-    const ms = new Date(raw).getTime() + Math.round(offsetH * 3_600_000)
-    const d = new Date(ms)
-    return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
-  }
-  return utcHHMMtoLocal(raw, offsetH)
 }
 
 // Arabic carries no English unit letters — see the twin in FlightDetail.
@@ -479,11 +462,16 @@ function FlightCard({ f, view, isPinned, onTogglePin, boardDate, phase }: { f: F
   // bar. The belt only needs the flight to be down.
   const isArrived   = status === 'Arrived'
 
-  const depOff = isArr ? tzOffset(f.dep_iata) : 3
-  const arrOff = isArr ? 3 : tzOffset(f.arr_iata)
-
-  const depTime = fmtLocal(f.actual_dep_utc ?? f.revised_dep_utc ?? f.dep_time_utc, depOff)
-  const arrTime = fmtLocal(f.actual_arr_utc ?? f.revised_arr_utc ?? f.arr_time_utc, arrOff)
+  /*
+   * Each end on its own airport's clock, resolved by zone.
+   *
+   * The Syrian side used to be the literal 3, which is right for Damascus, Aleppo and Deir ez-Zor
+   * and says so nowhere. Passing the IATA code gives the same answer for those and the correct one
+   * for the far end, including the European airports whose stored offset was an hour out — see
+   * lib/airport-time.
+   */
+  const dep = airportTimeParts(f.actual_dep_utc ?? f.revised_dep_utc ?? f.dep_time_utc, f.dep_iata)
+  const arr = airportTimeParts(f.actual_arr_utc ?? f.revised_arr_utc ?? f.arr_time_utc, f.arr_iata)
 
   const depDelay = calcDelay(f.dep_time_utc, f.actual_dep_utc ?? f.revised_dep_utc)
   const arrDelay = calcDelay(f.arr_time_utc, f.actual_arr_utc ?? f.revised_arr_utc)
@@ -597,7 +585,7 @@ function FlightCard({ f, view, isPinned, onTogglePin, boardDate, phase }: { f: F
               color: isCancelled ? '#A6A093' : depTimeColor,
               textDecoration: isCancelled ? 'line-through' : 'none',
             }}>
-              {depTime}
+              {dep.time}<Meridiem of={dep.meridiem} size={11} />
               {/*
                 The mirror of the arrival's +1. On the board for the day it lands, a flight that
                 left the previous evening prints its departure time with nothing to say so —
@@ -718,7 +706,11 @@ function FlightCard({ f, view, isPinned, onTogglePin, boardDate, phase }: { f: F
               color: isCancelled ? '#A6A093' : arrTimeColor,
               textDecoration: isCancelled ? 'line-through' : 'none',
             }}>
-              {hasComputedETA && !isCancelled ? fmtLocal(computedETA(f), arrOff) : arrTime}
+              {(() => {
+                const shown = hasComputedETA && !isCancelled
+                  ? airportTimeParts(computedETA(f), f.arr_iata) : arr
+                return <>{shown.time}<Meridiem of={shown.meridiem} size={11} /></>
+              })()}
               {/*
                 The timetable +1: this flight was due today and lands after midnight. Without
                 it, 00:05 sits in a column of evening times and reads as ten past midnight
@@ -1106,7 +1098,7 @@ export default function BoardPage() {
       )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 12px', borderRadius: 999, background: C.ink }}>
         <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, fontWeight: 600, color: '#fff', letterSpacing: '.04em' }}>
-          {nowSyriaHHMM} {t('chip.now')}
+          {nowSyria.time}<Meridiem of={nowSyria.meridiem} size={9} /> {t('chip.now')}
         </span>
       </div>
       {(enroute > 0 || complete) && (
@@ -1169,10 +1161,8 @@ export default function BoardPage() {
     : null
   const weeklyMaxFreq = weeklyFreq?.[0]?.count ?? 1
 
-  const nowSyriaHHMM = (() => {
-    const d = new Date(Date.now() + 3 * 3_600_000)
-    return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
-  })()
+  // The "now" chip reads the same clock as the times it sits among, meridiem included.
+  const nowSyria = airportTimeParts(new Date().toISOString(), 'DAM')
 
   const prevNowRef = useRef<HTMLDivElement>(null)
   useEffect(() => {

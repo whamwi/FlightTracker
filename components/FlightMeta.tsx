@@ -81,3 +81,24 @@ export function MetaStrip({ items }: { items: { text: string | null | undefined;
     </div>
   )
 }
+
+/**
+ * The ص / م beside a time, set as a label rather than as part of the number.
+ *
+ * The digits are monospace and bold so a column of times lines up and can be scanned; the meridiem
+ * is neither of those things. At the same weight and size it competed with the figure it qualifies,
+ * which is what it looked like before — so it takes the face used for airline names, at roughly
+ * two-thirds the digits' size, and steps back.
+ *
+ * `size` because the surfaces set times very differently: 12px on the map's panel card, 20px on the
+ * board. A fixed size would be a third of one and two-thirds of the other.
+ */
+export function Meridiem({ of, size = 8.5, color = MUTED }: { of: string; size?: number; color?: string }) {
+  if (!of) return null
+  return (
+    <span style={{
+      font: `500 ${size}px/1 'Instrument Sans',system-ui`,
+      color, marginInlineStart: 3, whiteSpace: 'nowrap',
+    }}>{of}</span>
+  )
+}
