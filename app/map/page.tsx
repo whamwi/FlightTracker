@@ -8,6 +8,7 @@ import { Suspense, useState, useEffect, useCallback, useRef } from 'react'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { cityFor, airlineNameFor, getActiveLocale, airportFlag as apFlag, airportOffset, loadGeoData } from '@/lib/geo-data'
 import { useT, useLocale, useHref } from '@/components/LocaleProvider'
+import { effectiveStatus } from '@/lib/flight-status'
 import { STATUS_KEY, counted } from '@/lib/i18n'
 import Wordmark from '@/components/Wordmark'
 import SiteNav from '@/components/SiteNav'
@@ -50,20 +51,7 @@ type InAirFlight = {
   aircraft_type: string | null
 }
 
-const STATUS_ALIAS: Record<string, string> = { Landed: 'Arrived', Land: 'Arrived' }
 const IN_AIR = new Set(['Departed', 'En Route', 'Approaching'])
-
-function panelEffectiveStatus(f: InAirFlight): string {
-  const s = STATUS_ALIAS[f.status] ?? f.status
-  if (f.actual_arr_utc) return 'Arrived'
-  if (s === 'Arrived' || s === 'Cancelled') return s
-  if (f.actual_dep_utc) {
-    const actMs = new Date(f.actual_dep_utc).getTime()
-    if (f.duration_min && actMs + f.duration_min * 60_000 < Date.now() - 15 * 60_000) return 'Arrived'
-    return s !== 'Unknown' && s !== 'Scheduled' ? s : 'Departed'
-  }
-  return s
-}
 
 function etaMs(f: InAirFlight): number {
   if (f.revised_arr_utc) return new Date(f.revised_arr_utc).getTime()
@@ -164,7 +152,7 @@ function MiniProgress({ depUtc, durationMin, approaching, accentColor }: { depUt
 function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelected?: boolean; onSelect: (n: string) => void }) {
   const t    = useT()
   const href = useHref()
-  const status = panelEffectiveStatus(f)
+  const status = effectiveStatus(f)
   const approaching = status === 'Approaching'
   // Damascus keeps the brand forest it has always had here — the rail sits on a pale panel,
   // not on a map, and #16a34a would be loud against it. The provincial hubs take the marker
@@ -309,7 +297,7 @@ function useInAirFlights() {
       }
 
       const isFlying = (f: InAirFlight) => {
-        const status = panelEffectiveStatus(f)
+        const status = effectiveStatus(f)
         if (status === 'Arrived' || status === 'Cancelled') return false
         return IN_AIR.has(status)
           || airborne.has((f.callsign ?? '').toUpperCase())

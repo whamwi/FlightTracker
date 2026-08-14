@@ -1,0 +1,79 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { hasArrived, effectiveStatus, type StatusFacts } from './flight-status.ts'
+
+const T = (s: string) => Date.parse(`2026-08-14T${s}:00Z`)
+
+/**
+ * The two flights that exposed the split, kept as fixtures rather than prose.
+ *
+ * Both were drawn "~ In air" by the map while the board and the live feed said otherwise, from
+ * opposite inputs — one arrived early against its projection, the other late. A rule that gets
+ * only one of them right is the rule we already had.
+ */
+const FYC492: StatusFacts = {              // SAW→ALP, landed at 76% of its projected block
+  status: 'Arrived',
+  actual_dep_utc: '2026-08-14T01:44:40Z',
+  actual_arr_utc: '2026-08-14T02:59:11Z',
+  duration_min: 105,
+}
+const RJA431: StatusFacts = {              // AMM→ALP, projection complete, arrival not yet published
+  status: 'Departed',
+  actual_dep_utc: '2026-08-14T01:45:47Z',
+  actual_arr_utc: null,
+  revised_arr_utc: '2026-08-14T02:38:38Z',
+  duration_min: 85,
+}
+
+test('an actual arrival ends the flight, however far along the projection is', () => {
+  // 03:04 — the moment the map still said "~ In air". 76% of the block had elapsed.
+  assert.equal(hasArrived(FYC492, T('03:04')), true)
+  assert.equal(effectiveStatus(FYC492, T('03:04')), 'Arrived')
+})
+
+test('a completed projection alone does not claim an arrival too early', () => {
+  // Its revised arrival passed at 02:38, but it did not land until 02:57. The old map rule
+  // reached 1.0 at 02:38 and would have been nineteen minutes early had it also confirmed.
+  assert.equal(hasArrived(RJA431, T('02:45')), false, 'not arrived just because the estimate passed')
+  assert.equal(effectiveStatus(RJA431, T('02:45')), 'Departed')
+})
+
+test('an unconfirmed flight is called arrived once the block plus grace has elapsed', () => {
+  // dep 01:45:47 + 85m = 03:10:47, + 15m grace = 03:25:47. Never earlier.
+  assert.equal(hasArrived(RJA431, T('03:20')), false)
+  assert.equal(hasArrived(RJA431, T('03:30')), true, 'so it cannot sit airborne for three hours')
+})
+
+test('the arrival, once published, wins over the grace clock', () => {
+  const withArrival = { ...RJA431, actual_arr_utc: '2026-08-14T02:57:18Z' }
+  assert.equal(hasArrived(withArrival, T('02:58')), true, 'a minute after FR24 published it')
+})
+
+test('Landed is spelled two ways and means the same thing', () => {
+  for (const status of ['Landed', 'Land', 'Arrived']) {
+    assert.equal(hasArrived({ status }, T('03:00')), true, status)
+  }
+})
+
+test('cancelled and diverted are not arrivals, and outrank the grace clock', () => {
+  const longGone = { actual_dep_utc: '2026-08-14T01:00:00Z', duration_min: 60 }
+  assert.equal(hasArrived({ ...longGone, status: 'Cancelled' }, T('05:00')), false)
+  assert.equal(hasArrived({ ...longGone, status: 'Diverted' }, T('05:00')), false)
+  assert.equal(effectiveStatus({ ...longGone, status: 'Diverted' }, T('05:00')), 'Diverted')
+})
+
+test('a flight with no departure is never arrived', () => {
+  assert.equal(hasArrived({ status: 'Scheduled', duration_min: 90 }, T('23:00')), false)
+})
+
+test('a revised arrival on a scheduled flight reads as Expected', () => {
+  assert.equal(
+    effectiveStatus({ status: 'Scheduled', revised_arr_utc: '2026-08-14T09:00:00Z' }, T('03:00')),
+    'Expected')
+})
+
+test('a departed flight with an unknown status still reads as Departed', () => {
+  assert.equal(
+    effectiveStatus({ status: 'Unknown', actual_dep_utc: '2026-08-14T02:00:00Z' }, T('03:00')),
+    'Departed')
+})

@@ -1,6 +1,7 @@
 'use client'
 import { PHONE_MQ } from '@/lib/breakpoints'
 import { carryArrival } from '@/lib/flight-leg'
+import { hasArrived } from '@/lib/flight-status'
 import { reportHandledError } from './ErrorReporter'
 
 import 'leaflet/dist/leaflet.css'
@@ -2180,8 +2181,28 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         const arrC = _apCoords[arr_iata]
         if (!depC || !arrC) continue
 
+        /*
+         * One rule, shared with the board and the panel — see lib/flight-status.
+         *
+         * This was `fraction >= 1.0 && confirmedArr`, which is only right when the projection and
+         * the confirmation agree, and on 14 Aug they disagreed in both directions within an hour.
+         * FYC492 landed at 76% of its projected block and stayed "~ In air" with a published
+         * arrival sitting unread; RJA431's projection completed nineteen minutes before it landed
+         * and it stayed "~ In air" too, which on a silent Aleppo day runs to three hours.
+         *
+         * hasArrived answers from the flight's own facts rather than from where a projection has
+         * got to: an actual arrival ends it outright, and failing that the block plus a grace
+         * period does. The marker is still placed by `fraction` — that is geometry, and it is fine
+         * for that — but it no longer decides whether the aircraft is down.
+         */
         const confirmedArr = !!(fs?.actual_arr_utc)
-        const arrived      = fraction >= 1.0 && confirmedArr
+        const arrived      = hasArrived({
+          status:          fs?.status,
+          actual_arr_utc:  fs?.actual_arr_utc,
+          actual_dep_utc:  fs?.actual_dep_utc,
+          revised_arr_utc: fs?.revised_arr_utc,
+          duration_min,
+        })
         if (fraction >= 1.0 && !confirmedArr && !fs?.actual_dep_utc) {
           if (schedMarkersRef.current[callsign]) {
             schedMarkersRef.current[callsign].remove(); delete schedMarkersRef.current[callsign]

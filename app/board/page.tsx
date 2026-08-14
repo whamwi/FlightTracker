@@ -8,6 +8,7 @@ import SiteNav from '@/components/SiteNav'
 import LanguageSwitch from '@/components/LanguageSwitch'
 import { useT, useLocale, useHref } from '@/components/LocaleProvider'
 import { STATUS_KEY, counted, dateLocaleOf, type Locale } from '@/lib/i18n'
+import { effectiveStatus } from '@/lib/flight-status'
 import { BOARD_AIRPORTS, type BoardAirport } from '@/lib/syria-airports'
 
 const city = (iata: string) => cityFor(iata)
@@ -64,7 +65,6 @@ const STATUS: Record<string, StatusCfg> = {
   Unknown:     { label: 'Unknown',    bg: '#E4E1D2',  text: C.muted,                                            rail: C.border },
 }
 
-const STATUS_ALIAS: Record<string, string> = { Landed: 'Arrived', Land: 'Arrived' }
 
 const LOCAL_LOGOS = AIRLINE_LOGOS
 
@@ -164,19 +164,6 @@ function durationLabel(min: number, locale: Locale): string {
  */
 function hhmm(min: number): string {
   return `${Math.floor(min / 60)}:${String(Math.round(min % 60)).padStart(2, '0')}`
-}
-
-function effectiveStatus(f: Flight): string {
-  const s = STATUS_ALIAS[f.status] ?? f.status
-  if (f.actual_arr_utc) return 'Arrived'
-  if (s === 'Arrived' || s === 'Landed' || s === 'Cancelled' || s === 'Diverted') return s
-  if (f.actual_dep_utc) {
-    const actMs = new Date(f.actual_dep_utc).getTime()
-    if (f.duration_min && actMs + f.duration_min * 60_000 < Date.now() - 15 * 60_000) return 'Arrived'
-    return s !== 'Unknown' ? s : 'Departed'
-  }
-  if (f.revised_arr_utc && (s === 'Scheduled' || s === 'Unknown')) return 'Expected'
-  return s
 }
 
 function computedETA(f: Flight): string | null {
