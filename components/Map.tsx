@@ -648,6 +648,30 @@ function buildPopup(
   const drLine = projected && lostAt
     ? `<div style="color:#9ca3af;font-size:10px;padding:2px 14px 6px;text-align:center">${T('map.dead_reckoning')} ${lostLocal}</div>`
     : ''
+
+  /*
+   * Altitude and speed, and only while we actually hold a fix — the app's rule, and its reasoning
+   * carries over unchanged: these must never appear for a flight being projected along a stored
+   * route, because the numbers would be invented and a reader has no way to tell an invented
+   * 34,000 ft from a measured one. buildSchedulePopup, which draws exactly those flights, does
+   * not get this line at all.
+   *
+   * Nor after the signal drops: `a.alt_baro` is then the last altitude we saw, and under a
+   * "signal lost" badge it reads as current. Nor once it is down.
+   *
+   * Digits stay Latin via toLocaleString('en-US') — the house rule wherever a number carries
+   * meaning — and only the unit is translated.
+   */
+  const liveDetail = (!projected && !lostAt && !arrived
+      && typeof a.alt_baro === 'number' && a.alt_baro > 0)
+    ? [
+        `${a.alt_baro.toLocaleString('en-US')} ${T('unit.ft')}`,
+        typeof a.gs === 'number' && a.gs > 0 ? `${Math.round(a.gs).toLocaleString('en-US')} ${T('unit.kts')}` : null,
+      ].filter(Boolean).join(' · ')
+    : ''
+  const liveLine = liveDetail
+    ? `<div dir="ltr" style="color:#9ca3af;font-size:10.5px;padding:3px 14px 7px;text-align:center">${liveDetail}</div>`
+    : ''
   const photoHtml = photoUrl
     ? `<img src="${photoUrl}" style="width:100%;height:110px;object-fit:cover;display:block">`
     : ''
@@ -662,7 +686,7 @@ function buildPopup(
       </div>
       <span style="background:${statusBg};color:${statusFg};font-size:10px;font-weight:600;padding:3px 8px;border-radius:99px;flex-shrink:0;margin-top:1px">${statusLabel}</span>
     </div>
-    ${progressHtml}${timesHtml}${lostLine}${drLine}
+    ${progressHtml}${timesHtml}${liveLine}${lostLine}${drLine}
   </div>`
 }
 
