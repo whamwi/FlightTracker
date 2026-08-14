@@ -364,22 +364,25 @@ function arrivalsBadge(L: typeof import('leaflet'), count: number, hub: BoardAir
   const h      = mobile ? 20 : 22
   const color  = MARKER_ACCENT[hub]
   /*
-   * translateX(-50%) inside a zero-width icon, rather than a measured iconSize.
+   * Absolutely positioned and pulled back by half itself, rather than given a measured iconSize.
    *
    * The badge's width is not knowable here: the count is one or two digits and the word changes
-   * with the locale, so any fixed size would clip one case or off-centre another. A zero-width box
-   * anchored on the field, with the content shifted half its own width, sits centred on the
-   * airport whatever it ends up containing.
+   * with the locale, so any fixed size would clip one case or off-centre another.
+   *
+   * position:absolute with left/top is what makes it direction-proof. A plain translateX(-50%) on
+   * a static child was measured 59 px to the left of its airport on the Arabic map: the icon box
+   * is zero-width, so under dir=rtl the content starts at the right edge and grows leftward before
+   * the transform is applied at all. left:0 means left in both directions.
    */
-  const html = `<div dir="ltr" style="display:inline-flex;align-items:center;gap:4px;
-      transform:translateX(-50%);
+  const html = `<div dir="ltr" style="position:absolute;left:0;top:0;
+      transform:translate(-50%,-50%);display:inline-flex;align-items:center;gap:4px;
       height:${h}px;padding:0 8px;border-radius:${h / 2}px;
       background:${color};color:#fff;border:1.5px solid #fff;
       font-family:'IBM Plex Mono',monospace;font-size:${mobile ? 10 : 11}px;font-weight:700;
       letter-spacing:.02em;white-space:nowrap;
       box-shadow:0 2px 5px rgba(0,0,0,.4);cursor:pointer">
       <span>${count}</span><span>${T('map.arrivals_badge')}</span></div>`
-  return L.divIcon({ className: '', html, iconSize: [0, h], iconAnchor: [0, h / 2] })
+  return L.divIcon({ className: '', html, iconSize: [0, 0], iconAnchor: [0, 0] })
 }
 
 /**
@@ -2374,7 +2377,9 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         const track = wps?.length
           ? bearingFromPath(wps, fPos)
           : bearingAlongPath(depC[0], depC[1], arrC[0], arrC[1], fPos)
-        const label = arrived ? `${callsign}\nARRIVED` : callsign
+        // Was the literal 'ARRIVED', which stayed English on the Arabic map — the one surface
+        // where it is the primary language.
+        const label = arrived ? `${callsign}\n${T('status.arrived').toUpperCase()}` : callsign
         const hub = markerHub(dep_iata, arr_iata)
         const isSchedHighlighted = highlightedCSRef.current === callsign
         const icon  = planeIcon(L, track, true, arrived, label, hub, !arrived, isSchedHighlighted ? '#ef4444' : undefined)
