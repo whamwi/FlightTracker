@@ -671,8 +671,17 @@ function buildPopup(
         typeof a.gs === 'number' && a.gs > 0 ? `${Math.round(a.gs).toLocaleString('en-US')} ${T('unit.kts')}` : null,
       ].filter(Boolean).join(' · ')
     : ''
+  /*
+   * No dir override. It carried dir="ltr" so the digits would stay put — which they do anyway,
+   * a number being laid out left-to-right inside an RTL paragraph without being told. What the
+   * override actually did was pin the whole line left-to-right on an Arabic page, so a reader
+   * scanning right-to-left met "قدم · 454 عقدة 35,000" instead of "35,000 قدم · 454 عقدة": each
+   * value separated from its own unit and attached to the next one.
+   *
+   * The same override, for the same wrong reason, scrambled the board's meta strip on 13 Aug.
+   */
   const liveLine = liveDetail
-    ? `<div dir="ltr" style="color:#9ca3af;font-size:10.5px;padding:3px 14px 7px;text-align:center">${liveDetail}</div>`
+    ? `<div style="color:#9ca3af;font-size:10.5px;padding:3px 14px 7px;text-align:center">${liveDetail}</div>`
     : ''
   const photoHtml = photoUrl
     ? `<img src="${photoUrl}" style="width:100%;height:110px;object-fit:cover;display:block">`
