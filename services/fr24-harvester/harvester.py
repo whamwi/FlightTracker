@@ -157,6 +157,10 @@ FEED_DEAD_COUNT = 22684
 # Below this, an aircraft is on the ground whatever its altitude reports. Airliner stall speeds
 # are 110-140 kts, so there is a wide margin; taxi is 10-25.
 GROUND_SPEED_KTS = 50
+# Above this altitude, below this ground speed, the fix is not describing a real aircraft.
+# See the rejection in collect_adsb for the measurement behind the numbers.
+BAD_FIX_MIN_ALT_FT = 1000
+BAD_FIX_MIN_GS_KTS = 30
 
 
 def log(msg: str) -> None:
@@ -597,6 +601,7 @@ def collect_adsb(live_by_callsign: dict[str, tuple[str, int]]) -> int:
         if res.status_code >= 300:
             return 0
         rows = []
+        bad_fixes = 0
         for a in res.json():
             cs = (a.get("callsign") or "").strip()
             hit = live_by_callsign.get(cs)
@@ -605,6 +610,28 @@ def collect_adsb(live_by_callsign: dict[str, tuple[str, int]]) -> int:
             fid, frow = hit
             alt = a.get("alt_baro")
             gs  = a.get("gs")
+
+            # A position no aircraft can be in, dropped before it is stored.
+            #
+            # RJ435 on 14 Aug reported one knot at 4,875 ft, with its latitude and longitude
+            # frozen at Amman while the altitude descended from 13,000 ft — a transmitter stuck
+            # on its last valid GPS fix, which is a known avionics failure. MLAT had the true
+            # position 32 km from Damascus and disagreed the whole way down, because MLAT is
+            # computed from signal timing at the receivers rather than from what the aircraft
+            # broadcasts. The map drew the frozen one: 195 km from where the aircraft was.
+            #
+            # Ground speed is the cheap tell. Measured over 48 hours, real fixes above 1,000 ft
+            # have a first percentile of 141 knots and a median of 451; nothing legitimate sits
+            # between a standstill and 30. The rule drops 0.8% of our own fixes and would have
+            # caught every one of RJ435's.
+            #
+            # Only this source. FR24's rows come in on another path, and a receiver network that
+            # produces a tenth of our rate is not the thing to start rewriting.
+            if alt is not None and alt > BAD_FIX_MIN_ALT_FT \
+               and gs is not None and gs < BAD_FIX_MIN_GS_KTS:
+                bad_fixes += 1
+                continue
+
             rows.append({
                 "fr24_id": fid, "fr24_row": frow,
                 "hex": (a.get("hex") or "").upper() or None, "callsign": cs,
@@ -635,6 +662,11 @@ def collect_adsb(live_by_callsign: dict[str, tuple[str, int]]) -> int:
                 "source": "adsb",
                 "raw": a,
             })
+        if bad_fixes:
+            # Counted rather than silent: the rate is the signal. A jump means either a fleet
+            # with bad transponders or a decode problem on our side, and both are worth seeing.
+            print(f"[adsb] dropped {bad_fixes} impossible fix(es) "
+                  f"(<{BAD_FIX_MIN_GS_KTS} kt above {BAD_FIX_MIN_ALT_FT} ft)", flush=True)
         if not rows:
             return 0
         res2 = cr.post(

@@ -667,8 +667,10 @@ function buildPopup(
   const liveDetail = (!projected && !lostAt && !arrived
       && typeof a.alt_baro === 'number' && a.alt_baro > 0)
     ? [
-        `${a.alt_baro.toLocaleString('en-US')} ${T('unit.ft')}`,
-        typeof a.gs === 'number' && a.gs > 0 ? `${Math.round(a.gs).toLocaleString('en-US')} ${T('unit.kts')}` : null,
+        `${T('label.altitude')}: ${a.alt_baro.toLocaleString('en-US')} ${T('unit.ft')}`,
+        typeof a.gs === 'number' && a.gs > 0
+          ? `${T('label.speed')}: ${Math.round(a.gs).toLocaleString('en-US')} ${T('unit.kts')}`
+          : null,
       ].filter(Boolean).join(' · ')
     : ''
   /*
