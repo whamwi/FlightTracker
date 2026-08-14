@@ -54,6 +54,7 @@ type InAirFlight = {
   // on this card briefly and removed — a third row on every card, where this is a summary. The
   // popup carries them for anyone who wants that detail.
   arr_next_day?: boolean
+  dep_prev_day?: boolean
 }
 
 const IN_AIR = new Set(['Departed', 'En Route', 'Approaching'])
@@ -249,7 +250,13 @@ function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelecte
               <span style={{ fontSize: 10, flexShrink: 0 }}>{depFlag}</span>
               <span style={{ font: `700 11px/1.15 'Instrument Sans',system-ui`, color: C.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{depCity}</span>
             </div>
-            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, fontWeight: 700, color: C.ink, marginTop: 2 }}>{depTime}</span>
+            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, fontWeight: 700, color: C.ink, marginTop: 2 }}>
+              {depTime}
+              {/* Mirror of the arrival's +1 opposite — see the board card for the reasoning. */}
+              {f.dep_prev_day && (
+                <sup dir="ltr" style={{ fontSize: 9, fontWeight: 700, marginInlineStart: 1, color: C.forest, verticalAlign: 'super' }}>−1</sup>
+              )}
+            </span>
             {/* Beneath the time, not beside it: this column is 64px inside a 308px panel, where
                 the board has 96px and room for both on one line. */}
             <DelayChip min={depDelay} />

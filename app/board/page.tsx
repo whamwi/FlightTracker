@@ -97,6 +97,7 @@ type Flight = {
   arr_baggage: string | null
   /** The arrival lands on the day after this board's date — shown as +1 beside the time. */
   arr_next_day?: boolean
+  dep_prev_day?: boolean
 }
 
 type Tab     = -1 | 0 | 1
@@ -186,7 +187,17 @@ function computedETA(f: Flight): string | null {
  * A spilled arrival keeps counting past 1440 so it sorts after the evening it belongs to.
  */
 function effectiveLocalMin(f: Flight, v: View): number {
-  const spill = v === 'arr' && f.arr_next_day ? 1440 : 0
+  /*
+   * A spilled arrival counts past 1440; a departure from the previous evening counts below zero.
+   *
+   * The second half was missing. XH781 leaves Damascus at 21:15 and lands at Muscat at 01:00, so
+   * it appears on the next day's board with dep_prev_day — and sorted by 21:15 it landed at the
+   * very end of that day, after everything that had not yet left, when it had in fact departed
+   * before any of them. The same mistake the +1 marker exists to prevent, made in the ordering.
+   */
+  const spill = v === 'arr' && f.arr_next_day ? 1440
+              : v === 'dep' && f.dep_prev_day ? -1440
+              : 0
   const iso = v === 'arr'
     ? (f.actual_arr_utc ?? f.revised_arr_utc)
     : (f.actual_dep_utc ?? f.revised_dep_utc)
@@ -587,6 +598,17 @@ function FlightCard({ f, view, isPinned, onTogglePin, boardDate, phase }: { f: F
               textDecoration: isCancelled ? 'line-through' : 'none',
             }}>
               {depTime}
+              {/*
+                The mirror of the arrival's +1. On the board for the day it lands, a flight that
+                left the previous evening prints its departure time with nothing to say so —
+                XH490 leaves Istanbul at 22:25 and shows 22:25 on the 15th's board, reading as
+                though it departs that evening rather than having already landed at 00:30 that
+                morning. Superscript for the same reason as +1: it stays attached to the digits
+                it qualifies, and dir=ltr keeps bidi from throwing the sign to the far side.
+              */}
+              {f.dep_prev_day && !isCancelled && (
+                <sup dir="ltr" title={t('label.prev_day')} style={{ fontSize: 11, fontWeight: 700, marginInlineStart: 1, color: C.goldenText, textDecoration: 'none', verticalAlign: 'super' }}>−1</sup>
+              )}
             </span>
             {!isCancelled && <DelayChip min={depDelay} />}
           </div>
