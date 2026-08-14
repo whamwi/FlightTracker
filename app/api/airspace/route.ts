@@ -1083,6 +1083,7 @@ export async function GET() {
         arr_time_utc:   info?.sched_arr      ? unixToHHMM(info.sched_arr) : null,
         duration_min:   info?.duration_min   ?? null,
         iata_number:    info?.iata_num       ?? null,
+        board_status:   info?.status         ?? null,
         actual_dep_utc,
         actual_arr_utc: info?.actual_arr_utc ?? null,
         revised_arr_utc: info?.revised_arr_utc ?? null,
@@ -1140,6 +1141,7 @@ export async function GET() {
           arr_time_utc:   info.sched_arr    ? unixToHHMM(info.sched_arr) : null,
           duration_min:   info.duration_min ?? null,
           iata_number:    info.iata_num     ?? null,
+          board_status:   info.status       ?? null,
           actual_dep_utc: info.actual_dep_utc ?? null,
           actual_arr_utc: info.actual_arr_utc ?? null,
           revised_arr_utc: info.revised_arr_utc ?? null,
@@ -1179,6 +1181,7 @@ export async function GET() {
         arr_time_utc:   info?.sched_arr    ? unixToHHMM(info.sched_arr) : null,
         duration_min:   info?.duration_min ?? null,
         iata_number:    info?.iata_num     ?? null,
+        board_status:   info?.status       ?? null,
         actual_dep_utc: info?.actual_dep_utc ?? null,
         actual_arr_utc: info?.actual_arr_utc ?? null,
         revised_arr_utc: info?.revised_arr_utc ?? null,
@@ -1284,6 +1287,15 @@ export async function GET() {
           actual_arr_utc:  f.actual_arr_utc,
           revised_arr_utc: f.revised_arr_utc,
           iata_number:     f.iata_num,
+          // The server's own verdict, which until now stopped at the board.
+          //
+          // The map computed its own from actual_arr_utc alone — `carriedArr ? 'Arrived' :
+          // 'Departed'` — so an arrival the server infers from est_arr, where no arrival time is
+          // ever published, reached the card and never the marker. FAD742 on 14 Aug read Arrived
+          // in the list and "~ In air" in its popup an hour after it was down. Removing the
+          // client's own stopwatch is what exposed it: before that, the map guessed its way to
+          // roughly the right answer.
+          status:          f.status,
           dep_delay_min:   f.dep_delay_min,
           airline_iata:    f.airline_iata,
           aircraft_reg:    f.reg,

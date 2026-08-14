@@ -30,8 +30,25 @@
  * of: an actual arrival time it was handed.
  */
 
-/** FR24 spells the same state more than one way. */
-const STATUS_ALIAS: Record<string, string> = { Landed: 'Arrived', Land: 'Arrived' }
+/**
+ * The same state, spelled several ways, reduced to one.
+ *
+ * FR24 says both "Landed" and "Land". The airspace route lowercases everything it forwards, and
+ * the v2 board title-cases its own. Matching `=== 'Arrived'` against that meant a server verdict of
+ * `arrived` read as no verdict at all — which is how FAD742's arrival reached the board and never
+ * the map. Anything unrecognised passes through untouched, so a raw FR24 string like
+ * "Estimated 12:47" still renders as it always did.
+ */
+const CANON: Record<string, string> = {
+  landed: 'Arrived',    land: 'Arrived',      arrived: 'Arrived',
+  scheduled: 'Scheduled', expected: 'Expected', departed: 'Departed',
+  cancelled: 'Cancelled', diverted: 'Diverted', unknown: 'Unknown',
+}
+
+export function canonicalStatus(s?: string | null): string {
+  const raw = (s ?? '').trim()
+  return CANON[raw.toLowerCase()] ?? raw
+}
 
 /**
  * The minimum a caller must know. Structural rather than a named Flight type, because the three
@@ -62,13 +79,12 @@ export type StatusFacts = {
  */
 export function hasArrived(f: StatusFacts, _nowMs: number = Date.now()): boolean {
   if (f.actual_arr_utc) return true
-  const s = STATUS_ALIAS[f.status ?? ''] ?? f.status
-  return s === 'Arrived'
+  return canonicalStatus(f.status) === 'Arrived'
 }
 
 /** The word a surface shows. Cancelled and Diverted outrank everything: the flight is not coming. */
 export function effectiveStatus(f: StatusFacts, nowMs: number = Date.now()): string {
-  const s = STATUS_ALIAS[f.status ?? ''] ?? f.status ?? 'Unknown'
+  const s = canonicalStatus(f.status) || 'Unknown'
   if (s === 'Cancelled' || s === 'Diverted') return s
   if (hasArrived(f, nowMs)) return 'Arrived'
   if (f.actual_dep_utc) return s !== 'Unknown' ? s : 'Departed'

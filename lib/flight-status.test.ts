@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { hasArrived, effectiveStatus, rankInstance, type StatusFacts } from './flight-status.ts'
+import { hasArrived, effectiveStatus, rankInstance, canonicalStatus, type StatusFacts } from './flight-status.ts'
 
 const T = (s: string) => Date.parse(`2026-08-14T${s}:00Z`)
 
@@ -133,4 +133,36 @@ test('and flips the moment the server says so — every surface at once', () => 
 test('a published arrival still wins over a fresh airborne fix', () => {
   // Contradictory inputs, but one of them is an observation of the landing itself.
   assert.equal(hasArrived({ ...FAD742, actual_arr_utc: '2026-08-14T10:07:00Z', airborne_fix_age_s: 60 }, T('10:30')), true)
+})
+
+/**
+ * The casing that made the server's verdict invisible.
+ *
+ * /v2/board answers "Arrived"; the airspace route lowercases everything it forwards, so the map
+ * received "arrived" and compared it against 'Arrived'. It matched nothing, and since the client's
+ * own stopwatch had just been removed there was nothing else left to say the flight was down —
+ * FAD742 read Arrived on the card and "~ In air" in its popup an hour after landing.
+ */
+test('the server’s verdict is read whatever case it arrives in', () => {
+  for (const spelling of ['Arrived', 'arrived', 'ARRIVED', 'landed', 'Landed', ' arrived ']) {
+    assert.equal(hasArrived({ ...FAD742, status: spelling }, T('10:30')), true, spelling)
+  }
+})
+
+test('a status we do not know is passed through untouched', () => {
+  // The cache fallback still carries raw FR24 text, and it has always rendered as-is.
+  assert.equal(canonicalStatus('Estimated 12:47'), 'Estimated 12:47')
+  assert.equal(canonicalStatus(null), '')
+})
+
+test('an arrival time still outranks a server status of Departed', () => {
+  // The carried-forward arrival is the client's one certainty and must not be argued out of it.
+  const landed = { ...FAD742, status: 'departed', actual_arr_utc: '2026-08-14T10:07:00Z' }
+  assert.equal(hasArrived(landed, T('10:30')), true)
+  assert.equal(effectiveStatus(landed, T('10:30')), 'Arrived')
+})
+
+test('diverted and cancelled survive the lowercasing too', () => {
+  assert.equal(effectiveStatus({ ...FAD742, status: 'diverted' }, T('10:30')), 'Diverted')
+  assert.equal(hasArrived({ ...FAD742, status: 'cancelled' }, T('10:30')), false)
 })

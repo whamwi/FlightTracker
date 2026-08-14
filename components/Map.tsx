@@ -1,7 +1,7 @@
 'use client'
 import { PHONE_MQ } from '@/lib/breakpoints'
 import { carryArrival } from '@/lib/flight-leg'
-import { hasArrived } from '@/lib/flight-status'
+import { hasArrived, canonicalStatus } from '@/lib/flight-status'
 import { reportHandledError } from './ErrorReporter'
 
 import 'leaflet/dist/leaflet.css'
@@ -55,6 +55,13 @@ interface Aircraft {
   actual_arr_utc: string | null
   /** The board's revised arrival, carried through so the popup need not synthesise one. */
   revised_arr_utc?: string | null
+  /**
+   * The board's own status for this flight, lowercased by the airspace route.
+   *
+   * Named apart from anything the position feed carries: this is the server's verdict on the
+   * flight, not a description of the fix.
+   */
+  board_status?: string | null
   dep_delay_min:  number | null
   airline_iata:   string | null
   seen_at?: string
@@ -1401,7 +1408,12 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
               callsign:          cs,
               // From the resolved arrival, not the incoming one — otherwise a flight whose
               // arrival is carried forward reads "Departed" while its card reads "Arrived".
-              status:            arrUtc ? 'Arrived' : 'Departed',
+              //
+              // Falling back to the server's verdict rather than to a bare 'Departed'. The literal
+              // was the map's own guess, and once the client's arrival stopwatch went it was the
+              // only thing left saying anything — so a flight the server had already called
+              // Arrived, with no published arrival time to carry, stayed airborne here forever.
+              status:            arrUtc ? 'Arrived' : (canonicalStatus(a.board_status) || 'Departed'),
               actual_dep_utc:    legDep,
               actual_arr_utc:    arrUtc,
               scheduled_dep_utc: existing?.scheduled_dep_utc ?? null,
@@ -1433,11 +1445,13 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
             dep_time_utc: string | null; arr_time_utc: string | null
             actual_dep_utc: string | null; actual_arr_utc: string | null
             revised_arr_utc: string | null
+            status: string | null
             iata_number: string; dep_delay_min: number | null; airline_iata: string | null
             aircraft_reg: string | null; aircraft_type: string | null
           }[]) {
             const { callsign: cs, dep_iata, arr_iata, duration_min, dep_time_utc, arr_time_utc,
-                    actual_dep_utc, actual_arr_utc, revised_arr_utc, iata_number, dep_delay_min, airline_iata,
+                    actual_dep_utc, actual_arr_utc, revised_arr_utc, status: boardStatus,
+                    iata_number, dep_delay_min, airline_iata,
                     aircraft_reg, aircraft_type } = bd
             if (!cs || !dep_iata || !arr_iata) continue
             const existing = flightStatusRef.current[cs]
@@ -1449,7 +1463,9 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
             const carriedArr = actual_arr_utc ?? carryArrival(existing?.actual_arr_utc, effectiveDep)
             flightStatusRef.current[cs] = {
               callsign:          cs,
-              status:            carriedArr ? 'Arrived' : 'Departed',
+              // Same fallback as the seed above: the server's word when we hold no arrival time
+              // of our own. This is the path FAD742 came in on.
+              status:            carriedArr ? 'Arrived' : (canonicalStatus(boardStatus) || 'Departed'),
               actual_dep_utc:    effectiveDep,
               actual_arr_utc:    carriedArr,
               scheduled_dep_utc: existing?.scheduled_dep_utc ?? null,
