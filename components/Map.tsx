@@ -2,6 +2,7 @@
 import { PHONE_MQ } from '@/lib/breakpoints'
 import { carryArrival } from '@/lib/flight-leg'
 import { hasArrived, canonicalStatus, calcDelay } from '@/lib/flight-status'
+import { climbAdjustedFraction } from '@/lib/climb-profile'
 import { reportHandledError } from './ErrorReporter'
 
 import 'leaflet/dist/leaflet.css'
@@ -185,6 +186,7 @@ const ARRIVED_HOLD_MS    = 30 * 60 * 1000
 // Flights to and from these are "ours", and decide which half of a leg is worth drawing.
 const HOME_AIRPORTS = new Set(['DAM', 'ALP', 'LTK', 'DEZ'])
 const STALE_TTL_SYRIA_MS = 6  * 60 * 60 * 1000
+
 
 // ── Geometry helpers ──────────────────────────────────────────────────────────
 
@@ -2142,7 +2144,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
               const display = pred.getDisplay(now)
               fraction = display.routeFraction > 0
                 ? Math.min(display.routeFraction, 0.99)
-                : elapsed / (duration_min * 60_000)
+                : climbAdjustedFraction(elapsed, duration_min * 60_000)
             } else {
               const ks = kinematicStateRef.current[callsign]
               if (ks && wpsK?.length) {
@@ -2150,7 +2152,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
                 const [drLat, drLon] = projectPosition(ks.lat, ks.lon, ks.track_deg, ks.gs_kts, sinceCapMs)
                 fraction = nearestPathFraction(wpsK, drLat, drLon)
               } else {
-                fraction = elapsed / (duration_min * 60_000)
+                fraction = climbAdjustedFraction(elapsed, duration_min * 60_000)
               }
             }
             // Expire dynamically: grace = max(2h, 1× flight duration) past expected arrival.
@@ -2169,7 +2171,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
             if (impliedDepMs) {
               const elapsed = now - impliedDepMs
               if (elapsed > 0) {
-                fraction = elapsed / (duration_min * 60_000)
+                fraction = climbAdjustedFraction(elapsed, duration_min * 60_000)
                 const graceMs = Math.max(2 * 3_600_000, duration_min * 60_000)
                 if (fraction > 1.0 && elapsed - duration_min * 60_000 > graceMs) {
                   fraction = null
