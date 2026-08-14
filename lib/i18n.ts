@@ -183,7 +183,17 @@ const en: Dict = {
   'map.last_seen':     'last seen',
   'map.dead_reckoning':'Dead reckoning from',
   'status.signal_lost':'Signal Lost',
-  'label.flown':       'flown',
+  /*
+   * The map card's figure for a flight that is down: arrival minus departure.
+   *
+   * Was 'flown' / 'مضت'. مضت means "passed", so "3:13 مضت" read as "3:13 ago" — it sounded like
+   * the aircraft had landed three hours earlier, when it is saying the flight took three hours.
+   *
+   * Deliberately the same words as label.flight_time, which labels the same quantity on the detail
+   * page. Kept as two keys because they sit in different layouts and either may need to shorten
+   * without dragging the other with it.
+   */
+  'label.flown':       'flight time',
   'label.next_day':    'Arrives the next day',
   'label.prev_day':    'Departed the previous day',
   'map.panel_title':   'Flights in air',
@@ -402,7 +412,17 @@ const ar: Dict = {
   'map.last_seen':     'آخر إشارة قبل',
   'map.dead_reckoning':'تقدير المسار منذ',
   'status.signal_lost':'انقطعت الإشارة',
-  'label.flown':       'مضت',
+  /*
+   * The map card's figure for a flight that is down: arrival minus departure.
+   *
+   * Was 'flown' / 'مضت'. مضت means "passed", so "3:13 مضت" read as "3:13 ago" — it sounded like
+   * the aircraft had landed three hours earlier, when it is saying the flight took three hours.
+   *
+   * Deliberately the same words as label.flight_time, which labels the same quantity on the detail
+   * page. Kept as two keys because they sit in different layouts and either may need to shorten
+   * without dragging the other with it.
+   */
+  'label.flown':       'زمن الرحلة',
   'label.next_day':    'يصل في اليوم التالي',
   'label.prev_day':    'أقلعت في اليوم السابق',
   'map.panel_title':   'رحلات في الجو',
