@@ -219,14 +219,17 @@ function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelecte
         {/* Row 2: route with progress */}
         <div className="ia-row2" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {/* Dep */}
-          {/* City first and in the card's own weight; the code is the reference under it. The
-              other way round led with three letters most readers have to decode. */}
+          {/* City alone. The IATA code sat under it as a reference and has been dropped for the
+              height: this card is a summary, the city is the part a reader actually reads, and
+              the code is on the marker, in the popup and on the board.
+
+              It costs one distinction — Istanbul has two airports in this schedule, IST and SAW,
+              and both render as إسطنبول here. The route line in the popup still separates them. */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1, width: 64, flexShrink: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 3, minWidth: 0 }}>
               <span style={{ fontSize: 10, flexShrink: 0 }}>{depFlag}</span>
               <span style={{ font: `700 11px/1.15 'Instrument Sans',system-ui`, color: C.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{depCity}</span>
             </div>
-            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 9.5, color: C.muted }}>{f.dep_iata}</span>
             <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, fontWeight: 700, color: C.ink, marginTop: 2 }}>{depTime}</span>
             {/* Beneath the time, not beside it: this column is 64px inside a 308px panel, where
                 the board has 96px and room for both on one line. */}
@@ -246,7 +249,6 @@ function MiniFlightCard({ f, isSelected, onSelect }: { f: InAirFlight; isSelecte
               <span style={{ font: `700 11px/1.15 'Instrument Sans',system-ui`, color: C.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{arrCity}</span>
               <span style={{ fontSize: 10, flexShrink: 0 }}>{arrFlag}</span>
             </div>
-            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 9.5, color: C.muted }}>{f.arr_iata}</span>
             <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, fontWeight: 700, color: approaching ? C.forest : C.ink, marginTop: 2 }}>
               {arrTime}
               {f.arr_next_day && (
