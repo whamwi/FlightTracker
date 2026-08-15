@@ -78,102 +78,122 @@ export async function GET(req: Request) {
     }
   }
 
-  // ── 2. Load yesterday's cache for Syrian airports ──────────────────────────
-  const cacheRes = await fetch(
-    `${SB_URL}/rest/v1/fr24_daily_cache` +
+  // ── 2. Load yesterday's flights for Syrian airports ────────────────────────
+  /*
+   * `flight`, not fr24_daily_cache.
+   *
+   * The cache is filled only by whoever opens /fr24 in a browser — cron/fr24-sync was never in
+   * vercel.json and was removed on 15 Aug — so a route that operated on a quiet night was
+   * invisible here, and reconciliation was as complete as yesterday's audience happened to be.
+   * `flight` is written by the harvester on its own schedule and holds one row per leg.
+   *
+   * The comparison below is unchanged. Only the source and the field shapes differ: the cache
+   * carried per-airport JSONB arrays with unix seconds, `flight` carries timestamps, so the two
+   * schedule times are converted back to unix and everything downstream reads the same.
+   */
+  const syrianList = SYRIAN_AIRPORTS.join(',')
+  const flightRes = await fetch(
+    `${SB_URL}/rest/v1/flight` +
     `?flight_date=eq.${targetDate}` +
-    `&airport_iata=in.(${SYRIAN_AIRPORTS.join(',')})` +
-    `&select=airport_iata,arrivals,departures`,
+    `&or=(dep_iata.in.(${syrianList}),arr_iata.in.(${syrianList}))` +
+    `&select=iata_number,callsign,dep_iata,arr_iata,sched_dep,sched_arr,duration_min`,
     { headers: HEADERS }
   )
-  if (!cacheRes.ok) {
-    return NextResponse.json({ ok: false, error: `cache fetch failed: ${cacheRes.status}` }, { status: 502 })
+  if (!flightRes.ok) {
+    return NextResponse.json({ ok: false, error: `flight fetch failed: ${flightRes.status}` }, { status: 502 })
   }
-  const cacheRows: RouteRow[] = await cacheRes.json()
+  const flightRows: RouteRow[] = await flightRes.json()
 
-  // ── 3. Compare each cache flight against route_master ──────────────────────
+  // ── 3. Compare each flight against route_master ────────────────────────────
   const toInsert: object[] = []
   const seen = new Set<string>()
 
-  for (const row of cacheRows) {
-    const ap = row.airport_iata as string
+  for (const f of flightRows) {
+    const dep = (f.dep_iata ?? '').trim()
+    const arr = (f.arr_iata ?? '').trim()
+    const depMs = Date.parse(f.sched_dep ?? '')
+    if (!dep || !arr || !Number.isFinite(depMs)) continue
+    if (!SYRIAN_AIRPORTS.includes(dep) && !SYRIAN_AIRPORTS.includes(arr)) continue
 
-    const flights: RouteRow[] = [
-      ...(row.arrivals   ?? []).map((f: RouteRow) => ({ ...f, arr_iata: f.arr_iata || ap })),
-      ...(row.departures ?? []).map((f: RouteRow) => ({ ...f, dep_iata: f.dep_iata || ap })),
-    ]
+    /*
+     * Either identifier will match. route_master is indexed above under both the IATA number and
+     * the broadcast callsign, and which one a route is filed under varies by carrier — the same
+     * XH744 / FYC744 split that has caused silent misses all week. Whichever finds candidates
+     * wins; the unfiled row is still written under the IATA number, as it always was.
+     */
+    const num = (f.iata_number ?? '').trim()
+    const cs  = (f.callsign ?? '').trim()
+    if (!num && !cs) continue
 
-    for (const f of flights) {
-      const num = (f.num ?? '').trim()
-      const dep = (f.dep_iata ?? '').trim()
-      const arr = (f.arr_iata ?? '').trim()
-      if (!num || !dep || !arr || !f.sched_dep) continue
-      if (!SYRIAN_AIRPORTS.includes(dep) && !SYRIAN_AIRPORTS.includes(arr)) continue
+    // `flight` holds one row per leg, so the cross-airport duplicate the cache produced cannot
+    // occur — the guard stays because it costs nothing and the key is still meaningful.
+    const dedupeKey = `${num || cs}|${dep}|${arr}|${targetDate}`
+    if (seen.has(dedupeKey)) continue
+    seen.add(dedupeKey)
 
-      // Deduplicate: same flight can appear in both the Syrian arrival and
-      // the origin airport's departure cache on the same date.
-      const dedupeKey = `${num}|${dep}|${arr}|${targetDate}`
-      if (seen.has(dedupeKey)) continue
-      seen.add(dedupeKey)
+    const sched_dep = Math.floor(depMs / 1000)
+    const arrMs     = Date.parse(f.sched_arr ?? '')
+    const sched_arr = Number.isFinite(arrMs) ? Math.floor(arrMs / 1000) : null
 
-      const cacheDep  = unixToUtcHHMM(f.sched_dep)
-      const cacheArr  = f.sched_arr ? unixToUtcHHMM(f.sched_arr) : null
-      const cacheDur  = f.duration_min ?? null
-      const dow       = unixToSyriaDow(f.sched_dep)
+    const cacheDep  = unixToUtcHHMM(sched_dep)
+    const cacheArr  = sched_arr ? unixToUtcHHMM(sched_arr) : null
+    const cacheDur  = f.duration_min ?? null
+    const dow       = unixToSyriaDow(sched_dep)
 
-      const candidates = rmByKey.get(`${num}|${dep}|${arr}|${dow}`) ?? []
+    const candidates = (num ? rmByKey.get(`${num}|${dep}|${arr}|${dow}`) : undefined)
+                    ?? (cs  ? rmByKey.get(`${cs}|${dep}|${arr}|${dow}`)  : undefined)
+                    ?? []
 
-      if (candidates.length === 0) {
-        toInsert.push({
-          flight_date:     targetDate,
-          iata_number:     num,
-          dep_iata:        dep,
-          arr_iata:        arr,
-          sched_dep_utc:   cacheDep,
-          sched_arr_utc:   cacheArr,
-          duration_min:    cacheDur,
-          day_of_week:     dow,
-          route_master_id: null,
-          rm_dep_time_utc: null,
-          rm_arr_time_utc: null,
-          diff_minutes:    null,
-          reason:          'new_route',
-        })
-        continue
-      }
+    if (candidates.length === 0) {
+      toInsert.push({
+        flight_date:     targetDate,
+        iata_number:     num,
+        dep_iata:        dep,
+        arr_iata:        arr,
+        sched_dep_utc:   cacheDep,
+        sched_arr_utc:   cacheArr,
+        duration_min:    cacheDur,
+        day_of_week:     dow,
+        route_master_id: null,
+        rm_dep_time_utc: null,
+        rm_arr_time_utc: null,
+        diff_minutes:    null,
+        reason:          'new_route',
+      })
+      continue
+    }
 
-      // Find the best-matching route_master row (smallest dep-time difference)
-      const cacheDepMin = hhmmToMin(cacheDep)
-      let best: RouteRow = candidates[0]
-      let bestDiff = Infinity
-      for (const c of candidates) {
-        if (!c.dep_time_utc) continue
-        const rmMin = hhmmToMin(c.dep_time_utc.slice(0, 5))
-        // Midnight-crossing guard: 23:55 vs 00:05 = 10 min, not 1430
-        const diff = Math.min(
-          Math.abs(cacheDepMin - rmMin),
-          1440 - Math.abs(cacheDepMin - rmMin)
-        )
-        if (diff < bestDiff) { bestDiff = diff; best = c }
-      }
+    // Find the best-matching route_master row (smallest dep-time difference)
+    const cacheDepMin = hhmmToMin(cacheDep)
+    let best: RouteRow = candidates[0]
+    let bestDiff = Infinity
+    for (const c of candidates) {
+      if (!c.dep_time_utc) continue
+      const rmMin = hhmmToMin(c.dep_time_utc.slice(0, 5))
+      // Midnight-crossing guard: 23:55 vs 00:05 = 10 min, not 1430
+      const diff = Math.min(
+        Math.abs(cacheDepMin - rmMin),
+        1440 - Math.abs(cacheDepMin - rmMin)
+      )
+      if (diff < bestDiff) { bestDiff = diff; best = c }
+    }
 
-      if (bestDiff > 10) {
-        toInsert.push({
-          flight_date:     targetDate,
-          iata_number:     num,
-          dep_iata:        dep,
-          arr_iata:        arr,
-          sched_dep_utc:   cacheDep,
-          sched_arr_utc:   cacheArr,
-          duration_min:    cacheDur,
-          day_of_week:     dow,
-          route_master_id: best.id,
-          rm_dep_time_utc: best.dep_time_utc?.slice(0, 5) ?? null,
-          rm_arr_time_utc: best.arr_time_utc?.slice(0, 5) ?? null,
-          diff_minutes:    bestDiff,
-          reason:          'time_drift',
-        })
-      }
+    if (bestDiff > 10) {
+      toInsert.push({
+        flight_date:     targetDate,
+        iata_number:     num,
+        dep_iata:        dep,
+        arr_iata:        arr,
+        sched_dep_utc:   cacheDep,
+        sched_arr_utc:   cacheArr,
+        duration_min:    cacheDur,
+        day_of_week:     dow,
+        route_master_id: best.id,
+        rm_dep_time_utc: best.dep_time_utc?.slice(0, 5) ?? null,
+        rm_arr_time_utc: best.arr_time_utc?.slice(0, 5) ?? null,
+        diff_minutes:    bestDiff,
+        reason:          'time_drift',
+      })
     }
   }
 
