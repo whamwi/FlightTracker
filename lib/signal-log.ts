@@ -112,18 +112,33 @@ export async function logSignals(batch: SignalReading[], nowIso: string): Promis
     })
   }
 
-  await Promise.allSettled([
-    fetch(`${SB_URL}/rest/v1/flight_position_log`, {
-      method:  'POST',
-      headers: { ...HEADERS, 'Content-Type': 'application/json', Prefer: 'resolution=ignore-duplicates,return=minimal' },
-      body:    JSON.stringify(positions),
-    }),
-    fetch(`${SB_URL}/rest/v1/flight_signal_log`, {
-      method:  'POST',
-      headers: { ...HEADERS, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' },
-      body:    JSON.stringify([...summaries.values()]),
-    }),
+  /*
+   * Checked, not fire-and-forget — the same rule airspace-poll states for its own write, and for
+   * the same reason. The first version of this used Promise.allSettled and wrote nothing at all
+   * for six minutes after deploy while every surface looked healthy: the cron logged four sweeps
+   * a minute, aircraft_last_seen filled normally, and the only evidence of failure was a table
+   * that stayed empty. A swallowed error here is indistinguishable from an empty sky.
+   */
+  const errors: string[] = []
+  const send = async (table: string, rows: Row[], resolution: string) => {
+    if (rows.length === 0) return
+    try {
+      const res = await fetch(`${SB_URL}/rest/v1/${table}`, {
+        method:  'POST',
+        headers: { ...HEADERS, 'Content-Type': 'application/json', Prefer: `resolution=${resolution},return=minimal` },
+        body:    JSON.stringify(rows),
+      })
+      if (!res.ok) errors.push(`${table} ${res.status}: ${(await res.text()).slice(0, 160)}`)
+    } catch (e) {
+      errors.push(`${table} threw: ${String(e).slice(0, 160)}`)
+    }
+  }
+
+  await Promise.all([
+    send('flight_position_log', positions, 'ignore-duplicates'),
+    send('flight_signal_log', [...summaries.values()], 'merge-duplicates'),
   ])
 
+  if (errors.length) throw new Error(errors.join(' | '))
   return valid.length
 }
