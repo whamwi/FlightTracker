@@ -32,14 +32,19 @@ export default function AirportLegend() {
         padding: '8px 11px 9px',
         boxShadow: '0 2px 10px rgba(0,0,0,0.10)',
         display: 'flex',
-        flexDirection: 'column',
-        gap: 5,
-        // Matches the boxes above it, so the stack reads as one column rather than three widths.
-        minWidth: 132,
+        // One row. The three names are short enough to sit side by side, and a horizontal key
+        // under a picture reads as a caption rather than as a fourth panel in the stack.
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        whiteSpace: 'nowrap',
+        // Right-aligned with the boxes above it rather than stretched to their width: a caption
+        // should be as wide as its content.
+        alignSelf: 'flex-end',
       }}
     >
       {ORDER.map(code => (
-        <div key={code} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+        <div key={code} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           <span
             aria-hidden
             style={{
