@@ -172,12 +172,24 @@ export async function GET(req: Request) {
     byFlight[k].dates.push(r.flight_date)
   }
 
+  /*
+   * The table lists only what is still a problem.
+   *
+   * A flight that flew — late, after its own day closed — is resolved: it operated, the schedule
+   * held, and nothing needs chasing. It stays in the monthly counts, where it is worth knowing how
+   * often that happens, and it comes out of the list, which exists to show what did not happen.
+   *
+   * Mixing them made the list longer than the thing it was reporting on, and a reader counting
+   * rows would have counted a flight that flew as one that did not.
+   */
+  const unresolved = rows.filter(r => r.outcome === 'did_not_operate')
+
   return NextResponse.json({
     ok: true,
     range: { from, to },
     months: Object.values(byMonth).sort((a, b) => b.month.localeCompare(a.month)),
     cancellations:       Object.values(byFlight).filter(f =>  f.ever_flown).sort((a, b) => b.count - a.count),
     unverified_schedule: Object.values(byFlight).filter(f => !f.ever_flown).sort((a, b) => b.count - a.count),
-    rows,
+    rows: unresolved,
   })
 }

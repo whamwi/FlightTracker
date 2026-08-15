@@ -132,7 +132,7 @@ export default async function NoActivityPage() {
             <FlightTable flights={data.unverified_schedule} empty="No unverified routes." />
           </Panel>
 
-          <Panel title="All records" subtitle={`${data.rows.length} in range, newest first.`}>
+          <Panel title="Did not operate" subtitle={`${data.rows.length} in range, newest first. Flights that flew late are counted above, not listed here.`}>
             <table style={{ borderCollapse: 'collapse', width: '100%' }}>
               <thead><tr>
                 <th style={th}>Date</th><th style={th}>Flight</th><th style={th}>Route</th>
