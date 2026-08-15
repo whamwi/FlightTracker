@@ -67,7 +67,6 @@ const STATUS: Record<string, StatusCfg> = {
   Unknown:     { label: 'Unknown',    bg: '#E4E1D2',  text: C.muted,                                            rail: C.border },
 }
 
-
 const LOCAL_LOGOS = AIRLINE_LOGOS
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -892,83 +891,6 @@ export default function BoardPage() {
 
   const loadRef = useRef(load)
   useEffect(() => { loadRef.current = load }, [load])
-
-  const warmFR24Cache = useCallback((airportCode: string, depth = 0) => {
-    const TZ = 'Asia/Damascus'
-    const flightDate = new Date().toLocaleDateString('en-CA', { timeZone: TZ })
-    const ts = Math.floor(new Date(flightDate + 'T00:00:00+03:00').getTime() / 1000)
-    const url = `https://api.flightradar24.com/common/v1/airport.json?code=${airportCode}&plugin=&plugin-setting[schedule][mode]=&plugin-setting[schedule][timestamp]=${ts}&page=1&limit=100&fleet=&token=`
-    const fr24abort = new AbortController()
-    const fr24timeout = setTimeout(() => fr24abort.abort(), 8_000)
-    fetch(url, { signal: fr24abort.signal })
-      .then(r => { clearTimeout(fr24timeout); return r.ok ? r.json() : null })
-      .then(data => {
-        if (!data) return
-        const sched = data?.result?.response?.airport?.pluginData?.schedule ?? {}
-        const REG_TO_FLIGHT: Record<string, string> = { 'YK-BAA': 'FYC728' }
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const normFlight = (f: any) => {
-          const fl = f?.flight
-          if (!fl) return null
-          const reg = fl.aircraft?.registration ?? null
-          const num = fl.identification?.number?.default ?? fl.identification?.callsign ?? (reg ? REG_TO_FLIGHT[reg] : null) ?? reg ?? null
-          const schedDep = fl.time?.scheduled?.departure ?? null
-          const schedArr = fl.time?.scheduled?.arrival   ?? null
-          if (!schedDep || !schedArr) return null
-          const flight = { num, fr24_id: fl.identification?.id ?? null, airline: fl.airline?.name ?? null, airline_iata: fl.airline?.code?.iata ?? null, dep_iata: fl.airport?.origin?.code?.iata ?? null, arr_iata: fl.airport?.destination?.code?.iata ?? null, sched_dep: schedDep, sched_arr: schedArr, duration_min: Math.round((schedArr - schedDep) / 60), status: fl.status?.text ?? null, est_dep: fl.time?.estimated?.departure ?? null, est_arr: fl.time?.estimated?.arrival ?? null, real_dep: fl.time?.real?.departure ?? null, real_arr: fl.time?.real?.arrival ?? null, aircraft: fl.aircraft?.model?.code ?? null, reg, dep_terminal: fl.airport?.origin?.info?.terminal ?? null, dep_gate: fl.airport?.origin?.info?.gate ?? null, arr_terminal: fl.airport?.destination?.info?.terminal ?? null, arr_gate: fl.airport?.destination?.info?.gate ?? null, arr_baggage: fl.airport?.destination?.info?.baggage ?? null }
-          if (flight.duration_min > 300) return null
-          return flight
-        }
-        const byDate: Record<string, { arrivals: object[]; departures: object[] }> = {}
-        const bucket = (d: string) => { if (!byDate[d]) byDate[d] = { arrivals: [], departures: [] }; return byDate[d] }
-        for (const f of (sched.departures?.data ?? [])) {
-          const flight = normFlight(f); if (!flight) continue
-          bucket(new Date(flight.sched_dep * 1000).toLocaleDateString('en-CA', { timeZone: TZ })).departures.push(flight)
-        }
-        for (const f of (sched.arrivals?.data ?? [])) {
-          const flight = normFlight(f); if (!flight) continue
-          bucket(new Date(flight.sched_arr * 1000).toLocaleDateString('en-CA', { timeZone: TZ })).arrivals.push(flight)
-        }
-        const writes = Object.entries(byDate).map(([d, v]) =>
-          fetch('/api/fr24-cache', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ airport_iata: airportCode, flight_date: d, ...v }) }).catch(() => {})
-        )
-        if (depth === 0) {
-          Promise.all(writes).then(() => loadRef.current(0, true)).catch(() => {})
-        }
-        /*
-         * DISABLED 9 Aug 2026 — trial. Restore by uncommenting; nothing else changed.
-         *
-         * This fanned out to every non-Syrian origin in the arrivals list and fetched its
-         * widget too — about 21 extra airports, ~25 requests to FR24 every five minutes from
-         * every open tab, on an audience that is 72% mobile.
-         *
-         * What it bought, measured on 9 Aug:
-         *   departure times   nothing. FR24's airport board carries both ends, so DAM's own
-         *                     arrival row already holds the origin's real_dep — true for all
-         *                     seven flights that had departed that morning.
-         *   departure status  nothing, same reason.
-         *   origin gate       20 of 42 rows filled, and never rendered: the arrivals view
-         *                     draws arr_gate, and the departures view draws flights leaving
-         *                     Damascus, whose gate comes from Damascus.
-         *   busy origins      worse than nothing — DXB's cached day stopped at 03:55 and held
-         *                     no Syria-bound departure at all, though XH728 leaves at 19:00.
-         *
-         * Left commented rather than deleted because one morning is one morning: if a carrier
-         * turns up whose destination row lacks real_dep while its origin's board has it, this
-         * is the thing to put back.
-         *
-         * if (depth === 0) {
-         *   const origins = new Set<string>()
-         *   for (const f of (sched.arrivals?.data ?? [])) {
-         *     const dep = (f as any)?.flight?.airport?.origin?.code?.iata
-         *     if (dep && dep !== airportCode) origins.add(dep as string)
-         *   }
-         *   origins.forEach(origin => warmFR24Cache(origin, 1))
-         * }
-         */
-      })
-      .catch(() => {})
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   /*
    * The live layer, on its own 30s clock.

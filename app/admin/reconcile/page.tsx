@@ -285,7 +285,7 @@ export default function ReconcilePage() {
     <div style={s.page}>
       <h1 style={s.h1}>Schedule Reconciliation</h1>
       <p style={s.sub}>
-        Flights from <code>fr24_daily_cache</code> that differ from <code>route_master</code>.
+        Flights from <code>flight</code> that differ from <code>route_master</code>.
         Review daily before automating any updates.
       </p>
 

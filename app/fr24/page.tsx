@@ -24,116 +24,6 @@ const REG_TO_FLIGHT: Record<string, string> = {
   'YK-BAA': 'FYC728',
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-// Returns flights bucketed by their actual operating date in Syria time.
-// Departures are keyed by sched_dep, arrivals by sched_arr — so overnight
-// flights (depart Jul 24, arrive DAM Jul 25) land in the correct date bucket,
-// and next-day flights visible in the widget are saved to their own date.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function normalizeForCache(data: any): Record<string, { arrivals: object[]; departures: object[] }> {
-  const sched = data?.result?.response?.airport?.pluginData?.schedule ?? {}
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const normFlight = (f: any, dir: 'arrivals' | 'departures') => {
-    const fl = f?.flight
-    if (!fl) return null
-    const reg      = fl.aircraft?.registration ?? null
-    const num      = fl.identification?.number?.default ?? fl.identification?.callsign ?? (reg ? REG_TO_FLIGHT[reg] : null) ?? reg ?? null
-    const schedDep = fl.time?.scheduled?.departure ?? null
-    const schedArr = fl.time?.scheduled?.arrival   ?? null
-    // For completed/landed flights FR24 may omit the origin-side scheduled time.
-    // Only require the time relevant to the direction we're processing.
-    if (dir === 'arrivals'   && !schedArr) return null
-    if (dir === 'departures' && !schedDep) return null
-    // fl.flight_time is in seconds; convert to minutes for the fallback case
-    const durationMin = (schedDep && schedArr)
-      ? Math.round((schedArr - schedDep) / 60)
-      : Math.round((fl.flight_time ?? 0) / 60)
-    const flight = {
-      num,
-      fr24_id:      fl.identification?.id ?? null,
-      airline:      fl.airline?.name ?? null,
-      airline_iata: fl.airline?.code?.iata ?? null,
-      dep_iata:     fl.airport?.origin?.code?.iata ?? null,
-      arr_iata:     fl.airport?.destination?.code?.iata ?? null,
-      sched_dep:    schedDep,
-      sched_arr:    schedArr,
-      duration_min: durationMin,
-      status:       fl.status?.text ?? null,
-      est_dep:      fl.time?.estimated?.departure ?? null,
-      est_arr:      fl.time?.estimated?.arrival   ?? null,
-      real_dep:     fl.time?.real?.departure      ?? null,
-      real_arr:     fl.time?.real?.arrival        ?? null,
-      aircraft:     fl.aircraft?.model?.code      ?? null,
-      reg:          fl.aircraft?.registration     ?? null,
-      dep_terminal: fl.airport?.origin?.info?.terminal      ?? null,
-      dep_gate:     fl.airport?.origin?.info?.gate          ?? null,
-      arr_terminal: fl.airport?.destination?.info?.terminal ?? null,
-      arr_gate:     fl.airport?.destination?.info?.gate     ?? null,
-      arr_baggage:  fl.airport?.destination?.info?.baggage  ?? null,
-    }
-    // Drop FR24 widget artifacts: corrupted entries have an inflated block time
-    // (> 5 hours for any Syrian-region route is always a bad sched_arr timestamp).
-    // Skip this check for landed flights — schedDep may carry a wrong previous-leg
-    // timestamp, but real_arr confirms the flight is genuine.
-    if (durationMin > 300 && !flight.real_arr) return null
-    return flight
-  }
-
-  const statusPriority = (s: string | null): number => {
-    const t = (s ?? '').toLowerCase()
-    if (t.includes('landed') || t.includes('arrived')) return 8
-    if (t.includes('approach'))                         return 7
-    if (t.includes('en route') || t.includes('in flight')) return 6
-    if (t.includes('departed') || t.includes('took off')) return 5
-    if (t.startsWith('delayed'))                        return 4
-    if (t.startsWith('estimated') || t.startsWith('expect')) return 3
-    if (t === 'scheduled' || t === 'scheduled*')        return 1
-    return 0
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const byDate: Record<string, { arrivals: any[]; departures: any[] }> = {}
-  const bucket = (date: string) => {
-    if (!byDate[date]) byDate[date] = { arrivals: [], departures: [] }
-    return byDate[date]
-  }
-
-  // Upsert a flight into a list by (num|dep_iata|arr_iata) key.
-  // When FR24 shows two entries for the same flight (e.g. "Scheduled*" + "Landed HH:MM"),
-  // keep only the one with the higher-priority status so the cache stays deduplicated.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const upsert = (list: any[], flight: any, keyFields: string[]) => {
-    const key = keyFields.map(k => flight[k] ?? '').join('|')
-    const idx = list.findIndex(e => keyFields.map(k => e[k] ?? '').join('|') === key)
-    if (idx >= 0) {
-      if (statusPriority(flight.status) > statusPriority(list[idx].status)) {
-        list[idx] = flight
-      }
-    } else {
-      list.push(flight)
-    }
-  }
-
-  for (const f of (sched.departures?.data ?? [])) {
-    const flight = normFlight(f, 'departures')
-    if (!flight) continue
-    const date = new Date(flight.sched_dep! * 1000).toLocaleDateString('en-CA', { timeZone: TZ })
-    // For departures: key by destination (origin is always this airport).
-    upsert(bucket(date).departures, flight, ['num', 'dep_iata', 'arr_iata'])
-  }
-  for (const f of (sched.arrivals?.data ?? [])) {
-    const flight = normFlight(f, 'arrivals')
-    if (!flight) continue
-    const date = new Date(flight.sched_arr! * 1000).toLocaleDateString('en-CA', { timeZone: TZ })
-    // For arrivals: key by origin only — FR24 clears arr_iata on landed entries
-    // so Scheduled* (arr_iata="DAM") and Landed (arr_iata=null) share the same key.
-    upsert(bucket(date).arrivals, flight, ['num', 'dep_iata'])
-  }
-
-  return byDate
-}
-
 function statusClass(text: string): string {
   const t = (text || '').toLowerCase()
   if (t === 'scheduled') return 'text-gray-500'
@@ -204,13 +94,11 @@ export default function Fr24DumpPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [updatedAt, setUpdatedAt] = useState<string | null>(null)
-  const [saved, setSaved] = useState<string | null>(null)
 
   const load = useCallback(async (ap: string, force = false) => {
     if (!force && cache[ap]) return
     setLoading(true)
     setError(null)
-    setSaved(null)
     try {
       const now = new Date()
       const flightDate = now.toLocaleDateString('en-CA', { timeZone: TZ })  // YYYY-MM-DD
@@ -223,25 +111,19 @@ export default function Fr24DumpPage() {
       setCache(prev => ({ ...prev, [ap]: data }))
       setUpdatedAt(new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }))
 
-      // Write-through: persist to DB bucketed by actual flight date.
-      // One POST per date — covers overnight flights and next-day scheduled entries.
-      const byDate = normalizeForCache(data)
-      const dates = Object.keys(byDate)
-      Promise.all(dates.map(date =>
-        fetch('/api/fr24-cache', {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({
-            airport_iata: ap,
-            flight_date:  date,
-            arrivals:     byDate[date].arrivals,
-            departures:   byDate[date].departures,
-          }),
-        }).then(r => r.json())
-      )).then(results => {
-        const saved = results.filter(j => j.ok)
-        if (saved.length) setSaved(`Saved ${dates.join(', ')}`)
-      }).catch(() => {/* silent */})
+      /*
+       * Read-only as of 15 Aug 2026. This page fetches FR24 and shows it; it no longer writes.
+       *
+       * It used to persist every load into fr24_daily_cache, bucketed by flight date — the "✓
+       * Saved" line under the header. That made the site's board partly a function of who had
+       * opened this page and when: the table's freshest row one morning was three hours old and
+       * Deir ez-Zor's was fifteen, because nothing else filled it.
+       *
+       * Every consumer now reads `flight`, kept current by the harvester, so writing here would
+       * only feed a table nothing reads. The page keeps its purpose — looking at what FR24 says
+       * about an airport right now, which is exactly what it is useful for when the board and the
+       * widget disagree.
+       */
     } catch (e) {
       setError(String(e))
     } finally {
@@ -291,7 +173,6 @@ export default function Fr24DumpPage() {
         <div className="ml-auto flex items-center gap-3 text-xs text-gray-500">
           {total > 0 && <span>{total} flights</span>}
           {updatedAt && <span>updated {updatedAt}</span>}
-          {saved && <span className="text-green-500">✓ {saved}</span>}
           <button
             onClick={() => load(airport, true)}
             className="border border-gray-700 px-2 py-1 rounded hover:border-blue-500 hover:text-blue-400 transition-colors"
