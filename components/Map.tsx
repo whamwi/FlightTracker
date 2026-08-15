@@ -1440,28 +1440,26 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
               }
             } else {
               /*
-               * Newer wins, by the fix's own clock. Ground speed used to stand in for freshness
-               * and it is exactly backwards on an approach.
+               * Take the row. No arbitration — there is nothing to arbitrate.
                *
-               * `(a.gs ?? 0) >= (prev.a.gs ?? 0)` accepted a fix only if the aircraft was going at
-               * least as fast as the last time we heard from it. An arriving aircraft slows the
-               * whole way down, so once the cruise fix was stored every later one was refused:
-               * 484 knots, then 400, 300, 137, and the touchdown roll at 20, all discarded. The
-               * snapshot froze at the fastest moment of the flight.
+               * Two heuristics have stood here and both failed the same way, on descent, because
+               * that is the only time these numbers visibly change:
                *
-               * SYR502 on 14 Aug showed what that looks like. Its marker was snapped to Damascus
-               * on final while the popup read "36,025 ft · 484 kt" — a fix from 18:32:33, when it
-               * was 212 km away, printed as the present tense twenty-five minutes later. The
-               * altitude line is guarded against projected and lost flights precisely so it can
-               * never be invented, and here it was measured, current-looking, and half an hour
-               * stale.
+               *   gs >= prev.gs   an arriving aircraft slows, so every fix after the fastest was
+               *                   refused. The snapshot froze at cruise: 484 kt, 36,025 ft, shown
+               *                   as the present tense twenty-five minutes later.
+               *
+               *   newer fix_at    fix_at and seen_at are absent on live rows — measured 3 of 3 —
+               *                   so a fresh fix scores 0 and loses to any stored timestamp. Same
+               *                   freeze, different arithmetic. That one was mine, and it shipped
+               *                   as the fix for the first.
+               *
+               * The premise was wrong both times. The airspace route already emits one position
+               * per callsign — measured, no duplicates in a payload — so there is no competing row
+               * to choose between, and the newest response is by definition the best thing we
+               * know. Anything that can reject it can only make the map older than the server.
                */
-              const prev = trackedRef.current[cs]
-              const tNew = Date.parse(a.fix_at ?? a.seen_at ?? '') || 0
-              const tOld = prev ? (Date.parse(prev.a.fix_at ?? prev.a.seen_at ?? '') || 0) : -1
-              if (!prev || prev.lostAt > 0 || tNew >= tOld) {
-                trackedRef.current[cs] = { a, lostAt: 0, isFr24: false }
-              }
+              trackedRef.current[cs] = { a, lostAt: 0, isFr24: false }
               freshCallsigns.add(cs)  // record as seen in this live cycle
             }
           }
