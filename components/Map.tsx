@@ -219,25 +219,6 @@ const ARRIVED_HOLD_MS    = 60 * 60 * 1000
  */
 const FINAL_RING_KM = 10
 
-/**
- * How old a fix may be before the aircraft is treated as no longer reporting.
- *
- * Measured 15 Aug 2026 over 637 observations of 19 aircraft, sampling every aircraft in the feed
- * every fifteen seconds:
- *
- *   fix_age_s   p50 1s · p90 48s · p99 68s · max 113s
- *
- * A healthy feed never reached two minutes. A dying one is unmistakable by contrast — TKJ340's
- * track sat at 218s and climbing while the aircraft descended into Aleppo.
- *
- * 150s sits in the gap: above every healthy observation with a third to spare, and well below the
- * dying signature. The margin is the point, because the cost of being too tight is measured too —
- * every observation up to 120s was followed by a fresh fix, 100% of them, so a two-minute
- * threshold would have blanked flights that were about to report. There is no such evidence above
- * 150s in either direction, which is the honest reason not to cut it finer.
- */
-const STALE_FIX_MS = 150 * 1000
-
 // Flights to and from these are "ours", and decide which half of a leg is worth drawing. From
 // lib/syria-airports rather than spelled out again — this file had its own copy, which is the
 // drift that module exists to stop, and DEZ opening in August is how it gets noticed.
@@ -1625,36 +1606,8 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
                * to choose between, and the newest response is by definition the best thing we
                * know. Anything that can reject it can only make the map older than the server.
                */
-              /*
-               * The row is still the best position we hold, but "we hold a position" and "we are
-               * hearing from this aircraft" are different claims, and this line used to make both.
-               *
-               * The server keeps listing an aircraft after its fixes stop, so lostAt stayed 0 and
-               * the card stayed green — altitude, speed and distance all presented as current from
-               * a fix minutes old. TKJ340 into Aleppo on 15 Aug: last heard 04:42:33 at 16.6 km and
-               * 8,025 ft, dropped by the server at 04:47:50, and for those five minutes and
-               * seventeen seconds the popup showed a live badge over frozen numbers while the
-               * aircraft descended and landed.
-               *
-               * Nothing new is drawn for this case — the projected state already exists and is
-               * already right. Only its trigger moves: from "the server gave up on it" to "the data
-               * stopped arriving", which is the thing a reader actually cares about.
-               *
-               * lostAt is the moment of the last fix, not now, so the dead-reckoning stamp names
-               * when we really lost it. TKJ340's card would have read 7:42 rather than 7:47.
-               */
-              const ageMs = typeof a.fix_age_s === 'number' ? a.fix_age_s * 1000 : 0
-              if (ageMs > STALE_FIX_MS) {
-                const lostFixAt = now - ageMs
-                // Same signal section 2 sends when a callsign drops out, and idempotent per its
-                // own tests — so a flight sitting stale across many polls only starts predicting
-                // once, from the right instant.
-                if (trackedRef.current[cs]?.lostAt === 0) predictorRef.current[cs]?.onSignalLoss(lostFixAt)
-                trackedRef.current[cs] = { a, lostAt: lostFixAt, isFr24: false }
-              } else {
-                trackedRef.current[cs] = { a, lostAt: 0, isFr24: false }
-                freshCallsigns.add(cs)  // record as seen in this live cycle
-              }
+              trackedRef.current[cs] = { a, lostAt: 0, isFr24: false }
+              freshCallsigns.add(cs)  // record as seen in this live cycle
             }
           }
 
