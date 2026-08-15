@@ -210,6 +210,80 @@ def derive_eta(f: dict) -> tuple[str | None, str]:
     return f.get("sched_arr"), "schedule"
 
 
+ETA_WOBBLE_MIN = 3
+"""Wider than the observed wobble, far narrower than any real schedule change."""
+
+# Last ETA published for a flight, so a bounce between two values is not shown as a change.
+# Process-local by design — see stable_eta.
+_ETA_HELD: dict[tuple, str] = {}
+
+
+def eta_key(f: dict) -> tuple:
+    """A flight's identity for the day. The same key the live document dedupes on."""
+    return (f.get("flight_date"), f.get("iata_number"), f.get("dep_iata"), f.get("arr_iata"))
+
+
+def hold_eta(key: tuple, raw: str | None, held: dict[tuple, str]) -> str | None:
+    """
+    The published estimate, held steady against wobble. Pure, so it can be tested.
+
+    The countdown a reader watches is arrival-minus-now, so every revision FR24 publishes moves
+    it — and it revises constantly, often back to a value it has already held. RB515 on 12 Aug
+    bounced between exactly two estimates five times in forty minutes:
+
+        12:28  13:22:08
+        12:29  13:24:16   +2.1
+        12:50  13:22:08   -2.1
+        12:52  13:24:16   +2.1
+        12:58  13:22:08   -2.1
+        12:59  13:24:16   +2.1
+
+    A reader sees "16m left" become "23m left" and back. Two devices polling thirty seconds
+    apart legitimately show numbers seven minutes apart, each correct for the estimate it holds.
+
+    So a new estimate is adopted only when it differs by more than the wobble. A genuine delay
+    still arrives — it moves far more than three minutes — while a bounce nobody chose to publish
+    twice does not reach any screen.
+
+    This lived in the mobile app and only there, so the app damped and the site did not: measured
+    15 Aug on SDR17HL, the site read "3:42 left" and the phone "3 hours 39 minutes" at the same
+    moment. Damping in each client is damping in none — the whole point is that every surface
+    shows one number, and a rule that must hold across surfaces belongs to the answer rather than
+    to whoever is rendering it.
+    """
+    if raw is None:
+        held.pop(key, None)
+        return None
+    prev = held.get(key)
+    if prev is None:
+        held[key] = raw
+        return raw
+    a, b = iso(raw), iso(prev)
+    if a is None or b is None or abs((a - b).total_seconds()) >= ETA_WOBBLE_MIN * 60:
+        held[key] = raw
+        return raw
+    return prev
+
+
+def stable_eta(f: dict, raw: str | None) -> str | None:
+    """
+    hold_eta against process-local state, pruned to the current day.
+
+    Process-local rather than a column, deliberately: every reader of this service shares one
+    process, so they cannot disagree with each other, which is the property being bought. It
+    re-anchors on redeploy — harmless, since re-anchoring means adopting the current estimate,
+    which is what would have been shown anyway — and it assumes a single instance. If this ever
+    runs replicated, two readers could hold different anchors and this must move to the row.
+    """
+    key = eta_key(f)
+    out = hold_eta(key, raw, _ETA_HELD)
+    if len(_ETA_HELD) > 4000:
+        today = datetime.now(TZ).strftime("%Y-%m-%d")
+        for k in [k for k in _ETA_HELD if k[0] != today]:
+            _ETA_HELD.pop(k, None)
+    return out
+
+
 def derive_delay(f: dict) -> tuple[int | None, str | None]:
     """
     The second axis. On the ground, late is a state — past the slot, not yet departed. Airborne,
@@ -410,6 +484,10 @@ def to_contract(f: dict, al: dict | None, pos: dict | None, board_day) -> dict:
         "arr_confirmed_src": f.get("arr_confirmed_src") if not f.get("real_arr") else None,
         "revised_dep_utc": zulu(revision(f.get("est_dep"), f.get("sched_dep"))),
         "revised_arr_utc": zulu(revision(f.get("est_arr"), f.get("sched_arr"))),
+        # The arrival a countdown should run to, damped once here rather than in each client.
+        # Null before there is an estimate worth the name, exactly like revised_arr_utc — a
+        # flight still on its filed time has nothing to hold steady.
+        "eta_stable_utc": stable_eta(f, zulu(revision(f.get("est_arr"), f.get("sched_arr")))),
         "aircraft_type": f.get("aircraft_type"),
         "aircraft_reg":  f.get("registration") or "",
         "dep_terminal":  terminal(f.get("dep_terminal")),
@@ -549,6 +627,10 @@ async def build_live() -> dict:
             "progress_basis": p_basis,
             "eta_utc": eta,
             "eta_basis": e_basis,
+            # The same instant, held steady against wobble — what every surface should count
+            # down to. eta_utc stays literal so the API goes on telling the truth about what
+            # the feed said; this is the one both clients render.
+            "eta_stable_utc": stable_eta(f, eta),
             "delay_min": delay,
             "delay_basis": d_basis,
             "position": {
