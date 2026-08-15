@@ -14,9 +14,14 @@ import { NextResponse } from 'next/server'
  * timetable on 5 Aug 2026 and had still never flown three days later — left in the same
  * bucket they would quietly inflate the figure twice a week.
  *
- * So each flight number is checked against flight_signal_log: has this callsign ever been
- * seen airborne, on any date? Never seen means the schedule is unverified, and it is reported
- * separately rather than counted as a cancellation.
+ * So each flight number is checked against `flight`: has it ever recorded a real departure, on
+ * any date? Never means the schedule is unverified, and it is reported separately rather than
+ * counted as a cancellation.
+ *
+ * This asked flight_signal_log until 15 Aug, which held one row per callsign per date written by
+ * whichever visitor had the map open. A service that only ever flew while nobody was watching
+ * looked unverified; RB445 was recorded as never having flown on a day `flight` has it departing
+ * at 20:28 and landing at 22:02. The canonical table has no such gap.
  *
  * Under /api/admin, so the existing Basic auth gate covers it.
  */
@@ -64,18 +69,24 @@ export async function GET(req: Request) {
   }
   const rows: Row[] = await res.json()
 
-  // Which callsigns have ever been seen airborne — the test for "this service is real".
+  // Which services have ever actually departed — the test for "this service is real".
   // Every date, not just the reporting window: a route that flew in July is still a real
   // route when it is cancelled in August.
   const sigRes = await fetch(
-    `${SB_URL}/rest/v1/flight_signal_log?airborne_at=not.is.null&select=callsign`,
+    `${SB_URL}/rest/v1/flight?real_dep=not.is.null&select=iata_number,callsign`,
     { headers: HEADERS, cache: 'no-store' },
   )
-  const everAirborne = new Set<string>(
-    sigRes.ok ? (await sigRes.json() as any[]).map(r => r.callsign) : [],
-  )
+  const everFlown = new Set<string>()
+  if (sigRes.ok) {
+    for (const r of (await sigRes.json()) as any[]) {
+      if (r.iata_number) everFlown.add(r.iata_number)
+      if (r.callsign)    everFlown.add(r.callsign)
+    }
+  }
 
-  const hasFlown = (r: Row) => everAirborne.has(r.callsign ?? r.iata_number)
+  // Either identifier will do: the register carries the IATA number and `flight` holds both.
+  const hasFlown = (r: Row) =>
+    everFlown.has(r.iata_number) || (!!r.callsign && everFlown.has(r.callsign))
 
   // Only settled verdicts are counted. A row still open is a flight the day has not finished
   // judging, and including it would move the total every time the page is refreshed.
