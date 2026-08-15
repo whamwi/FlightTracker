@@ -751,8 +751,18 @@ function buildPopup(
    *
    * The same override, for the same wrong reason, scrambled the board's meta strip on 13 Aug.
    */
+  /*
+   * Four pixels of side padding rather than fourteen, so the third value fits on one line.
+   *
+   * "الارتفاع: 24,525 قدم · السرعة: 459 عقدة · المتبقي: 117 كم" is about 275px at this size and the
+   * popup is 300 wide, which left 272 between the old margins — enough for every part except the
+   * last word, so "كم" wrapped alone onto a second line and separated a number from its unit.
+   *
+   * Costs nothing when the line is short: it is centred, so the padding is invisible until the
+   * text is long enough to need the room, which is exactly when it should give it up.
+   */
   const liveLine = liveDetail
-    ? `<div style="color:#9ca3af;font-size:10.5px;padding:3px 14px 7px;text-align:center">${liveDetail}</div>`
+    ? `<div style="color:#9ca3af;font-size:10.5px;padding:3px 4px 7px;text-align:center">${liveDetail}</div>`
     : ''
   const photoHtml = photoUrl
     ? `<img src="${photoUrl}" style="width:100%;height:110px;object-fit:cover;display:block">`
