@@ -1,7 +1,7 @@
 import { NextResponse, after } from 'next/server'
 import { sweepAllCircles } from '@/lib/adsb-feed'
 import { fetchIataToIcao, fetchCallsignLookup, resolveCallsign, type CallsignLookup } from '@/lib/callsign'
-import { SYRIA_AIRPORT_SET, SYRIA_AIRPORTS_CSV } from '@/lib/syria-airports'
+import { SYRIA_AIRPORT_SET } from '@/lib/syria-airports'
 import { rankInstance } from '@/lib/flight-status'
 import { inSyria } from '@/lib/syria-airspace'
 
@@ -139,9 +139,9 @@ function extractRevisedArrUtc(status: string, date: string): string | null {
   return extractStatusUtc(status, ['estimated', 'expect', 'delayed'], date)
 }
 
-// ── Board flights (fr24_daily_cache, Syria op date = UTC+3, 60s cache) ────────
+// ── Board flights (from v2, Syria op date = UTC+3, 60s cache) ─────────────────
 interface BoardFlight {
-  num:            string        // raw FR24 value — used to match rows back into fr24_daily_cache
+  num:            string        // raw FR24 value, as the board publishes it
   /**
    * The cache date this flight was read from — yesterday, today or tomorrow.
    *
@@ -352,259 +352,25 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>, lookup: Cal
     return v2
   }
 
-  const res = await fetch(
-    `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=in.(${yesterday},${date},${tomorrow})&airport_iata=in.(${SYRIA_AIRPORTS_CSV})&select=airport_iata,flight_date,departures,arrivals`,
-    { headers: SB_HEADERS },
-  )
-  if (!res.ok) return boardCache?.flights ?? []
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows: any[] = await res.json()
-
-  // Today's rows first — ensures today's version of a flight wins the seen-set dedup
-  // and yesterday's / tomorrow's identical entries are skipped.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  rows.sort((a: any, b: any) => (a.flight_date === date ? -1 : 0) - (b.flight_date === date ? -1 : 0))
-
-  // Reverse map: ICAO prefix → IATA (e.g. FYC→XH, THY→TK, FDB→FZ)
-  const icaoToIata: Record<string, string> = {}
-  for (const [iata, icao] of Object.entries(iataToIcao)) icaoToIata[icao] = iata
-
-  const seen    = new Set<string>()
-  const flights: BoardFlight[] = []
-
-  for (const row of rows) {
-    const ap = (row.airport_iata as string) || ''
-    // Use the row's own flight_date for status string parsing so that "Departed HH:MM"
-    // on yesterday's row is stamped on yesterday's date, not today's.
-    const rowDate = (row.flight_date as string) || date
-    for (const section of ['departures', 'arrivals'] as const) {
-      for (const f of (row[section] ?? [])) {
-        const num = (f.num ?? '').toString()
-        if (!num) continue
-        // Cross-midnight filtering for non-today rows.
-        if (row.flight_date !== date) {
-          if (row.flight_date === yesterday) {
-            // Keep only flights still airborne after Syria midnight (sched_arr > tonight's midnight).
-            if (!f.sched_arr || f.sched_arr * 1000 <= syriaMidnightMs) continue
-          } else if (row.flight_date === tomorrow) {
-            // Keep only inbound arrivals at Syrian airports that arrive within the first
-            // 4 hours of tomorrow and haven't landed yet — departed tonight, cross midnight.
-            if (section !== 'arrivals') continue
-            if (!f.sched_arr || f.real_arr) continue
-            const arrMs = (f.sched_arr as number) * 1000
-            if (arrMs < tomorrowMidnightMs || arrMs >= tomorrowMidnightMs + 4 * 60 * 60 * 1000) continue
-          } else {
-            continue  // safety: ignore any unexpected date
-          }
-        }
-        const key = `${num}|${f.sched_dep ?? ''}`
-        if (seen.has(key)) continue
-        seen.add(key)
-        const status         = (f.status ?? '').toLowerCase()
-        const actual_dep_utc = f.real_dep
-          ? new Date(f.real_dep * 1000).toISOString()
-          : extractActualDepUtc(status, rowDate)
-        const raw_actual_arr_utc = f.real_arr
-          ? new Date(f.real_arr * 1000).toISOString()
-          : extractActualArrUtc(status, rowDate)
-        // Discarded when it implies an impossible block time, rather than only being
-        // distrusted for the duration below. Both clients use this field DIRECTLY as the
-        // arrival estimate that drives the tracker's rate — remaining path over remaining
-        // time — so a revised arrival stamped a day late makes the marker crawl and the
-        // aircraft appears to sit near its origin. Sanitising duration_min alone left that
-        // path open: SYR522 read 180 minutes while still carrying a 2026-08-04 ETA.
-        const revised_arr_raw = extractRevisedArrUtc(status, rowDate)
-          ?? (f.est_arr ? new Date(f.est_arr * 1000).toISOString() : null)
-        const revised_arr_utc = (() => {
-          if (!revised_arr_raw || !actual_dep_utc) return revised_arr_raw
-          const depMs = new Date(actual_dep_utc).getTime()
-          const sched = f.duration_min ?? null
-          const implausible = (mins: number) => !(mins > 0
-            && mins <= MAX_BLOCK_MIN
-            && (sched == null || mins <= sched + MAX_DELAY_OVER_SCHED_MIN))
-
-          // Repair the date, do not discard the time.
-          //
-          // The failure is a whole-day offset: RB522's estimate arrived as 2026-08-04T20:35Z,
-          // which is 23:35 in Damascus — the right time on the wrong day, and within two
-          // minutes of the 23:33 the flight board shows. Dropping it lost a good ETA and sent
-          // the map back to departure plus scheduled block, so the popup read 00:14 while the
-          // board read 23:33. Shifting whole days keeps the estimate and its accuracy.
-          let t = new Date(revised_arr_raw).getTime()
-          for (let i = 0; i < 2 && (t - depMs) / 60_000 > MAX_BLOCK_MIN; i++) t -= 86_400_000
-          for (let i = 0; i < 2 && t <= depMs; i++) t += 86_400_000
-
-          const mins = Math.round((t - depMs) / 60_000)
-          if (!implausible(mins)) {
-            if (t !== new Date(revised_arr_raw).getTime()) {
-              console.warn(`[airspace] ${num}: revised arrival re-dated ${revised_arr_raw} → ${new Date(t).toISOString()} (${mins}min after departure)`)
-            }
-            return new Date(t).toISOString()
-          }
-          console.warn(`[airspace] ${num}: discarding revised arrival ${revised_arr_raw} — implies ${mins}min (sched ${sched})`)
-          return null
-        })()
-        // Prefer computed duration (actual_dep → revised_arr) over stale scheduled block time.
-        const effectiveDurationMin = (() => {
-          const sched = f.duration_min ?? null
-          if (actual_dep_utc && revised_arr_utc) {
-            const c = Math.round(
-              (new Date(revised_arr_utc).getTime() - new Date(actual_dep_utc).getTime()) / 60_000
-            )
-            // The lower bound alone was not enough. A revised arrival stamped with the wrong
-            // DATE lands exactly 1440 minutes out and was believed: SYR522 DOH-DAM came
-            // through as a 1578-minute block against a scheduled 180, which put its ETA a day
-            // away. Every consumer derives from this — the path tracker's rate is remaining
-            // path over remaining time, so the marker crawled while the aircraft flew, and
-            // drift grew without limit.
-            //
-            // Nothing on this network is close to 12 hours, and a real en-route delay does
-            // not add four. Either bound catches the day-wrap; both are cheap.
-            const plausible = c > 30
-              && c <= MAX_BLOCK_MIN
-              && (sched == null || c <= sched + MAX_DELAY_OVER_SCHED_MIN)
-            if (plausible) return c
-            console.warn(`[airspace] ${num}: implausible revised block ${c}min (sched ${sched}) — using schedule`)
-          }
-          return sched
-        })()
-        // Infer actual arrival when dep is confirmed + expected arr time is in the past.
-        // When FR24 has its own ETA (revised_arr_utc), trust it — use a tight 15-min window.
-        // Without an FR24 ETA we're working from the scheduled block time; use 90 min so a
-        // delayed flight on final approach isn't prematurely marked as arrived and snapped to
-        // the destination airport on the map while still airborne.
-        const actual_arr_utc = raw_actual_arr_utc ?? (() => {
-          if (!actual_dep_utc || !effectiveDurationMin || effectiveDurationMin <= 0) return null
-          const expectedMs  = new Date(actual_dep_utc).getTime() + effectiveDurationMin * 60_000
-          const thresholdMs = revised_arr_utc ? 15 * 60_000 : 90 * 60_000
-          return expectedMs < Date.now() - thresholdMs ? new Date(expectedMs).toISOString() : null
-        })()
-        const schedDepMs   = f.sched_dep ? f.sched_dep * 1000 : null
-        const actualDepMs  = actual_dep_utc ? new Date(actual_dep_utc).getTime() : null
-        /*
-         * Bounded only against a day wrap, not against being very late.
-         *
-         * This was briefly capped at four hours, which was wrong: real delays on this network
-         * go well past it. RB516 ran 296 minutes late on 5 Aug and FYC781's Thursday
-         * Damascus–Muscat left 424 minutes late, departing 04:14 the following morning — both
-         * true, and the four-hour cap hid the second one.
-         *
-         * Twelve hours is the point at which a difference is more plausibly a date error than
-         * a delay, which is the only thing worth rejecting here. Same reasoning as the block
-         * time bound above, added after SYR522 came through 1440 minutes out.
-         */
-        const rawDelay = (schedDepMs && actualDepMs)
-          ? Math.round((actualDepMs - schedDepMs) / 60_000)
-          : null
-        const dep_delay_min = rawDelay !== null && Math.abs(rawDelay) > MAX_BLOCK_MIN
-          ? null
-          : rawDelay
-        const callsignCs   = resolveCallsign(num, lookup, iataToIcao)
-        const icaoPrefix   = callsignCs.replace(/\d/g, '')
-        // FR24 cache omits the implicit airport — fill dep_iata for departures
-        // and arr_iata for arrivals from the row's airport_iata.
-        flights.push({
-          num,
-          flight_date:    rowDate,
-          iata_num:       lookup.toIata[num.toUpperCase()] ?? num,
-          callsign:       callsignCs,
-          dep_iata:       f.dep_iata || (section === 'departures' ? ap : null) || null,
-          arr_iata:       f.arr_iata || (section === 'arrivals'   ? ap : null) || null,
-          sched_dep:      f.sched_dep    ?? null,
-          sched_arr:      f.sched_arr    ?? null,
-          duration_min:   effectiveDurationMin,
-          status,
-          actual_dep_utc,
-          actual_arr_utc,
-          revised_arr_utc,
-          dep_delay_min,
-          airline_iata:   icaoToIata[icaoPrefix] ?? null,
-          reg:            f.reg      || null,
-          aircraft_type:  f.aircraft || null,
-        })
-      }
-    }
-  }
-
-  // ── Second pass: the other end of each flight ──────────────────────────────
-  //
-  // Everything above comes from DAM, ALP and LTK only, which is why the map disagreed with
-  // the flight board about G9375: Damascus still read "Delayed 14:44" while Sharjah had
-  // recorded the landing at 09:57:48, twelve seconds from the truth VariFlight confirmed.
-  // The board reads origin airports in its own second pass; the map never did, so it went on
-  // predicting an aircraft that had been on stand for an hour.
-  //
-  // Both directions, not just origins. For an arrival into Syria the origin's departures row
-  // is the counterpart; for a departure out of Syria it is the destination's arrivals row —
-  // and that is the row that knows when it landed. Airports elsewhere are also better
-  // instrumented than ours, so their estimates tend to be fresher too.
-  //
-  // Fills gaps only. Where both ends report something, the first pass keeps its value: this
-  // exists to supply what Syria does not know, not to arbitrate between two sources that
-  // disagree, which today's evidence says cannot be done by preferring one airport.
-  const counterparts = new Set<string>()
-  // Keyed like the first pass, on number AND scheduled departure. The cache spans three
-  // dates, and a flight number repeats daily: keyed on the number alone, yesterday's Sharjah
-  // row matched today's leg and handed ABY375 an arrival from the day before. sched_dep is a
-  // unix instant, so both ends of the same leg agree on it.
-  const byNum = new Map<string, BoardFlight>()
-  for (const f of flights) {
-    const k = `${f.num}|${f.sched_dep ?? ''}`
-    if (!byNum.has(k)) byNum.set(k, f)
-    const dep = f.dep_iata ?? '', arr = f.arr_iata ?? ''
-    const other = SYRIA_AIRPORTS.has(arr) ? dep : SYRIA_AIRPORTS.has(dep) ? arr : ''
-    if (other && !SYRIA_AIRPORTS.has(other)) counterparts.add(other)
-  }
-
-  if (counterparts.size) {
-    const codes = [...counterparts].join(',')
-    const res2 = await fetch(
-      `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=in.(${yesterday},${date},${tomorrow})&airport_iata=in.(${codes})&select=airport_iata,flight_date,departures,arrivals`,
-      { headers: SB_HEADERS },
-    )
-    if (res2.ok) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const rows2: any[] = await res2.json()
-      let filled = 0
-      for (const row of rows2) {
-        const rowDate = (row.flight_date as string) || date
-        for (const section of ['departures', 'arrivals'] as const) {
-          for (const f of (row[section] ?? [])) {
-            const num = (f.num ?? '').toString()
-            const hit = num && byNum.get(`${num}|${f.sched_dep ?? ''}`)
-            if (!hit) continue
-            const st = (f.status ?? '').toLowerCase()
-
-            if (!hit.actual_arr_utc) {
-              const arr = f.real_arr
-                ? new Date(f.real_arr * 1000).toISOString()
-                : extractActualArrUtc(st, rowDate)
-              // An arrival before its own departure belongs to another leg. The key should
-              // already prevent that; this catches it when a row carries no sched_dep to key
-              // on, which is how yesterday's landing reached today's flight.
-              const sane = arr && hit.actual_dep_utc
-                ? Date.parse(arr) > Date.parse(hit.actual_dep_utc)
-                : !!arr
-              if (arr && sane) { hit.actual_arr_utc = arr; filled++ }
-            }
-            if (!hit.actual_dep_utc) {
-              const dep = f.real_dep
-                ? new Date(f.real_dep * 1000).toISOString()
-                : extractActualDepUtc(st, rowDate)
-              if (dep) hit.actual_dep_utc = dep
-            }
-            if (!hit.revised_arr_utc && f.est_arr) {
-              hit.revised_arr_utc = new Date(f.est_arr * 1000).toISOString()
-            }
-          }
-        }
-      }
-      if (filled) console.log(`[airspace] second pass supplied ${filled} arrival(s) Syria had not recorded`)
-    }
-  }
-
-  boardCache = { flights, date, ts: Date.now() }
-  return flights
+  /*
+   * No fallback to fr24_daily_cache.
+   *
+   * There was one: when v2 could not answer, this parsed three days of the cache into the same
+   * board shape. It went on 15 Aug, with the cache itself, and removing it was the point rather
+   * than a side effect — a fallback onto a table nobody writes fails quietly, which is worse than
+   * failing visibly. The last thing that filled it server-side (cron/fr24-sync) had never run, so
+   * the fallback would have served data that aged without any surface saying so.
+   *
+   * What a reader sees when v2 is down: aircraft still draw, from the sweep and from
+   * fr24_live_position, but without identity — no flight number, no route, no status. That is the
+   * honest rendering of "we cannot reach the board", and the caller already treats an empty board
+   * as a degraded state rather than an empty sky.
+   *
+   * The last good board is served first, so a brief blip costs nothing; only a sustained outage
+   * empties it.
+   */
+  console.error('[airspace] v2 board unavailable — serving last known board, no cache fallback')
+  return boardCache?.flights ?? []
 }
 
 // The per-callsign and per-hex adsb.fi lookups that used to live here are gone.
