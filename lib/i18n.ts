@@ -220,8 +220,10 @@ const en: Dict = {
    * gone. ABY433 on 15 Aug read "2,500 ft · 134 kt" fifteen seconds before touchdown; both numbers
    * were true when measured and neither was true when read.
    *
-   * Third person, matching map.arriving_soon directly above it rather than the first person, so
-   * the two phrases a reader meets seconds apart are in the same voice.
+   * First person — نقترب, not يقترب — which is the product's own voice speaking to the reader
+   * rather than a status printed about the aircraft. It sits next to map.arriving_soon, which is
+   * third person, and the reader chose the mismatch deliberately: this is the one moment the map
+   * stops reporting and starts telling you what is about to happen.
    */
   'map.approaching_runway': 'Approaching runway',
   'map.arriving_soon': 'Arriving soon',
@@ -456,7 +458,7 @@ const ar: Dict = {
   'map.none_arrived':        'لم تصل أي رحلة اليوم بعد',
   'status.in_air':     'في الجو',
   'map.until_arrival': 'على الوصول',
-  'map.approaching_runway': 'يقترب من المدرج',
+  'map.approaching_runway': 'نقترب من المدرج',
   'map.arriving_soon': 'يقترب من الهبوط',
   'map.no_flights':    'لا توجد رحلات في الجو',
   'map.none_currently':'لا توجد رحلات في الجو حالياً',
