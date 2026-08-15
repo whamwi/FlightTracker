@@ -241,6 +241,8 @@ const en: Dict = {
   'map.approaching_runway': 'Approaching runway',
   'map.arriving_soon': 'Arriving soon',
   'map.no_flights':    'No flights in air',
+  // Shown when the tab's JavaScript is older than the deployment serving it.
+  'version.update_available': 'New version — tap to refresh',
   'map.none_currently':'No flights currently in air',
   'map.sorted':        'sorted by arrival',
   'map.authority_photos': 'Authority Photos',
@@ -478,6 +480,7 @@ const ar: Dict = {
   'map.approaching_runway': 'نقترب من المدرج',
   'map.arriving_soon': 'يقترب من الهبوط',
   'map.no_flights':    'لا توجد رحلات في الجو',
+  'version.update_available': 'نسخة جديدة — اضغط للتحديث',
   'map.none_currently':'لا توجد رحلات في الجو حالياً',
   'map.sorted':        'مرتبة حسب الوصول',
   'map.authority_photos': 'صور الهيئة',

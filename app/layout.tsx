@@ -5,6 +5,7 @@ import { LocaleProvider } from '@/components/LocaleProvider'
 import { DEFAULT_LOCALE, alternatesFor, dirOf, isLocale } from '@/lib/i18n'
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
+import VersionCheck from '@/components/VersionCheck'
 
 export const viewport: Viewport = {
   width: 'device-width',
@@ -74,7 +75,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         )}
       </head>
       <body className="bg-gray-950 text-white">
-        <LocaleProvider locale={locale}>{children}</LocaleProvider>
+        <LocaleProvider locale={locale}>{children}<VersionCheck /></LocaleProvider>
         {/*
           Vercel Web Analytics. Cookieless and with no cross-site identifiers, so it needs no
           consent banner and adds nothing to the App Privacy disclosures — which matters with
