@@ -19,6 +19,7 @@ import VideoBox from './VideoBox'
 // once per poll. Set false to fall back to the poll writing positions directly.
 const RAF_MOTION = true
 import PhotoBox from './PhotoBox'
+import AirportLegend from './AirportLegend'
 import { PANEL } from './MapBox'
 import { translate, counted } from '@/lib/i18n'
 import { getActiveLocale, cityFor } from '@/lib/geo-data'
@@ -3128,6 +3129,8 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
           onToggle={setPhotoOpen}
           externalTrigger={isPhone}
         />
+        {/* Directly under the photo box, and only where there is room for it. */}
+        {!isPhone && <AirportLegend />}
         </div>
       )}
       {!embed && isPhone && actionSlot && createPortal(

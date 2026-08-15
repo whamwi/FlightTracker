@@ -20,14 +20,27 @@ export type AirlineRow = {
   country_flag: string | null
 }
 
-// Module-level maps — seeded with critical fallbacks, populated from /api/airports + /api/airlines on load
-export const airportCity: Record<string, string>            = { DAM: 'Damascus', ALP: 'Aleppo' }
-export const airportFlag: Record<string, string>            = { DAM: '🇸🇾', ALP: '🇸🇾' }
+/*
+ * Module-level maps — seeded with critical fallbacks, populated from /api/airports and
+ * /api/airlines on load.
+ *
+ * All four Syrian airports are seeded, not two. The seeds are what every surface reads before the
+ * fetch lands, and DEZ opened on 7 Aug without being added — so anything rendering early fell back
+ * to the raw code, and in Arabic to the English name, because the Arabic maps had no entry either.
+ * The values are copied from the airports table rather than typed from memory.
+ *
+ * This is the third time a private airport list has gone stale behind the shared one. Adding an
+ * airport means checking here as well as lib/syria-airports.
+ */
+export const airportCity: Record<string, string>            = { DAM: 'Damascus', ALP: 'Aleppo', DEZ: 'Deir ez-Zor', LTK: 'Latakia' }
+export const airportFlag: Record<string, string>            = { DAM: '🇸🇾', ALP: '🇸🇾', DEZ: '🇸🇾', LTK: '🇸🇾' }
 export const airportCoords: Record<string, [number, number]> = {
   DAM: [33.4114, 36.5156],
   ALP: [36.1807, 37.2244],
+  DEZ: [35.2854, 40.1760],
+  LTK: [35.4011, 35.9488],
 }
-export const airportOffset: Record<string, number>          = { DAM: 3, ALP: 3 }
+export const airportOffset: Record<string, number>          = { DAM: 3, ALP: 3, DEZ: 3, LTK: 3 }
 /**
  * IANA zone per airport — the thing that actually knows when a clock changes.
  *
@@ -43,8 +56,8 @@ export const airportTimezone: Record<string, string>        = { DAM: 'Asia/Damas
  * at once: a card can be Arabic while a share link or an aria-label stays English. The reader
  * below picks per call.
  */
-export const airportCityAr: Record<string, string> = { DAM: 'دمشق', ALP: 'حلب' }
-export const airportNameAr: Record<string, string> = { DAM: 'مطار دمشق الدولي', ALP: 'مطار حلب الدولي' }
+export const airportCityAr: Record<string, string> = { DAM: 'دمشق', ALP: 'حلب', DEZ: 'دير الزور', LTK: 'اللاذقية' }
+export const airportNameAr: Record<string, string> = { DAM: 'مطار دمشق الدولي', ALP: 'مطار حلب الدولي', DEZ: 'مطار دير الزور', LTK: 'مطار اللاذقية الدولي' }
 
 /**
  * The locale the page is currently rendering in.
