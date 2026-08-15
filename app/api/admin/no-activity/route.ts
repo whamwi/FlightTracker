@@ -3,8 +3,9 @@ import { NextResponse } from 'next/server'
 /**
  * Month-end reckoning of flights that were scheduled and never flew.
  *
- * flight_no_activity records every flight the timetable promised and the day did not deliver.
- * Counting them is only half the answer, because two very different things land in that table:
+ * A flight the timetable promised and the day did not deliver is stamped on its own row in
+ * `flight` — outcome_checked_at says we looked, outcome says what we found. Counting them is
+ * only half the answer, because two very different things end up in that set:
  *
  *   - a real service that was cancelled on the day
  *   - a route_master row for a service that has never operated at all
@@ -36,7 +37,8 @@ const HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 type Row = {
-  id: number
+  // `${flight_date}|${iata_number}` — the register's serial is gone with the register.
+  id: string
   flight_date: string
   iata_number: string
   callsign: string | null
@@ -55,19 +57,60 @@ export async function GET(req: Request) {
   const from  = url.searchParams.get('from') ?? new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10)
   const to    = url.searchParams.get('to')   ?? new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)
 
+  /*
+   * From `flight`, not a register.
+   *
+   * flight_no_activity held a copy of rows `flight` already had, and the two drifted: 13 of its 17
+   * rows said "unknown" in one place and settled in the other, and RB445 was recorded as never
+   * having flown beside a flight row showing its departure and its arrival.
+   *
+   * Everything this page shows is derivable from the flight itself. The one that looked as though
+   * it needed the register is "flew late", which seemed to depend on a snapshot taken at day
+   * close — it does not. Syria closes at 21:00 UTC, so a flight was silent then exactly when it
+   * had no departure by that instant. A comparison, not a thing that had to be recorded at the
+   * time.
+   */
   const res = await fetch(
-    `${SB_URL}/rest/v1/flight_no_activity?flight_date=gte.${from}&flight_date=lte.${to}`
-    + `&select=id,flight_date,iata_number,callsign,dep_iata,arr_iata,sched_dep_utc,outcome,`
-    + `resolved_at,resolved_reason,hours_overdue&order=flight_date.desc`,
+    `${SB_URL}/rest/v1/flight?flight_date=gte.${from}&flight_date=lte.${to}`
+    + `&outcome_checked_at=not.is.null`
+    + `&select=flight_date,iata_number,callsign,dep_iata,arr_iata,sched_dep,real_dep,`
+    + `outcome,outcome_checked_at,outcome_source&order=flight_date.desc`,
     { headers: HEADERS, cache: 'no-store' },
   )
   if (!res.ok) {
     return NextResponse.json(
-      { ok: false, error: `flight_no_activity ${res.status}: ${(await res.text()).slice(0, 200)}` },
+      { ok: false, error: `flight ${res.status}: ${(await res.text()).slice(0, 200)}` },
       { status: 502 },
     )
   }
-  const rows: Row[] = await res.json()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const raw: any[] = await res.json()
+
+  // Shaped to what the page already renders, so the UI is unchanged.
+  const rows: Row[] = raw.map(r => {
+    const closeMs   = Date.parse(`${r.flight_date}T21:00:00Z`)
+    const schedMs   = r.sched_dep ? Date.parse(r.sched_dep) : null
+    const checkedMs = Date.parse(r.outcome_checked_at)
+    const flewLate  = !!r.real_dep && Date.parse(r.real_dep) >= closeMs
+    return {
+      id:            `${r.flight_date}|${r.iata_number}`,
+      flight_date:   r.flight_date,
+      iata_number:   r.iata_number,
+      callsign:      r.callsign,
+      dep_iata:      r.dep_iata,
+      arr_iata:      r.arr_iata,
+      sched_dep_utc: schedMs ? new Date(schedMs).toISOString().slice(11, 16) : null,
+      outcome:       flewLate ? 'flew_late' : r.outcome === 'no_show' ? 'did_not_operate' : null,
+      resolved_at:   r.outcome_checked_at,
+      // The sentence the page prints, rebuilt from the stamp rather than stored beside it.
+      resolved_reason: flewLate
+        ? `departed ${r.real_dep} — after the day closed`
+        : (r.outcome_source ?? '').startsWith('carry_over:no_departure')
+          ? `no departure recorded ${(r.outcome_source ?? '').split(':')[2] ?? ''} past scheduled departure`
+          : (r.outcome_source ?? ''),
+      hours_overdue: schedMs ? Math.round(((checkedMs - schedMs) / 3_600_000) * 10) / 10 : null,
+    }
+  })
 
   // Which services have ever actually departed — the test for "this service is real".
   // Every date, not just the reporting window: a route that flew in July is still a real

@@ -1,7 +1,7 @@
 /**
  * Flights the timetable promised and the day did not deliver.
  *
- * Two things land in flight_no_activity and they must not be added together: an airline
+ * Two things are counted here and they must not be added together: an airline
  * cancelling a real service, and a route_master row for a service that has never operated.
  * The second is our own bookkeeping and repeats every scheduled weekday, so it is reported in
  * its own section — a number sent outside the building has to mean what it says.

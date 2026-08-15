@@ -50,14 +50,6 @@
       "schedule": "*/15 * * * *"
     },
     {
-      "path": "/api/cron/no-activity",
-      "schedule": "15 21 * * *"
-    },
-    {
-      "path": "/api/cron/no-activity",
-      "schedule": "0 9 * * *"
-    },
-    {
       "path": "/api/cron/carry-over",
       "schedule": "*/10 * * * *"
     }
