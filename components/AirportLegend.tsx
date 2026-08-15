@@ -1,6 +1,7 @@
 'use client'
 
 import { PANEL } from './MapBox'
+import { useLocale } from '@/components/LocaleProvider'
 import { MARKER_ACCENT, type BoardAirport } from '@/lib/syria-airports'
 import { cityFor } from '@/lib/geo-data'
 
@@ -23,6 +24,16 @@ import { cityFor } from '@/lib/geo-data'
 const ORDER: BoardAirport[] = ['DAM', 'ALP', 'DEZ']
 
 export default function AirportLegend() {
+  /*
+   * The control stack aligns its children with flex-end, which is the *inline* end — the right in
+   * English and the left in Arabic. The stack itself is pinned to the right of the map either way,
+   * so in Arabic the key drifted to the far edge and came unstuck from the photo box above it.
+   *
+   * Aligned to the physical right in both languages instead. The text inside still lays out
+   * right-to-left; only the block's position is fixed.
+   */
+  const rtl = useLocale() === 'ar'
+
   return (
     <div
       style={{
@@ -38,9 +49,9 @@ export default function AirportLegend() {
         alignItems: 'center',
         gap: 12,
         whiteSpace: 'nowrap',
-        // Right-aligned with the boxes above it rather than stretched to their width: a caption
-        // should be as wide as its content.
-        alignSelf: 'flex-end',
+        // Sized to its content rather than stretched to the stack's width — a caption should be
+        // as wide as what it says.
+        alignSelf: rtl ? 'flex-start' : 'flex-end',
       }}
     >
       {ORDER.map(code => (
