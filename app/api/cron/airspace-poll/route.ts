@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
 import { sweepAllCircles } from '@/lib/adsb-feed'
-import { logSignals, syriaOpDate } from '@/lib/signal-log'
 
 /**
  * Owns the ADS-B sweep so nothing else has to.
@@ -125,37 +124,6 @@ async function writePositions(aircraft: any[], ours: Set<string>): Promise<numbe
     if (res.ok) written += batch.length
     else console.error('[airspace-poll] write failed', res.status, (await res.text()).slice(0, 200))
   }
-
-  /*
-   * Position history and flight milestones, from the same sweep.
-   *
-   * These rows were written by visitors' browsers, which meant two production paths depended on
-   * somebody watching: cron/carry-over reads flight_signal_log.airborne_at to spot a carried-over
-   * flight that is really flying, and /api/airspace reads flight_position_log for fixes that are
-   * often a flight's only ones. Measured before moving it — five consecutive hours on 14 Aug with
-   * no rows at all, because nobody had the map open.
-   *
-   * dep_iata and arr_iata are null here. They come from board matching, which happens in
-   * /api/airspace at request time and has no business running in a sweep; no consumer on the read
-   * path selects them. The browser used to supply them, which is why every historical row has one
-   * — a useful tell for telling the two eras apart later.
-   */
-  const opDate = syriaOpDate(Date.parse(now))
-  const readings = rows
-    .filter(r => r.callsign)
-    .map(r => ({
-      callsign:    r.callsign as string,
-      flight_date: opDate,
-      lat: r.lat, lon: r.lon,
-      alt_baro: r.alt_baro, gs: r.gs, track: r.track,
-      hex: r.hex ?? null,
-      dep_iata: null, arr_iata: null,
-    }))
-  if (readings.length > 0) {
-    try { await logSignals(readings, now) }
-    catch (e) { console.error('[airspace-poll] signal log failed', e) }
-  }
-
   return written
 }
 
