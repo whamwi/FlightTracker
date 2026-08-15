@@ -47,6 +47,16 @@ interface Aircraft {
   t: string | null
   r: string | null
   board_match:    boolean
+  /**
+   * Seconds since the position under this row was actually observed.
+   *
+   * The airspace route has emitted it all along and this component never read it, which is how a
+   * card came to show a green badge over an altitude, a speed and a distance from a fix four
+   * minutes old — TKJ340 into Aleppo on 15 Aug, frozen at 16.6 km and 8,025 ft while it landed.
+   * The panel was already consuming the same field; the map was not, and one surface knowing a
+   * fact the other does not is the shape most of these defects have taken.
+   */
+  fix_age_s?:     number | null
   dep_iata:       string | null
   arr_iata:       string | null
   dep_time_utc?:  string | null   // scheduled "HH:MM" UTC — popup fallback when no status
@@ -191,7 +201,14 @@ const STALE_TTL_MS       = 30 * 60 * 1000
  * another and four hours in a third, so a flight left the map at a different moment depending on
  * which surface you were looking at and whether we still held a fix for it.
  */
-const ARRIVED_HOLD_MS    = 30 * 60 * 1000
+/**
+ * How long the most recent arrival stays drawn at its airport.
+ *
+ * Sixty minutes, and it governs two things that must not disagree: how long the marker is shown,
+ * and how long the tracked entry behind it is kept. It was thirty for the entry alone, which would
+ * have deleted the flight halfway through its hour on the map.
+ */
+const ARRIVED_HOLD_MS    = 60 * 60 * 1000
 
 /**
  * Inside this distance from the destination the popup stops quoting altitude and speed.
@@ -1073,6 +1090,20 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
   const unvouchedRef    = useRef<Record<string, number>>({})
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const schedLinesRef   = useRef<Record<string, any[]>>({})
+  /**
+   * When each callsign was first seen arrived, and where.
+   *
+   * The arrival time itself is not enough to rank by: a flight can be declared arrived with no
+   * actual_arr_utc at all — TKJ340 into Aleppo on 15 Aug was inferred from its estimate five
+   * minutes after the fact, having last been observed 16.6 km out at 8,025 ft. So this records the
+   * published time where there is one and the moment we first believed it where there is not,
+   * which is the best available answer to "which of these landed most recently".
+   *
+   * Written once per callsign and never revised: the first sighting is the one that dates the
+   * arrival, and letting a later poll overwrite it would keep pushing the same flight to the front
+   * of the queue and never let the next one take the airport.
+   */
+  const arrivedAtRef      = useRef<Record<string, { at: number; arr: string | null }>>({})
   // Last-known state keyed by callsign — replaces hex-keyed lastKnownRef
   const trackedRef        = useRef<Record<string, TrackedEntry>>({})
   const scheduleRef       = useRef<ScheduleEntry[]>([])
@@ -1458,6 +1489,51 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         })
       }
 
+      /*
+       * One arrival stays on the map per airport: the last one in, until the next lands or an hour
+       * passes.
+       *
+       * Arrivals were removed from the map outright on 14 Aug, and that was right about the pile —
+       * half an hour of ARRIVED tags stacked over Damascus, which a fan, an offset along the route
+       * and a badge all failed to make readable. It was wrong about the last one. "What just landed
+       * here" is a question about now, and it has exactly one answer per airport, so it costs one
+       * marker rather than a heap.
+       *
+       * Ranked on when we first believed the arrival, not on the published time, because a third of
+       * Aleppo's arrivals are never published at all. Older entries are pruned here rather than
+       * left to accumulate across a session.
+       */
+      for (const [cs, rec] of Object.entries(arrivedAtRef.current)) {
+        if (now - rec.at > ARRIVED_HOLD_MS) delete arrivedAtRef.current[cs]
+      }
+
+      const noteArrived = (cs: string, arrIata: string | null, publishedArrUtc?: string | null) => {
+        if (arrivedAtRef.current[cs]) return
+        arrivedAtRef.current[cs] = { at: Date.parse(publishedArrUtc ?? '') || now, arr: arrIata }
+      }
+
+      /*
+       * Is this callsign the one its airport is currently holding?
+       *
+       * Scans rather than reading a precomputed winner, so the answer cannot depend on whether a
+       * flight happened to be noted before or after the table was built — the two render passes
+       * walk different collections in different orders, and a table built between them would let
+       * the same flight win on one path and lose on the other.
+       *
+       * The tie-break on callsign exists because two arrivals can land in the same second when both
+       * are inferred from estimates, and without it neither would hold the airport: each would see
+       * the other as not-older and stand down.
+       */
+      const holdsAirport = (cs: string) => {
+        const rec = arrivedAtRef.current[cs]
+        if (!rec?.arr || now - rec.at > ARRIVED_HOLD_MS) return false
+        for (const [other, r] of Object.entries(arrivedAtRef.current)) {
+          if (other === cs || r.arr !== rec.arr || now - r.at > ARRIVED_HOLD_MS) continue
+          if (r.at > rec.at || (r.at === rec.at && other < cs)) return false
+        }
+        return true
+      }
+
       try {
         const res  = await fetch('/api/airspace')
         const data = await res.json()
@@ -1763,6 +1839,20 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
       const STALE_HAND_OFF_MS = 3 * 60_000
       const FR24_HAND_OFF_MS  = 30 * 60_000
 
+      /*
+       * Record every arrival before any of them is judged.
+       *
+       * Noting them inside the render loop below would make the winner depend on iteration order:
+       * an older arrival evaluated first would find no newer one recorded yet, hold the airport,
+       * and only stand down on the next poll — ten seconds of two markers on the same runway.
+       */
+      for (const [cs, entry] of Object.entries(trackedRef.current)) {
+        if (!arrivedNow(cs, entry.a)) continue
+        const fs = flightStatusRef.current[cs]
+        noteArrived(cs, fs?.arr_iata ?? entry.a.arr_iata ?? null,
+                    fs?.actual_arr_utc ?? entry.a.actual_arr_utc)
+      }
+
       for (const [cs, entry] of Object.entries(trackedRef.current)) {
         const { a, lostAt, isFr24 } = entry
 
@@ -1779,8 +1869,13 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
          * The position is real, which is what made this easy to leave alone. But a real position
          * on a stand is not what a map of flights is for, and the reader was told twice — the tag
          * and the list — that the flight was over.
+         *
+         * Except the newest one, as of 15 Aug: each airport keeps its most recent arrival for an
+         * hour or until the next lands. That is one marker per airport rather than the pile this
+         * paragraph was written about, and it answers a question the list cannot — where the
+         * aircraft that just landed here actually is.
          */
-        if (arrivedNow(cs, a)) {
+        if (arrivedNow(cs, a) && !holdsAirport(cs)) {
           markersRef.current[cs]?.remove(); delete markersRef.current[cs]
           linesRef.current[cs]?.forEach((l: any) => l.remove()); delete linesRef.current[cs]  // eslint-disable-line
           continue
@@ -2546,6 +2641,17 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
          * fixed pixel fan, then a badge standing in for the group. All of them were solving the
          * wrong problem. A map answers "where is it now", and the answer for a landed flight is
          * a line in a list, not a mark on a country.
+         *
+         * The last-arrival hold added on 15 Aug deliberately does not apply here, and this is the
+         * one place the two paths are meant to differ. That rule keeps the newest arrival at its
+         * airport, and the live loop already holds it — any flight we ever tracked has a trackedRef
+         * entry that outlives the landing, and it adds itself to realCallsigns, which suppresses
+         * the schedule marker for the same callsign. So a kept arrival is drawn once, from there.
+         *
+         * What reaches here instead is a flight we never once observed. It has no position to put
+         * at the airport — only a schedule saying it should have got there — and drawing it on the
+         * runway would assert an arrival nobody saw. The list can say that honestly; a marker
+         * cannot.
          */
         if (arrived) {
           if (schedMarkersRef.current[callsign]) {
