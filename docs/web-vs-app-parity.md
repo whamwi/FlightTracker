@@ -57,24 +57,23 @@ delivery. Whether it should have one is a product question, not a parity gap.
 
 This is the section that matters. Everything above is a gap; this is a contradiction.
 
-### Arrived hold — the two surfaces answer differently today
+### Arrived hold — resolved 15 Aug, the app follows the web
 
-| | web | app |
-|---|---|---|
-| how long an arrival stays | **60 min** | **30 min** (`ARRIVED_HOLD_MIN`, `lib/flight-items.ts`) |
-| how many are shown | **one per airport**, the most recent | **all of them** |
-| ranked by | first moment we believed the arrival | published arrival time |
+It read differently on the two screens: the phone kept every arrival for 30 minutes, the desktop
+one per airport for 60. Damascus after a busy hour therefore answered "what just landed" two ways.
 
-So at Damascus after a busy hour, the phone shows several arrived markers and the desktop shows
-one. Neither is wrong in isolation; together they are a bug, and the web moved on 15 Aug without
-the app moving with it.
+Settled by moving the app: `ARRIVED_HOLD_MIN` 30 → 60, and `buildItems` now keeps only the most
+recent arrival at each airport. The web's rule was the deliberate one — it answered a specific
+complaint about arrived tags piling onto Damascus, which a fan, a route offset and a grouped badge
+all failed to make readable — and the reasoning applies at least as strongly on a smaller screen.
 
-The web's rule was a deliberate answer to a specific complaint — arrived tags piling onto Damascus,
-which a fan, a route offset and a grouped badge all failed to make readable. The reasoning applies
-to a phone at least as strongly, where the screen is smaller.
+One implementation note worth keeping: the app applies the comparison where its item list is
+finished, not at the four places an arrival can be held. Those are filters on a single flight;
+this is a comparison between flights, and a flight cannot know it has been superseded while it is
+being judged on its own. Ranked on the published arrival where there is one and the revised one
+otherwise, since a third of Aleppo's arrivals are never published and would otherwise rank equal.
 
-**Decision needed:** the app follows the web to one-per-airport for 60 minutes, or the web reverts
-to 30 minutes and all arrivals. Not left as is.
+Ships with the next app build — it is a client change, not a deploy.
 
 ### Agreeing already
 
