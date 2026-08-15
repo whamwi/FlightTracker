@@ -134,77 +134,24 @@ export async function logSignals(batch: SignalReading[], nowIso: string): Promis
    * that stayed empty. A swallowed error here is indistinguishable from an empty sky.
    */
   const errors: string[] = []
-
-  const post = async (table: string, rows: Row[], resolution: string) => {
-    const res = await fetch(`${SB_URL}/rest/v1/${table}`, {
-      method:  'POST',
-      headers: { ...HEADERS, 'Content-Type': 'application/json', Prefer: `resolution=${resolution},return=minimal` },
-      body:    JSON.stringify(rows),
-    })
-    return res
-  }
-
-  /*
-   * Send only positions we do not already hold.
-   *
-   * flight_position_log carries a second unique index — (callsign, flight_date, lat, lon,
-   * COALESCE(alt_baro,-1)) — whose whole purpose is to reject a fix identical to one already
-   * stored, and the feed repeats fixes constantly. Because it is an expression index PostgREST
-   * cannot name it as an ON CONFLICT target, so `resolution=ignore-duplicates` falls back to the
-   * primary key and the repeat still raises 23505, failing the entire batch.
-   *
-   * Filtering first is better than tolerating the error anyway: a repeated fix is not data. The
-   * window is generous rather than exact, and the per-row fallback below covers whatever slips
-   * past it.
-   */
-  const seen = new Set<string>()
-  const posKey = (r: Row) => `${r.callsign}|${r.lat}|${r.lon}|${r.alt_baro ?? -1}`
-  try {
-    const res = await fetch(
-      `${SB_URL}/rest/v1/flight_position_log`
-      + `?flight_date=in.(${dates.join(',')})&order=captured_at.desc&limit=1000`
-      + `&select=callsign,lat,lon,alt_baro`,
-      { headers: HEADERS },
-    )
-    if (res.ok) for (const row of (await res.json()) as Row[]) seen.add(posKey(row))
-  } catch { /* An unreadable window means more rows are offered, not wrong ones. */ }
-
-  const fresh = positions.filter(p => {
-    const k = posKey(p)
-    if (seen.has(k)) return false
-    seen.add(k)   // also dedupes within this batch
-    return true
-  })
-
-  if (fresh.length > 0) {
+  const send = async (table: string, rows: Row[], resolution: string) => {
+    if (rows.length === 0) return
     try {
-      const res = await post('flight_position_log', fresh, 'ignore-duplicates')
-      if (res.status === 409) {
-        /*
-         * A repeat the window did not cover. One request per row, ignoring only the duplicate
-         * code — so one stale fix cannot cost the whole sweep its history, which is what the
-         * all-or-nothing batch was doing.
-         */
-        const results = await Promise.all(fresh.map(async row => {
-          const r = await post('flight_position_log', [row], 'ignore-duplicates')
-          return r.ok || r.status === 409
-        }))
-        const failed = results.filter(x => !x).length
-        if (failed > 0) errors.push(`flight_position_log: ${failed}/${fresh.length} rows rejected`)
-      } else if (!res.ok) {
-        errors.push(`flight_position_log ${res.status}: ${(await res.text()).slice(0, 160)}`)
-      }
+      const res = await fetch(`${SB_URL}/rest/v1/${table}`, {
+        method:  'POST',
+        headers: { ...HEADERS, 'Content-Type': 'application/json', Prefer: `resolution=${resolution},return=minimal` },
+        body:    JSON.stringify(rows),
+      })
+      if (!res.ok) errors.push(`${table} ${res.status}: ${(await res.text()).slice(0, 160)}`)
     } catch (e) {
-      errors.push(`flight_position_log threw: ${String(e).slice(0, 160)}`)
+      errors.push(`${table} threw: ${String(e).slice(0, 160)}`)
     }
   }
 
-  try {
-    const res = await post('flight_signal_log', [...summaries.values()], 'merge-duplicates')
-    if (!res.ok) errors.push(`flight_signal_log ${res.status}: ${(await res.text()).slice(0, 160)}`)
-  } catch (e) {
-    errors.push(`flight_signal_log threw: ${String(e).slice(0, 160)}`)
-  }
+  await Promise.all([
+    send('flight_position_log', positions, 'ignore-duplicates'),
+    send('flight_signal_log', [...summaries.values()], 'merge-duplicates'),
+  ])
 
   if (errors.length) throw new Error(errors.join(' | '))
   return valid.length
