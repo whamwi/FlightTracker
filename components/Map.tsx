@@ -451,7 +451,18 @@ function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, s
 
   let html = svg
   if (label) {
-    const textColor = stale ? '#6b7280' : estimated ? '#d97706' : '#166534'
+    /*
+     * The arrived label is the quietest thing on the map, and should look it.
+     *
+     * `stale` here means arrSnapped — one flight held at its airport for an hour after landing, so
+     * a reader can see what just came in. It is history, not traffic: it is not moving, nothing
+     * about it will change, and it sits still while everything around it does not. #6b7280 gave it
+     * the same weight as a live flight's label.
+     *
+     * #9ca3af is the fill the snapped marker itself already uses, so the label and the icon it
+     * belongs to now read as one object rather than a grey plane under a dark caption.
+     */
+    const textColor = stale ? '#9ca3af' : estimated ? '#d97706' : '#166534'
     /*
      * The second line is quieter than the first, because it is answering a different question.
      *
@@ -461,7 +472,7 @@ function planeIcon(L: typeof import('leaflet'), track: number, syria: boolean, s
      */
     const labelHtml = label.split('\n').map((line, i) =>
       `<div style="font-size:${mobile ? 8 : (i > 0 ? 8 : 9)}px;font-weight:${i > 0 ? 600 : 'bold'};`
-      + `color:${i > 0 ? '#6b7280' : textColor};letter-spacing:0.3px;line-height:1.2;`
+      + `color:${i > 0 ? (stale ? '#9ca3af' : '#6b7280') : textColor};letter-spacing:0.3px;line-height:1.2;`
       + `white-space:nowrap">${line}</div>`
     ).join('')
     html = `<div style="display:flex;flex-direction:column;align-items:center;gap:2px">
