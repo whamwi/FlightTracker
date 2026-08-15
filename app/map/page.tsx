@@ -50,6 +50,8 @@ type InAirFlight = {
   actual_arr_utc: string | null
   revised_dep_utc: string | null
   revised_arr_utc: string | null
+  /** The arrival estimate damped server-side; see etaMs. */
+  eta_stable_utc: string | null
   aircraft_type: string | null
   // The board sends terminal, gate and belt too. Deliberately not declared here: they were shown
   // on this card briefly and removed — a third row on every card, where this is a summary. The
@@ -84,6 +86,9 @@ const IN_AIR = new Set(['Departed', 'En Route', 'Approaching'])
  */
 function etaMs(f: InAirFlight): number {
   if (f.actual_arr_utc)  return new Date(f.actual_arr_utc).getTime()
+  // The server's damped estimate first — see the note in components/Map.tsx. revised_arr_utc
+  // remains the fallback for a flight it has not stabilised.
+  if (f.eta_stable_utc) return new Date(f.eta_stable_utc).getTime()
   if (f.revised_arr_utc) return new Date(f.revised_arr_utc).getTime()
   if (f.actual_dep_utc && f.duration_min)
     return new Date(f.actual_dep_utc).getTime() + f.duration_min * 60_000

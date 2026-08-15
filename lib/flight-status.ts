@@ -60,6 +60,8 @@ export type StatusFacts = {
   actual_arr_utc?: string | null
   actual_dep_utc?: string | null
   revised_arr_utc?: string | null
+  /** The arrival estimate damped server-side — what every surface counts to. */
+  eta_stable_utc?: string | null
   duration_min?: number | null
   /**
    * Seconds since we last saw this aircraft airborne, from a real fix — never F-EST.

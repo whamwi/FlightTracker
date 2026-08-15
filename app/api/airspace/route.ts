@@ -163,6 +163,7 @@ interface BoardFlight {
   actual_dep_utc:  string | null // from "Departed HH:MM" status
   actual_arr_utc:  string | null // from real_arr (landing-confirm cron) or "Landed HH:MM" status
   revised_arr_utc: string | null // FR24 est_arr or "Estimated HH:MM" status
+  eta_stable_utc: string | null  // the same estimate, damped once by flight-api
   dep_delay_min:   number | null // actual_dep_utc − sched_dep
   airline_iata:    string | null // IATA code for airline logo
   /**
@@ -313,6 +314,7 @@ async function boardFromV2(dates: string[]): Promise<BoardFlight[] | null> {
         actual_dep_utc:  f.actual_dep_utc ?? null,
         actual_arr_utc:  f.actual_arr_utc ?? null,
         revised_arr_utc: f.revised_arr_utc ?? null,
+        eta_stable_utc: f.eta_stable_utc ?? null,
         dep_delay_min:   depDelay,
         airline_iata:    f.airline_iata ?? null,
         reg:             f.aircraft_reg  ?? null,
@@ -517,6 +519,7 @@ async function fetchLastKnownPositions(matchLive: (cs: string) => BoardFlight | 
       actual_dep_utc: info.actual_dep_utc,
       actual_arr_utc: info.actual_arr_utc,
       revised_arr_utc: info.revised_arr_utc ?? null,
+      eta_stable_utc: info.eta_stable_utc ?? null,
       dep_delay_min:  info.dep_delay_min,
       airline_iata:   info.airline_iata,
       seen_at:        r.seen_at,
@@ -899,6 +902,7 @@ export async function GET() {
           actual_dep_utc: info.actual_dep_utc ?? null,
           actual_arr_utc: info.actual_arr_utc ?? null,
           revised_arr_utc: info.revised_arr_utc ?? null,
+      eta_stable_utc: info.eta_stable_utc ?? null,
           dep_delay_min:  info.dep_delay_min  ?? null,
           airline_iata:   info.airline_iata   ?? null,
         })

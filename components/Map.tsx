@@ -36,6 +36,8 @@ const RTL = () => getActiveLocale() === 'ar'
 
 interface Aircraft {
   hex: string
+  /** Optional: present when the row came from the board, absent on a bare position. */
+  eta_stable_utc?: string | null
   flight: string
   lat: number
   lon: number
@@ -121,6 +123,8 @@ interface FlightStatus {
   scheduled_arr_utc: string | null
   revised_dep_utc:   string | null
   revised_arr_utc:   string | null
+  /** The arrival estimate damped server-side — what every countdown runs to. */
+  eta_stable_utc:    string | null
   dep_delay_min:     number | null
   arr_delay_min:     number | null
   aircraft_reg:      string | null
@@ -648,7 +652,18 @@ function buildPopup(
   // column. Keeping them on separate chains is how a card ends up reading "ARRIVAL 02:52"
   // beside "26m left" — each defensible alone, nonsense together.
   const depISO = fs?.actual_dep_utc ?? a.actual_dep_utc ?? null
-  const arrISO = fs?.actual_arr_utc ?? fs?.revised_arr_utc ?? fs?.scheduled_arr_utc
+  /*
+   * eta_stable_utc ahead of revised_arr_utc: the same instant, damped once on the server so
+   * every surface counts to one number.
+   *
+   * The countdown moved with every estimate FR24 published, and it republishes constantly —
+   * RB515 alternated between two values five times in forty minutes, so a reader watched
+   * "16m left" become "23m" and back. The app damped this and the site did not, which is how
+   * SDR17HL read "3:42 left" here and "3 hours 39 minutes" on the phone at the same moment.
+   * Now neither client damps and both read the same field. revised_arr_utc stays as the
+   * fallback for anything the service has not stabilised.
+   */
+  const arrISO = fs?.actual_arr_utc ?? fs?.eta_stable_utc ?? fs?.revised_arr_utc ?? fs?.scheduled_arr_utc
     ?? (() => {
       const d = Date.parse(depISO ?? '')
       return Number.isFinite(d) && a.duration_min
@@ -907,7 +922,9 @@ function buildSchedulePopup(e: ScheduleEntry, arrived = false, fs?: FlightStatus
   // the countdown below. The synthesised leg (actual departure + block time) matters for a
   // delayed flight — without it the column showed the scheduled arrival while the countdown
   // ran to the real one, so the card contradicted itself by exactly the delay.
-  const bestArrISO   = fs?.actual_arr_utc ?? fs?.revised_arr_utc
+  // Same chain as buildPopup — see the note there. The two countdowns must agree with each
+  // other before either can agree with the phone.
+  const bestArrISO   = fs?.actual_arr_utc ?? fs?.eta_stable_utc ?? fs?.revised_arr_utc
     ?? (() => {
       const depMs = Date.parse(fs?.actual_dep_utc ?? '')
       return Number.isFinite(depMs) && e.duration_min > 0
@@ -1711,6 +1728,10 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
               // scheduled duration. RJ435 read ARRIVAL 07:40 in the popup against 07:13 on the
               // side card, which is the revised time the board had all along.
               revised_arr_utc:   a.revised_arr_utc ?? carryArrival(existing?.revised_arr_utc, legDep),
+              // Carried alongside, never synthesised: this field means "the service damped this",
+              // and inventing one locally would put the client back in the damping business,
+              // which is the whole thing being removed.
+              eta_stable_utc:    a.eta_stable_utc ?? existing?.eta_stable_utc ?? null,
               dep_delay_min:     a.dep_delay_min ?? existing?.dep_delay_min ?? null,
               arr_delay_min:     arrUtc ? existing?.arr_delay_min ?? null : null,
               aircraft_reg:      a.r ?? existing?.aircraft_reg   ?? null,
@@ -1729,12 +1750,14 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
             dep_time_utc: string | null; arr_time_utc: string | null
             actual_dep_utc: string | null; actual_arr_utc: string | null
             revised_arr_utc: string | null
+            eta_stable_utc: string | null
             status: string | null
             iata_number: string; dep_delay_min: number | null; airline_iata: string | null
             aircraft_reg: string | null; aircraft_type: string | null
           }[]) {
             const { callsign: cs, dep_iata, arr_iata, duration_min, dep_time_utc, arr_time_utc,
-                    actual_dep_utc, actual_arr_utc, revised_arr_utc, status: boardStatus,
+                    actual_dep_utc, actual_arr_utc, revised_arr_utc, eta_stable_utc,
+                    status: boardStatus,
                     iata_number, dep_delay_min, airline_iata,
                     aircraft_reg, aircraft_type } = bd
             if (!cs || !dep_iata || !arr_iata) continue
@@ -1757,6 +1780,10 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
               scheduled_arr_utc: carryArrival(existing?.scheduled_arr_utc, effectiveDep),
               revised_dep_utc:   existing?.revised_dep_utc   ?? null,
               revised_arr_utc:   revised_arr_utc ?? estimatedArr ?? carryArrival(existing?.revised_arr_utc, effectiveDep),
+              // Not falling back to estimatedArr. That is the client's own arithmetic — the
+              // fallback belongs in the chain that reads this, not in the field that says the
+              // server stabilised something.
+              eta_stable_utc:    eta_stable_utc ?? existing?.eta_stable_utc ?? null,
               dep_delay_min:     dep_delay_min ?? existing?.dep_delay_min ?? null,
               arr_delay_min:     carriedArr ? existing?.arr_delay_min ?? null : null,
               aircraft_reg:      aircraft_reg  ?? existing?.aircraft_reg  ?? null,

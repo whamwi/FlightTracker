@@ -40,6 +40,8 @@ export type BoardFlightV2 = {
   arr_confirmed_src: string | null
   revised_dep_utc: string | null
   revised_arr_utc: string | null
+  /** The arrival estimate, damped server-side — what a countdown should run to. */
+  eta_stable_utc: string | null
   aircraft_type: string | null
   aircraft_reg: string | null
   dep_terminal: string | null
