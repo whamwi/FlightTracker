@@ -550,7 +550,11 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
 
           {lastRefresh > 0 && (
             <div style={{ textAlign: 'center', paddingBottom: 10, fontSize: 9, color: C.muted, fontFamily: 'monospace' }}>
-              {t('label.updated')} {new Date(lastRefresh).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+              {t('label.updated')}{' '}
+              <span dir="ltr">{(() => {
+                const p = airportTimeParts(new Date(lastRefresh).toISOString(), flight?.arr_iata ?? 'DAM')
+                return <>{p.time}<Meridiem of={p.meridiem} size={8} /></>
+              })()}</span>
             </div>
           )}
         </div>
