@@ -531,7 +531,11 @@ function progressBarHtml(dep: string | null, arr: string | null, fraction: numbe
             <div style="font-size:10px;color:#6b7280;font-family:monospace;text-align:end">${arr}</div>
           </div>
         </div>
-        ${belowStr ? `<div style="text-align:center;color:#9ca3af;font-size:11px;margin-top:8px">${belowStr}</div>` : ''}
+        <!-- 2px here against the countdown's 8px above, which looks asymmetric written down and
+             reads as even on screen: the row above this line ends in the two IATA codes, so there
+             is already a band of empty space under the bar itself before the row closes. Matching
+             the numbers would leave this line floating away from the bar it belongs to. -->
+        ${belowStr ? `<div style="text-align:center;color:#9ca3af;font-size:11px;margin-top:2px">${belowStr}</div>` : ''}
       </div>`
 }
 
