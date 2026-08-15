@@ -40,8 +40,13 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
   const forceDate = searchParams.get('date')
 
-  // Yesterday in Syria time — the fr24-sync cron runs at 02:00 UTC and populates
-  // yesterday's cache, so by 03:00 UTC the data is ready to reconcile.
+  // Yesterday in Syria time.
+  //
+  // This said the fr24-sync cron populated yesterday's cache at 02:00 UTC, so 03:00 was safe.
+  // fr24-sync was never in vercel.json and never ran; it was removed on 15 Aug. So the cache
+  // this reads is filled only by whoever opens /fr24 in a browser, and the freshness this job
+  // assumes has never existed. It needs repointing at `flight`, which the harvester keeps
+  // current — until then its input is as complete as yesterday's audience happened to be.
   const yesterday = new Date(Date.now() - 24 * 3600_000)
     .toLocaleDateString('en-CA', { timeZone: 'Asia/Damascus' })
   const targetDate = forceDate ?? yesterday

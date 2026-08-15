@@ -790,7 +790,7 @@ const SYRIAN_AIRPORTS_SET = SYRIA_AIRPORT_SET
  * an aircraft that is airborne, and a delayed flight has by definition *not* left at its
  * scheduled time. JOC541/DN541 (OTP→DAM) departed 02:23:35 against a 02:00 schedule, so the
  * marker was drawn 24 minutes along the route the moment it was spotted, then snapped back
- * when fr24-sync published the real departure. FYC486 (SAW→DAM, +31 min) did the same.
+ * when the real departure was published. FYC486 (SAW→DAM, +31 min) did the same.
  *
  * We already know enough to do better: the aircraft's position gives progress along the
  * route, so `now − progress × block_time` recovers roughly when it started. Falls back to

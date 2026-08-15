@@ -1018,7 +1018,7 @@ export default function BoardPage() {
      *
      * warmFR24Cache is left in place, unused, until the remaining cache readers are migrated —
      * /api/flight, /api/weekly-stats, landing-confirm and three crons still read the table, and
-     * cron/fr24-sync still fills it server-side.
+     * nothing fills it server-side any more — cron/fr24-sync was removed on 15 Aug.
      */
     const loadTimer = setInterval(() => load(0, true), 60_000)
     return () => { clearInterval(loadTimer) }
