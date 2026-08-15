@@ -193,6 +193,15 @@ const STALE_TTL_MS       = 30 * 60 * 1000
  */
 const ARRIVED_HOLD_MS    = 30 * 60 * 1000
 
+/**
+ * Inside this distance from the destination the popup stops quoting altitude and speed.
+ *
+ * The numbers are real but they expire faster than the ten-second poll can replace them, so what
+ * a reader sees is always a moment behind the aeroplane — and on final that moment is the
+ * difference between flying and landed.
+ */
+const FINAL_RING_KM = 10
+
 // Flights to and from these are "ours", and decide which half of a leg is worth drawing. From
 // lib/syria-airports rather than spelled out again — this file had its own copy, which is the
 // drift that module exists to stop, and DEZ opening in August is how it gets noticed.
@@ -692,7 +701,28 @@ function buildPopup(
    * Digits stay Latin via toLocaleString('en-US') — the house rule wherever a number carries
    * meaning — and only the unit is translated.
    */
-  const liveDetail = (!projected && !lostAt && !arrived
+  /*
+   * Inside the last ten kilometres, say where it is rather than what it was doing.
+   *
+   * At 134 knots that ring takes about two and a half minutes to cross and the map polls every
+   * ten seconds, so a printed figure describes a moment already gone. ABY433 on 15 Aug read
+   * "2,500 ft · 134 kt" fifteen seconds before touchdown — measured, current when taken, and
+   * wrong by the time anyone read it. The values below it were 65, then 22, then 20 on the
+   * rollout, and none of them could ever appear: the flight was Arrived by the next poll and an
+   * arrival leaves the map.
+   *
+   * Ten kilometres because that is the reader's ask and it matches the geometry — beyond it a
+   * ten-second lag is a few hundred feet and reads fine; inside it the aircraft is landing.
+   */
+  const arrCoords  = arr ? _apCoords[arr] : null
+  const kmToArr = (arrCoords && typeof a.lat === 'number' && typeof a.lon === 'number')
+    ? greatCircleKm(a.lat, a.lon, arrCoords[0], arrCoords[1])
+    : null
+  const onFinal = kmToArr !== null && kmToArr < FINAL_RING_KM
+
+  const liveDetail = (!projected && !lostAt && !arrived && onFinal)
+    ? T('map.approaching_runway')
+    : (!projected && !lostAt && !arrived
       && typeof a.alt_baro === 'number' && a.alt_baro > 0)
     ? [
         `${T('label.altitude')}: ${a.alt_baro.toLocaleString('en-US')} ${T('unit.ft')}`,
