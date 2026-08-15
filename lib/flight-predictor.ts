@@ -290,6 +290,21 @@ interface RecoveryState {
   predictedAtStart:   [number, number]  // frozen predicted position at recovery start
 }
 
+/**
+ * The mirror of RecoveryState, for a loss noticed late rather than a signal regained.
+ *
+ * Recovery blends a frozen prediction toward a fixed live position. This blends a frozen live
+ * position toward a prediction that is still moving, which is the same problem pointing the other
+ * way: in both cases the honest answer is somewhere the marker is not, and teleporting it there
+ * reads as a fault even when the new position is the correct one.
+ */
+interface CatchUpState {
+  startMs:      number
+  durationMs:   number
+  fromLat:      number
+  fromLon:      number
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // FlightPredictor
 // ─────────────────────────────────────────────────────────────────────────────
@@ -312,6 +327,9 @@ export class FlightPredictor {
 
   // Recovery blend state
   private recovery: RecoveryState | null = null
+
+  // Catch-up blend state — set when a loss is discovered after the fact.
+  private catchUp: CatchUpState | null = null
 
   // Non-decreasing route fraction floor (GPS lock-in).
   private _minFraction: number = 0
@@ -366,6 +384,51 @@ export class FlightPredictor {
       this.recovery       = null
     } else {
       this.signalLostAtMs ??= nowMs
+    }
+  }
+
+  /**
+   * The signal stopped arriving at lostAtMs, and we are only finding out at nowMs.
+   *
+   * onSignalLoss assumes the loss is happening as it is reported, so prediction starts from zero
+   * elapsed and the marker creeps away from its last drawn position. When the loss is discovered
+   * late that assumption breaks: the prediction is immediately (nowMs − lostAtMs) of travel ahead
+   * of where the marker is drawn, and applying it in one step throws the aircraft down its route.
+   * Measured 15 Aug 2026 on FYC762 — 150 s of undiscovered loss at 369 kt is about 15 km, and it
+   * arrived in a single frame.
+   *
+   * The prediction is not wrong; the aircraft really is that far along. What is wrong is showing
+   * the correction all at once, so it is eased in — from where the marker actually is, toward a
+   * target that keeps moving, over the same per-kilometre schedule the recovery blend uses. The
+   * error is the distance between the two, so a small discovery costs a short blend and a large
+   * one is spread over as much as maxRecoveryMs.
+   *
+   * Idempotent in the way that matters: once predicting, later calls only fill in a missing loss
+   * time. A flight sitting stale across many polls blends once, not on every poll.
+   */
+  onSignalLostAt(lostAtMs: number, nowMs: number): void {
+    if (this._state === 'predicting') {
+      this.signalLostAtMs ??= lostAtMs
+      return
+    }
+    const from = this.lastLive
+    this._state         = 'predicting'
+    this.signalLostAtMs = lostAtMs
+    this.recovery       = null
+
+    // Nothing has been drawn yet, so there is no position to ease away from.
+    if (!from) { this.catchUp = null; return }
+
+    const pred    = this._computePredicted(nowMs)
+    const errorKm = haversineKm(from.lat, from.lon, pred.lat, pred.lon)
+    this.catchUp  = {
+      startMs:    nowMs,
+      durationMs: Math.min(
+        this.cfg.maxRecoveryMs,
+        Math.max(this.cfg.minRecoveryMs, errorKm * this.cfg.recoveryMsPerKm),
+      ),
+      fromLat: from.lat,
+      fromLon: from.lon,
     }
   }
 
@@ -437,6 +500,28 @@ export class FlightPredictor {
     }
 
     // ── Predicting ────────────────────────────────────────────────────────────
+    /*
+     * Easing in a loss we noticed late. The target moves while the blend runs — that is the
+     * difference from recovery above, where the target is a fixed fix — so the marker keeps
+     * advancing throughout and never stalls or backs up waiting for the blend to finish.
+     */
+    if (this.catchUp) {
+      const rawT = (nowMs - this.catchUp.startMs) / this.catchUp.durationMs
+      if (rawT >= 1.0) {
+        this.catchUp = null
+      } else {
+        const t   = smoothstep(rawT, 0, 1)
+        const lat = this.catchUp.fromLat + t * (pred.lat - this.catchUp.fromLat)
+        const lon = this.catchUp.fromLon + t * (pred.lon - this.catchUp.fromLon)
+        return {
+          lat, lon,
+          track_deg: pred.track_deg, altitude_ft: pred.altitude_ft,
+          state: 'predicting', confidence: this.confidence(nowMs), isEstimated: true,
+          signalLostMs, routeFraction,
+        }
+      }
+    }
+
     return {
       lat: pred.lat, lon: pred.lon,
       track_deg: pred.track_deg, altitude_ft: pred.altitude_ft,
@@ -489,6 +574,9 @@ export class FlightPredictor {
 
     this.lastLive       = { lat: pos.lat, lon: pos.lon, track_deg: pos.track_deg, altitude_ft: pos.altitude_ft }
     this.signalLostAtMs = null
+    // A real fix outranks any catch-up still running: recovery takes over from here, blending to
+    // the position we were just given rather than to one we were guessing at.
+    this.catchUp        = null
   }
 
   /**

@@ -1646,10 +1646,20 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
               const ageMs = typeof a.fix_age_s === 'number' ? a.fix_age_s * 1000 : 0
               if (ageMs > STALE_FIX_MS) {
                 const lostFixAt = now - ageMs
-                // Same signal section 2 sends when a callsign drops out, and idempotent per its
-                // own tests — so a flight sitting stale across many polls only starts predicting
-                // once, from the right instant.
-                if (trackedRef.current[cs]?.lostAt === 0) predictorRef.current[cs]?.onSignalLoss(lostFixAt)
+                /*
+                 * onSignalLostAt, not onSignalLoss: the loss is already in the past and the
+                 * predictor has to be told both instants to ease the correction in.
+                 *
+                 * The first attempt at this called onSignalLoss and shipped a defect — the
+                 * prediction was 150 s of travel ahead of the drawn marker and arrived in one
+                 * frame, which on FYC762 at 369 kt was about 15 km. The prediction was right;
+                 * presenting the whole correction at once was not.
+                 *
+                 * Called every poll while the fix stays stale. The predictor's own guard makes
+                 * that safe and is the only guard — an outer check on lostAt would be a second
+                 * copy of the same rule, free to disagree with it.
+                 */
+                predictorRef.current[cs]?.onSignalLostAt(lostFixAt, now)
                 trackedRef.current[cs] = { a, lostAt: lostFixAt, isFr24: false }
               } else {
                 trackedRef.current[cs] = { a, lostAt: 0, isFr24: false }

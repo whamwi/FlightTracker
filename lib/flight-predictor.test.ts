@@ -295,6 +295,109 @@ describe('FlightPredictor state machine', () => {
     assert.equal(display.state, 'live')
   })
 
+  /*
+   * A loss discovered late. FYC762 on 15 Aug: 150 s of undiscovered signal loss at 369 kt put the
+   * prediction ~15 km ahead of the drawn marker, and applying it in one step threw the aircraft
+   * down its route. These pin the three properties that made that a defect rather than a
+   * correction — where it starts, that it never goes backwards, and that it arrives.
+   */
+  test('onSignalLostAt starts the marker where it already was, not where the prediction is', () => {
+    const p = new FlightPredictor()
+    p.setContext(makeCtx())
+    p.onLive(makeLivePos(), T0)
+    const drawn = p.getDisplay(T0)
+
+    // Loss happened 150 s ago and we are only noticing now.
+    p.onSignalLostAt(T0 + 150_000, T0 + 300_000)
+    const first = p.getDisplay(T0 + 300_000)
+
+    const jumpKm = haversineKm(drawn.lat, drawn.lon, first.lat, first.lon)
+    assert.ok(jumpKm < 0.5, `expected no jump on the first frame, got ${jumpKm.toFixed(1)} km`)
+  })
+
+  /*
+   * Not asserted here: that the marker never moves backwards. It can, and did so at +80 s when
+   * this test first ran — but the reversal is in the underlying prediction, not the blend. Past
+   * kinematicFullMs the weighting shifts from dead reckoning toward the route, and where the two
+   * disagree the predicted point slides between them. That behaviour predates this change and is
+   * the predictor's own business; asserting against it here would be testing the wrong module.
+   *
+   * What belongs to the blend is the size of a single step, which is the whole complaint.
+   */
+  test('the catch-up removes the jump rather than merely delaying it', () => {
+    const eased = new FlightPredictor()
+    eased.setContext(makeCtx())
+    eased.onLive(makeLivePos(), T0)
+    const drawn = eased.getDisplay(T0)
+    eased.onSignalLostAt(T0 + 150_000, T0 + 300_000)
+
+    // The same loss, reported the old way: prediction applied in one step.
+    const raw = new FlightPredictor()
+    raw.setContext(makeCtx())
+    raw.onLive(makeLivePos(), T0)
+    raw.onSignalLoss(T0 + 150_000)
+    const rawFirst = raw.getDisplay(T0 + 300_000)
+    const rawJumpKm = haversineKm(drawn.lat, drawn.lon, rawFirst.lat, rawFirst.lon)
+    assert.ok(rawJumpKm > 5, `expected the un-eased path to jump, got ${rawJumpKm.toFixed(1)} km`)
+
+    let prev = drawn
+    let worstStepKm = 0
+    for (let dt = 0; dt <= 120_000; dt += 2_000) {
+      const d = eased.getDisplay(T0 + 300_000 + dt)
+      worstStepKm = Math.max(worstStepKm, haversineKm(prev.lat, prev.lon, d.lat, d.lon))
+      prev = d
+    }
+    // Two-second frames, so a step is a fifth of the whole correction at worst — a glide, not a
+    // teleport. The un-eased path does all of it between two consecutive frames.
+    assert.ok(
+      worstStepKm < rawJumpKm / 5,
+      `worst eased step ${worstStepKm.toFixed(2)} km vs raw jump ${rawJumpKm.toFixed(1)} km`,
+    )
+  })
+
+  test('the catch-up converges on the raw prediction and then stops blending', () => {
+    // 90 s is maxRecoveryMs; well past it the blend must be finished and gone.
+    const p = new FlightPredictor()
+    p.setContext(makeCtx())
+    p.onLive(makeLivePos(), T0)
+    p.onSignalLostAt(T0 + 150_000, T0 + 300_000)
+
+    const late = T0 + 300_000 + 200_000
+    const blended = p.getDisplay(late)
+
+    // A second predictor told about the same loss as it happened — no catch-up, raw prediction.
+    const q = new FlightPredictor()
+    q.setContext(makeCtx())
+    q.onLive(makeLivePos(), T0)
+    q.onSignalLoss(T0 + 150_000)
+    const raw = q.getDisplay(late)
+
+    const gapKm = haversineKm(blended.lat, blended.lon, raw.lat, raw.lon)
+    assert.ok(gapKm < 0.5, `expected convergence, still ${gapKm.toFixed(1)} km apart`)
+  })
+
+  test('onSignalLostAt while already predicting does not restart the blend', () => {
+    const p = new FlightPredictor()
+    p.setContext(makeCtx())
+    p.onLive(makeLivePos(), T0)
+    p.onSignalLostAt(T0 + 150_000, T0 + 300_000)
+    const a = p.getDisplay(T0 + 400_000)
+    // Every subsequent poll reports the same stale fix; none of them may re-anchor the blend.
+    p.onSignalLostAt(T0 + 150_000, T0 + 400_000)
+    p.onSignalLostAt(T0 + 150_000, T0 + 410_000)
+    const b = p.getDisplay(T0 + 400_000)
+    assert.ok(haversineKm(a.lat, a.lon, b.lat, b.lon) < 1e-6, 'blend was re-anchored')
+  })
+
+  test('a returning fix cancels the catch-up in favour of recovery', () => {
+    const p = new FlightPredictor()
+    p.setContext(makeCtx())
+    p.onLive(makeLivePos(), T0)
+    p.onSignalLostAt(T0 + 150_000, T0 + 300_000)
+    p.onLive(makeLivePos({ lat: 32.0, lon: 38.0 }), T0 + 320_000)
+    assert.equal(p.state, 'recovering')
+  })
+
   test('onSignalLoss is idempotent', () => {
     const p = new FlightPredictor()
     p.onLive(makeLivePos(), T0)
