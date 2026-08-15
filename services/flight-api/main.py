@@ -345,12 +345,26 @@ def revision(est: str | None, sched: str | None) -> str | None:
     return est if abs((e - s_).total_seconds()) > 60 else None
 
 
+# Below this, a computed block is not a short flight, it is a corrupt estimate.
+#
+# Was 30, which is longer than a real sector we fly. DAM-AMM is filed at 50 minutes and flown in
+# 28, so the floor rejected the truth and substituted the padded schedule — and the padding is 22
+# minutes, so the map projected those flights at roughly half the progress they had actually made.
+# RJ440 on 15 Aug sat near the Jordanian border while it was 13 km from Amman.
+#
+# Measured over 14 days of the raw tape: the smallest computed block seen anywhere is 23 minutes,
+# and there is no band below it at all. The old floor discarded 134 observations across 22 flights
+# and rejected nothing bad, because nothing bad occurs. Ten leaves generous headroom under the
+# smallest real value while still catching an est_arr that has collapsed onto its departure.
+MIN_CREDIBLE_BLOCK_MIN = 10
+
+
 def effective_duration(f: dict) -> int:
     """Actual departure to revised arrival when both are known — the schedule is padded."""
     dep, est_arr = iso(f.get("real_dep")), iso(f.get("est_arr"))
     if dep and est_arr:
         computed = round((est_arr - dep).total_seconds() / 60)
-        if computed > 30:
+        if computed >= MIN_CREDIBLE_BLOCK_MIN:
             return computed
     sd, sa = iso(f["sched_dep"]), iso(f["sched_arr"])
     return round((sa - sd).total_seconds() / 60)

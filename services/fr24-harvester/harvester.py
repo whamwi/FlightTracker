@@ -186,6 +186,27 @@ MIN_JUMP_KM = 5
 # away, and the previous fix says nothing about whether the new one is real.
 MAX_GAP_SEC = 1800
 
+# How long a reference may go on refusing every fix before we stop believing it.
+#
+# A rejected fix deliberately does not become the new reference — right for one bad reading, and
+# wrong when the bad reading is the one that got accepted. Then every genuine fix afterwards is
+# measured against a phantom and dropped, and nothing can recover it, because only an accepted fix
+# moves the reference.
+#
+# Measured over 3 days: 22 gaps of 10-20 minutes across 19 flights, and 4 more in the 20-31 band
+# topping out at 31 minutes. That ceiling is the tell — MAX_GAP_SEC is 30 minutes, so the only
+# thing ending these blackouts was the guard timing out. FYC486 on 15 Aug lost twelve minutes of a
+# Damascus approach this way, from 02:37:28 to 02:49:30, while every surface still read "live".
+#
+# Five minutes, not thirty. Long enough to outlast a spoof run — the ones measured lasted three to
+# four fixes — and short enough that a poisoned reference costs a few minutes rather than half an
+# hour. If the re-anchor lands on a bad fix, the next genuine one re-anchors again five minutes
+# later; alternating beats going dark.
+REJECT_RECOVERY_SEC = 300
+
+# When each flight's reference started refusing everything. Cleared on any acceptance.
+_reject_since: dict[str, float] = {}
+
 # Last accepted position per fr24_id, in process: lat, lon, altitude, timestamp. Deliberately not
 # persisted: after a restart the first fix of each flight is accepted unchecked, which is the safe
 # direction — this rejects data, so it must never run on a stale reference.
@@ -243,11 +264,23 @@ def reject_fix(fid: str, lat: float, lon: float, alt: float | None,
         plat, plon, palt, pts = prev
         dt = now_s - pts
         if 0 < dt <= MAX_GAP_SEC:
+            reason = None
             if lat == plat and lon == plon and alt is not None and palt is not None and alt != palt:
-                return "frozen"
-            km = _km(plat, plon, lat, lon)
-            if km >= MIN_JUMP_KM and (km / dt) * 3600 > MAX_GROUND_SPEED_KMH:
-                return "jump"
+                reason = "frozen"
+            else:
+                km = _km(plat, plon, lat, lon)
+                if km >= MIN_JUMP_KM and (km / dt) * 3600 > MAX_GROUND_SPEED_KMH:
+                    reason = "jump"
+            if reason:
+                first = _reject_since.setdefault(fid, now_s)
+                if now_s - first < REJECT_RECOVERY_SEC:
+                    return reason
+                # Refusing everything for five minutes is not a run of bad fixes, it is a bad
+                # reference. Fall through, re-anchor on this one, and say so.
+                _reject_since.pop(fid, None)
+                log(f"  feed: {fid} re-anchored after {REJECT_RECOVERY_SEC}s of rejections "
+                    f"— the reference was refusing every fix")
+    _reject_since.pop(fid, None)
     _last_fix[fid] = (lat, lon, alt, now_s)
     return None
 
