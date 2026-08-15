@@ -499,7 +499,14 @@ function identityLine(flightNum: string | null | undefined, callsign: string | n
 // the tracked marker and the schedule overlay as its signal comes and goes, the *same*
 // flight rendered one way on one refresh and the other way on the next. Two implementations
 // of one component will always drift; there is now one.
-function progressBarHtml(dep: string | null, arr: string | null, fraction: number | null, etaStr: string): string {
+/**
+ * `belowStr` is optional and defaults to empty, which is what keeps buildSchedulePopup honest.
+ *
+ * That builder draws flights projected along a stored route, where every position is computed
+ * rather than observed — so a distance printed under its bar would be arithmetic on a guess, and a
+ * reader has no way to tell that from a measurement. It simply never passes one.
+ */
+function progressBarHtml(dep: string | null, arr: string | null, fraction: number | null, etaStr: string, belowStr = ''): string {
   if (!dep || !arr) return ''
   const fillPct  = fraction != null ? Math.max(1, Math.round(fraction * 100))       : 0
   const emptyPct = fraction != null ? Math.max(1, Math.round((1 - fraction) * 100)) : 100
@@ -524,6 +531,7 @@ function progressBarHtml(dep: string | null, arr: string | null, fraction: numbe
             <div style="font-size:10px;color:#6b7280;font-family:monospace;text-align:end">${arr}</div>
           </div>
         </div>
+        ${belowStr ? `<div style="text-align:center;color:#9ca3af;font-size:11px;margin-top:8px">${belowStr}</div>` : ''}
       </div>`
 }
 
@@ -654,7 +662,37 @@ function buildPopup(
     ? `<span dir="ltr" style="display:inline-flex;background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;padding:2px 5px;border-radius:99px;line-height:1.4;flex-shrink:0">${RTL() ? `<span>د</span><span>${Math.abs(min)}</span><span>${min > 0 ? '+' : '-'}</span>` : `${min > 0 ? '+' : ''}${min}m`}</span>`
     : ''
 
-  const progressHtml = progressBarHtml(dep, arr, fraction, etaStr)
+  /*
+   * How far it still has to go, under the bar that shows how far it has come.
+   *
+   * Beneath rather than beside the altitude and speed, because those describe the aircraft and
+   * this describes the journey — it belongs to the bar, not to the telemetry. Beneath rather than
+   * above it because the line above is the countdown, and the two would compete: same information,
+   * different units, stacked either side of the thing they both measure reads as a pair rather
+   * than a repetition.
+   *
+   * Great-circle to the arrival airport, so it is a floor and not a promise wherever the routing
+   * bends — and the same measurement the final ring is tested against, so the line cannot disagree
+   * with the behaviour underneath it.
+   *
+   * Guarded exactly as the telemetry line is, and for the same reason: never while a position is
+   * projected, never once the signal has dropped, never after it is down. `a.lat` is then the last
+   * place we saw it, and a distance computed from that reads as current when it is not.
+   *
+   * Suppressed inside the final ring too. That is the one place it would be most useful and least
+   * true: at 3 km a fix half a minute old is wrong by two of them, which is most of what is left,
+   * and «نقترب من المدرج» is already saying the same thing without pretending to precision.
+   */
+  const kmToArr = (arrCoord && typeof a.lat === 'number' && typeof a.lon === 'number')
+    ? greatCircleKm(a.lat, a.lon, arrCoord[0], arrCoord[1])
+    : null
+  const onFinal = kmToArr !== null && kmToArr < FINAL_RING_KM
+
+  const distStr = (!projected && !lostAt && !arrived && kmToArr !== null && !onFinal)
+    ? `${T('label.distance_left')}: ${Math.round(kmToArr).toLocaleString('en-US')} ${T('unit.km')}`
+    : ''
+
+  const progressHtml = progressBarHtml(dep, arr, fraction, etaStr, distStr)
 
   const timesHtml = (depTimeLocal || arrTimeLocal)
     ? `<div style="display:flex;background:#1f2937;padding:11px 14px">
@@ -714,12 +752,9 @@ function buildPopup(
    * Ten kilometres because that is the reader's ask and it matches the geometry — beyond it a
    * ten-second lag is a few hundred feet and reads fine; inside it the aircraft is landing.
    */
-  const arrCoords  = arr ? _apCoords[arr] : null
-  const kmToArr = (arrCoords && typeof a.lat === 'number' && typeof a.lon === 'number')
-    ? greatCircleKm(a.lat, a.lon, arrCoords[0], arrCoords[1])
-    : null
-  const onFinal = kmToArr !== null && kmToArr < FINAL_RING_KM
-
+  // kmToArr and onFinal are measured once, further up, where the distance line under the bar
+  // first needs them. This used to declare its own `arrCoords` beside the `arrCoord` already in
+  // scope — two names, one lookup, and a standing invitation to change one and not the other.
   const liveDetail = (!projected && !lostAt && !arrived && onFinal)
     ? T('map.approaching_runway')
     : (!projected && !lostAt && !arrived
@@ -728,17 +763,6 @@ function buildPopup(
         `${T('label.altitude')}: ${a.alt_baro.toLocaleString('en-US')} ${T('unit.ft')}`,
         typeof a.gs === 'number' && a.gs > 0
           ? `${T('label.speed')}: ${Math.round(a.gs).toLocaleString('en-US')} ${T('unit.kts')}`
-          : null,
-        /*
-         * Distance still to run, which is the one of the three a waiting reader can act on: an
-         * altitude and a speed describe the aircraft, this describes when it gets here.
-         *
-         * Only outside the final ring. Inside it the line has already been replaced by
-         * map.approaching_runway, and putting a number back would undo that — at 3 km a fix
-         * thirty seconds old is wrong by two, which is most of what is left.
-         */
-        kmToArr !== null
-          ? `${T('label.distance_left')}: ${Math.round(kmToArr).toLocaleString('en-US')} ${T('unit.km')}`
           : null,
       ].filter(Boolean).join(' · ')
     : ''
@@ -751,18 +775,10 @@ function buildPopup(
    *
    * The same override, for the same wrong reason, scrambled the board's meta strip on 13 Aug.
    */
-  /*
-   * Four pixels of side padding rather than fourteen, so the third value fits on one line.
-   *
-   * "الارتفاع: 24,525 قدم · السرعة: 459 عقدة · المتبقي: 117 كم" is about 275px at this size and the
-   * popup is 300 wide, which left 272 between the old margins — enough for every part except the
-   * last word, so "كم" wrapped alone onto a second line and separated a number from its unit.
-   *
-   * Costs nothing when the line is short: it is centred, so the padding is invisible until the
-   * text is long enough to need the room, which is exactly when it should give it up.
-   */
+  // Back to 14px: the distance that briefly made this line a third too long now lives under the
+  // progress bar, so altitude and speed have the room they always had.
   const liveLine = liveDetail
-    ? `<div style="color:#9ca3af;font-size:10.5px;padding:3px 4px 7px;text-align:center">${liveDetail}</div>`
+    ? `<div style="color:#9ca3af;font-size:10.5px;padding:3px 14px 7px;text-align:center">${liveDetail}</div>`
     : ''
   const photoHtml = photoUrl
     ? `<img src="${photoUrl}" style="width:100%;height:110px;object-fit:cover;display:block">`
