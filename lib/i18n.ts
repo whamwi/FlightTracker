@@ -176,6 +176,19 @@ const en: Dict = {
   'unit.kts':          'kts',
   'label.altitude':    'Altitude',
   'label.speed':       'Speed',
+  /*
+   * How far the aircraft still has to go, beside its altitude and speed.
+   *
+   * Great-circle to the arrival airport, which is shorter than the distance it will actually fly
+   * wherever the routing bends — so it is a floor, not a promise. It is the same number the final
+   * ring is tested against, which is the point: one measurement, two uses, and no way for the line
+   * to disagree with the ring beneath it.
+   *
+   * Kilometres rather than nautical miles. The reader here is a passenger or someone waiting for
+   * one, not a pilot.
+   */
+  'label.distance_left': 'To go',
+  'unit.km':           'km',
   'unit.kt':           'kt',
   'map.unknown_airline': 'Unknown airline',
   'map.no_signal':     'Schedule projection · no live signal',
@@ -430,6 +443,10 @@ const ar: Dict = {
   'unit.kts':          'عقدة',
   'label.altitude':    'الارتفاع',
   'label.speed':       'السرعة',
+  // "المتبقي" — the remaining — parallel to الارتفاع and السرعة beside it, and short enough that
+  // three values still fit one line on the narrow screens that are most of the audience.
+  'label.distance_left': 'المتبقي',
+  'unit.km':           'كم',
   'unit.kt':           'عقدة',
   'map.unknown_airline': 'شركة غير معروفة',
   'map.no_signal':     'تقدير حسب الجدول · لا توجد إشارة مباشرة',

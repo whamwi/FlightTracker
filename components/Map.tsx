@@ -729,6 +729,17 @@ function buildPopup(
         typeof a.gs === 'number' && a.gs > 0
           ? `${T('label.speed')}: ${Math.round(a.gs).toLocaleString('en-US')} ${T('unit.kts')}`
           : null,
+        /*
+         * Distance still to run, which is the one of the three a waiting reader can act on: an
+         * altitude and a speed describe the aircraft, this describes when it gets here.
+         *
+         * Only outside the final ring. Inside it the line has already been replaced by
+         * map.approaching_runway, and putting a number back would undo that — at 3 km a fix
+         * thirty seconds old is wrong by two, which is most of what is left.
+         */
+        kmToArr !== null
+          ? `${T('label.distance_left')}: ${Math.round(kmToArr).toLocaleString('en-US')} ${T('unit.km')}`
+          : null,
       ].filter(Boolean).join(' · ')
     : ''
   /*
