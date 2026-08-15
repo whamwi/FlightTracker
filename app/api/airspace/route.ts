@@ -844,6 +844,11 @@ export async function GET() {
         actual_dep_utc,
         actual_arr_utc: info?.actual_arr_utc ?? null,
         revised_arr_utc: info?.revised_arr_utc ?? null,
+        // Carried everywhere revised_arr_utc is. Six builders emit that field and this one
+        // reached only three, so SYR272 and FYC728 came back with a revised arrival and no
+        // stable one — the popup then fell to a different field than the side card used, and
+        // the same flight read 9:10 in one and 9:13 in the other.
+        eta_stable_utc: info?.eta_stable_utc ?? null,
         dep_delay_min:  info?.dep_delay_min  ?? null,
         airline_iata:   info?.airline_iata   ?? null,
       })
@@ -902,7 +907,7 @@ export async function GET() {
           actual_dep_utc: info.actual_dep_utc ?? null,
           actual_arr_utc: info.actual_arr_utc ?? null,
           revised_arr_utc: info.revised_arr_utc ?? null,
-      eta_stable_utc: info.eta_stable_utc ?? null,
+          eta_stable_utc: info.eta_stable_utc ?? null,
           dep_delay_min:  info.dep_delay_min  ?? null,
           airline_iata:   info.airline_iata   ?? null,
         })
@@ -1006,6 +1011,7 @@ export async function GET() {
           actual_dep_utc,
           actual_arr_utc:  f.actual_arr_utc,
           revised_arr_utc: f.revised_arr_utc,
+          eta_stable_utc:  f.eta_stable_utc ?? null,
           iata_number:     f.iata_num,
           // The server's own verdict, which until now stopped at the board.
           //
