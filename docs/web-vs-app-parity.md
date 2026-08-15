@@ -75,6 +75,29 @@ otherwise, since a third of Aleppo's arrivals are never published and would othe
 
 Ships with the next app build — it is a client change, not a deploy.
 
+### Arrival, when FR24 publishes nothing — resolved 15 Aug
+
+Found after the audit, and it was the larger of the two divergences.
+
+The app's map decided a flight had landed from `actual_arr_utc` alone. FR24 is silent on 22 of 35
+Aleppo arrivals; the server settles those from `arr_confirmed_at` or from five minutes past
+`est_arr`, and neither writes `actual_arr_utc`. So the app contradicted **itself**: `FlightCard`
+rendered the derived status and read Arrived, while `flight-items` kept flying the aircraft on the
+same screen. It had been receiving that status all along — it reads the same `/v2/board` the web
+does — and never looked at it.
+
+The web made this change on 14 Aug, after RJA431 read "~ In air" for nineteen minutes past
+touchdown and, on a quiet day, for three hours.
+
+Fixed by `arrivedNow()` in `lib/flight-items.ts`, used at all four decision points — including the
+registry branch that draws flights the feed never gave a position for, which at Aleppo is most of
+them and was therefore exactly where this landed.
+
+**Why the audit missed it.** It grepped for web features to port. This was not a feature the web
+had and the app lacked; it was a *rule the web changed and the app did not*, with no new symbol to
+find. Absence is greppable, divergence is not — which is the limitation recorded at the foot of
+this document, caught doing exactly what it warns about.
+
 ### Agreeing already
 
 | | note |
