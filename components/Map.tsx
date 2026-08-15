@@ -2114,8 +2114,30 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
               dep_coords:     depC,
               arr_coords:     arrC,
               departed_at_ms: depAt,
-              eta_ms:         a.duration_min ? depAt + a.duration_min * 60_000 : null,
-              duration_ms:    a.duration_min ? a.duration_min * 60_000 : null,
+              /*
+               * The revised arrival first, exactly as the schedule overlay below already does.
+               *
+               * This path only ever used the scheduled block, and a short leg that leaves early is
+               * where that falls apart. RJ440 on 15 Aug is filed DAM–AMM 01:55–02:45, a 50-minute
+               * block; it left at 01:27 and flew it in 28. At 01:51 the predictor had it 24 minutes
+               * into 50 — 49% along a 194 km route, some 95 km from Damascus — while the aircraft
+               * was 13 km from Amman on final. The marker sat near the border, and the popup beside
+               * it read "1 minute to arrival", because the countdown was reading the revised time
+               * the predictor was ignoring.
+               *
+               * The fix offered below corrects the rate, but it cannot outvote a duration that is
+               * nearly twice the truth for the whole flight.
+               */
+              eta_ms:         (() => {
+                const revised = a.revised_arr_utc ? Date.parse(a.revised_arr_utc) : NaN
+                if (Number.isFinite(revised)) return revised
+                return a.duration_min ? depAt + a.duration_min * 60_000 : null
+              })(),
+              duration_ms:    (() => {
+                const revised = a.revised_arr_utc ? Date.parse(a.revised_arr_utc) : NaN
+                if (Number.isFinite(revised) && revised > depAt) return revised - depAt
+                return a.duration_min ? a.duration_min * 60_000 : null
+              })(),
               fix: (moved && isLive) ? {
                 lat: a.lat, lon: a.lon, at_ms: now,
                 gs_kts: a.gs ?? null, track_deg: a.track ?? null,
