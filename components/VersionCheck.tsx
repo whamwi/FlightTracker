@@ -18,36 +18,45 @@ import { useT, useLocale } from '@/components/LocaleProvider'
  *
  * Five minutes between checks. The point is that a tab open for hours eventually notices, not that
  * it notices in the first ten seconds, and this runs on every page.
+ *
+ * The build id arrives as a prop from the server-rendered layout rather than through
+ * NEXT_PUBLIC_BUILD_ID. The first attempt used that, and it silently did nothing: Next inlines
+ * NEXT_PUBLIC_* from the real environment, not from next.config's `env`, so the value never
+ * reached the bundle and the comparison always short-circuited. Verified by grepping the deployed
+ * HTML and all ten chunks for the SHA — absent from every one.
+ *
+ * Rendering it into the page is also better semantics. The prop is fixed at the moment the page
+ * was served, which is exactly the question being asked: is this tab older than what is deployed
+ * now. A build-time constant answers the same thing only by coincidence.
  */
 const CHECK_MS = 5 * 60 * 1000
 
-export default function VersionCheck() {
+export default function VersionCheck({ build }: { build: string }) {
   const [stale, setStale] = useState(false)
   const t = useT()
   const locale = useLocale()
 
   useEffect(() => {
-    const mine = process.env.NEXT_PUBLIC_BUILD_ID
     // 'dev' is the local fallback: nothing to compare, and no banner while developing.
-    if (!mine || mine === 'dev') return
+    if (!build || build === 'dev') return
 
     let cancelled = false
     const check = async () => {
       try {
         const res = await fetch('/api/version', { cache: 'no-store' })
         if (!res.ok) return
-        const { build } = await res.json()
+        const { build: current } = await res.json()
         // Only a definite disagreement counts. A missing or malformed answer means the check
         // failed, not that the tab is stale — and a banner shown on a network blip would train
         // people to ignore it.
-        if (!cancelled && build && build !== 'dev' && build !== mine) setStale(true)
+        if (!cancelled && current && current !== 'dev' && current !== build) setStale(true)
       } catch { /* offline, or the deployment is mid-swap. Try again next time. */ }
     }
 
     check()
     const id = setInterval(check, CHECK_MS)
     return () => { cancelled = true; clearInterval(id) }
-  }, [])
+  }, [build])
 
   if (!stale) return null
 

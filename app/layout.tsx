@@ -75,7 +75,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         )}
       </head>
       <body className="bg-gray-950 text-white">
-        <LocaleProvider locale={locale}>{children}<VersionCheck /></LocaleProvider>
+        <LocaleProvider locale={locale}>{children}<VersionCheck build={process.env.VERCEL_GIT_COMMIT_SHA ?? 'dev'} /></LocaleProvider>
         {/*
           Vercel Web Analytics. Cookieless and with no cross-site identifiers, so it needs no
           consent banner and adds nothing to the App Privacy disclosures — which matters with
