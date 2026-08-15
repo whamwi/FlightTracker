@@ -56,6 +56,15 @@ type InAirFlight = {
   // popup carries them for anyone who wants that detail.
   arr_next_day?: boolean
   dep_prev_day?: boolean
+  /**
+   * Which board this row came from, stamped on merge.
+   *
+   * The panel fetches two days and flattens them, and `arr_time_utc` is a bare HH:MM that means
+   * nothing without a date. Everywhere else that reassembles it — the airspace route — anchors it
+   * against the board date it arrived on, and this exists so the panel can do the same instead of
+   * assuming today.
+   */
+  board_date?: string
 }
 
 const IN_AIR = new Set(['Departed', 'En Route', 'Approaching'])
@@ -78,10 +87,28 @@ function etaMs(f: InAirFlight): number {
   if (f.revised_arr_utc) return new Date(f.revised_arr_utc).getTime()
   if (f.actual_dep_utc && f.duration_min)
     return new Date(f.actual_dep_utc).getTime() + f.duration_min * 60_000
-  const [h, m] = (f.arr_time_utc ?? '23:59').slice(0, 5).split(':').map(Number)
-  const now = Date.now()
-  const base = new Date(now)
-  return Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate(), (h + 21) % 24, m)
+  /*
+   * Nothing observed, nothing estimated, nothing under way: the timetable is all that is left.
+   *
+   * This branch shifted the value by `(h + 21) % 24` — minus three hours — which treated
+   * arr_time_utc as Damascus local and "converted" it to UTC. It is already UTC: the board writes
+   * it as sa.astimezone(timezone.utc). FZ1115 on 15 Aug was due 06:30Z into Damascus, which is
+   * 9:30 in the morning there, and the card read 6:30 ص — the UTC figure printed as though local.
+   *
+   * It survived because the wrong answer looks like a right one. The tell was elsewhere on the
+   * same card: a departure at 7:15 Dubai and an arrival four minutes later, on a sector that takes
+   * three hours and forty minutes.
+   *
+   * Not only cosmetic. This list is sorted by etaMs, so every flight that had not yet departed
+   * sorted three hours early — FZ1115 led a list ordered by arrival, above two flights genuinely
+   * an hour and more from landing, and soonestArrRef fed the same number to the strip's countdown.
+   *
+   * Anchored to the board date the row came from, with the same next-day roll the airspace route
+   * applies, rather than to whatever day it happens to be when a reader opens the panel.
+   */
+  const day = f.board_date ?? new Date().toISOString().slice(0, 10)
+  const ms  = Date.parse(`${day}T${(f.arr_time_utc ?? '23:59').slice(0, 5)}:00Z`)
+  return Number.isFinite(ms) ? ms + (f.arr_next_day ? 86_400_000 : 0) : Date.now()
 }
 
 // Arabic carries no English unit letters — see the twin in FlightDetail.
@@ -444,13 +471,17 @@ function useInAirFlights() {
       // map component, so `new Map()` here builds a React element.
       const rank = (f: InAirFlight) => (f.actual_dep_utc ? 2 : f.status && f.status !== 'Scheduled' ? 1 : 0)
       const best: Record<string, InAirFlight> = {}
-      for (const board of boards) {
+      // Parallel to the array the two boards were fetched with, so each row keeps the day its
+      // bare HH:MM times belong to once the two are flattened together.
+      const boardDates = [today, tomorrow]
+      boards.forEach((board, i) => {
         for (const f of ((board?.flights ?? []) as InAirFlight[])) {
+          f.board_date = boardDates[i]
           const key  = `${f.iata_number}|${f.dep_iata}|${f.arr_iata}`
           const prev = best[key]
           if (!prev || rank(f) > rank(prev)) best[key] = f
         }
-      }
+      })
 
       const isFlying = (f: InAirFlight) => {
         // Hand the rule what we last saw, so the stopwatch cannot drop a flight out of the panel
