@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { sweepAllCircles } from '@/lib/adsb-feed'
 import { logSignals, syriaOpDate } from '@/lib/signal-log'
+import { inSyria } from '@/lib/syria-airspace'
 
 /**
  * Owns the ADS-B sweep so nothing else has to.
@@ -145,9 +146,23 @@ async function writePositions(aircraft: any[], ours: Set<string>): Promise<numbe
    * path selects them. The browser used to supply them, which is why every historical row has one
    * — a useful tell for telling the two eras apart later.
    */
+  /*
+   * Only flights that could be ours — the board's callsigns, or anything over Syria.
+   *
+   * The same rule the read path applies (`board_match || inSyria`), and it has to be applied here
+   * too. The browser this replaced logged only the flights it was already tracking; the sweep sees
+   * the whole region, so logging everything with a callsign put foreign overflights into
+   * flight_signal_log. /api/airspace reads that table for confirmed-airborne flights and emits
+   * them with board_match hardcoded true, so on 15 Aug five aircraft — BBG692, MEA251, ETD76T,
+   * JAV281, FDB34Q — were drawn on the map with no origin and no destination.
+   *
+   * Storing them was never the intent: this table exists to give our flights a position when the
+   * sweep misses them, not to be a regional traffic log.
+   */
   const opDate = syriaOpDate(Date.parse(now))
   const readings = rows
-    .filter(r => r.callsign)
+    .filter(r => r.callsign
+      && (ours.has(r.callsign.trim().toUpperCase()) || inSyria(r.lat, r.lon)))
     .map(r => ({
       callsign:    r.callsign as string,
       flight_date: opDate,
