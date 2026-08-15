@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
 import { fetchCallsignLookup, fetchIataToIcao, resolveCallsign } from '@/lib/callsign'
-import { SYRIA_AIRPORT_SET, SYRIA_AIRPORTS_CSV } from '@/lib/syria-airports'
 import { boardFromV2, type BoardFlightV2 } from '@/lib/board-v2'
 
 export const dynamic = 'force-dynamic'
@@ -9,9 +8,7 @@ const SB_URL  = process.env.SUPABASE_URL!
 const SB_KEY  = process.env.SUPABASE_ANON_KEY!
 const HEADERS = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 
-const PREFIX_TO_IATA: Record<string, string> = { FYC: 'XH', SYR: 'RB', HST: 'RB' }
 
-const SYRIAN_AIRPORTS = SYRIA_AIRPORT_SET
 
 const STATUS_RANK: Record<string, number> = {
   // Terminal, like Arrived — see normaliseStatus in the flightboard route.
@@ -20,11 +17,6 @@ const STATUS_RANK: Record<string, number> = {
   Expected: 2, Scheduled: 1, Unknown: 0,
 }
 
-function unixToUtcHHMM(unix: number | null): string {
-  if (!unix) return ''
-  const d = new Date(unix * 1000)
-  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
-}
 
 function normaliseStatus(raw: string | null): string {
   if (!raw) return 'Scheduled'
@@ -61,81 +53,8 @@ function resolveRevisedArr(f: any): string | null {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function effectiveStatusFor(f: any): { status: string; rank: number } {
-  const base       = normaliseStatus(f.status)
-  const actualDep  = resolveActualDep(f)
-  const actualArr  = resolveActualArr(f)
-  const revisedArr = resolveRevisedArr(f)
-  const dur = (() => {
-    if (actualDep && revisedArr) {
-      const d = Math.round((new Date(revisedArr).getTime() - new Date(actualDep).getTime()) / 60_000)
-      if (d > 30) return d
-    }
-    return f.duration_min ?? 0
-  })()
-  const inferredArrived =
-    !actualArr && !!actualDep && dur > 0 &&
-    new Date(actualDep).getTime() + dur * 60_000 < Date.now() - 15 * 60_000
-
-  const status = actualArr ? 'Arrived'
-    : inferredArrived ? 'Arrived'
-    : (actualDep && (STATUS_RANK[base] ?? 0) < STATUS_RANK['Departed'] ? 'Departed' : base)
-
-  return { status, rank: STATUS_RANK[status] ?? 0 }
-}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildFlight(f: any, num: string, status: string, airlineMap: Record<string, { name: string; flag: string; icao: string }>, date: string) {
-  /*
-   * The carrier code, from whichever form the number arrived in.
-   *
-   * PREFIX_TO_IATA is keyed on three-letter ICAO prefixes — FYC, SYR — which is what FR24
-   * publishes for the carriers that use callsigns. Now that XH744 resolves as well as FYC744,
-   * `num` can also be the two-character IATA form, and slice(0,3) of XH744 is "XH7", matching
-   * nothing. The code came back empty, the logo URL became /airlines/100/_100px.png, and the
-   * card showed a black square where Fly Cham's logo should be.
-   */
-  const airlineIata = f.airline_iata
-    || PREFIX_TO_IATA[num.slice(0, 3)]
-    || (/^[A-Z][A-Z0-9]\d/.test(num) ? num.slice(0, 2) : '')
-    || ''
-  const al = airlineMap[airlineIata] ?? { name: f.airline ?? airlineIata, flag: '', icao: '' }
-  const actualDep = resolveActualDep(f)
-  const revisedArr = resolveRevisedArr(f)
-  const dur = (() => {
-    if (actualDep && revisedArr) {
-      const d = Math.round((new Date(revisedArr).getTime() - new Date(actualDep).getTime()) / 60_000)
-      if (d > 30) return d
-    }
-    return f.duration_min ?? 0
-  })()
-  return {
-    iata_number:     num,
-    airline_name:    al.name,
-    airline_iata:    airlineIata,
-    airline_icao:    al.icao,
-    country_flag:    al.flag,
-    dep_iata:        f.dep_iata  ?? '',
-    arr_iata:        f.arr_iata  ?? '',
-    dep_time_utc:    unixToUtcHHMM(f.sched_dep),
-    arr_time_utc:    unixToUtcHHMM(f.sched_arr),
-    sched_dep_unix:  f.sched_dep  ?? null,
-    duration_min:    dur,
-    status,
-    actual_dep_utc:  resolveActualDep(f),
-    actual_arr_utc:  resolveActualArr(f),
-    revised_dep_utc: resolveRevisedDep(f),
-    revised_arr_utc: resolveRevisedArr(f),
-    aircraft_type:   f.aircraft_type ?? f.aircraft ?? null,
-    aircraft_reg:    f.aircraft_reg  ?? f.reg     ?? null,
-    dep_terminal:    f.dep_terminal     ?? null,
-    dep_gate:        f.dep_gate         ?? null,
-    arr_terminal:    f.arr_terminal     ?? null,
-    arr_gate:        f.arr_gate         ?? null,
-    arr_baggage:     f.arr_baggage      ?? null,
-    date,
-  }
-}
 
 /**
  * The detail card for one flight, from the same board document the board tab renders.
@@ -184,15 +103,6 @@ function flightFromBoard(
     iata_number: num,
     date,
   }
-}
-
-async function fetchCaches(date: string): Promise<{ airport_iata: string; arrivals: unknown[]; departures: unknown[] }[]> {
-  const res = await fetch(
-    `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${date}&airport_iata=in.(${SYRIA_AIRPORTS_CSV})&select=airport_iata,arrivals,departures`,
-    { headers: HEADERS }
-  )
-  if (!res.ok) return []
-  return res.json()
 }
 
 export async function GET(req: Request) {
@@ -246,72 +156,21 @@ export async function GET(req: Request) {
       continue
     }
 
-    const rows = await fetchCaches(date)
-    let bestFlight = null
-    let bestRank   = -1
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let bestRaw: any = null
-    let bestSide: 'arr' | 'dep' = 'dep'
-
-    for (const row of rows) {
-      const airport = row.airport_iata
-      const sides: [unknown[], 'arr' | 'dep'][] = [
-        [row.arrivals  ?? [], 'arr'],
-        [row.departures ?? [], 'dep'],
-      ]
-      for (const [list, side] of sides) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        for (const raw of list as any[]) {
-          const fNum = (raw.num ?? '').replace(/\s+/g, '').toUpperCase()
-          if (!aliases.has(fNum)) continue
-          // arr_iata / dep_iata are often null in cache — infer from the row's airport
-          const f = {
-            ...raw,
-            arr_iata: raw.arr_iata ?? (side === 'arr' ? airport : null),
-            dep_iata: raw.dep_iata ?? (side === 'dep' ? airport : null),
-          }
-          const { status, rank } = effectiveStatusFor(f)
-          if (rank > bestRank) {
-            bestFlight = buildFlight(f, num, status, airlineMap, date)
-            bestRank   = rank
-            bestRaw    = f
-            bestSide   = side as 'arr' | 'dep'
-          }
-        }
-      }
-    }
-
-    // Second pass: for inbound flights, read origin airport departure cache
-    // to get est_dep / est_arr (mirrors what the flightboard does).
-    if (bestFlight && bestSide === 'arr' && bestRaw) {
-      const originIata = bestRaw.dep_iata as string | null
-      if (originIata && !SYRIAN_AIRPORTS.has(originIata)) {
-        const originRes = await fetch(
-          `${SB_URL}/rest/v1/fr24_daily_cache?flight_date=eq.${date}&airport_iata=eq.${originIata}&select=departures`,
-          { headers: HEADERS }
-        )
-        if (originRes.ok) {
-          const originRows: { departures: unknown[] }[] = await originRes.json()
-          for (const originRow of originRows) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            for (const f of (originRow.departures ?? []) as any[]) {
-              const fNum = (f.num ?? '').replace(/\s+/g, '').toUpperCase()
-              if (!aliases.has(fNum)) continue
-              const merged = {
-                ...bestRaw,
-                est_dep: f.est_dep ?? bestRaw.est_dep,
-                est_arr: f.est_arr ?? bestRaw.est_arr,
-              }
-              const { status } = effectiveStatusFor(merged)
-              bestFlight = buildFlight(merged, num, status, airlineMap, date)
-              break
-            }
-          }
-        }
-      }
-    }
-
-    if (bestFlight) return NextResponse.json({ ok: true, flight: bestFlight, date })
+    /*
+     * No cache fallback.
+     *
+     * v2 could not answer at all — a transport failure, not a miss. There used to be a second
+     * path here that parsed fr24_daily_cache for the same flight, plus a pass over the origin
+     * airport's departures to recover est_dep / est_arr for inbound legs.
+     *
+     * It went with the cache on 15 Aug. The route's own comment above already refused to fall
+     * through on a *miss*, for the reason that applies just as well here: the cache is written
+     * only by whoever opens /fr24 in a browser, so answering from it means serving one visitor's
+     * snapshot as though it were the board, and being unable to tell which the reader got.
+     *
+     * A 404 is the honest answer when the board cannot be reached — it says nothing, rather than
+     * saying something that may be days old.
+     */
   }
 
   return NextResponse.json({ ok: false, error: 'flight not found', dates }, { status: 404 })
