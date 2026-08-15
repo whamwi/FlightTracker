@@ -2329,6 +2329,25 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         if (fs?.actual_dep_utc && bestSchedDepTime[callsign] && dep_time_utc !== bestSchedDepTime[callsign]) continue
         const AIRBORNE_STATUSES  = new Set(['En Route', 'Departed', 'Approaching'])
 
+        /*
+         * The block this flight is actually flying, not the one it was filed with.
+         *
+         * RJ440 is filed DAM–AMM with a 50-minute block and flies it in 28. Projecting along the
+         * filed figure put its marker 86 km behind the aircraft while the countdown beside it,
+         * which reads the revised arrival, was correct to the minute. The live path had the same
+         * fault and was fixed first; this is the other half — the ghost, and the duration handed to
+         * the tracker.
+         *
+         * Falls back to the filed block when there is no revised arrival: before FR24 publishes
+         * one, and for any flight it never resolves.
+         */
+        const revisedArrMs = fs?.revised_arr_utc ? Date.parse(fs.revised_arr_utc) : NaN
+        const depAtMs      = fs?.actual_dep_utc  ? Date.parse(fs.actual_dep_utc)  : NaN
+        const effectiveBlockMs =
+          Number.isFinite(revisedArrMs) && Number.isFinite(depAtMs) && revisedArrMs > depAtMs
+            ? revisedArrMs - depAtMs
+            : duration_min * 60_000
+
         let fraction: number | null = null
         const actualArrMs  = fs?.actual_arr_utc ? new Date(fs.actual_arr_utc).getTime() : null
         const priorLegDone = actualArrMs !== null && actualArrMs < now
@@ -2344,7 +2363,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
               const display = pred.getDisplay(now)
               fraction = display.routeFraction > 0
                 ? Math.min(display.routeFraction, 0.99)
-                : climbAdjustedFraction(elapsed, duration_min * 60_000)
+                : climbAdjustedFraction(elapsed, effectiveBlockMs)
             } else {
               const ks = kinematicStateRef.current[callsign]
               if (ks && wpsK?.length) {
@@ -2352,7 +2371,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
                 const [drLat, drLon] = projectPosition(ks.lat, ks.lon, ks.track_deg, ks.gs_kts, sinceCapMs)
                 fraction = nearestPathFraction(wpsK, drLat, drLon)
               } else {
-                fraction = climbAdjustedFraction(elapsed, duration_min * 60_000)
+                fraction = climbAdjustedFraction(elapsed, effectiveBlockMs)
               }
             }
             // Expire dynamically: grace = max(2h, 1× flight duration) past expected arrival.
@@ -2527,7 +2546,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
               eta_ms:         revised && Number.isFinite(revised)
                                 ? revised
                                 : entry.duration_min ? depAt + entry.duration_min * 60_000 : null,
-              duration_ms:    entry.duration_min ? entry.duration_min * 60_000 : null,
+              duration_ms:    effectiveBlockMs || null,
               fix:            null,
               src:            'sched',
             })
