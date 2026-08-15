@@ -85,10 +85,24 @@ export async function logSignals(batch: SignalReading[], nowIso: string): Promis
     const alt = r.alt_baro ?? 0
     const gs  = r.gs       ?? 0
 
+    /*
+     * gs and alt_baro are integer columns and the feed sends neither as one — 299.3 kt is
+     * ordinary. Postgres rejects the row outright: 22P02, invalid input syntax for integer.
+     *
+     * This predates the move to the cron. The browser posted one reading at a time and did not
+     * check the response, so every fractional speed was dropped in silence while whole ones
+     * landed — which means the history is quietly biased toward aircraft that happened to report
+     * a round number. Batching is what made it visible, by failing all of them at once.
+     *
+     * Rounded here rather than at each caller: the mobile app posts to this route too, and the
+     * column types are the constraint, not the caller.
+     */
     positions.push({
       callsign: r.callsign, flight_date: r.flight_date, captured_at: nowIso,
       lat: r.lat, lon: r.lon,
-      alt_baro: r.alt_baro, gs: r.gs, track: r.track, hex: r.hex,
+      alt_baro: r.alt_baro == null ? null : Math.round(r.alt_baro),
+      gs:       r.gs       == null ? null : Math.round(r.gs),
+      track: r.track, hex: r.hex,
       dep_iata: r.dep_iata, arr_iata: r.arr_iata,
     })
 
