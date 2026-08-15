@@ -580,7 +580,7 @@ function FlightCard({ f, view, isPinned, onTogglePin, boardDate, phase }: { f: F
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-            <span style={{
+            <span dir="ltr" style={{
               font: `600 20px/1 'IBM Plex Mono', monospace`,
               color: isCancelled ? '#A6A093' : depTimeColor,
               textDecoration: isCancelled ? 'line-through' : 'none',
@@ -701,7 +701,7 @@ function FlightCard({ f, view, isPinned, onTogglePin, boardDate, phase }: { f: F
             {hasComputedETA && !isCancelled && (
               <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, fontWeight: 600, padding: '3px 5px', borderRadius: 5, background: C.goldenBg, color: C.goldenText }}>~</span>
             )}
-            <span style={{
+            <span dir="ltr" style={{
               font: `600 20px/1 'IBM Plex Mono', monospace`,
               color: isCancelled ? '#A6A093' : arrTimeColor,
               textDecoration: isCancelled ? 'line-through' : 'none',
@@ -1098,7 +1098,7 @@ export default function BoardPage() {
       )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 12px', borderRadius: 999, background: C.ink }}>
         <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, fontWeight: 600, color: '#fff', letterSpacing: '.04em' }}>
-          {nowSyria.time}<Meridiem of={nowSyria.meridiem} size={9} /> {t('chip.now')}
+          <span dir="ltr">{nowSyria.time}<Meridiem of={nowSyria.meridiem} size={9} /></span> {t('chip.now')}
         </span>
       </div>
       {(enroute > 0 || complete) && (

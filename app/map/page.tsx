@@ -751,9 +751,9 @@ function InAirStrip({ selectedFlight, onSelect, onClear }: { selectedFlight?: st
               <span style={{ display: 'flex', alignItems: 'baseline', gap: 5,
                 fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, fontWeight: 600,
                 color: C.muted, whiteSpace: 'nowrap' }}>
-                <span>{f.dep_iata} {dep.time}<Meridiem of={dep.meridiem} size={8} /></span>
+                <span dir="ltr">{f.dep_iata} {dep.time}<Meridiem of={dep.meridiem} size={8} /></span>
                 <span style={{ color: C.forestLight }}>{locale === 'ar' ? '←' : '→'}</span>
-                <span>{f.arr_iata} {arr.time}<Meridiem of={arr.meridiem} size={8} /></span>
+                <span dir="ltr">{f.arr_iata} {arr.time}<Meridiem of={arr.meridiem} size={8} /></span>
               </span>
             </span>
             </span>

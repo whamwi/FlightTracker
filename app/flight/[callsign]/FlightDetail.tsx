@@ -480,7 +480,7 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
                 {!isCancelled && depMoved && <span style={{ fontSize: 8, fontWeight: 500, opacity: .75, textTransform: 'none' }}>({t(depKind)})</span>}
               </div>
               <div style={{ display: 'flex', alignItems: 'baseline' }}>
-                <span style={{ fontSize: 20, fontWeight: 700, color: isCancelled ? C.muted : C.ink, fontVariantNumeric: 'tabular-nums', textDecoration: isCancelled ? 'line-through' : 'none' }}>
+                <span dir="ltr" style={{ fontSize: 20, fontWeight: 700, color: isCancelled ? C.muted : C.ink, fontVariantNumeric: 'tabular-nums', textDecoration: isCancelled ? 'line-through' : 'none' }}>
                   {depDisplay}<Meridiem of={depPart.meridiem} size={11} />
                 </span>
                 {!isCancelled && <DelayBadge min={depDelay} />}
@@ -489,7 +489,7 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
               {!isCancelled && depMoved && (
                 <div style={{ fontSize: 10, color: C.muted, marginTop: 2, display: 'flex', gap: 5, alignItems: 'baseline' }}>
                   <span>{t('label.scheduled')}</span>
-                  <span style={{ textDecoration: 'line-through', fontVariantNumeric: 'tabular-nums' }}>{depSched}<Meridiem of={depSchedPart.meridiem} size={8} /></span>
+                  <span dir="ltr" style={{ textDecoration: 'line-through', fontVariantNumeric: 'tabular-nums' }}>{depSched}<Meridiem of={depSchedPart.meridiem} size={8} /></span>
                 </div>
               )}
             </div>
@@ -502,13 +502,13 @@ export default function FlightDetail({ callsign }: { callsign: string }) {
               </div>
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end' }}>
                 {!isCancelled && <DelayBadge min={arrDelay} />}
-                <span style={{ fontSize: 20, fontWeight: 700, color: isCancelled ? C.muted : C.ink, fontVariantNumeric: 'tabular-nums', textDecoration: isCancelled ? 'line-through' : 'none' }}>
+                <span dir="ltr" style={{ fontSize: 20, fontWeight: 700, color: isCancelled ? C.muted : C.ink, fontVariantNumeric: 'tabular-nums', textDecoration: isCancelled ? 'line-through' : 'none' }}>
                   {arrDisplay}<Meridiem of={arrPart.meridiem} size={11} />
                 </span>
               </div>
               {!isCancelled && arrMoved && (
                 <div style={{ fontSize: 10, color: C.muted, marginTop: 2, display: 'flex', gap: 5, alignItems: 'baseline', justifyContent: 'flex-end' }}>
-                  <span style={{ textDecoration: 'line-through', fontVariantNumeric: 'tabular-nums' }}>{arrSched}<Meridiem of={arrSchedPart.meridiem} size={8} /></span>
+                  <span dir="ltr" style={{ textDecoration: 'line-through', fontVariantNumeric: 'tabular-nums' }}>{arrSched}<Meridiem of={arrSchedPart.meridiem} size={8} /></span>
                   <span>{t('label.scheduled')}</span>
                 </div>
               )}
