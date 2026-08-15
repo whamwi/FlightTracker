@@ -73,11 +73,6 @@ async function boardCallsigns(): Promise<Set<string>> {
   }
 }
 
-// Surfaced in the GET response so a failing write can be seen without log access — the table
-// staying empty while every other signal looked healthy is what made the first attempt hard to
-// diagnose.
-let lastSignalNote = 'not run'
-
 /* eslint-disable @typescript-eslint/no-explicit-any */
 async function writePositions(aircraft: any[], ours: Set<string>): Promise<number> {
   /*
@@ -157,10 +152,8 @@ async function writePositions(aircraft: any[], ours: Set<string>): Promise<numbe
       dep_iata: null, arr_iata: null,
     }))
   if (readings.length > 0) {
-    try { lastSignalNote = `ok ${await logSignals(readings, now)}` }
-    catch (e) { lastSignalNote = String(e).slice(0, 300); console.error('[airspace-poll] signal log failed', e) }
-  } else {
-    lastSignalNote = 'no readings'
+    try { await logSignals(readings, now) }
+    catch (e) { console.error('[airspace-poll] signal log failed', e) }
   }
 
   return written
@@ -210,7 +203,6 @@ export async function GET() {
     ok: !blind,
     sweeps,
     totalSeen,
-    signalLog: lastSignalNote,
     elapsedMs: Date.now() - started,
   })
 }
