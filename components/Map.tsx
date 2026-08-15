@@ -3102,7 +3102,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
   // assumed to be a datacenter IP block. It never worked: opensky-network.org sends no
   // permissive Access-Control-Allow-Origin, so every visitor's fetch failed CORS. The
   // premise was wrong too — OpenSky does not block Vercel. It now runs server-side in
-  // /api/cron/opensky-poll, and its fixes reach the map through /api/airspace.
+  // the harvester, and its fixes reach the map through fr24_live_position.
 
   return (
     <div className="relative w-full h-full">

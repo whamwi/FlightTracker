@@ -57,21 +57,14 @@ async function processReading(r: SignalReading, now: string) {
     (ex?.airborne_at || airborne_at) && gs < 30 && alt < 100 ? now : null
   )
 
-  // 3. Insert position row — ignore exact-duplicate positions (same lat/lon/alt on stale ADS-B ticks)
-  await fetch(`${SB_URL}/rest/v1/flight_position_log`, {
-    method:  'POST',
-    headers: { ...HEADERS, 'Content-Type': 'application/json', Prefer: 'resolution=ignore-duplicates,return=minimal' },
-    body: JSON.stringify({
-      callsign, flight_date, captured_at: now,
-      lat: r.lat, lon: r.lon,
-      alt_baro: r.alt_baro,
-      gs:       r.gs,
-      track:    r.track,
-      hex:      r.hex,
-      dep_iata: r.dep_iata,
-      arr_iata: r.arr_iata,
-    }),
-  })
+  /*
+   * The position insert that stood here is gone: flight_position_log is retired and every
+   * position now comes from fr24_live_position, written server-side by the harvester.
+   *
+   * The milestone upsert below stays. cron/carry-over reads airborne_at from it to notice a
+   * carried-over flight that is actually flying, and that has no equivalent in the position
+   * table — it is a fact about the flight, not about where the aircraft is.
+   */
 
   // 4. Upsert summary row
   await fetch(`${SB_URL}/rest/v1/flight_signal_log`, {

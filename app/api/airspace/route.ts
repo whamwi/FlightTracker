@@ -619,92 +619,22 @@ async function fetchBoardFlights(iataToIcao: Record<string, string>, lookup: Cal
 // aircraft_last_seen, 13 were outside the circles — and the Turkey circle now covers 9 of
 // those. Net unique yield: 4 aircraft in 7 days.
 //
-// What they were actually for is now done properly by /api/cron/opensky-poll: one request,
-// one credit, every tracked hex at once, global, no radius limit, on a cron rather than
-// per visitor. fetchLoggedPositions below surfaces its fixes to the map.
-interface SignalFlight { callsign: string; hex: string; dep_iata: string | null; arr_iata: string | null; flight_date: string }
-
-// ── Poller-written positions (10s cache) ──────────────────────────────────────
-// /api/cron/opensky-poll writes flight_position_log on a cron for every tracked hex,
-// worldwide. OpenSky sees traffic the volunteer ADS-B networks miss over this region, so
-// these rows are often the only live fix a flight has. Reading them here is a DB hit
-// rather than an upstream call, so the cost does not scale with visitor count — which is
-// the point of polling on a cron instead of from the browser.
-//
-// A row can be up to one poll interval old, so it is emitted as an out-of-band fix
-// carrying its own capture time (`fix_at`) rather than as a current position: the client
-// dead-reckons forward from it instead of assuming the aircraft is there now.
-//
-// This window MUST stay above the cron interval in vercel.json, or fixes age out before
-// the next poll replaces them and the channel goes dark for part of every cycle with no
-// error anywhere — the window was 6 min while the cron ran every 2, and moving the cron
-// to 15 without this would have blanked it for two thirds of each interval.
-// It must also stay under FR24_HAND_OFF_MS (30 min) in Map.tsx, which retires a fix
-// client-side; a row older than that would be dropped on arrival instead.
-const OPENSKY_POLL_INTERVAL_MS = 15 * 60_000          // keep in sync with vercel.json
-const LOGGED_MAX_AGE_MS        = OPENSKY_POLL_INTERVAL_MS + 5 * 60_000
-
-interface LoggedPos {
-  callsign:    string
-  lat:         number
-  lon:         number
-  alt_baro:    number | null
-  gs:          number | null
-  track:       number | null
-  hex:         string | null
-  captured_at: string
-}
-let loggedCache: { map: Record<string, LoggedPos>; ts: number } | null = null
-
-async function fetchLoggedPositions(): Promise<Record<string, LoggedPos>> {
-  if (loggedCache && Date.now() - loggedCache.ts < 10_000) return loggedCache.map
-  const cutoff = new Date(Date.now() - LOGGED_MAX_AGE_MS).toISOString()
-  try {
-    const res = await fetch(
-      `${SB_URL}/rest/v1/flight_position_log`
-      + `?captured_at=gte.${cutoff}&order=captured_at.desc&limit=500`
-      + `&select=callsign,lat,lon,alt_baro,gs,track,hex,captured_at`,
-      { headers: SB_HEADERS, signal: AbortSignal.timeout(5000) },
-    )
-    const rows: LoggedPos[] = res.ok ? await res.json() : []
-    const map: Record<string, LoggedPos> = {}
-    // Newest-first, so the first row seen for a callsign is its latest fix.
-    for (const r of rows) {
-      if (!r.callsign || r.lat == null || r.lon == null) continue
-      if (!map[r.callsign]) map[r.callsign] = r
-    }
-    loggedCache = { map, ts: Date.now() }
-    return map
-  } catch { return loggedCache?.map ?? {} }
-}
-
-// Fetch today's confirmed-airborne flights with hex codes from flight_signal_log
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let signalCache: { flights: SignalFlight[]; ts: number } | null = null
-async function fetchSignalFlights(): Promise<SignalFlight[]> {
-  if (signalCache && Date.now() - signalCache.ts < 30_000) return signalCache.flights
-  const today   = new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10)
-  // Only include flights that became airborne within the last 6 hours — the longest
-  // Syrian route is DAM→AMS at ~4.5h, so 6h gives a 1.5h buffer before we stop tracking.
-  // Using airborne_at, not last_seen_at: a flight leaving the Syria radius 20 min after
-  // takeoff would have last_seen ~2h ago on a 3h flight, which a last_seen cutoff would
-  // incorrectly exclude. Sort by airborne_at desc so same-hex aircraft (two legs same day)
-  // yield the most recent leg first — the seenHex dedup then keeps the right one.
-  const cutoff  = new Date(Date.now() - 6 * 3_600_000).toISOString()
-  try {
-    const res = await fetch(
-      `${SB_URL}/rest/v1/flight_signal_log`
-      + `?flight_date=eq.${today}&actual_arr_at=is.null&airborne_at=not.is.null&hex=not.is.null`
-      + `&airborne_at=gte.${cutoff}`
-      + `&order=airborne_at.desc`
-      + `&select=callsign,hex,dep_iata,arr_iata,flight_date`,
-      { headers: SB_HEADERS, signal: AbortSignal.timeout(5000) }
-    )
-    const flights: SignalFlight[] = res.ok ? await res.json() : []
-    signalCache = { flights, ts: Date.now() }
-    return flights
-  } catch { return signalCache?.flights ?? [] }
-}
+// What they were actually for is now done by the harvester, which writes every fix into
+// fr24_live_position on its own sweep — server-side, one poll, and the same table the board
+// reads, rather than a second position store per visitor.
+/*
+ * Positions now come from one place: fr24_live_position, via livePositionsFromV2 above.
+ *
+ * This is where flight_position_log used to be read. It held fixes written by whichever visitor
+ * had the map open, joined against flight_signal_log to decide which of them to draw, and emitted
+ * the result with board_match hardcoded true — so an aircraft with no board identity was still
+ * published as one of ours. On 15 Aug that put an Israeli domestic flight on the map.
+ *
+ * The v2 block does the same job and refuses that case by construction: `if (!info) continue`,
+ * identity from the board or nothing. It is also fresher — measured on the five flights this path
+ * was serving at the time, fr24_live_position held fixes 49-120s old against browser rows minutes
+ * older.
+ */
 
 // ── Persist last known positions ───────────────────────────────────────────────
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1059,12 +989,10 @@ export async function GET() {
       }
     }
 
-    // Confirmed-airborne hex list, fetched in parallel with the position persist.
     // Nothing is persisted when the positions came out of the table: see fromStorage above.
-    const [signalFlights] = await Promise.all([
-      fetchSignalFlights(),
-      fromStorage ? Promise.resolve() : upsertPositions(visualAircraft, boardCallsignSet),
-    ] as const)
+    // The confirmed-airborne hex list that used to be fetched alongside this came from
+    // flight_signal_log and existed only to pick which flight_position_log rows to draw.
+    if (!fromStorage) await upsertPositions(visualAircraft, boardCallsignSet)
 
     // Annotate visual radius aircraft
     const seenHex = new Set<string>()
@@ -1160,7 +1088,7 @@ export async function GET() {
     // Poller-written fixes for tracked flights that no radius circle found.
     //
     // Nothing in trackedExtra is fed back through upsertPositions: every source below is
-    // already DB-derived (flight_position_log, aircraft_last_seen), and writing a row back
+    // already DB-derived (aircraft_last_seen), and writing a row back
     // would stamp seen_at = now, making a fix of known age look permanently current.
     const emittedCs = new Set<string>(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1211,44 +1139,6 @@ export async function GET() {
       }
     }
 
-    const loggedMap = await fetchLoggedPositions()
-    for (const sig of signalFlights) {
-      const cs = sig.callsign.trim().toUpperCase()
-      if (emittedCs.has(cs)) continue
-      if (sig.hex && seenHex.has(sig.hex.toLowerCase())) continue
-      const p = loggedMap[sig.callsign] ?? loggedMap[cs]
-      if (!p) continue
-      emittedCs.add(cs)
-      if (p.hex) seenHex.add(p.hex.toLowerCase())
-      const info = matchLive(cs)
-      trackedExtra.push({
-        hex:            p.hex ?? sig.hex,
-        flight:         cs,
-        lat:            p.lat,
-        lon:            p.lon,
-        alt_baro:       p.alt_baro,
-        gs:             p.gs,
-        track:          p.track,
-        true_heading:   p.track,
-        t:              info?.aircraft_type ?? null,
-        r:              info?.reg           ?? null,
-        fr24:           true,          // out-of-band fix: dead-reckon from fix_at, don't treat as live
-        fix_at:         p.captured_at,
-        board_match:    true,
-        dep_iata:       sig.dep_iata,
-        arr_iata:       sig.arr_iata,
-        dep_time_utc:   info?.sched_dep    ? unixToHHMM(info.sched_dep) : null,
-        arr_time_utc:   info?.sched_arr    ? unixToHHMM(info.sched_arr) : null,
-        duration_min:   info?.duration_min ?? null,
-        iata_number:    info?.iata_num     ?? null,
-        board_status:   info?.status       ?? null,
-        actual_dep_utc: info?.actual_dep_utc ?? null,
-        actual_arr_utc: info?.actual_arr_utc ?? null,
-        revised_arr_utc: info?.revised_arr_utc ?? null,
-        dep_delay_min:  info?.dep_delay_min  ?? null,
-        airline_iata:   info?.airline_iata   ?? null,
-      })
-    }
 
     // Every circle failed — we are blind, not looking at empty sky. Fall back to the last
     // known position of each board flight so the map keeps its aircraft instead of
