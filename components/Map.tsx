@@ -1239,7 +1239,6 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
   const syriaGeoRef                          = useRef<any>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const overSyriaMarkersRef                  = useRef<Record<string, any>>({})
-  const lastLoggedPosRef = useRef<Record<string, { lat: number; lon: number; alt: number | null }>>({})
 
   useEffect(() => {
     if (!loading) return
@@ -1824,42 +1823,22 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         }
       }
 
-      // ── 2b. Log live ADS-B positions for board-matched flights ───────────────
-      // Fire-and-forget — never block the render loop
-      if (freshCallsigns.size > 0) {
-        const syriaDt = new Date(now + 3 * 3_600_000).toISOString().slice(0, 10)
-        const batch = [...freshCallsigns].flatMap(cs => {
-          const entry = trackedRef.current[cs]
-          if (!entry || entry.lostAt > 0) return []
-          const a = entry.a
-          const alt = typeof a.alt_baro === 'number' ? a.alt_baro
-                    : a.alt_baro === 'ground'        ? 0
-                    : null
-          // Skip if position unchanged since last log (stale ADS-B tick)
-          const prev = lastLoggedPosRef.current[cs]
-          if (prev && prev.lat === a.lat && prev.lon === a.lon && prev.alt === alt) return []
-          lastLoggedPosRef.current[cs] = { lat: a.lat, lon: a.lon, alt }
-          return [{
-            callsign:    cs,
-            flight_date: syriaDt,
-            lat:         a.lat,
-            lon:         a.lon,
-            alt_baro:    alt,
-            gs:          a.gs,
-            track:       a.track,
-            hex:         a.hex,
-            dep_iata:    a.dep_iata,
-            arr_iata:    a.arr_iata,
-            iata_number: a.iata_number,
-          }]
-        })
-        if (batch.length > 0) {
-          fetch('/api/signal-log', {
-            method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify(batch),
-          }).catch(() => {})
-        }
+      /*
+       * 2b. Position logging moved to the server on 15 Aug 2026.
+       *
+       * This block POSTed every fresh fix to /api/signal-log, which is how flight_position_log and
+       * flight_signal_log were filled. Two production paths read them — cron/carry-over uses
+       * airborne_at to catch a carried-over flight that is really flying, and /api/airspace reads
+       * the positions as fixes that are often a flight's only ones — so both quietly depended on
+       * somebody having the map open.
+       *
+       * What that cost, measured the day it was removed: five consecutive hours, 20:00–00:00 UTC,
+       * with not a single row written. cron/airspace-poll already sweeps the region every minute
+       * and now writes both tables itself, so the history is even instead of audience-shaped.
+       *
+       * The endpoint stays for the mobile app, which shares these routes.
+       */
+      {
 
         // Capture kinematic state for dead reckoning after signal loss.
         // Only from fresh live ADS-B (not FR24 cache, not stale DB rows).
