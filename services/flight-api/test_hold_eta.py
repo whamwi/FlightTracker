@@ -20,7 +20,7 @@ os.environ.setdefault("SUPABASE_SERVICE_KEY", "test")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test")
 os.environ.setdefault("SUPABASE_ANON_KEY", "test")
 
-from main import hold_eta, ETA_WOBBLE_MIN  # noqa: E402
+from main import hold_eta, ETA_WOBBLE_MIN, merge_position  # noqa: E402
 
 KEY = ("2026-08-12", "RB515", "DAM", "SHJ")
 
@@ -77,6 +77,50 @@ def test_flights_do_not_share_an_anchor():
     hold_eta(KEY, A, held)
     assert hold_eta(other, "2026-08-12T19:00:00+00:00", held) == "2026-08-12T19:00:00+00:00"
     assert hold_eta(KEY, B, held) == A, "one flight's revision must not move another's"
+
+
+# ── Position merge ───────────────────────────────────────────────────────────────
+
+FR24 = {"lat": 34.0, "lon": 36.0, "fix_at": "2026-08-15T17:00:00+00:00", "source": "F-BDWY1"}
+CIRC = {"lat": 34.5, "lon": 36.5, "seen_at": "2026-08-15T17:00:30+00:00", "gs": 430,
+        "track": 320, "alt_baro": 34000}
+
+
+def test_the_fresher_source_wins_not_the_favoured_one():
+    # The circles are 30 s newer here, so they win.
+    out = merge_position(FR24, CIRC)
+    assert out["lat"] == 34.5, out
+    assert out["source"] == "adsb"
+    assert out["fix_at"] == CIRC["seen_at"], "the winner brings its own timestamp"
+
+
+def test_a_stale_circle_does_not_displace_a_fresh_feed_row():
+    old = {**CIRC, "seen_at": "2026-08-15T16:56:00+00:00"}   # four minutes older
+    # Preferring a source outright is what put five flights on four-minute-old ADS-B while
+    # four-second-old feed rows sat unused, then lurched when the stale row aged out.
+    assert merge_position(FR24, old)["lat"] == 34.0
+
+
+def test_either_source_alone_is_enough():
+    assert merge_position(FR24, None)["lat"] == 34.0
+    assert merge_position(None, CIRC)["lat"] == 34.5
+    assert merge_position(None, None) is None
+
+
+def test_a_circle_row_is_returned_in_the_feed_shape():
+    out = merge_position(None, CIRC)
+    # Nothing downstream should have to know a second table exists.
+    for k in ("lat", "lon", "altitude_ft", "ground_speed_kts", "track_deg",
+              "vertical_speed_fpm", "on_ground", "fix_at", "source"):
+        assert k in out, f"missing {k}"
+    # Not guessed: the circles carry neither, and a caller must be able to tell.
+    assert out["vertical_speed_fpm"] is None
+    assert out["on_ground"] is None
+
+
+def test_an_unparseable_timestamp_keeps_the_feed_row():
+    # Rather than silently promoting a row whose age cannot be established.
+    assert merge_position(FR24, {**CIRC, "seen_at": "not a time"})["lat"] == 34.0
 
 
 if __name__ == "__main__":

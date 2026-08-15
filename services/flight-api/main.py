@@ -558,10 +558,91 @@ async def latest_positions(client: httpx.AsyncClient) -> dict[str, dict]:
     return out
 
 
+async def circle_positions(client: httpx.AsyncClient) -> dict[str, dict]:
+    """
+    Direct ADS-B reception, keyed by callsign — the circles the website's map has always had.
+
+    `aircraft_last_seen` is written continuously by the airspace poller from adsb.fi and
+    adsb.lol. It never reached this service, so /v2/live carried FR24's sweep alone and the
+    website merged the two itself in a Next.js route only it calls. That made the site
+    structurally better informed than the app, and no amount of client work could close it.
+
+    The harvester is supposed to fold direct reception into fr24_live_position with
+    source='adsb', and that path exists — but measured 15 Aug it produced ONE row in thirty
+    minutes while this table took a row every couple of seconds. So the merge was not happening
+    anywhere a client could see it.
+
+    Worth having on its own terms rather than for parity: the circles hear 32 of the 86 board
+    flights that departed on 15 Aug, and they are 2-4 seconds old against FR24's 60-second
+    sweep. For a third of the traffic this is both fresher and, where FR24 cannot see the
+    aircraft at all, the only source.
+
+    Keyed by callsign because that is all the table has — it is fed by hex from the feeds, with
+    no fr24_id to join on. Upper-cased and stripped: ADS-B pads callsigns to eight characters.
+    """
+    cutoff = quote(
+        (datetime.now(timezone.utc) - timedelta(seconds=FIX_STALE_SEC)).isoformat(), safe="")
+    rows = await sb(
+        client,
+        "aircraft_last_seen?select=callsign,lat,lon,alt_baro,gs,track,seen_at"
+        f"&seen_at=gte.{cutoff}&callsign=not.is.null&order=seen_at.desc",
+    )
+    out: dict[str, dict] = {}
+    for r in rows:                            # ordered desc, so first of a callsign is newest
+        cs = (r.get("callsign") or "").strip().upper()
+        if cs and cs not in out and r.get("lat") is not None:
+            out[cs] = r
+    return out
+
+
+def merge_position(fr24: dict | None, circle: dict | None) -> dict | None:
+    """
+    One position per aircraft, from whichever source saw it last.
+
+    Freshness decides, not source. Preferring a source outright is what made five flights on
+    13 Aug render from four-minute-old ADS-B while four-second-old feed rows sat unused, and
+    then lurch when the stale row aged out — the same mistake pointed the other way would be
+    just as visible.
+
+    Returned in the feed's shape whichever wins, so nothing downstream has to know a second
+    table exists. The circles carry no vertical speed or on-ground flag; both are None rather
+    than guessed, and a caller that needs them can tell the difference.
+    """
+    if circle is None:
+        return fr24
+    if fr24 is None:
+        return _from_circle(circle)
+    # iso() raises on a malformed value rather than returning None, and this is the one place
+    # that compares a timestamp from a table the harvester does not own. A single unparseable
+    # seen_at would otherwise take down the whole live document; here it simply loses the
+    # comparison, which is the conservative answer anyway.
+    try:
+        a, b = iso(fr24.get("fix_at")), iso(circle.get("seen_at"))
+    except (ValueError, TypeError):
+        return fr24
+    if a is None or b is None or a >= b:
+        return fr24
+    return _from_circle(circle)
+
+
+def _from_circle(c: dict) -> dict:
+    return {
+        "lat": c.get("lat"), "lon": c.get("lon"),
+        "altitude_ft": c.get("alt_baro"),
+        "ground_speed_kts": c.get("gs"),
+        "track_deg": c.get("track"),
+        "vertical_speed_fpm": None,
+        "on_ground": None,
+        "fix_at": c.get("seen_at"),
+        "source": "adsb",
+    }
+
+
 async def build_live() -> dict:
     async with httpx.AsyncClient() as client:
         aps = await airports(client)
         pos_by_id = await latest_positions(client)
+        circles   = await circle_positions(client)
 
         # Everything with a fresh fix, whichever source produced it. A flight our own receivers
         # can see but FR24 has filed no live instance for is already here: the harvester wrote it
@@ -570,6 +651,24 @@ async def build_live() -> dict:
         if pos_by_id:
             ids = ",".join(f'"{i}"' for i in pos_by_id)
             flights = await sb(client, f"flight?select=*&fr24_id=in.({ids})")
+
+        # Plus anything the circles can hear that FR24 has not filed a live position for.
+        #
+        # Selecting only on fr24_id meant an aircraft our own receivers could see was absent from
+        # this document entirely unless FR24 also had it — so the coverage the circles buy could
+        # never reach a client through here. Restricted to today and to flights that have
+        # actually departed, because a callsign match alone would resurrect yesterday's instance
+        # of the same number.
+        if circles:
+            known = {f.get("fr24_id") for f in flights}
+            names = ",".join(f'"{c}"' for c in circles)
+            day   = datetime.now(TZ).strftime("%Y-%m-%d")
+            extra = await sb(
+                client,
+                f"flight?select=*&flight_date=eq.{day}&callsign=in.({names})"
+                "&real_dep=not.is.null&real_arr=is.null",
+            )
+            flights += [f for f in extra if f.get("fr24_id") not in known]
 
         # Plus anything that landed recently, fix or no fix.
         #
@@ -613,7 +712,11 @@ async def build_live() -> dict:
 
     out = []
     for f in flights:
-        pos = pos_by_id.get(f.get("fr24_id"))
+        # Whichever source saw this aircraft last — see merge_position.
+        pos = merge_position(
+            pos_by_id.get(f.get("fr24_id")),
+            circles.get((f.get("callsign") or "").strip().upper()),
+        )
         progress, p_basis = derive_progress(f, pos, aps)
         eta, e_basis = derive_eta(f)
         delay, d_basis = derive_delay(f)
