@@ -34,10 +34,12 @@
     #panel a { color: #9ec7a6; }
   }
   h1 { font-size: 13px; margin: 0 0 6px; }
-  .counts { font-variant-numeric: tabular-nums; margin-bottom: 8px; }
+  .counts { font-variant-numeric: tabular-nums; margin-bottom: 8px; white-space: pre-line; }
   .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; }
-  .obs { background: #556A4E; }
-  .prj { background: #B9A779; }
+  .dam { background: #2f6b3c; }
+  .alp { background: #c0392b; }
+  .dez { background: #1d6fd0; }
+  .oth { background: #6b7280; }
   table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
   td { padding: 1px 4px 1px 0; vertical-align: top; }
   td.n { text-align: right; color: #6b7280; }
@@ -57,7 +59,9 @@
 <div id="panel">
   <h1>/v2/live — marker test</h1>
   <div class="counts" id="counts">loading…</div>
-  <div><span class="swatch obs"></span>observed &nbsp; <span class="swatch prj"></span>projected</div>
+  <div><span class="swatch dam"></span>DAM &nbsp;<span class="swatch alp"></span>ALP &nbsp;<span
+       class="swatch dez"></span>DEZ &nbsp;<span class="swatch oth"></span>other</div>
+  <div style="margin-top:3px;color:#6b7280">colour = Syrian end of the route &middot; faded = projected</div>
   <hr style="border:none;border-top:1px solid #d5dfd0;margin:8px 0">
   <table id="rows"></table>
 </div>
@@ -83,7 +87,41 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r
  */
 const markers = new Map()
 
-const icon = (label, track, projected) => L.divIcon({
+/*
+ * Colour is the Syrian end of the route: DAM green, ALP red, DEZ blue.
+ *
+ * Either end counts, because ALP→SHJ and OTP→ALP are both Aleppo traffic and keying off the
+ * departure alone would colour half of it. When both ends are Syrian — DAM→ALP — the departure
+ * wins, so a flight keeps one colour for its whole life rather than changing hue at some
+ * arbitrary point.
+ *
+ * Anything with no Syrian end is grey. It is on the map because it is inside the circles, not
+ * because anyone is waiting for it, and it should not compete with the traffic that is.
+ *
+ * Colour therefore carries ROUTE, and observed against projected is carried by opacity and the
+ * label tint instead. Hue can only encode one fact legibly: if green also had to mean "we can
+ * see it", a projected Damascus arrival would be indistinguishable from an observed one — and
+ * telling those two apart is the entire reason this page exists.
+ */
+const HUB_COLOUR = {
+  DAM: { plane: '#2f6b3c', label: '#245730', faded: '#7fae88' },   // Forest green
+  ALP: { plane: '#c0392b', label: '#98261a', faded: '#d9776b' },   // red
+  DEZ: { plane: '#1d6fd0', label: '#17559f', faded: '#7fb0e8' },   // blue
+  '':  { plane: '#6b7280', label: '#4b5563', faded: '#a8aeb7' },   // not ours
+}
+const SYRIAN = new Set(['DAM', 'ALP', 'DEZ'])
+
+const hubOf = f =>
+  SYRIAN.has(f.dep_iata) ? f.dep_iata
+  : SYRIAN.has(f.arr_iata) ? f.arr_iata
+  : ''
+
+const planeColour = (hub, projected) =>
+  projected ? HUB_COLOUR[hub].faded : HUB_COLOUR[hub].plane
+const labelColour = (hub, projected) =>
+  projected ? HUB_COLOUR[hub].faded : HUB_COLOUR[hub].label
+
+const icon = (label, track, projected, hub) => L.divIcon({
   className: '',
   // The anchor's y is half the glyph's height, so the aircraft sits ON its coordinate rather
   // than beside it. Get this wrong and every marker is quietly offset by a fixed number of
@@ -91,8 +129,8 @@ const icon = (label, track, projected) => L.divIcon({
   iconSize: [96, 60],
   iconAnchor: [48, 19],
   html: `<div class="plane" style="transform:rotate(${(track ?? 0) - 90}deg);color:${
-           projected ? '#B9A779' : '#556A4E'};opacity:${projected ? .75 : 1}">&#9992;</div>
-         <div class="lbl" style="color:${projected ? '#8a7c52' : '#3f5139'}">${label}</div>`,
+           planeColour(hub, projected)};opacity:${projected ? .8 : 1}">&#9992;</div>
+         <div class="lbl" style="color:${labelColour(hub, projected)}">${label}</div>`,
 })
 
 const fmt = n => (n === null || n === undefined) ? '—' : n
@@ -110,6 +148,7 @@ async function tick() {
   const flights = doc.flights || []
   const seen = new Set()
   let observed = 0, projected = 0, nopos = 0
+  const byHub = { DAM: 0, ALP: 0, DEZ: 0 }
   const rows = []
 
   for (const f of flights) {
@@ -119,6 +158,8 @@ async function tick() {
     isProj ? projected++ : observed++
 
     const cs = f.callsign || f.iata_number || '?'
+    const hub = hubOf(f)
+    if (hub) byHub[hub]++
     seen.add(cs)
 
     // Nothing is interpolated, smoothed, or advanced between polls. The marker is placed where
@@ -127,9 +168,9 @@ async function tick() {
     const m = markers.get(cs)
     if (m) {
       m.setLatLng(ll)
-      m.setIcon(icon(cs, p.track_deg, isProj))
+      m.setIcon(icon(cs, p.track_deg, isProj, hub))
     } else {
-      markers.set(cs, L.marker(ll, { icon: icon(cs, p.track_deg, isProj) })
+      markers.set(cs, L.marker(ll, { icon: icon(cs, p.track_deg, isProj, hub) })
         .addTo(map)
         .bindPopup(''))
     }
@@ -142,7 +183,8 @@ async function tick() {
       `progress ${f.progress == null ? '—' : Math.round(f.progress * 100) + '%'}` +
       (p.fraction != null ? ` &middot; f=${p.fraction.toFixed(3)}` : ''))
 
-    rows.push(`<tr><td>${isProj ? '<span class="swatch prj"></span>' : '<span class="swatch obs"></span>'}${cs}</td>` +
+    rows.push(`<tr><td><span class="swatch" style="background:${planeColour(hub, isProj)}"></span>` +
+              `<span style="color:${labelColour(hub, isProj)}${hub ? ';font-weight:700' : ''}">${cs}</span></td>` +
               `<td>${f.dep_iata ?? '?'}&rarr;${f.arr_iata ?? '?'}</td>` +
               `<td class="n">${f.phase}</td></tr>`)
   }
@@ -154,7 +196,8 @@ async function tick() {
   }
 
   document.getElementById('counts').textContent =
-    `${flights.length} flights · ${observed} observed · ${projected} projected · ${nopos} no position`
+    `${flights.length} flights · ${observed} observed · ${projected} projected · ${nopos} no position\n`
+    + `DAM ${byHub.DAM} · ALP ${byHub.ALP} · DEZ ${byHub.DEZ}`
   document.getElementById('rows').innerHTML = rows.sort().join('')
 }
 
