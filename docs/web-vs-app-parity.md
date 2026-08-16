@@ -173,6 +173,26 @@ Not a defect — the server fills the gap and everything downstream works. But c
 Aleppo's arrival times are ours rather than FR24's, which is the measured reason `arr_confirmed_at`
 exists and is directly relevant to how an inferred arrival should report its time there.
 
+## The flight sheet against the web's popup
+
+Compared by which **facts** each renders, not by pixels.
+
+### Time flown, once it has landed — the app shows the wrong number, not a missing one
+
+The web computes `actualArrMs - depMs` and labels it «زمن الرحلة»: the time the flight actually
+took. The app's `ArrivalBar` renders `durationLabel(f.duration_min)` — the **scheduled** block
+time, and unlabelled. A flight that ran twenty minutes long reports its schedule on the phone.
+
+`label.flown` is defined in the app's i18n and rendered nowhere.
+
+### Absent from the sheet
+
+| | web popup | app sheet |
+|---|---|---|
+| altitude | yes | yes |
+| ground speed | yes (`unit.kt`) | **no** — the string is defined and never rendered |
+| distance still to run | yes (`unit.km`) | **no** — the string is not defined at all |
+
 ## Not yet compared
 
 The board page, the flight sheet's layout, push notifications, and the news and airlines tabs.
