@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>flight-api /v2/live — marker test</title>
+
+<!--
+  A deliberately stupid map.
+
+  This exists to test the API, so it does exactly one thing: it draws what /v2/live says and
+  nothing else. No tracker, no predictor, no corridor, no animation, no staleness rules, no
+  arbitration between sources. If a marker is in the wrong place here, the server is wrong —
+  there is no client logic left for the fault to hide in. That is the whole point of it, and the
+  property both real clients are being rebuilt to have.
+
+  It is NOT part of the website. It is a static file beside the service it tests, opened
+  directly; the Next.js app neither serves nor builds it.
+-->
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root { color-scheme: light dark; }
+  html, body { margin: 0; height: 100%; font: 13px/1.45 ui-sans-serif, system-ui, sans-serif; }
+  #map { position: absolute; inset: 0; }
+  #panel {
+    position: absolute; z-index: 1000; top: 10px; left: 10px; width: 268px; max-height: calc(100% - 20px);
+    overflow: auto; background: rgba(255,255,255,.95); border: 1px solid #d5dfd0; border-radius: 8px;
+    padding: 10px 12px; box-shadow: 0 2px 10px rgba(0,0,0,.15);
+  }
+  @media (prefers-color-scheme: dark) {
+    #panel { background: rgba(20,24,20,.95); color: #e8e8e4; border-color: #33403a; }
+    #panel a { color: #9ec7a6; }
+  }
+  h1 { font-size: 13px; margin: 0 0 6px; }
+  .counts { font-variant-numeric: tabular-nums; margin-bottom: 8px; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; }
+  .obs { background: #556A4E; }
+  .prj { background: #B9A779; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  td { padding: 1px 4px 1px 0; vertical-align: top; }
+  td.n { text-align: right; color: #6b7280; }
+  .plane { font-size: 22px; line-height: 1; text-align: center; }
+  /*
+   * The halo is white regardless of the page theme, because the map tiles are light in both.
+   * Keying it to prefers-color-scheme drew a black halo over pale terrain and every label read
+   * as a smudge — the label has to contrast with what is UNDER it, not with the page chrome.
+   */
+  .lbl { font-size: 10px; font-weight: 700; text-align: center; white-space: nowrap;
+         text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff; }
+  .err { color: #b91c1c; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="panel">
+  <h1>/v2/live — marker test</h1>
+  <div class="counts" id="counts">loading…</div>
+  <div><span class="swatch obs"></span>observed &nbsp; <span class="swatch prj"></span>projected</div>
+  <hr style="border:none;border-top:1px solid #d5dfd0;margin:8px 0">
+  <table id="rows"></table>
+</div>
+
+<script>
+// Same origin by default so this works wherever it is served from; override for a deployed
+// service with ?api=https://...
+const API = new URLSearchParams(location.search).get('api') || 'http://127.0.0.1:8077'
+
+const map = L.map('map', { zoomControl: true }).setView([33.5, 38.0], 5)
+L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; OpenStreetMap, &copy; CARTO', maxZoom: 19,
+}).addTo(map)
+
+/*
+ * ONE marker per aircraft, in ONE collection, keyed by callsign.
+ *
+ * The website keeps three separate collections — live, schedule ghosts, and its Over Syria view —
+ * none of which knows about the others, and a flight that changes how its callsign is spelled
+ * between two of them gets drawn twice with neither able to remove the other. That is how AY352
+ * and ABY352 ended up side by side on 16 Aug. One map, one key, and that class of defect cannot
+ * be expressed.
+ */
+const markers = new Map()
+
+const icon = (label, track, projected) => L.divIcon({
+  className: '',
+  iconSize: [80, 44],
+  iconAnchor: [40, 16],
+  html: `<div class="plane" style="transform:rotate(${(track ?? 0) - 90}deg);color:${
+           projected ? '#B9A779' : '#556A4E'};opacity:${projected ? .75 : 1}">&#9992;</div>
+         <div class="lbl" style="color:${projected ? '#8a7c52' : '#3f5139'}">${label}</div>`,
+})
+
+const fmt = n => (n === null || n === undefined) ? '—' : n
+
+async function tick() {
+  let doc
+  try {
+    const res = await fetch(`${API}/v2/live`, { cache: 'no-store' })
+    doc = await res.json()
+  } catch (e) {
+    document.getElementById('counts').innerHTML = `<span class="err">${API} unreachable</span>`
+    return
+  }
+
+  const flights = doc.flights || []
+  const seen = new Set()
+  let observed = 0, projected = 0, nopos = 0
+  const rows = []
+
+  for (const f of flights) {
+    const p = f.position
+    if (!p || p.lat == null || p.lon == null) { nopos++; continue }
+    const isProj = p.pos_source === 'projected'
+    isProj ? projected++ : observed++
+
+    const cs = f.callsign || f.iata_number || '?'
+    seen.add(cs)
+
+    // Nothing is interpolated, smoothed, or advanced between polls. The marker is placed where
+    // the server said, and moves only when the server says something new.
+    const ll = [p.lat, p.lon]
+    const m = markers.get(cs)
+    if (m) {
+      m.setLatLng(ll)
+      m.setIcon(icon(cs, p.track_deg, isProj))
+    } else {
+      markers.set(cs, L.marker(ll, { icon: icon(cs, p.track_deg, isProj) })
+        .addTo(map)
+        .bindPopup(''))
+    }
+    markers.get(cs).setPopupContent(
+      `<b>${cs}</b> &nbsp; ${f.dep_iata ?? '?'} &rarr; ${f.arr_iata ?? '?'}<br>` +
+      `phase <b>${f.phase}</b> &middot; source <b>${p.pos_source}</b><br>` +
+      `${p.lat.toFixed(4)}, ${p.lon.toFixed(4)} &middot; track ${fmt(p.track_deg && Math.round(p.track_deg))}<br>` +
+      `alt ${fmt(p.altitude_ft)} ft &middot; gs ${fmt(p.ground_speed_kts)} kt<br>` +
+      `eta_stable ${f.eta_stable_utc ?? '—'}<br>` +
+      `progress ${f.progress == null ? '—' : Math.round(f.progress * 100) + '%'}` +
+      (p.fraction != null ? ` &middot; f=${p.fraction.toFixed(3)}` : ''))
+
+    rows.push(`<tr><td>${isProj ? '<span class="swatch prj"></span>' : '<span class="swatch obs"></span>'}${cs}</td>` +
+              `<td>${f.dep_iata ?? '?'}&rarr;${f.arr_iata ?? '?'}</td>` +
+              `<td class="n">${f.phase}</td></tr>`)
+  }
+
+  // A flight that leaves the document leaves the map. One rule, one place — the web spreads the
+  // equivalent across five thresholds and a silence counter in a single poll body.
+  for (const [cs, m] of markers) {
+    if (!seen.has(cs)) { m.remove(); markers.delete(cs) }
+  }
+
+  document.getElementById('counts').textContent =
+    `${flights.length} flights · ${observed} observed · ${projected} projected · ${nopos} no position`
+  document.getElementById('rows').innerHTML = rows.sort().join('')
+}
+
+tick()
+setInterval(tick, 10_000)
+</script>
+</body>
+</html>
