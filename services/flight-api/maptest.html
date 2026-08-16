@@ -41,13 +41,13 @@
   table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
   td { padding: 1px 4px 1px 0; vertical-align: top; }
   td.n { text-align: right; color: #6b7280; }
-  .plane { font-size: 22px; line-height: 1; text-align: center; }
+  .plane { font-size: 38px; line-height: 1; text-align: center; }
   /*
    * The halo is white regardless of the page theme, because the map tiles are light in both.
    * Keying it to prefers-color-scheme drew a black halo over pale terrain and every label read
    * as a smudge — the label has to contrast with what is UNDER it, not with the page chrome.
    */
-  .lbl { font-size: 10px; font-weight: 700; text-align: center; white-space: nowrap;
+  .lbl { font-size: 12px; font-weight: 700; text-align: center; white-space: nowrap;
          text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff; }
   .err { color: #b91c1c; }
 </style>
@@ -85,8 +85,11 @@ const markers = new Map()
 
 const icon = (label, track, projected) => L.divIcon({
   className: '',
-  iconSize: [80, 44],
-  iconAnchor: [40, 16],
+  // The anchor's y is half the glyph's height, so the aircraft sits ON its coordinate rather
+  // than beside it. Get this wrong and every marker is quietly offset by a fixed number of
+  // pixels — which looks like a projection error and is not one.
+  iconSize: [96, 60],
+  iconAnchor: [48, 19],
   html: `<div class="plane" style="transform:rotate(${(track ?? 0) - 90}deg);color:${
            projected ? '#B9A779' : '#556A4E'};opacity:${projected ? .75 : 1}">&#9992;</div>
          <div class="lbl" style="color:${projected ? '#8a7c52' : '#3f5139'}">${label}</div>`,
