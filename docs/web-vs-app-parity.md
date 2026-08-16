@@ -41,7 +41,19 @@ Six modules exist in both repos. Only one is a real problem.
 | `syria-airports.ts` | Different shapes, neither ahead. `MARKER_ACCENT` is identical — DAM green, ALP orange, DEZ blue. |
 | `i18n.ts` | Translations. `status.departed` and `status.in_air` are the same on both sides; see the status divergence below, which is not a translation problem. |
 
-### path-tracker: the web is missing four fixes, and depends on the file more
+### path-tracker — RESOLVED 16 Aug
+
+Ported to the web by copying the app's file wholesale (the app's was a strict superset: 29
+differing code lines, all additions, identical imports). Both are now byte-identical, and the
+measurement above became 224 → 132 → 78 → 61 km on both sides.
+
+The test file was copied with it, which mattered more than it looked: the web's own 31 tests
+PASSED against the new source, because they build the aircraft BEHIND the tracker and never
+exercise the backward path at all.
+
+What follows is kept as the record of what was wrong.
+
+#### the original finding
 
 Made in the app on 15 Aug and never carried back — `web 0, app 4`:
 
@@ -79,18 +91,42 @@ frequency, not a live one.
 
 ## Divergences
 
-### 1. The status word — «في الجو» against «أقلعت»
+### 1. The status word on the MAP — «في الجو» against «أقلعت»
 
-Not translation. Both sides define `status.in_air` = في الجو and `status.departed` = أقلعت.
+Not translation, and not the boards. Both sides define the same strings, and **both boards already
+apply the same rule**: on departures an airborne flight is «أقلعت», on arrivals «في الجو».
+`app/board/page.tsx:388` and the app's `StatusBadge` argue it identically — on a departures board
+the fact you care about is that it has gone.
 
-The **web** derives the badge from map state — arrived, signal-lost, projected — so an airborne
-flight always reads «في الجو», with a `~` prefix when the position is projected. It has no path to
-«أقلعت» at all (`Map.tsx:638`).
+The maps diverge, and neither applies that rule:
 
-The **app** shows `PhaseChip` when a live row exists and falls back to `MapStatusBadge` on the
-board's `status` otherwise, which renders `Departed` as «أقلعت». The live row comes from
-`/v2/live`, which carried one or two flights all evening — so the fallback is the common case, not
-the rare one.
+- **web** derives the badge from map state — arrived, signal-lost, projected — so an airborne
+  flight always reads «في الجو», with a `~` prefix when projected. It has no path to «أقلعت» at
+  all (`Map.tsx:638`).
+- **app** shows `PhaseChip` when a live row exists and falls back to `MapStatusBadge` on the
+  board's `status`, which renders `Departed` as «أقلعت» — the board's word without the board's
+  context. The live row comes from `/v2/live`, which carried one or two flights all evening, so
+  the fallback is the common case rather than the rare one.
+
+The web's choice looks right for a map: direction is visible on the screen, so «في الجو» is the
+fact being asked for. The app's map badge should follow it — while both boards keep the view rule
+they already share.
+
+### 1b. Status canonicalisation — latent
+
+The web's `canonicalStatus` folds `landed` / `land` / `arrived` into `Arrived` before anything
+renders. The app's `statusConfig` is a direct key lookup falling back to `Unknown`, with no
+equivalent — so a lowercase form would render as Unknown on a card.
+
+Dormant today: flight-api emits only `Scheduled`, `Arrived`, `Expected`, `Departed`, all of which
+the app knows. It becomes live the first time a raw FR24 status reaches a client.
+
+### 1c. calcDelay — a NaN the web returns null for
+
+Byte-for-byte the same arithmetic except one guard. The web checks
+`if (!Number.isFinite(schedMs)) return null` before the midnight adjustment; the app
+(`app/(tabs)/map.tsx:45`) does not, so a malformed `HH:MM` produces `NaN` and a broken chip where
+the web shows nothing. Low reachability — the null/empty guard above catches the common cases.
 
 ### 2. Countdown source
 
