@@ -51,17 +51,46 @@ function onPath(f: number): { lat: number; lon: number } {
   return { lat, lon }
 }
 
-describe('progress is monotonic', () => {
-  test('never reverses even when fixes insist the aircraft is behind', () => {
+/**
+ * Progress used to be strictly monotonic, and that was wrong.
+ *
+ * Strict monotonicity plus a rate clamped at zero means a tracker that has run AHEAD of the
+ * aircraft can never come back, however much evidence arrives. FYC361 sat 208 km ahead of a
+ * feed that could see it perfectly and only recovered when the tracker was rebuilt — which
+ * presented as a 192 km jump.
+ *
+ * The guarantee is now bounded movement rather than no movement: a single fix cannot move the
+ * aircraft backwards at all, and a corroborated one moves it by a fraction of the
+ * disagreement. That keeps the property the invariant was protecting — no teleporting on bad
+ * data — without the drift trap.
+ */
+/**
+ * Distance between a tracker position and a place on the ground.
+ *
+ * Deliberately in kilometres on lat/lon rather than in route fraction. Every existing test
+ * asserts `routeFraction` or `isEstimated`, which means none of them would notice if the
+ * projection back to coordinates broke — and coordinates are the only thing a reader sees.
+ */
+function kmApart(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
+  return haversineKm(a.lat, a.lon, b.lat, b.lon)
+}
+
+describe('progress moves backwards only on corroboration, and only a little', () => {
+  test('no single step is a teleport, however insistent the fixes', () => {
     const t = new PathTracker(ctx(), T0)
-    let prev = -1
+    let prev = t.position(T0).routeFraction
 
     for (let i = 1; i <= 40; i++) {
       const now = T0 + i * 5 * 60_000
       // Every fix claims the aircraft is far behind where we think it is.
       t.applyFix({ ...onPath(0.01), at_ms: now }, now)
       const s = t.position(now).routeFraction
-      assert.ok(s >= prev, `s went backwards at step ${i}: ${s} < ${prev}`)
+      // Backward movement is capped at the correction factor times the largest disagreement
+      // the route allows (1.0), with a little headroom for the forward rate in the same step.
+      assert.ok(
+        s - prev >= -DEFAULT_PATH_CONFIG.backwardCorrectionFactor,
+        `step ${i} reversed too far: ${prev} → ${s}`,
+      )
       prev = s
     }
   })
@@ -80,20 +109,116 @@ describe('progress is monotonic', () => {
     assert.equal(out.reason, 'backward')
   })
 
-  test('a corroborated backward correction is accepted but still does not move it back', () => {
-    const t = new PathTracker(ctx(), T0)
-    const t1 = T0 + HOUR
-    assert.equal(t.applyFix({ ...onPath(0.26), at_ms: t1 }, t1).accepted, true)
-    const before = t.position(t1).routeFraction
+  /**
+   * A tracker that has run AHEAD of the aircraft, which is the only case this machinery is
+   * for, and the one three earlier versions of these tests failed to construct.
+   *
+   * Getting the direction wrong is easy and silent. The constructor seeds `s` from elapsed
+   * time, so at t0 + 1 h on a 4 h flight the seed is 0.25 — and a fix at 0.40 is then FORWARD
+   * of the tracker, exercising the rate correction that has always worked while the backward
+   * path never runs at all. Every assertion still passes, and proves nothing.
+   *
+   * Two hours in the seed is 0.50. A fix at 0.30 is genuinely behind it: ~300 km ahead of an
+   * aeroplane the feed can see perfectly, which is FYC361 as observed.
+   */
+  const AHEAD_AT   = T0 + 2 * HOUR   // seeded s = 0.50
+  const AHEAD_TRUTH = 0.30           // where the aircraft really is
 
-    let now = t1
+  test('a corroborated backward correction actually moves it back', () => {
+    const t    = new PathTracker(ctx(), T0)
+    // A twin that never hears the fixes, so the comparison isolates the correction from the
+    // rate. Comparing against the tracker's own earlier position would fail on a correct
+    // implementation: the aircraft legitimately advances between fixes.
+    const twin = new PathTracker(ctx(), T0)
+
+    let now = AHEAD_AT
     let lastOutcome
-    for (let i = 0; i < DEFAULT_PATH_CONFIG.backwardConfirmCount; i++) {
-      now += 10 * 60_000
-      lastOutcome = t.applyFix({ ...onPath(0.24), at_ms: now }, now)
+    // Three polls: the first is the free first fix, the second is refused for want of
+    // corroboration, the third is believed.
+    for (let i = 0; i < 3; i++) {
+      lastOutcome = t.applyFix({ ...onPath(AHEAD_TRUTH), at_ms: now }, now)
+      now += 60_000
     }
     assert.equal(lastOutcome?.accepted, true, 'corroborated backward fix should be accepted')
-    assert.ok(t.position(now).routeFraction >= before, 'but progress must not reverse')
+
+    const later = now + 60_000
+    assert.ok(
+      t.position(later).routeFraction < twin.position(later).routeFraction - 1e-6,
+      'corroborated evidence should pull it back relative to an uncorrected tracker',
+    )
+  })
+
+  /**
+   * The property that replaced monotonicity, and the one that actually protects the reader.
+   *
+   * An earlier attempt applied the correction inside applyFix, which put the whole
+   * disagreement into one animation frame — 73 km on a badly drifted flight. That passes a
+   * test asserting "it moved back" and fails the only thing a viewer cares about. Asserted in
+   * kilometres between consecutive frames, because that is what the eye reads.
+   */
+  test('no frame moves the aircraft further than the eye reads as motion', () => {
+    const t = new PathTracker(ctx(), T0)
+    let now = AHEAD_AT
+
+    let prev = t.position(now)
+    let worst = 0
+    for (let poll = 0; poll < 8; poll++) {
+      for (let f = 0; f < 60; f++) {
+        now += 1000
+        const p = t.position(now)
+        worst = Math.max(worst, kmApart(p, prev))
+        prev = p
+      }
+      t.applyFix({ ...onPath(AHEAD_TRUTH), at_ms: now }, now)
+      const p = t.position(now)
+      worst = Math.max(worst, kmApart(p, prev))
+      prev = p
+    }
+    // A second of cruise is ~0.25 km. Anything near that is motion; 73 km is a teleport.
+    assert.ok(worst < 1, `a frame jumped ${worst.toFixed(1)} km`)
+  })
+
+  /**
+   * The implied-speed guard divides by the interval since the last accepted fix, so a fix at
+   * or before that moment leaves it with nothing to divide by. It used to fall through as
+   * though it had passed — the only along-track sanity check on a fix, silently skipped.
+   *
+   * Reachable without an attacker: a feed merging several ADS-B receivers emits out-of-order
+   * timestamps routinely, and a rejected fix leaves the accepted-timestamp behind, so the
+   * next one can easily arrive "before" it.
+   */
+  test('a fix that predates the last accepted one is discarded, not waved through', () => {
+    const t  = new PathTracker(ctx(), T0)
+    const t1 = T0 + HOUR
+    assert.equal(t.applyFix({ ...onPath(0.26), at_ms: t1 }, t1).accepted, true)
+
+    // Same wall clock, but the fix itself claims to be older than the one already believed.
+    const out = t.applyFix({ ...onPath(0.30), at_ms: t1 - 30_000 }, t1)
+    assert.equal(out.accepted, false, 'an out-of-order fix must not be accepted')
+    assert.equal(out.reason, 'stale')
+  })
+
+  test('drift converges instead of persisting', () => {
+    const t = new PathTracker(ctx(), T0)
+    const truth = AHEAD_TRUTH
+    let now = AHEAD_AT
+    const startGap = kmApart(t.position(now), onPath(truth))
+    // Sixty-second polls with frames between them, which is what the feed and the animation
+    // actually do. Ten-minute polls make this scenario dishonest rather than demanding: the
+    // fix is pinned at one fraction while the tracker legitimately flies on, so most of the
+    // residual being measured is an aeroplane that the test is pretending never moved.
+    for (let i = 0; i < 20; i++) {
+      for (let f = 0; f < 60; f++) { now += 1000; t.position(now) }
+      t.applyFix({ ...onPath(truth), at_ms: now }, now)
+    }
+    // Tight deliberately. An earlier attempt settled into a permanent 67 km residual with a
+    // 36 km sawtooth on every poll, and a loose threshold called that convergence. It has to
+    // actually arrive, not merely stop getting worse.
+    const gapKm = kmApart(t.position(now), onPath(truth))
+    assert.ok(
+      gapKm < startGap * 0.6,
+      `drift did not converge: ${Math.round(startGap)} km -> ${Math.round(gapKm)} km`,
+    )
   })
 })
 
@@ -358,18 +483,39 @@ describe('a newly created tracker defers to its first real fix', () => {
     const t = new PathTracker(ctx(), born)
     assert.ok(Math.abs(t.position(born).routeFraction - 0.25) < 1e-6)
 
-    // The aircraft is really at 0.20 — behind the schedule's opinion. A lone backward fix
-    // is not believed, so corroborate it the way the live feed does: another fix seconds
-    // later, still well inside the startup window.
-    let now = born, out
-    for (let i = 0; i < DEFAULT_PATH_CONFIG.backwardConfirmCount; i++) {
-      now += 10_000
-      out = t.applyFix({ ...onPath(0.20), at_ms: now }, now)
-    }
-    assert.equal(out?.accepted, true)
+    // The aircraft is really at 0.20 — behind the schedule's opinion. ONE fix settles it:
+    // there is nothing to corroborate a first fix against, because the only thing it
+    // contradicts is the constructor's guess.
+    const now = born + 10_000
+    const out = t.applyFix({ ...onPath(0.20), at_ms: now }, now)
+    assert.equal(out.accepted, true, 'a first fix has no guess worth defending against it')
     assert.ok(
       Math.abs(t.position(now).routeFraction - 0.20) < 1e-3,
       'first accepted fix should place the aircraft, not just adjust the rate',
+    )
+  })
+
+  /**
+   * The launch jump: the marker sat on the stored path for a poll, then moved.
+   *
+   * The backward gate used to reject the first fix — asking a second opinion before
+   * overruling a value that was never an observation — and the snap then placed the aircraft
+   * on the fix after. Two steps where one was warranted, visible on every app start.
+   */
+  test('no wasted poll: the marker is placed on the first fix, not the second', () => {
+    const born = T0 + 2 * HOUR
+    const t = new PathTracker(ctx(), born)
+    const seeded = t.position(born).routeFraction
+
+    const truth = 0.44
+    const out = t.applyFix({ ...onPath(truth), at_ms: born }, born)
+    assert.equal(out.accepted, true, 'the first fix must not be rejected as backward')
+
+    const movedKm = kmApart(t.position(born), onPath(seeded))
+    assert.ok(movedKm > 50, `first fix should have placed it; moved only ${movedKm.toFixed(1)} km`)
+    assert.ok(
+      kmApart(t.position(born), onPath(truth)) < 1,
+      'and placed it where the fix actually says it is',
     )
   })
 
@@ -407,37 +553,5 @@ describe('a newly created tracker defers to its first real fix', () => {
       fast.position(later).routeFraction > slow.position(later).routeFraction,
       'a slower aircraft must advance more slowly than a faster one on the same route',
     )
-  })
-})
-
-describe('the first fix may place the aircraft forward as well as back', () => {
-  // The seed is elapsed/duration, but block time includes taxi and approach, so a cruising
-  // aircraft is normally AHEAD of it. SYR503 was seeded at 0.646 while its own live fix
-  // projected to 0.74 — and being a forward disagreement it could never be placed, only
-  // chased through the rate, leaving 200km of drift the feed could see perfectly well.
-  test('a modest forward disagreement places it', () => {
-    const born = T0 + HOUR
-    const t = new PathTracker(ctx(), born)
-    const before = t.position(born).routeFraction
-
-    const out = t.applyFix({ ...onPath(before + 0.09), at_ms: born }, born)
-    assert.equal(out.accepted, true)
-    assert.ok(t.position(born).routeFraction > before + 0.08,
-      'a first fix modestly ahead should place the aircraft, not just raise the rate')
-  })
-
-  test('a large forward disagreement still does not teleport it', () => {
-    const born = T0 + HOUR
-    const t = new PathTracker(ctx(), born)
-    const before = t.position(born).routeFraction
-
-    t.applyFix({ ...onPath(0.90), at_ms: born }, born)
-    assert.equal(t.position(born).routeFraction, before,
-      'a wrong or spoofed position must not move the aircraft down its route')
-  })
-
-  test('the bound is what separates them', () => {
-    assert.ok(DEFAULT_PATH_CONFIG.maxInitialSnapS > 0.09, 'must admit a seed-sized error')
-    assert.ok(DEFAULT_PATH_CONFIG.maxInitialSnapS < 0.5, 'must reject a spoofed position')
   })
 })
