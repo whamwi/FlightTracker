@@ -4,8 +4,6 @@ import { fetchIataToIcao, fetchCallsignLookup, resolveCallsign, type CallsignLoo
 import { SYRIA_AIRPORT_SET } from '@/lib/syria-airports'
 import { rankInstance } from '@/lib/flight-status'
 import { inSyria } from '@/lib/syria-airspace'
-import { isPlausibleFix, dropSentinelFixes, inferPosition, greatCirclePath } from '@/lib/map-position'
-import type { Waypoint } from '@/lib/flight-predictor'
 
 export const dynamic = 'force-dynamic'
 
@@ -116,49 +114,6 @@ async function fetchAirportCoords(): Promise<Record<string, [number, number]>> {
     }
   }
   apCoordCache = { map, ts: Date.now() }
-  return map
-}
-
-// ── Route corridors (1h cache) ────────────────────────────────────────────────
-/*
- * The same rows /api/routes serves, read directly rather than over an HTTP hop to ourselves.
- * Collapsed to one corridor per OD pair by observed_count, exactly as that endpoint does — a
- * second variant silently overwriting the first is a bug it already found and fixed.
- */
-/**
- * The next occurrence of a UTC clock time after a departure.
- *
- * `boardDeparted` publishes the scheduled arrival as HH:MM, having already dropped the date it
- * belonged to. Reattaching it to the departure's date and rolling forward a day when that lands
- * before the departure is the same midnight rule the board applies — an arrival "before" its own
- * take-off is a flight crossing midnight, not a flight going backwards.
- */
-function hhmmAfter(depUtc: string, hhmm: string): number {
-  const dep = Date.parse(depUtc)
-  if (!Number.isFinite(dep)) return NaN
-  const day = new Date(dep).toISOString().slice(0, 10)
-  const at  = Date.parse(`${day}T${hhmm}:00Z`)
-  if (!Number.isFinite(at)) return NaN
-  return at < dep ? at + 86_400_000 : at
-}
-
-let routePathCache: { map: Record<string, Waypoint[]>; ts: number } | null = null
-
-async function fetchRoutePaths(): Promise<Record<string, Waypoint[]>> {
-  if (routePathCache && Date.now() - routePathCache.ts < 3_600_000) return routePathCache.map
-  const res = await fetch(
-    `${SB_URL}/rest/v1/route_paths?select=dep_iata,arr_iata,waypoints,observed_count` +
-    `&order=observed_count.desc,variant.asc`,
-    { headers: SB_HEADERS },
-  )
-  if (!res.ok) return routePathCache?.map ?? {}
-  const rows: { dep_iata: string; arr_iata: string; waypoints: Waypoint[] }[] = await res.json()
-  const map: Record<string, Waypoint[]> = {}
-  for (const r of rows) {
-    const od = `${r.dep_iata}|${r.arr_iata}`
-    if (!map[od] && Array.isArray(r.waypoints) && r.waypoints.length) map[od] = r.waypoints
-  }
-  routePathCache = { map, ts: Date.now() }
   return map
 }
 
@@ -712,12 +667,7 @@ function refreshFeeds(): Promise<{ aircraft: unknown[]; live: boolean }> {
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────
-export async function GET(req: Request) {
-  /*
-   * Opt-in, so the live website's map is untouched by any of this until we choose to move it.
-   */
-  const wantInfer = new URL(req.url).searchParams.get('infer') === '1'
-
+export async function GET() {
   // Hoisted out of the try so the catch block can still resolve board metadata for the
   // DB fallback. An empty map there just means the fallback returns nothing, which is the
   // same as the old behaviour rather than a regression.
@@ -811,20 +761,6 @@ export async function GET(req: Request) {
     // Nothing is persisted when the positions came out of the table: see fromStorage above.
     // The confirmed-airborne hex list that used to be fetched alongside this came from
     // flight_signal_log and existed only to pick which flight_position_log rows to draw.
-    /*
-     * Refuse impossible fixes before anything is stored or drawn.
-     *
-     * Placed here because this is the last point where the whole sweep is visible at once, which
-     * the sentinel rule needs — it decides by asking how many aircraft claim one coordinate, and
-     * a per-row check cannot see that.
-     *
-     * Ahead of upsertPositions deliberately. When the guard was missing, 47 aircraft were written
-     * to aircraft_last_seen sitting on Queen Alia airport over two days, and every one of them was
-     * then served back to both surfaces as a last-known position long after the sweep that
-     * produced it had gone.
-     */
-    visualAircraft = dropSentinelFixes(visualAircraft.filter(isPlausibleFix))
-
     if (!fromStorage) await upsertPositions(visualAircraft, boardCallsignSet)
 
     // Annotate visual radius aircraft
@@ -1104,83 +1040,6 @@ export async function GET(req: Request) {
     const visible = annotated.filter((a: any) => a.board_match || inSyria(a.lat, a.lon))
 
     /*
-     * Resolve the flights nobody can hear, here, once — opt-in via ?infer=1.
-     *
-     * `boardDeparted` above is already the list of flights the board says are airborne and no
-     * feed can see: roughly one airborne flight in five, because ADS-B is largely blind over
-     * Syria. Until now this endpoint handed that list to the clients and each one worked out
-     * the positions for itself. Two implementations of one question is the whole history of
-     * this project's position defects — FYC361 drawn 190 km apart on two screens, one tracker
-     * closing a 298 km error while the other grew it to 440 km.
-     *
-     * So the answer is computed on this side and published like any other position, tagged
-     * `pos_source: 'inferred'` so a reader is never told we saw something we did not.
-     *
-     * Behind a parameter because the website's map is live and still does its own inference:
-     * without the flag its request is byte-for-byte what it has always been. The flag comes off
-     * and the clients lose their trackers once the app has proven this in the field.
-     */
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const inferred: any[] = []
-    if (wantInfer && boardDeparted.length) {
-      const [apCoords, paths] = await Promise.all([fetchAirportCoords(), fetchRoutePaths()])
-      for (const f of boardDeparted) {
-        const dep = f.dep_iata ? String(f.dep_iata).toUpperCase() : null
-        const arr = f.arr_iata ? String(f.arr_iata).toUpperCase() : null
-        if (!dep || !arr || !f.actual_dep_utc) continue
-
-        const depMs = Date.parse(f.actual_dep_utc)
-        /*
-         * The arrival instant, in the order the rest of the product already trusts: the server's
-         * damped ETA first, then a revision, then the schedule, then block time. `eta_stable_utc`
-         * leads deliberately — it is the same field both countdowns read, so the aeroplane and
-         * the clock it is racing cannot disagree.
-         */
-        const arrMs =
-            (f.eta_stable_utc  ? Date.parse(f.eta_stable_utc)  : NaN) ||
-            (f.revised_arr_utc ? Date.parse(f.revised_arr_utc) : NaN) ||
-            (f.arr_time_utc && f.actual_dep_utc
-               ? hhmmAfter(f.actual_dep_utc, f.arr_time_utc) : NaN) ||
-            (Number.isFinite(depMs) && f.duration_min ? depMs + f.duration_min * 60_000 : NaN)
-
-        // A recorded corridor when we have one, a great circle when we do not. Same shape either
-        // way, so there is no second branch downstream.
-        const path = paths[`${dep}|${arr}`]
-          ?? (apCoords[dep] && apCoords[arr]
-                ? greatCirclePath(apCoords[dep][0], apCoords[dep][1], apCoords[arr][0], apCoords[arr][1])
-                : [])
-
-        const pos = inferPosition(depMs, arrMs, path, Date.now())
-        if (!pos) continue
-
-        inferred.push({
-          hex:            null,
-          flight:         f.callsign,
-          lat:            pos.lat,
-          lon:            pos.lon,
-          track:          pos.track,
-          true_heading:   pos.track,
-          alt_baro:       null,
-          gs:             null,
-          pos_source:     'inferred',
-          board_match:    true,
-          t:              f.aircraft_type ?? null,
-          r:              f.aircraft_reg ?? null,
-          dep_iata:       dep,
-          arr_iata:       arr,
-          duration_min:   f.duration_min,
-          iata_number:    f.iata_number,
-          actual_dep_utc: f.actual_dep_utc,
-          actual_arr_utc: f.actual_arr_utc,
-          revised_arr_utc: f.revised_arr_utc,
-          eta_stable_utc: f.eta_stable_utc,
-          status:         f.status,
-          airline_iata:   f.airline_iata ?? null,
-        })
-      }
-    }
-
-    /*
      * One age for every aircraft, computed here so no surface has to work it out twice.
      *
      * The paths arrive with different clocks: the raw feed carries `seen`, seconds since the
@@ -1199,13 +1058,13 @@ export async function GET(req: Request) {
       const age = Number.isFinite(fixMs) ? (Date.now() - fixMs) / 1000
                 : typeof a.seen === 'number' ? a.seen
                 : null
-      return { ...a, fix_age_s: age == null ? null : Math.round(age), pos_source: a.pos_source ?? 'observed' }
+      return { ...a, fix_age_s: age == null ? null : Math.round(age) }
     }
     void nowSec
 
     return NextResponse.json({
       ok:           true,
-      aircraft:     [...visible, ...trackedExtra, ...inferred].map(withAge),
+      aircraft:     [...visible, ...trackedExtra].map(withAge),
       boardDeparted,
       ts:           feedCache!.ts,
       // Enough to tell "the feeds returned nothing" from "we filtered it all out".
