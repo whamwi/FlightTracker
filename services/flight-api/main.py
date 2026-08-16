@@ -41,6 +41,7 @@ from urllib.parse import quote
 from geo import (
     is_plausible_fix,
     drop_sentinel_fixes,
+    fix_contradicts_flight,
     great_circle_path,
     project_position,
     within_projection_window,
@@ -793,6 +794,22 @@ async def build_live() -> dict:
         progress, p_basis = derive_progress(f, pos, aps)
         eta, e_basis = derive_eta(f)
         delay, d_basis = derive_delay(f)
+
+        # A fix can be possible and still not be about this aeroplane.
+        #
+        # KNE591 on 16 Aug was served parked at Queen Alia two minutes before it landed at
+        # Damascus, and every rule about a fix in isolation passed it. The website never drew it
+        # because it draws the corridor and treats a fix as a nudge; the test map drew it, sat in
+        # Jordan, and jumped to Damascus on arrival. Refusing it here gives the app the website's
+        # robustness without giving it the website's blind spot, because a MOVING aircraft is
+        # still believed wherever it is — which is what FYC361 needed.
+        if pos is not None and fix_contradicts_flight(
+            pos,
+            aps.get(f.get("dep_iata") or ""),
+            aps.get(f.get("arr_iata") or ""),
+            arrived=bool(f.get("real_arr") or f.get("arr_confirmed_at")),
+        ):
+            pos = None
 
         # No fix — say where it should be, and say that is what we are doing.
         #

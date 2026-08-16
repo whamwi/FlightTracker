@@ -288,3 +288,75 @@ def within_projection_window(arr_ms: float | None, now_ms: float, linger_ms: flo
     if arr_ms is None or not math.isfinite(arr_ms):
         return True
     return now_ms <= arr_ms + linger_ms
+
+
+# ── Does this fix make sense for THIS flight? ────────────────────────────────
+
+# Below this an aircraft is not flying. Well under any airliner's approach speed.
+MIN_MOVING_KT = 50
+# Within this of an airport, being stationary is ordinary: a stand, a taxiway, a runway.
+NEAR_AIRPORT_KM = 30
+
+
+def haversine_km(a: tuple[float, float], b: tuple[float, float]) -> float:
+    R = 6371.0
+    p1, p2 = math.radians(a[0]), math.radians(b[0])
+    dphi = p2 - p1
+    dlam = math.radians(b[1] - a[1])
+    h = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlam / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(h))
+
+
+def fix_contradicts_flight(
+    fix: dict,
+    dep: tuple[float, float] | None,
+    arr: tuple[float, float] | None,
+    arrived: bool,
+) -> bool:
+    """
+    A fix can be perfectly possible and still not be about this aeroplane.
+
+    KNE591 JED–DAM, 16 Aug: FR24 served 31.72/36.00 — Queen Alia, Amman — at 3,550 ft and 10
+    knots, two minutes before it landed at Damascus. Our own receiver had had it eleven minutes
+    earlier at 33.43/37.57, 17,000 ft, 384 kt, descending 95 km east of Damascus. The bad row won
+    the merge for being newer, and every rule about a fix IN ISOLATION passed it: the coordinate
+    is a real airport, the altitude is a believable field elevation, the speed is a believable
+    taxi. The website never drew it, because it draws the corridor and treats a fix as a nudge.
+    The test map drew it, sat in Jordan, and then jumped to Damascus on arrival.
+
+    Distance from the projection cannot be the test. Measured across live traffic the same day,
+    fix and projection routinely disagree by 15–80 km, median 37, and the LARGEST gap — FDB1113
+    DXB–DAM at 184.9 km — was a case where the projection was wrong and the fix was right: its
+    ETA had expired, so the projection had pinned at Damascus while the aircraft was genuinely
+    185 km out. KNE591's bad fix was ~195 km from its projection. A distance threshold separating
+    those two does not exist, and one that tried would redraw a real aeroplane at an airport it
+    had not reached — which is the FYC361 defect, in the other direction.
+
+    What separates them is motion. A flight still en route is somewhere between two airports; if
+    it is reported STATIONARY and it is at neither end of its own route, the fix is not about
+    this flight. FDB1113 was doing cruise speed and is untouched by this.
+
+    Deliberately narrow. It says nothing about a moving aircraft, however far from its corridor,
+    because aeroplanes really do fly off the stored airway — DAM–SHJ is filed via Saudi Arabia
+    and often flown via Iraq. It only refuses to believe an aeroplane is parked in a place it has
+    no business being parked.
+    """
+    if arrived:
+        return False                       # stationary at the end of the trip is the normal case
+
+    gs = _num(fix.get("gs"))
+    if gs is None:
+        gs = _num(fix.get("ground_speed_kts"))
+    if gs is None or gs >= MIN_MOVING_KT:
+        return False                       # moving, or no speed to judge by
+
+    lat, lon = _num(fix.get("lat")), _num(fix.get("lon"))
+    if lat is None or lon is None:
+        return False                       # not this function's job
+
+    here = (lat, lon)
+    for airport in (dep, arr):
+        if airport and haversine_km(here, airport) <= NEAR_AIRPORT_KM:
+            return False                   # on the ground at one of its own airports
+
+    return True

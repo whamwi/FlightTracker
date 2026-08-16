@@ -13,6 +13,7 @@ import sys
 
 from geo import (
     is_plausible_fix,
+    fix_contradicts_flight,
     within_projection_window,
     drop_sentinel_fixes,
     interpolate_path,
@@ -40,6 +41,7 @@ REAL = {"hex": "4bb290", "lat": 34.9912, "lon": 37.8703,
 DAM = (33.411, 36.514)
 KWI = (29.227, 47.969)
 DXB = (25.253, 55.365)
+DAM_C = DAM
 
 HOUR = 3_600_000
 T0 = 1_755_340_800_000        # a fixed instant; nothing here reads a clock
@@ -311,6 +313,55 @@ def test_an_unknown_arrival_keeps_the_flight():
 
 def test_before_arrival_it_is_obviously_in_the_window():
     assert within_projection_window(ARR, DEP, LINGER)
+
+
+# ── Does the fix make sense for this flight ───────────────────────────────────
+
+JED = (21.680, 39.157)
+AMM = (31.7226, 35.9932)
+SHJ = (25.328, 55.517)
+
+
+def test_kne591_stationary_at_an_airport_that_is_not_its_own():
+    # The case the whole rule exists for. 16 Aug, verbatim from FR24.
+    bad = {"lat": 31.72, "lon": 36.0, "alt_baro": 3550, "gs": 10, "track": 90}
+    assert fix_contradicts_flight(bad, JED, DAM, arrived=False)
+
+
+def test_fdb1113_moving_far_from_its_projection_is_kept():
+    # 184.9 km from its projection, the largest gap in live traffic that day, and CORRECT —
+    # the projection had expired and pinned at Damascus. A distance rule would have deleted it.
+    good = {"lat": 32.789, "lon": 38.555, "gs": 430, "alt_baro": 35000}
+    assert not fix_contradicts_flight(good, DXB, DAM, arrived=False)
+
+
+def test_stationary_at_its_own_departure_or_arrival_is_ordinary():
+    # Pushback, taxi, rollout, stand. All of it is stationary and all of it is real.
+    assert not fix_contradicts_flight({"lat": 33.41, "lon": 36.51, "gs": 0}, DAM, SHJ, arrived=False)
+    assert not fix_contradicts_flight({"lat": 25.33, "lon": 55.52, "gs": 4}, DAM, SHJ, arrived=False)
+
+
+def test_an_arrived_flight_is_never_contradicted():
+    # It is supposed to be stopped. Judging it would delete every flight on a stand.
+    assert not fix_contradicts_flight({"lat": 31.72, "lon": 36.0, "gs": 0}, JED, DAM, arrived=True)
+
+
+def test_a_moving_aircraft_is_never_contradicted_however_far_off_route():
+    # Aeroplanes really do fly off the stored airway — DAM-SHJ is filed via Saudi Arabia and
+    # often flown via Iraq. This rule is about being PARKED somewhere impossible, nothing else.
+    assert not fix_contradicts_flight({"lat": 30.0, "lon": 44.0, "gs": 420}, DAM, SHJ, arrived=False)
+
+
+def test_no_speed_means_no_verdict():
+    # FR24 rows sometimes carry no ground speed. Silence is not evidence.
+    assert not fix_contradicts_flight({"lat": 31.72, "lon": 36.0}, JED, DAM, arrived=False)
+
+
+def test_unknown_airports_do_not_manufacture_a_verdict():
+    # With no coordinates for either end there is nothing to be near, so a stationary aircraft
+    # away from both is still refused — that is the honest reading, and it is what a missing
+    # airport row should cost.
+    assert fix_contradicts_flight({"lat": 31.72, "lon": 36.0, "gs": 2}, None, None, arrived=False)
 
 
 if __name__ == "__main__":
