@@ -150,6 +150,29 @@ reads `/api/airspace` and the board. Once flight-api's ADS-B circle merge is pro
 deployed 15 Aug, still unexercised because no Syrian flight has been inside the circles since — the
 app should return to one document.
 
+## Push alerts — checked, and they agree
+
+Worth stating because the opposite was nearly recorded here. The alert path (`cron/alert-shadow`)
+sends LANDED on a real `actual_arr_utc` transition, and only logs `would_send=false` when a status
+flips to Arrived with **no arrival timestamp of any kind**.
+
+That reads like a gap — both clients call a flight Arrived from `arr_confirmed_at` alone — and it
+is not one. flight-api publishes `actual_arr_utc` as `real_arr or arr_confirmed_at`, so an arrival
+the server established itself carries a timestamp and pushes normally. The withheld case is a bare
+status change with nothing behind it, which is correctly withheld.
+
+Measured while checking, and worth keeping — arrivals over the seven days to 15 Aug:
+
+| airport | arrivals | FR24 published | we inferred | inferred |
+|---|---|---|---|---|
+| DAM | 197 | 191 | 6 | 3.0% |
+| ALP | 65 | 36 | 29 | **44.6%** |
+| DEZ | 1 | 0 | 1 | 100% |
+
+Not a defect — the server fills the gap and everything downstream works. But close to half of
+Aleppo's arrival times are ours rather than FR24's, which is the measured reason `arr_confirmed_at`
+exists and is directly relevant to how an inferred arrival should report its time there.
+
 ## Not yet compared
 
 The board page, the flight sheet's layout, push notifications, and the news and airlines tabs.
