@@ -185,13 +185,47 @@ time, and unlabelled. A flight that ran twenty minutes long reports its schedule
 
 `label.flown` is defined in the app's i18n and rendered nowhere.
 
-### Absent from the sheet
+### Both were added on 16 Aug — and placed differently on purpose
 
 | | web popup | app sheet |
 |---|---|---|
 | altitude | yes | yes |
-| ground speed | yes (`unit.kt`) | **no** — the string is defined and never rendered |
-| distance still to run | yes (`unit.km`) | **no** — the string is not defined at all |
+| ground speed | yes (`unit.kt`) | yes — added 16 Aug |
+| distance still to run | yes (`unit.km`) | yes — added 16 Aug |
+
+**The placement is deliberately not the same, and this is the one difference in this document
+that should NOT be "fixed" by making the app match.**
+
+The site has room for a row: countdown above the bar, distance as a caption under it, altitude
+and speed at the foot of the popup. Reproduced literally on a phone, all four landed above the
+bar and wrapped onto a second line.
+
+So the app splits them by kind instead:
+
+```
+1 ساعة و19 دقيقة على الوصول · 1,709 كم     ← how far there is to go
+            [———————✈————]
+        33,975 قدم · 425 عقدة              ← how it is flying right now
+```
+
+The top row answers "when does it land", the bottom "what is it doing", and each stays on one
+line. The distance also drops the site's «المتبقي:» prefix in that position: beside a countdown
+that already says على الوصول, the label is redundant width — which was the complaint. The string
+is kept, because under the bar it has no such neighbour and does need it.
+
+Same facts, same words, same units. Only the arrangement differs, and it differs because the
+surfaces are different sizes.
+
+## A note on what parity means here
+
+Everything else in this document treats a difference as a defect, because the site is the
+reference implementation and the app has been chasing it. The sheet's layout is the first case
+where that is wrong: a phone is not a small desktop, and copying an arrangement built for a wider
+surface produced a worse result than adapting it.
+
+The test that separates the two: **does the reader get a different answer, or the same answer
+arranged differently?** A different arrival time is a defect. The same four numbers in two rows
+instead of three is a design decision, and one the app is entitled to make.
 
 ## Not yet compared
 
