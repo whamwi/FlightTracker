@@ -78,6 +78,35 @@ def test_rejects_missing_out_of_range_and_null_island():
     assert not is_plausible_fix({"lat": True, "lon": 36})     # bool is not a coordinate
 
 
+def test_the_kne591_case_is_NOT_caught_and_this_pins_that():
+    """
+    A known limit, recorded so it cannot be mistaken for coverage.
+
+    16 Aug, verbatim: FR24 served KNE591 at 31.72/36.00 — Queen Alia — at 3,550 ft and 10 knots,
+    two minutes before it landed at Damascus. Our own receiver had had it eleven minutes earlier
+    at 33.43/37.57, 17,000 ft, 384 kt: 95 km east of Damascus, descending. The bad fix won the
+    merge for being newer and passed this guard for looking like an aeroplane on a stand.
+
+    It is asserted PASSING deliberately. Nothing in a single fix distinguishes it from real
+    ground traffic, and a threshold tuned until it failed would delete aircraft parked at Amman.
+    When the route-aware check lands, this test flips and the comment explains why.
+    """
+    assert is_plausible_fix(
+        {"fr24_id": "x", "lat": 31.72, "lon": 36.0, "alt_baro": 3550, "gs": 10, "track": 90})
+    # The fix that was true at the time, and which staleness had already excluded.
+    assert is_plausible_fix(
+        {"fr24_id": "x", "lat": 33.425764, "lon": 37.570384, "alt_baro": 17000, "gs": 384})
+
+
+def test_a_parked_aircraft_at_the_highest_field_in_the_network_is_kept():
+    # Queen Alia is 2,395 ft and Riyadh 2,082. A guard that rejected an aircraft on stand at
+    # either would delete real traffic to catch fake traffic.
+    assert is_plausible_fix({"hex": "a", "lat": 31.72, "lon": 35.99, "alt_baro": 2395, "gs": 0})
+    assert is_plausible_fix({"hex": "a", "lat": 24.96, "lon": 46.70, "alt_baro": 2082, "gs": 3})
+    # And climbing away from one, which is slow but not stationary.
+    assert is_plausible_fix({"hex": "a", "lat": 31.72, "lon": 35.99, "alt_baro": 4800, "gs": 190})
+
+
 def test_a_fix_with_no_altitude_or_speed_is_judged_on_position_alone():
     # FR24 rows carry neither. Refusing them would empty the map to spite the aggregator.
     assert is_plausible_fix({"hex": "b", "lat": 33.4, "lon": 36.5})

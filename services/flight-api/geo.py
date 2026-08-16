@@ -24,6 +24,21 @@ import math
 # ── Fix plausibility ──────────────────────────────────────────────────────────
 
 # Above this an aircraft is unambiguously airborne rather than parked or taxiing.
+#
+# Bounded from below by field elevation: a parked aircraft reports the airport's altitude at zero
+# ground speed and must not be rejected for it. AMM is 2,395 ft, RUH 2,082, DAM 2,020.
+#
+# KNOWN LIMIT, measured 16 Aug. This does not catch a bad fix that lands inside the plausible
+# ground band. KNE591 JED-DAM was served at 31.72/36.00 — Queen Alia — reporting 3,550 ft at
+# 10 knots, two minutes before it landed at Damascus, while our own receiver had had it at
+# 33.43/37.57, 17,000 ft, 384 kt eleven minutes earlier: 95 km east of Damascus, descending.
+#
+# Lowering the ceiling to 5,000 does not help — 3,550 is under that too — and going below ~3,000
+# starts clipping aircraft parked at Amman once pressure varies, since 1 hPa is about 27 ft and a
+# 20 hPa swing is 540. The fix is at a real airport at a believable ground speed and altitude:
+# no rule over one fix in isolation can tell it from an aeroplane genuinely on a stand. What makes
+# it wrong is that THIS flight had no business at Amman, which is route knowledge, not physics.
+# Tracked separately rather than papered over with a threshold that would delete real traffic.
 AIRBORNE_FT = 10_000
 # No aircraft holds 10,000 ft below this. Stalling speeds are far above it.
 MIN_AIRBORNE_KT = 50
