@@ -1,120 +1,120 @@
-# Web and app: what each has, and where they disagree
+# Web and app: where they actually differ
 
-Status: audit, 15 Aug 2026. Read from both codebases, not from memory. Nothing changed to produce
-it.
+Status: rewritten 16 Aug 2026, replacing the 15 Aug version. Read from both codebases and, where
+it mattered, by running both implementations on identical inputs.
 
-Repos: `~/FlightTracker` (web) and `~/FlightTrackerApp` (Expo). They share the API routes, so a
-difference here is a client difference — the same JSON rendered two ways.
+Repos: `~/FlightTracker` (web) and `~/FlightTrackerApp` (Expo).
 
-## Why this exists
+## Why the previous version was withdrawn
 
-The web gained six features in one day and the app gained none of them. That is not automatically
-a problem: the two have different jobs, and a phone is not a small desktop. It becomes a problem
-when the *same* fact is rendered differently, because a passenger checking a flight on the phone
-and then the laptop reads two answers and reasonably concludes one of them is broken.
+It was produced by grepping both trees for the symbols each feature is built from. That finds
+**absence** and is blind to **divergence**, which it admitted — and then the blindness cost a day.
 
-That failure has already cost real time this week — FAD742 arrived on the board and stayed flying
-on the map, XH728 was airborne on one screen and landed on another. Both were one surface knowing
-something another did not.
+It also stated a wrong model of the web, which several ports were then built on: that the web
+"draws the fix" and the app "draws the corridor". The web does **both**. It anchors to the fix when
+a poll lands and advances along the route between polls — `components/Map.tsx:2985`, an animation
+loop asking `store.position(cs, now)` for every callsign on every frame. Reproducing only the first
+half is what left live markers on the phone standing still between polls.
 
-## Web-only
+## The method that worked
 
-Everything here was added on 15 Aug.
+Run both implementations on the same inputs and diff the numbers. Two examples, each of which
+found something no amount of reading had:
 
-| feature | where |
+- Feeding both `FlightPredictor`s identical fixes: **0.00 km apart while live, 94.5 km apart the
+  instant a fix went stale.** Cause was one method the web had and the app did not.
+- Feeding both `PathTracker`s a tracker seeded 298 km ahead of its aircraft: the app closed to
+  61 km over 40 polls; **the web grew to 440 km.**
+
+Files look similar. Behaviour does not. Prefer the harness.
+
+## Shared library files
+
+Six modules exist in both repos. Only one is a real problem.
+
+| file | state |
 |---|---|
-| «نقترب من المدرج» — replaces altitude and speed inside 10 km | `components/Map.tsx`, `FINAL_RING_KM` |
-| Distance still to run, under the progress bar | `components/Map.tsx`, `label.distance_left` |
-| Fix-age staleness gate at 150 s, with an eased catch-up | `Map.tsx` `STALE_FIX_MS`, `lib/flight-predictor.ts` `onSignalLostAt` |
-| Airport colour key | `components/AirportLegend.tsx` |
-| Stale-bundle banner | `components/VersionCheck.tsx`, `/api/version` |
-| 12-hour time with a meridiem, resolved by IANA zone | `lib/airport-time.ts` |
+| `tracker-store.ts` | **Identical**, byte for byte. |
+| `flight-predictor.ts` | **Identical in code** — the 35 differing lines are comments, after `onSignalLostAt` was ported on 15 Aug. |
+| `path-tracker.ts` | **The app is ahead.** See below. |
+| `airport-time.ts` | Diverged out of necessity: the app's carries a Hermes capability probe and takes the locale as a parameter, because `lib/locale` imports react-native and would make the module untestable off-device. |
+| `syria-airports.ts` | Different shapes, neither ahead. `MARKER_ACCENT` is identical — DAM green, ALP orange, DEZ blue. |
+| `i18n.ts` | Translations. `status.departed` and `status.in_air` are the same on both sides; see the status divergence below, which is not a translation problem. |
 
-Two of these are worth porting on merit rather than for symmetry:
+### path-tracker: the web is missing four fixes, and depends on the file more
 
-- **The fix-age gate.** The app has no equivalent, so it presents a frozen position as current for
-  as long as the server keeps listing the aircraft. On the web that was measured at five minutes
-  and seventeen seconds on TKJ340 into Aleppo — a green badge over an altitude, a speed and a
-  distance from a fix that had stopped updating before the descent began.
-- **Airport-local 12-hour time.** The app formats `HH:MM`. The web resolves the zone through
-  `Intl`, which is what caught Berlin stored as +1 while actually +2, and Berlin and Düsseldorf
-  stored an hour apart in the same zone.
+Made in the app on 15 Aug and never carried back — `web 0, app 4`:
 
-The version banner is **not** a missing app feature. A native app updates through the store or
-`expo-updates`; a stale JavaScript bundle is not its failure mode. (The app has no `expo-updates`
-wired up at all, which is separately noted as post-demo work.)
+- a corroborated backward disagreement can correct progress (`backwardCorrectionFactor`)
+- the first fix is believed rather than refused as `backward`
+- the rate floor yields while chasing (`chasing`)
+- a fix predating the last accepted one is rejected rather than skipping the implied-speed guard
 
-## App-only
+Without them `s` can only ever increase — `clamp(this.s + this.v * dt, this.s, 1)` with a rate floor
+of `nominal * minRateFactor` — so a tracker that runs ahead of its aircraft **cannot come back**.
+Measured above: the gap grows rather than closing.
 
-| feature | where |
-|---|---|
-| Push notifications | `lib/alerts.ts`, `expo-notifications` |
+This matters more on the web than in the app. `RAF_MOTION = true`, and at `Map.tsx:2388` the poll
+path deliberately does **not** set the marker when the store has the flight:
 
-The web has the server half — `cron/alert-send`, `push_devices`, `flight_alerts` — and no browser
-delivery. Whether it should have one is a product question, not a parity gap.
+```js
+if (!(RAF_MOTION && storeRef.current.has(cs))) markersRef.current[cs].setLatLng([dispLat, dispLon])
+```
 
-## Both, and divergent
+So the tracker owns the position outright for essentially every airborne flight, while the app —
+after the 15 Aug revert — uses it only for predicted ones.
 
-This is the section that matters. Everything above is a gap; this is a contradiction.
+**Not observed in production.** On 15 Aug the web was right and the phone was 190 km out, so real
+drift is evidently small, presumably because the elapsed-time seed is usually close and trackers
+are rebuilt whenever a flight leaves and re-enters the store. This is a latent defect of unmeasured
+frequency, not a live one.
 
-### Arrived hold — resolved 15 Aug, the app follows the web
+## Constants that agree
 
-It read differently on the two screens: the phone kept every arrival for 30 minutes, the desktop
-one per airport for 60. Damascus after a busy hour therefore answered "what just landed" two ways.
+| | web | app |
+|---|---|---|
+| fix staleness | `STALE_FIX_MS = 150 * 1000` | same |
+| arrived hold | `ARRIVED_HOLD_MS = 60 * 60 * 1000` | `ARRIVED_HOLD_MIN = 60` |
+| marker colours | `MARKER_ACCENT` | identical values |
 
-Settled by moving the app: `ARRIVED_HOLD_MIN` 30 → 60, and `buildItems` now keeps only the most
-recent arrival at each airport. The web's rule was the deliberate one — it answered a specific
-complaint about arrived tags piling onto Damascus, which a fan, a route offset and a grouped badge
-all failed to make readable — and the reasoning applies at least as strongly on a smaller screen.
+## Divergences
 
-One implementation note worth keeping: the app applies the comparison where its item list is
-finished, not at the four places an arrival can be held. Those are filters on a single flight;
-this is a comparison between flights, and a flight cannot know it has been superseded while it is
-being judged on its own. Ranked on the published arrival where there is one and the revised one
-otherwise, since a third of Aleppo's arrivals are never published and would otherwise rank equal.
+### 1. The status word — «في الجو» against «أقلعت»
 
-Ships with the next app build — it is a client change, not a deploy.
+Not translation. Both sides define `status.in_air` = في الجو and `status.departed` = أقلعت.
 
-### Arrival, when FR24 publishes nothing — resolved 15 Aug
+The **web** derives the badge from map state — arrived, signal-lost, projected — so an airborne
+flight always reads «في الجو», with a `~` prefix when the position is projected. It has no path to
+«أقلعت» at all (`Map.tsx:638`).
 
-Found after the audit, and it was the larger of the two divergences.
+The **app** shows `PhaseChip` when a live row exists and falls back to `MapStatusBadge` on the
+board's `status` otherwise, which renders `Departed` as «أقلعت». The live row comes from
+`/v2/live`, which carried one or two flights all evening — so the fallback is the common case, not
+the rare one.
 
-The app's map decided a flight had landed from `actual_arr_utc` alone. FR24 is silent on 22 of 35
-Aleppo arrivals; the server settles those from `arr_confirmed_at` or from five minutes past
-`est_arr`, and neither writes `actual_arr_utc`. So the app contradicted **itself**: `FlightCard`
-rendered the derived status and read Arrived, while `flight-items` kept flying the aircraft on the
-same screen. It had been receiving that status all along — it reads the same `/v2/board` the web
-does — and never looked at it.
+### 2. Countdown source
 
-The web made this change on 14 Aug, after RJA431 read "~ In air" for nineteen minutes past
-touchdown and, on a quiet day, for three hours.
+The web reads `eta_stable_utc`, damped once by flight-api. The app reads it for the arrival **time**
+(16 Aug) but its countdown still derives from `actual_dep_utc + stableDuration(duration_min)` — a
+second damping, fighting the server's. Task #31.
 
-Fixed by `arrivedNow()` in `lib/flight-items.ts`, used at all four decision points — including the
-registry branch that draws flights the feed never gave a position for, which at Aleppo is most of
-them and was therefore exactly where this landed.
+Why it matters, sampled every 15 s on 15 Aug: FR24 alternated FYC728's arrival between 21:07:12 and
+21:09:20 and back inside two minutes. The site held 12:07; the phone read 12:07, 12:09, 12:07.
 
-**Why the audit missed it.** It grepped for web features to port. This was not a feature the web
-had and the app lacked; it was a *rule the web changed and the app did not*, with no new symbol to
-find. Absence is greppable, divergence is not — which is the limitation recorded at the foot of
-this document, caught doing exactly what it warns about.
+### 3. Web-only features
 
-### Agreeing already
+- «نقترب من المدرج» inside 10 km — `FINAL_RING_KM`, no equivalent in the app
+- Distance still to run — `label.distance_left`, absent from the app's i18n entirely
+- Stale-bundle banner — deliberately web-only; a native app updates through the store
 
-| | note |
-|---|---|
-| Phase chips | Same key contract. Web `app/board/page.tsx`, app `components/PhaseChip.tsx`. Strings live client-side in both, so the server can add a phase without breaking a shipped build. |
-| Marker accent colours | `MARKER_ACCENT`, same three airports, same meaning — coloured by the flight's provincial end. |
-| Pins | Present in both. |
+### 4. Position sources
 
-## How this was produced, and what that is worth
+The app reads `/api/airspace` for positions **and** `/v2/live` for phase, progress and eta. The web
+reads `/api/airspace` and the board. Once flight-api's ADS-B circle merge is proven in production —
+deployed 15 Aug, still unexercised because no Syrian flight has been inside the circles since — the
+app should return to one document.
 
-By grepping both trees for the symbols and strings each feature is built from. That reliably finds
-**absence**, which is most of the table above.
+## Not yet compared
 
-It is weaker on *present but implemented differently* — the arrived-hold divergence only surfaced
-because the constant was read, not because a grep flagged it. So treat "agreeing already" as
-"nothing contradicted it", not as verified equivalence. Phase chips and marker colours were checked
-by eye; pins were not.
-
-A stronger version of this document would compare rendered output for one flight across both
-clients at the same moment. That has not been done.
+The board page, the flight sheet's layout, push notifications, and the news and airlines tabs.
+Anything not named above is **unexamined**, not verified equivalent.
