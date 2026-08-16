@@ -38,6 +38,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote
 
+from geo import (
+    is_plausible_fix,
+    drop_sentinel_fixes,
+    great_circle_path,
+    project_position,
+    within_projection_window,
+)
+
 import httpx
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -100,6 +108,34 @@ async def airports(client: httpx.AsyncClient) -> dict[str, tuple[float, float]]:
         for a in await sb(client, "airports?select=iata,lat,lon&lat=not.is.null"):
             _airports[a["iata"]] = (a["lat"], a["lon"])
     return _airports
+
+
+_route_paths: dict[str, list[dict]] = {}
+
+
+async def route_paths(client: httpx.AsyncClient) -> dict[str, list[dict]]:
+    """
+    Recorded corridors, keyed by OD pair.
+
+    Collapsed to one path per pair by observed_count, the same rule /api/routes applies — a
+    second variant silently overwriting the first is a bug that endpoint already found.
+
+    Cached for the process lifetime like airports and airlines: these change when someone
+    imports a route, not between polls.
+    """
+    if _route_paths:
+        return _route_paths
+    rows = await sb(
+        client,
+        "route_paths?select=dep_iata,arr_iata,waypoints,observed_count"
+        "&order=observed_count.desc,variant.asc",
+    )
+    for r in rows:
+        od = f"{r.get('dep_iata')}|{r.get('arr_iata')}"
+        wps = r.get("waypoints")
+        if od not in _route_paths and isinstance(wps, list) and wps:
+            _route_paths[od] = wps
+    return _route_paths
 
 
 async def airlines(client: httpx.AsyncClient) -> dict[str, dict]:
@@ -532,6 +568,13 @@ async def latest_positions(client: httpx.AsyncClient) -> dict[str, dict]:
         "track_deg,vertical_speed_fpm,on_ground,fix_at,source"
         f"&fix_at=gte.{cutoff}&order=fix_at.desc",
     )
+
+    # Believe nothing impossible, whatever wrote it.
+    #
+    # Both fix sources are guarded, not just the aggregator, because the harvester writes direct
+    # reception into this same table — a corrupt sweep upstream reaches clients through either
+    # door. Keyed by fr24_id here: that is what identifies an airframe in this table.
+    rows = drop_sentinel_fixes([r for r in rows if is_plausible_fix(r)], key="fr24_id")
     # Direct reception beats a network aggregate *of comparable age*, and only that.
     #
     # This preferred `source='adsb'` over recency unconditionally, which is wrong the moment the
@@ -587,6 +630,11 @@ async def circle_positions(client: httpx.AsyncClient) -> dict[str, dict]:
         "aircraft_last_seen?select=callsign,lat,lon,alt_baro,gs,track,seen_at"
         f"&seen_at=gte.{cutoff}&callsign=not.is.null&order=seen_at.desc",
     )
+    # The door the 15-16 Aug corruption actually came through: 47 aircraft stamped on Queen
+    # Alia airport with gs 0.7 while their altitudes stayed real. Keyed by callsign because
+    # aircraft_last_seen has no hex to group by.
+    rows = drop_sentinel_fixes([r for r in rows if is_plausible_fix(r)], key="callsign")
+
     out: dict[str, dict] = {}
     for r in rows:                            # ordered desc, so first of a callsign is newest
         cs = (r.get("callsign") or "").strip().upper()
@@ -710,6 +758,31 @@ async def build_live() -> dict:
             deduped.append(f)
         flights = deduped
 
+        # ── The flights nobody can hear ──────────────────────────────────────
+        #
+        # Everything above is built FROM a position, so a flight no feed can see was absent
+        # from this document entirely — about one airborne flight in five, because ADS-B is
+        # largely blind over Syria. That gap is the whole reason each client grew its own
+        # corridor tracker, and the reason the two then disagreed: FYC361 drawn 190 km apart
+        # on the site and the phone, one tracker closing a 298 km error while the other grew
+        # it to 440 km.
+        #
+        # So they are pulled in here and projected below. Departed and not yet arrived, today
+        # only — a callsign match alone would resurrect yesterday's instance of the number.
+        day = datetime.now(TZ).strftime("%Y-%m-%d")
+        have = {(f.get("flight_date"), f.get("iata_number"),
+                 f.get("dep_iata"), f.get("arr_iata")) for f in flights}
+        unheard = await sb(
+            client,
+            f"flight?select=*&flight_date=eq.{day}"
+            "&real_dep=not.is.null&real_arr=is.null&arr_confirmed_at=is.null",
+        )
+        flights += [f for f in unheard
+                    if (f.get("flight_date"), f.get("iata_number"),
+                        f.get("dep_iata"), f.get("arr_iata")) not in have]
+
+        paths = await route_paths(client)
+
     out = []
     for f in flights:
         # Whichever source saw this aircraft last — see merge_position.
@@ -720,6 +793,38 @@ async def build_live() -> dict:
         progress, p_basis = derive_progress(f, pos, aps)
         eta, e_basis = derive_eta(f)
         delay, d_basis = derive_delay(f)
+
+        # No fix — say where it should be, and say that is what we are doing.
+        #
+        # Counted against the stabilised arrival rather than the raw estimate, so the aeroplane
+        # and the clock it is racing cannot disagree: a delay already absorbed into the countdown
+        # slows the marker here instead of teleporting it on arrival.
+        #
+        # A recorded corridor when we have one, a great circle when we do not. Same shape either
+        # way, so nothing downstream needs a second branch.
+        projected = None
+        if pos is None:
+            dep_at = iso(f.get("real_dep"))
+            arr_at = iso(stable_eta(f, eta) or eta)
+            dep_c = aps.get(f.get("dep_iata") or "")
+            arr_c = aps.get(f.get("arr_iata") or "")
+            path = paths.get(f"{f.get('dep_iata')}|{f.get('arr_iata')}")
+            if not path and dep_c and arr_c:
+                path = great_circle_path(dep_c, arr_c)
+            # ARRIVED_LINGER_SEC, the same window the arrival queries above use, so a flight
+            # that has landed leaves the map at the same moment it leaves the arrivals list.
+            drawable = within_projection_window(
+                arr_at.timestamp() * 1000 if arr_at else None,
+                datetime.now(timezone.utc).timestamp() * 1000,
+                ARRIVED_LINGER_SEC * 1000,
+            )
+            if dep_at and arr_at and path and drawable:
+                projected = project_position(
+                    dep_at.timestamp() * 1000,
+                    arr_at.timestamp() * 1000,
+                    path,
+                    datetime.now(timezone.utc).timestamp() * 1000,
+                )
         out.append({
             "iata_number": f["iata_number"],
             "callsign": f.get("callsign"),
@@ -736,6 +841,13 @@ async def build_live() -> dict:
             "eta_stable_utc": stable_eta(f, eta),
             "delay_min": delay,
             "delay_basis": d_basis,
+            # One position field, whether we saw the aircraft or worked out where it must be.
+            #
+            # `pos_source` is published rather than inferred from which fields are null: a
+            # reader is entitled to know the difference, and the marker needs it to fade.
+            # Altitude and speed stay null on a projection — we do not know them, and inventing
+            # a cruise altitude to fill the row is how a card ends up asserting 35,000 ft about
+            # an aeroplane nobody can hear.
             "position": {
                 "lat": pos["lat"], "lon": pos["lon"],
                 "altitude_ft": pos.get("altitude_ft"),
@@ -745,7 +857,19 @@ async def build_live() -> dict:
                 "on_ground": pos.get("on_ground"),
                 "fix_at": pos.get("fix_at"),
                 "source": pos.get("source"),
-            } if pos else None,
+                "pos_source": "observed",
+            } if pos else {
+                "lat": projected["lat"], "lon": projected["lon"],
+                "altitude_ft": None,
+                "ground_speed_kts": None,
+                "track_deg": projected["track_deg"],
+                "vertical_speed_fpm": None,
+                "on_ground": False,
+                "fix_at": None,
+                "source": None,
+                "pos_source": "projected",
+                "fraction": projected["fraction"],
+            } if projected else None,
             # Both actuals travel with the live document now, so a consumer never needs a second
             # source to know whether the flight is still flying.
             "actual_dep_utc": zulu(f.get("real_dep")),
