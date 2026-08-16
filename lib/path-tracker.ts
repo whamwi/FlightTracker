@@ -13,15 +13,8 @@
  *
  * That gives three properties the old model could not:
  *   - a missing fix is a non-event, so aircraft cannot vanish
- *   - per-frame movement is bounded, so aircraft cannot jump
+ *   - `s` is monotonic, so aircraft cannot reverse
  *   - `v` is bounded, so corrections cannot present as jumps
- *
- * `s` was strictly monotonic until 15 Aug, which sounded stronger and was in fact a trap: a
- * tracker that ran AHEAD of its aircraft could never come back, because the correction acts
- * through a rate that is never negative. FYC361 sat 208 km ahead of a feed that could see it
- * perfectly, every fix saying so, until the tracker was rebuilt — which is what the 192 km
- * "jump" actually was. `s` may now retreat, but only on corroborated evidence and only a
- * slice per frame, so the property that mattered — nothing teleports — is unchanged.
  *
  * The primary rate signal is not ADS-B at all: it is the arrival estimate, which arrives
  * via the schedule feed and is revised during the flight. `v_nominal` is simply "remaining
@@ -264,16 +257,6 @@ export interface PathConfig {
   backwardToleranceS: number
   /** Consecutive agreeing fixes needed before a backward correction is believed. */
   backwardConfirmCount: number
-  /**
-   * How much of a corroborated backward disagreement is closed per fix.
-   *
-   * The whole of it would be a snap, and a snap is the failure mode this design exists to
-   * prevent — even from two agreeing fixes, since two readings of the same jammed transponder
-   * agree with each other. A third closes most of what is left, so a genuine drift is gone
-   * within a poll or two while a wrong pair moves the marker by a third of their error and is
-   * then contradicted by the next honest fix.
-   */
-  backwardCorrectionFactor: number
   /** Consecutive off-path fixes before concluding the aircraft is not on the route. */
   divergenceCount: number
   /** Never divide by less than this when deriving nominal rate. */
@@ -306,7 +289,6 @@ export const DEFAULT_PATH_CONFIG: Readonly<PathConfig> = {
   etaRebuildMs:          12 * 3_600_000,
   backwardToleranceS:    0.01,
   backwardConfirmCount:  2,
-  backwardCorrectionFactor: 0.35,
   divergenceCount:       3,
   minRemainingMs:        60_000,
   maxFixAgeMs:           30 * 60_000,
@@ -354,26 +336,6 @@ export class PathTracker {
   private hasAcceptedFix = false
   private readonly createdAtMs: number
   private backwardStreak = 0
-  /**
-   * Progress still to be given back, worked off in advance() rather than at the fix.
-   *
-   * Positive means the tracker believes itself further along the route than corroborated
-   * evidence says. Zero is the normal state.
-   */
-  private pendingCorrectionS = 0
-  /**
-   * True while the tracker is known to be ahead of the aircraft and working its way back.
-   *
-   * Distinct from having a correction mid-bleed, and the distinction is the whole difference
-   * between converging and not. A bleed decays to nothing within a poll, so gating the rate
-   * floor on it hands the floor straight back and the schedule creeps forward again between
-   * fixes — the correction then spends every poll reclaiming ground it just lost, which
-   * measured as a permanent ~60 km residual that stopped improving and began growing again.
-   *
-   * Set when evidence says we are ahead; cleared only when a fix actually AGREES. Until then
-   * the schedule has been outvoted and has no business asserting a minimum speed.
-   */
-  private chasing = false
   private offPathStreak  = 0
   private mode: PathMode = 'path'
 
@@ -483,30 +445,6 @@ export class PathTracker {
 
     this.s = clamp(this.s + this.v * dt, this.s, 1)
 
-    // Work off any outstanding backward correction, a slice per frame.
-    //
-    // The correction is held here rather than applied where the evidence arrived because
-    // `applyFix` runs once per poll and `advance` runs once per animation frame. Subtracting
-    // it at the fix would land the whole disagreement in a single frame — measured at 73 km
-    // on a badly drifted flight, which is precisely the teleport this design exists to
-    // prevent, merely pointed the other way. Bled off here it is a smooth retreat.
-    //
-    // Note this is the one place `s` may decrease, and it is bounded per frame by the
-    // horizon. The class-level claim that progress is monotonic is no longer strictly true;
-    // what remains true, and is the property that actually matters, is that no single frame
-    // moves the aircraft further than the eye reads as continuous motion.
-    if (this.pendingCorrectionS > 0) {
-      const bleed = Math.min(
-        this.pendingCorrectionS,
-        this.pendingCorrectionS * (dt / this.cfg.correctionHorizonMs),
-      )
-      this.s = clamp(this.s - bleed, 0, 1)
-      this.pendingCorrectionS -= bleed
-      // Below the tolerance it is noise, and letting it linger keeps the rate floor released
-      // for no reason.
-      if (this.pendingCorrectionS < this.cfg.backwardToleranceS / 100) this.pendingCorrectionS = 0
-    }
-
     // Re-derive nominal as the flight proceeds so a slipping ETA keeps taking effect
     // even while no fixes are arriving.
     const nominal = this.nominalRate(nowMs)
@@ -531,18 +469,7 @@ export class PathTracker {
   }
 
   private rateBounds(nominal: number): [number, number] {
-    // The floor yields while a correction is outstanding.
-    //
-    // Otherwise the schedule fights the correction: the floor keeps pushing the aircraft
-    // forward at half nominal while the bleed pulls it back, and the two settle into an
-    // equilibrium instead of closing. Measured at a permanent 67 km residual with a ~36 km
-    // sawtooth on every poll — the correction was running forever and arriving nowhere.
-    //
-    // Releasing it is not the same as trusting the fix completely. The disagreement still has
-    // to have been corroborated to exist at all, and the bleed above still governs how fast
-    // it is worked off. This only stops the schedule's opinion from being asserted against
-    // evidence that has already outvoted it.
-    const lo = this.chasing ? 0 : nominal * this.cfg.minRateFactor
+    const lo = nominal * this.cfg.minRateFactor
     const hi = Math.max(lo, Math.min(nominal * this.cfg.maxRateFactor, this.maxPhysicalRate()))
     return [lo, hi]
   }
@@ -590,49 +517,19 @@ export class PathTracker {
         const km  = haversineKm(this.lastAcceptedFix.lat, this.lastAcceptedFix.lon, fix.lat, fix.lon)
         const kts = (km / 1.852) / dtH
         if (kts > this.cfg.maxImpliedGsKts) return this.reject('impossible_speed')
-      } else {
-        // A fix at or before the last one we believed. The speed test cannot evaluate it —
-        // there is no positive interval to divide by — and it used to fall through as if it
-        // had passed, leaving the only along-track sanity check on the fix silently skipped.
-        //
-        // That is not a hypothetical: a feed merging several ADS-B receivers emits
-        // out-of-order timestamps as a matter of course, and rejecting a backward fix leaves
-        // `lastAcceptedMs` behind, so the very next fix can arrive "before" it. Anything
-        // relying on the speed guard downstream was therefore relying on a test that had not
-        // run.
-        //
-        // Discarded rather than clamped to a floor interval. We already hold a position that
-        // is at least as recent, so there is nothing to gain from an older one, and inventing
-        // a dt to make the check evaluable would be manufacturing evidence.
-        return this.reject('stale')
       }
     }
 
     // A fix claiming we are well behind needs corroboration before it is believed —
     // one bad sample must not be able to stall an aircraft.
-    //
-    // Not before the first accepted fix, though. Until one arrives `s` is only the
-    // elapsed-time fraction the constructor seeded, and there is nothing for a fix to be
-    // corroborated AGAINST: the value it contradicts is an admitted guess, never an
-    // observation. Requiring a second opinion to overrule a guess had a visible cost — the
-    // marker sat on the stored path for a full poll while the aircraft's real position was in
-    // hand and being thrown away, and the snap below then placed it on the next fix anyway.
-    // That two-step is the jump seen on every app launch. The startup snap is the mechanism
-    // built for exactly this case, and this gate was denying it its chance to run.
-    let errorS = sLive - this.s
-    let corroboratedBackward = false
-    if (this.hasAcceptedFix && errorS < -this.cfg.backwardToleranceS) {
+    const errorS = sLive - this.s
+    if (errorS < -this.cfg.backwardToleranceS) {
       this.backwardStreak++
       if (this.backwardStreak < this.cfg.backwardConfirmCount) {
         return this.reject('backward', errorS)
       }
-      corroboratedBackward = true
     } else {
       this.backwardStreak = 0
-      // A fix that agrees is the only thing that ends the chase. Anything weaker — a timer, a
-      // bleed running dry — lets the schedule resume pushing before the disagreement is
-      // actually settled.
-      this.chasing = false
     }
 
     // Accepted.
@@ -673,40 +570,6 @@ export class PathTracker {
       if (withinStartup && Math.abs(errorS) <= this.cfg.maxInitialSnapS) {
         this.s = clamp(sLive, 0, 1)
       }
-    }
-
-    // A corroborated backward disagreement is worked off by moving, because nothing else can.
-    //
-    // The correction below acts through the rate, and the rate is clamped at zero on both
-    // branches — so `s` can only ever increase. Once the tracker has run AHEAD of the
-    // aircraft, no amount of agreeing evidence can bring it back: the guard above accepts the
-    // fix after backwardConfirmCount corroborations and the acceptance then has no effect.
-    // That is a permanent, silent drift. FYC361 sat 208 km ahead of a feed that could see it
-    // perfectly, every fix saying so, and only came back when the tracker was rebuilt from
-    // scratch — which is the 192 km jump, not a jamming event.
-    //
-    // Eased, not snapped: a fraction of the disagreement per fix, so the marker closes the gap
-    // over several polls instead of teleporting. Repeated fixes keep the streak up and keep
-    // correcting, so convergence is geometric — 208 km is ~90 after one, ~40 after two.
-    //
-    // The anti-spoof property is intact and is the reason this is gated rather than free. A
-    // fix reaching this line has already passed the corridor test (40 km), the implied-speed
-    // test (700 kt) and, uniquely among corrections, has had to be AGREED WITH by a second
-    // independent fix. One bad or spoofed sample still cannot move the aircraft at all.
-    // Not when the startup snap has just placed it. That block sets `s` from this very fix, so
-    // applying a share of the disagreement on top would correct twice for one observation and
-    // carry the aircraft back PAST the position it was just given.
-    // Not applied here — recorded, and worked off frame by frame in advance(). Skipped when
-    // the startup snap has just placed the aircraft from this very fix, since there is then
-    // no disagreement left to correct.
-    if (corroboratedBackward && sLive !== this.s) {
-      // The freshest measurement replaces any outstanding one rather than adding to it: two
-      // fixes reporting the same 200 km disagreement are one piece of evidence observed
-      // twice, not 400 km of error.
-      this.pendingCorrectionS = Math.min(-errorS * this.cfg.backwardCorrectionFactor, 1)
-      this.chasing = true
-      // The rate correction below should chase only what the bleed will not close.
-      errorS = errorS * (1 - this.cfg.backwardCorrectionFactor)
     }
 
     // The correction itself: close the disagreement over the horizon, never by moving.
