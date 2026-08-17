@@ -439,6 +439,44 @@ def eta_key(f: dict) -> tuple:
     return (f.get("flight_date"), f.get("iata_number"), f.get("dep_iata"), f.get("arr_iata"))
 
 
+# A leg that has not arrived, long after it should have. FR24 sometimes never publishes an
+# arrival, leaving the row open for ever, and an open row is exactly what a callsign or a
+# recycled fr24_id can latch onto days later. Longer than any route we fly — DAM-SVO is 280
+# minutes — plus room for a badly delayed one.
+STALE_UNARRIVED_SEC = 18 * 3600
+
+
+def is_live_leg(f: dict, now: datetime) -> bool:
+    """
+    Could this board row be the aircraft we are hearing right now?
+
+    RJA437 on 17 Aug was scheduled out of Amman at 10:55Z and left at 13:21Z, two and a half
+    hours late. For its first ten minutes airborne this service bound it to YESTERDAY's row —
+    a leg that had already landed at 13:05Z on the 16th — and it carried yesterday's schedule
+    and yesterday's ETA until 13:34Z, when it flipped to today's row mid-flight.
+
+    The three queries that assemble the document do not guard equally. The circle query is
+    restricted to today and to flights that have departed and not arrived; the arrival query is
+    bounded by ARRIVED_LINGER_SEC. The FIRST one selects purely on fr24_id, with no filter on
+    the date or on whether the leg is already closed — so a completed flight comes back into a
+    live document the moment its id reappears upstream.
+
+    Guarding here rather than in that one query, because the rule is about what a live leg IS,
+    not about how it happened to be fetched, and the next source added would need it too.
+    """
+    arrived = max((t for t in (iso(f.get("real_arr")), iso(f.get("arr_confirmed_at"))) if t),
+                  default=None)
+    if arrived:
+        # Recently landed belongs here — the ground phases depend on it. Landed yesterday
+        # does not.
+        return (now - arrived).total_seconds() <= ARRIVED_LINGER_SEC
+
+    dep = iso(f.get("real_dep")) or iso(f.get("sched_dep"))
+    if dep and (now - dep).total_seconds() > STALE_UNARRIVED_SEC:
+        return False                       # open for ever, and not today's aeroplane
+    return True
+
+
 def hold_eta(key: tuple, raw: str | None, held: dict[tuple, str]) -> str | None:
     """
     The published estimate, held steady against wobble. Pure, so it can be tested.
@@ -959,6 +997,13 @@ async def build_live() -> dict:
 
         if not flights:
             return {"as_of": now_iso(), "flights": []}
+
+        # Legs that have already closed, dropped before anything binds a position to one.
+        #
+        # See is_live_leg: the fr24_id query carries no date or arrival filter, so yesterday's
+        # finished flight can re-enter a live document and take a live aircraft's identity with
+        # it. Applied to the assembled list so every source is covered, including the next one.
+        flights = [f for f in flights if is_live_leg(f, datetime.now(timezone.utc))]
 
         # A flight can arrive by both routes — a fresh on-ground fix and a recent arrival, or both
         # arrival columns — and the reader must not see it twice. Keyed on the row's identity,
