@@ -40,6 +40,7 @@ from typing import Any
 from urllib.parse import quote
 
 import adsb
+import learn
 from geo import (
     is_plausible_fix,
     drop_sentinel_fixes,
@@ -64,6 +65,10 @@ TZ = timezone(timedelta(hours=3))
 # healthy fix is under two minutes old; beyond five it has either left the collection box or the
 # feed has stopped carrying it, and a stale position is worse than none because the phase derived
 # from it would still read as confident.
+# This service was read-only until 17 Aug. Sample recording is the first write, and it is
+# behind a switch so it can be turned off without a deploy if it ever misbehaves.
+FLIGHT_API_READONLY = os.environ.get("FLIGHT_API_READONLY", "").lower() in ("1", "true", "yes")
+
 FIX_STALE_SEC = 300
 # How long a landed flight stays in the live document after touchdown. See build_live: the ground
 # phases only exist for a flight that has stopped moving, which is exactly when FIX_STALE_SEC has
@@ -1074,6 +1079,15 @@ async def build_live() -> dict:
             "arr_iata": f.get("arr_iata"),
             "duration_min": effective_duration(f),
         })
+    # Record what we saw, for the corridor learning. Fire-and-forget and never fatal: a document
+    # that fails to serve because a sample insert timed out would be a poor trade.
+    if not FLIGHT_API_READONLY:
+        try:
+            async with httpx.AsyncClient() as _c:
+                await learn.record(_c, SB_URL, SB_HEADERS, out, aps)
+        except Exception:
+            pass
+
     # Forget flights this document no longer carries. Both maps are keyed by callsign and would
     # otherwise grow for the life of the process — and a stale entry would make tomorrow's leg
     # of the same number believe it had already landed.
@@ -1155,6 +1169,30 @@ async def live():
 async def board(date: str | None = Query(None)):
     day = date or datetime.now(TZ).strftime("%Y-%m-%d")
     return await cached(f"board:{day}", BOARD_TTL, lambda: build_board(day))
+
+
+@app.post("/v2/learn-routes")
+async def learn_routes():
+    """
+    Rebuild the learned corridors from the samples.
+
+    A POST rather than a cron for now, so it is run deliberately and its output read, rather
+    than quietly rewriting corridors on a schedule nobody watches — which is how route_paths
+    came to hold 68 hand-imported paths that nothing has checked since.
+    """
+    async with httpx.AsyncClient() as client:
+        aps = await airports(client)
+        written = await learn.learn(client, SB_URL, SB_HEADERS, aps)
+    return {
+        "ok": True,
+        "corridors": len(written),
+        "routes": [
+            {"route": f"{w['dep_iata']}->{w['arr_iata']}", "operator": w["operator"],
+             "flights": w["observed_count"], "waypoints": len(w["waypoints"]),
+             "outliers": w["outliers_excluded"]}
+            for w in sorted(written, key=lambda w: -w["observed_count"])
+        ],
+    }
 
 
 @app.get("/health")

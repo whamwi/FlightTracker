@@ -360,3 +360,79 @@ def fix_contradicts_flight(
             return False                   # on the ground at one of its own airports
 
     return True
+
+
+# ── Learning a corridor from what was actually flown ─────────────────────────
+
+def gc_fraction(dep: tuple[float, float], arr: tuple[float, float],
+                lat: float, lon: float) -> float:
+    """
+    How far along the great circle from dep to arr this point is, 0 to 1.
+
+    Deliberately owes nothing to any stored corridor. `route_path_samples.s` is progress measured
+    AGAINST the stored path, so on DAM-JED — where the corridor matches Syrian Air and flynas
+    flies ~170 km away from it — `s` is wrong for exactly the flights whose paths we most need to
+    learn. Binning by that would aggregate the right coordinates into the wrong buckets.
+
+    Projected onto the dep->arr axis by along-track distance, so an aircraft 200 km off to one
+    side still reports the progress its position implies rather than being pushed toward an end.
+    """
+    total = haversine_km(dep, arr)
+    if total < 1e-6:
+        return 0.0
+    # Along-track distance via the spherical law of cosines on the triangle dep-arr-point.
+    d_dep = haversine_km(dep, (lat, lon))
+    d_arr = haversine_km((lat, lon), arr)
+    # Positive when the point lies between the two, and clamped when it does not — an aircraft
+    # still on the ground behind its origin is at 0, not at a negative fraction.
+    along = (d_dep ** 2 - d_arr ** 2 + total ** 2) / (2 * total)
+    return min(1.0, max(0.0, along / total))
+
+
+def consensus_path(tracks: list[list[dict]], bins: int = 40) -> list[dict] | None:
+    """
+    One corridor from many flown tracks: the per-bin median position.
+
+    Median rather than mean, and this is the whole design. SYR342 flew KWI-DAM at 7 km from the
+    consensus one day and 231 km another; an average would drag the corridor 12 km sideways
+    permanently, while a median ignores that flight entirely and keeps the path the other
+    nineteen actually fly.
+
+    Each track is a list of {gc_fraction, lat, lon}. A bin with no samples is skipped rather than
+    interpolated: a gap in coverage is not a waypoint, and interpolate_path will bridge it.
+
+    Returns None when there is not enough to be a consensus — fewer than two flights, or too few
+    bins covered to describe a route. A caller with None should keep the great circle and wait.
+    """
+    if len(tracks) < 2:
+        return None
+
+    buckets: list[list[tuple[float, float]]] = [[] for _ in range(bins)]
+    for track in tracks:
+        # One point per bin per flight, so a slow-sampled flight and a fast-sampled one carry
+        # the same weight. Without this a flight with 150 fixes outvotes one with 20.
+        seen: dict[int, tuple[float, float]] = {}
+        for p in track:
+            f = p.get("gc_fraction")
+            if f is None:
+                continue
+            i = min(bins - 1, max(0, int(f * bins)))
+            seen.setdefault(i, (p["lat"], p["lon"]))
+        for i, latlon in seen.items():
+            buckets[i].append(latlon)
+
+    out: list[dict] = []
+    for i, pts in enumerate(buckets):
+        if len(pts) < 2:
+            continue
+        lats = sorted(p[0] for p in pts)
+        lons = sorted(p[1] for p in pts)
+        mid = len(pts) // 2
+        out.append({
+            "f": (i + 0.5) / bins,
+            "lat": lats[mid],
+            "lon": lons[mid],
+        })
+
+    # A handful of bins is a fragment, not a route.
+    return out if len(out) >= max(4, bins // 4) else None
