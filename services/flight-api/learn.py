@@ -24,7 +24,7 @@ from urllib.parse import quote
 
 import httpx
 
-from geo import gc_fraction, consensus_path, haversine_km
+from geo import gc_fraction, bins_for_route, consensus_path, haversine_km
 
 SAMPLE_WINDOW_DAYS = 60          # rolling: airspace here changes politically, not seasonally
 MIN_FLIGHTS = 2                  # below this there is no consensus, only an anecdote
@@ -131,7 +131,18 @@ async def learn(client, sb, sb_headers: dict, aps: dict) -> list[dict]:
         if len(tracks) < MIN_FLIGHTS:
             continue
 
-        path = consensus_path(tracks)
+        # Sliced to the length of the route, not to a constant.
+        #
+        # A bin narrower than the ground covered between two samples is a bin two flights will
+        # never share, and a waypoint needs two flights to agree. At a flat 40, Amman-Damascus
+        # produced ZERO shared bins across two legs — 4.5 km a bin against a 14 km sampling
+        # stride — so the shortest routes, which are exactly the ones ADS-B sees best, could
+        # never learn a corridor at all. See bins_for_route.
+        dc, ac = aps.get(dep or ""), aps.get(arr or "")
+        route_km = haversine_km(dc, ac) if dc and ac else None
+        nbins = bins_for_route(route_km)
+
+        path = consensus_path(tracks, bins=nbins)
         if not path:
             continue
 
@@ -147,9 +158,20 @@ async def learn(client, sb, sb_headers: dict, aps: dict) -> list[dict]:
             else:
                 kept.append(key)
 
-        if len(kept) >= MIN_FLIGHTS and outliers:
+        if outliers:
+            if len(kept) < MIN_FLIGHTS:
+                # Nothing agrees with anything. Two flights 417 km apart — KNE388 and KNE378 into
+                # Riyadh on 17 Aug — are two different routings with one example each, not a
+                # corridor and its outlier, and the median of them is a line down the middle that
+                # neither flew. Storing that is worse than storing nothing: the tracker would
+                # draw every DAM-RUH flight 200 km from wherever it actually is.
+                #
+                # Discovered only once variable binning let this route past the resolution gate,
+                # which had been hiding it. The old code wrote the contaminated path anyway and
+                # labelled it observed_count 1.
+                continue
             # Recompute without them, so one bad day cannot even half-shift the median.
-            path = consensus_path([flights[k] for k in kept]) or path
+            path = consensus_path([flights[k] for k in kept], bins=nbins) or path
 
         written.append({
             "dep_iata": dep, "arr_iata": arr, "operator": op,

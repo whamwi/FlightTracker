@@ -11,7 +11,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from geo import gc_fraction, consensus_path, haversine_km
+from geo import (MAX_BINS, MIN_BINS, bins_for_route, gc_fraction, consensus_path,
+                 haversine_km)
 
 DAM = (33.411, 36.514)
 JED = (21.680, 39.157)
@@ -121,6 +122,98 @@ def test_gaps_are_left_for_the_interpolator_rather_than_invented():
     path = consensus_path([split(), split()])
     assert path is not None
     assert not any(0.35 < p["f"] < 0.65 for p in path), "a gap is not a waypoint"
+
+
+# ── Slicing a route to its length ─────────────────────────────────────────────
+
+def test_a_short_hop_is_not_sliced_more_finely_than_we_sample_it():
+    """
+    Amman-Damascus is about 180 km. At a flat 40 bins that is 4.5 km a bin, roughly 19 seconds at
+    cruise, against a sampling stride nearer 14 km — so a flight lands a point every third bin and
+    two flights almost never share one. Measured 17 Aug: RJA437's two legs shared ZERO bins of 40,
+    and the route could not learn a corridor at all.
+    """
+    assert bins_for_route(180) <= 10
+
+
+def test_a_long_route_keeps_the_resolution_it_already_had():
+    # DAM-SHJ is about 2,000 km and shared 41 bins of 40 under the old constant. Nothing to fix.
+    assert bins_for_route(2000) == MAX_BINS
+
+
+def test_the_slice_is_never_finer_than_the_sampling_stride():
+    # 25 km a bin, against roughly 14 km between samples at 450 kt on a 60-second cadence.
+    for km in (120, 300, 700, 1300, 2500):
+        assert km / bins_for_route(km) >= 14.0, km
+
+
+def test_a_very_short_route_still_gets_enough_bins_to_be_a_shape():
+    # Below the floor a corridor stops describing anything. Four waypoints is a line, not a route.
+    assert bins_for_route(30) == MIN_BINS
+    assert bins_for_route(1) == MIN_BINS
+
+
+def test_an_unknown_length_falls_back_to_the_old_constant():
+    # A missing airport should not silently coarsen every corridor to the floor.
+    assert bins_for_route(None) == MAX_BINS
+    assert bins_for_route(0) == MAX_BINS
+
+
+def test_two_sparse_legs_of_a_short_route_now_reach_consensus():
+    """
+    The end-to-end point. Two legs down one short corridor, sampled coarsely and at different
+    moments, so they interleave rather than coincide — which is exactly what defeated the flat
+    binning.
+    """
+    dep, arr = (31.72, 35.99), (33.41, 36.52)          # AMM -> DAM
+    km = haversine_km(dep, arr)
+
+    def leg(offset):
+        pts = []
+        for i in range(10):
+            f = min(1.0, offset + i * 0.1)
+            pts.append({"gc_fraction": f,
+                        "lat": dep[0] + (arr[0] - dep[0]) * f,
+                        "lon": dep[1] + (arr[1] - dep[1]) * f})
+        return pts
+
+    tracks = [leg(0.00), leg(0.04)]                    # interleaved, never the same fraction
+    assert consensus_path(tracks, bins=40) is None, "the old behaviour, reproduced"
+    path = consensus_path(tracks, bins=bins_for_route(km))
+    assert path, "sliced to the route, the same two legs agree"
+    assert len(path) >= 4
+
+
+def test_a_route_with_no_agreement_at_all_stores_nothing():
+    """
+    Two flights 417 km apart — KNE388 and KNE378 into Riyadh on 17 Aug — are two different
+    routings with one example each, not a corridor and its outlier. The median of them is a line
+    down the middle that neither flew, and drawing every DAM-RUH flight there would be worse than
+    drawing none.
+
+    This is asserted through learn()'s rule rather than consensus_path, which will happily
+    average anything it is given: the judgement belongs to the caller that knows what an outlier
+    is.
+    """
+    from learn import MIN_FLIGHTS, OUTLIER_KM, _off_path_km
+
+    def straight(lat0, lon0, lat1, lon1, n=12):
+        return [{"gc_fraction": i / (n - 1),
+                 "lat": lat0 + (lat1 - lat0) * i / (n - 1),
+                 "lon": lon0 + (lon1 - lon0) * i / (n - 1)} for i in range(n)]
+
+    # Same endpoints, wildly different middles.
+    a = straight(33.41, 36.52, 24.96, 46.70)
+    b = [dict(p, lat=p["lat"] + 3.5) for p in a]          # a few hundred km north
+    path = consensus_path([a, b], bins=40)
+    assert path, "a median exists, which is exactly the danger"
+
+    kept = []
+    for track in (a, b):
+        offs = sorted(_off_path_km(path, p) for p in track)
+        if offs[len(offs) // 2] <= OUTLIER_KM:
+            kept.append(track)
+    assert len(kept) < MIN_FLIGHTS, "neither flight agrees with the average of the two"
 
 
 if __name__ == "__main__":

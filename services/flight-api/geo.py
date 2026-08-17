@@ -389,6 +389,37 @@ def gc_fraction(dep: tuple[float, float], arr: tuple[float, float],
     return min(1.0, max(0.0, along / total))
 
 
+# How finely to slice a route, given how long it is.
+#
+# A bin must not be narrower than the ground an aircraft covers between two of our samples, or two
+# flights will keep landing in different bins and never agree on one — and a bin needs at least
+# two flights in it to contribute a waypoint.
+#
+# We sample roughly every 60 seconds and cruise is roughly 450 kt, so a sample is about 14 km
+# apart. 25 km per bin leaves room for a slow cadence without smearing the corridor.
+#
+# Measured 17 Aug, with a flat 40 bins, counting bins where BOTH legs of a route had a point:
+#
+#     DAM-SHJ  ~2,000 km   41 shared bins    learned
+#     DXB-DAM  ~2,000 km   39               learned
+#     DAM-RUH  ~1,300 km    9               refused, needs 10
+#     DAM-KWI  ~1,200 km    7               refused
+#     AMM-DAM    ~180 km    0               refused — the two legs never once coincided
+#
+# 40 bins over 180 km is 4.5 km a bin, about 19 seconds at cruise, against a 60-second cadence:
+# a flight lands a point every third bin and two flights almost never share one. The long routes
+# were never at risk — 50 km a bin is 3.6 minutes, three or more samples deep.
+KM_PER_BIN = 25.0
+MIN_BINS, MAX_BINS = 8, 40
+
+
+def bins_for_route(km: float | None) -> int:
+    """How many bins to slice a route of this length into. 40 when the length is unknown."""
+    if not km or km <= 0:
+        return MAX_BINS
+    return max(MIN_BINS, min(MAX_BINS, round(km / KM_PER_BIN)))
+
+
 def consensus_path(tracks: list[list[dict]], bins: int = 40) -> list[dict] | None:
     """
     One corridor from many flown tracks: the per-bin median position.
