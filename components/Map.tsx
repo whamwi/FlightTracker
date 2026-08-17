@@ -1402,6 +1402,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         [25.3285, 55.5172], // SHJ
         [51.2895,  6.7668], // DUS
         [52.3667, 13.5033], // BER
+        [50.8659,  7.1427], // CGN
         [36.8987, 30.7999], // AYT
       ]
       for (const coords of SERVICED) {
