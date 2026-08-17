@@ -68,6 +68,30 @@ async def record(client, sb, sb_headers: dict, flights: list[dict], aps: dict) -
         })
     if not rows:
         return 0
+
+    # One aircraft, one position, one instant.
+    #
+    # The unique index is (callsign, flight_date, seen_at), so the date is part of the key and two
+    # board rows for the same aeroplane defeat it: both are handed the SAME fix — position is
+    # looked up by callsign — and each writes it under its own date. RJA437 did exactly that on
+    # 17 Aug while its identity flipped from the 16th to the 17th mid-flight, and 12 callsigns
+    # were carrying two open rows when this was written, so the pairing is ordinary rather than
+    # exotic.
+    #
+    # Deduped here rather than by narrowing the index, because this is the honest statement of
+    # the rule and it needs no migration: whatever upstream decides about identity, an aircraft
+    # cannot be in two places at one instant, so it contributes one sample. A duplicate is not
+    # merely untidy — these rows are the corridor-learning input, and a doubled sample silently
+    # double-weights one flight in a per-bin median.
+    seen_fix: set[tuple] = set()
+    unique = []
+    for r in rows:
+        k = (r["callsign"], r["seen_at"])
+        if k in seen_fix:
+            continue
+        seen_fix.add(k)
+        unique.append(r)
+    rows = unique
     # Duplicates ignored rather than raised: the document is cached, so consecutive builds offer
     # the same fix again, and the unique index is what makes that harmless.
     r = await client.post(
