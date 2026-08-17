@@ -11,8 +11,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from geo import (MAX_BINS, MIN_BINS, bins_for_route, gc_fraction, consensus_path,
-                 haversine_km)
+from geo import (MAX_BINS, MIN_BINS, SEAM_BLEND_F, bins_for_route, covered_span,
+                 gc_fraction, consensus_path, great_circle_path, haversine_km,
+                 interpolate_path, position_on_route)
 
 DAM = (33.411, 36.514)
 JED = (21.680, 39.157)
@@ -214,6 +215,78 @@ def test_a_route_with_no_agreement_at_all_stores_nothing():
         if offs[len(offs) // 2] <= OUTLIER_KM:
             kept.append(track)
     assert len(kept) < MIN_FLIGHTS, "neither flight agrees with the average of the two"
+
+
+# ── Using a corridor that does not cover the whole route ──────────────────────
+
+GC = great_circle_path(DAM, KWI)
+
+
+def half_corridor(offset_lon=1.0):
+    """A corridor over the first 60% of DAM->KWI, displaced sideways so it is distinguishable."""
+    return [w for w in
+            [{"f": i / 39, "lat": DAM[0] + (KWI[0] - DAM[0]) * i / 39,
+              "lon": DAM[1] + (KWI[1] - DAM[1]) * i / 39 + offset_lon} for i in range(40)]
+            if w["f"] <= 0.6]
+
+
+def test_the_corridor_is_used_where_it_covers_the_route():
+    pos = position_on_route(half_corridor(), GC, 0.3)
+    gc = interpolate_path(GC, 0.3)
+    assert haversine_km(pos, gc) > 50, "displaced from the great circle, i.e. the corridor won"
+
+
+def test_the_great_circle_is_used_well_past_the_corridors_end():
+    """
+    interpolate_path CLAMPS: past the last waypoint it returns that waypoint, so an aircraft two
+    thirds of the way to Kuwait would be drawn pinned where our samples ran out. Measured on
+    FDB1848: 156.8 km median that way, against 59 km for the plain great circle.
+    """
+    pos = position_on_route(half_corridor(), GC, 0.95)
+    gc = interpolate_path(GC, 0.95)
+    assert haversine_km(pos, gc) < 1.0, "beyond the blend it is the great circle"
+
+    # The old behaviour, for contrast: on this 1,183 km route the clamp lands 345 km away.
+    clamped = interpolate_path(half_corridor(), 0.95)
+    assert haversine_km(clamped, gc) > 100 * haversine_km(pos, gc) + 100
+
+
+def test_the_marker_does_not_jump_where_the_corridor_ends():
+    # The corridor and the great circle are up to OUTLIER_KM apart at the seam. A hard switch
+    # would teleport the marker sideways by that much in one poll.
+    corr = half_corridor()
+    hi = covered_span(corr)[1]
+    step = 0.002
+    a = position_on_route(corr, GC, hi - step)
+    b = position_on_route(corr, GC, hi + step)
+    assert haversine_km(a, b) < 15, f"jumped {haversine_km(a, b):.1f} km at the seam"
+
+
+def test_the_blend_finishes_where_the_great_circle_is():
+    corr = half_corridor()
+    hi = covered_span(corr)[1]
+    at_end = position_on_route(corr, GC, hi + SEAM_BLEND_F)
+    assert haversine_km(at_end, interpolate_path(GC, hi + SEAM_BLEND_F)) < 1.0
+
+
+def test_no_corridor_at_all_is_simply_the_great_circle():
+    for empty in (None, [], [{"f": 0.5, "lat": 33.0, "lon": 37.0}]):
+        pos = position_on_route(empty, GC, 0.4)
+        assert haversine_km(pos, interpolate_path(GC, 0.4)) < 1.0
+
+
+def test_a_corridor_that_starts_late_is_not_used_before_it_starts():
+    # Coverage grows from the middle outwards as often as from the start.
+    late = [w for w in half_corridor(offset_lon=1.0) if w["f"] >= 0.3]
+    pos = position_on_route(late, GC, 0.05)
+    assert haversine_km(pos, interpolate_path(GC, 0.05)) < 1.0
+
+
+def test_the_covered_span_is_what_the_waypoints_actually_describe():
+    assert covered_span(half_corridor())[0] == 0.0
+    assert 0.55 <= covered_span(half_corridor())[1] <= 0.6
+    assert covered_span([]) is None
+    assert covered_span(None) is None
 
 
 if __name__ == "__main__":

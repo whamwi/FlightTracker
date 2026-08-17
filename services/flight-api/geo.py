@@ -222,6 +222,72 @@ def bearing_from_path(waypoints: list[dict], f: float) -> float | None:
     return (math.degrees(math.atan2(y, x)) + 360) % 360
 
 
+# How much of the route to blend over where a corridor ends.
+#
+# The corridor and the great circle do not meet at the seam — the corridor is wherever aircraft
+# actually fly, which is the whole point, and that is up to OUTLIER_KM away. Switching between
+# them at a single fraction would teleport the marker sideways by that much. 5% of the route is
+# about twelve minutes at cruise on a Gulf sector: long enough that the correction is a drift
+# rather than a jump.
+SEAM_BLEND_F = 0.05
+
+
+def covered_span(corridor: list[dict] | None) -> tuple[float, float] | None:
+    """The fractions a corridor actually describes, or None if it describes nothing."""
+    if not corridor:
+        return None
+    fs = [_num(w.get("f")) for w in corridor
+          if _num(w.get("lat")) is not None and _num(w.get("lon")) is not None]
+    fs = [v for v in fs if v is not None]
+    if len(fs) < 2:
+        return None
+    return (min(fs), max(fs))
+
+
+def position_on_route(corridor: list[dict] | None, great_circle: list[dict],
+                      f: float) -> tuple[float, float] | None:
+    """
+    Where the aircraft is at progress `f`: the corridor where it covers this part of the route,
+    the great circle where it does not.
+
+    A LEARNED CORRIDOR IS ROUTINELY PARTIAL. It only exists where two or more flights shared a
+    bin, so it grows from wherever coverage is best and reaches the ends last. Feeding such a
+    path straight to interpolate_path is actively harmful, because that function clamps: every
+    fraction beyond the corridor's last waypoint returns that waypoint, so an aircraft two thirds
+    of the way to Dubai is drawn pinned at the point where our samples ran out.
+
+    Measured 17 Aug, holding FDB1848 out of DAM-DXB and projecting it from the other two legs,
+    whose consensus spanned f 0.013 to 0.588:
+
+        45 fixes inside that span    median error   18.5 km
+        65 fixes beyond it           51 km at the seam, hundreds by the end
+        overall                     156.8 km, against 59 km for the plain great circle
+
+    So a half-learned corridor used naively is WORSE than no corridor at all — and corridors are
+    always half-learned early in a route's life, which is exactly when they are relied on.
+    """
+    gc_pos = interpolate_path(great_circle, f)
+    span = covered_span(corridor)
+    if span is None:
+        return gc_pos
+
+    lo, hi = span
+    if lo <= f <= hi:
+        return interpolate_path(corridor, f)
+
+    # Outside it. Walk off the corridor's edge towards the great circle rather than stepping.
+    if f < lo:
+        distance, edge = lo - f, interpolate_path(corridor, lo)
+    else:
+        distance, edge = f - hi, interpolate_path(corridor, hi)
+    if edge is None or gc_pos is None or distance >= SEAM_BLEND_F:
+        return gc_pos
+
+    w = distance / SEAM_BLEND_F
+    return (edge[0] + (gc_pos[0] - edge[0]) * w,
+            edge[1] + (gc_pos[1] - edge[1]) * w)
+
+
 def great_circle_path(dep: tuple[float, float], arr: tuple[float, float]) -> list[dict]:
     """
     A two-point corridor, for an OD pair no path has ever been recorded for.
