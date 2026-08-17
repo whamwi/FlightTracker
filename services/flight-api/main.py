@@ -1342,7 +1342,14 @@ async def build_board(date: str) -> dict:
 
     want = datetime.strptime(date, "%Y-%m-%d").date()
     out = []
-    for f in [*rows, *span]:
+    # The same confirmations the live document folds in.
+    #
+    # Applied here as well because otherwise the two documents this one service publishes
+    # disagree about whether a flight has landed: the map would show `arrived` and the board
+    # would still be waiting for it, from the same process, on the same request. That split —
+    # board and map telling a reader different things about one flight — is a defect this
+    # project has already paid for more than once.
+    for f in apply_confirmed_arrivals([*rows, *span]):
         sd, sa = iso(f["sched_dep"]), iso(f["sched_arr"])
         if not sd or not sa:
             continue
