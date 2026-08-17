@@ -13,7 +13,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 os.environ.setdefault("SUPABASE_URL", "https://example.invalid")
 os.environ.setdefault("SUPABASE_SERVICE_KEY", "test")
 
-from main import derive_phase
+from main import derive_phase, note_ground_state, LANDED_LATCH_MS
+import main as _main
 
 
 def test_fdb1192_climbing_out_of_aleppo_is_not_scheduled():
@@ -94,6 +95,66 @@ def ground(gs, **kw):
     return {"on_ground": True, "altitude_ft": 0, "ground_speed_kts": gs, **kw}
 
 
+# ── The touchdown latch ───────────────────────────────────────────────────────
+
+T0 = 1_755_400_000_000
+
+
+def reset_latch():
+    _main._ground_since.clear()
+    _main._seen_airborne.clear()
+
+
+def test_the_transition_is_remembered_only_for_something_seen_flying():
+    reset_latch()
+    # First sighting is already on the ground: we did not watch it land, so we must not say so.
+    assert note_ground_state("PARKED", True, T0) is None
+    # Seen airborne, then on the ground: that is a landing, and the instant is kept.
+    assert note_ground_state("FLYER", False, T0) is None
+    assert note_ground_state("FLYER", True, T0 + 1000) == T0 + 1000
+    # And it does not move on later ground fixes.
+    assert note_ground_state("FLYER", True, T0 + 9000) == T0 + 1000
+
+
+def test_going_airborne_again_clears_it():
+    # A go-around, or tomorrow's leg on the same callsign.
+    reset_latch()
+    note_ground_state("X", False, T0)
+    note_ground_state("X", True, T0 + 1000)
+    assert note_ground_state("X", False, T0 + 2000) is None
+    assert note_ground_state("X", True, T0 + 3000) == T0 + 3000
+
+
+def test_an_unknown_ground_state_neither_sets_nor_clears():
+    reset_latch()
+    note_ground_state("Y", False, T0)
+    note_ground_state("Y", True, T0 + 1000)
+    assert note_ground_state("Y", None, T0 + 2000) == T0 + 1000, "silence is not evidence"
+
+
+def test_a_brisk_rollout_still_shows_landed():
+    """
+    FYC781 into Muscat, 17 Aug: airborne at 350 ft and 108 kt, then 0 ft and 25.5 kt seventeen
+    seconds later. The whole roll fitted in one gap, so the speed test never saw it above 50 and
+    the stage was skipped entirely.
+    """
+    f = dict(CONFIRMED)
+    assert derive_phase(f, ground(25.5), landed_at_ms=T0, now_ms=T0 + 5_000) == "landed"
+
+
+def test_the_latch_expires_and_the_ladder_resumes():
+    f = dict(CONFIRMED)
+    just_after = T0 + LANDED_LATCH_MS + 1
+    assert derive_phase(f, ground(25.5), landed_at_ms=T0, now_ms=just_after) == "taxi_to_gate"
+    assert derive_phase(f, ground(0), landed_at_ms=T0, now_ms=just_after) == "arrived"
+
+
+def test_without_a_touchdown_instant_nothing_changes():
+    # Every existing caller and every case where we never saw it fly.
+    f = dict(CONFIRMED)
+    assert derive_phase(f, ground(25.5)) == "taxi_to_gate"
+
+
 # ── The four stages a person waiting actually experiences ─────────────────────
 
 def test_rollout_is_landed():
@@ -138,6 +199,15 @@ def test_the_belt_beats_the_gate_but_not_the_taxi():
     assert derive_phase(dict(CONFIRMED, arr_baggage="CAR4"), ground(22)) == "taxi_to_gate"
 
 
+def test_the_record_can_be_ahead_of_the_aeroplane():
+    """
+    FR24 published FYC781's landing at 03:40:22 while our fix at 03:40:27 still had it airborne
+    at 350 ft. For those 22 seconds `arrived` — stopped at the end of the trip — would be a lie.
+    """
+    airborne = {"on_ground": False, "altitude_ft": 350, "ground_speed_kts": 108}
+    assert derive_phase(CONFIRMED, airborne) == "landed"
+
+
 def test_confirmed_down_with_no_position_is_arrived():
     # No fix to say which stage; the coarser word, as ever.
     assert derive_phase(CONFIRMED, None) == "arrived"
@@ -161,7 +231,7 @@ def test_a_confirmed_arrival_beats_a_fix_that_still_looks_airborne():
     # Contradictory data: the record says it landed, the fix says 25,900 ft. The record wins,
     # and with no ground position to say which stage, the terminal word is the honest one.
     f = {"real_dep": None, "real_arr": "2026-08-16T15:10:00Z"}
-    assert derive_phase(f, {"on_ground": False, "ground_speed_kts": 425, "altitude_ft": 25900}) == "arrived"
+    assert derive_phase(f, {"on_ground": False, "ground_speed_kts": 425, "altitude_ft": 25900}) == "landed"
 
 
 def test_cancelled_and_diverted_still_win_over_everything():

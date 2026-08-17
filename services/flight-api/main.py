@@ -125,6 +125,43 @@ async def airports(client: httpx.AsyncClient) -> dict[str, tuple[float, float]]:
     return _airports
 
 
+# How long the touchdown stays on screen after it happens.
+#
+# FYC781 into Muscat on 17 Aug went from "350 ft, 108 kt" to "0 ft, 25 kt" in one 17-second
+# step: the whole landing roll fitted inside a single gap, so the `landed` stage never appeared
+# and the flight jumped straight to taxi_to_gate. A rollout takes roughly 20-30 seconds and our
+# effective resolution is 15-25, so deriving that stage from the CURRENT speed means catching it
+# sometimes and missing it often.
+#
+# Latched from the transition instead. Once a flight we have seen airborne shows up on the
+# ground, it reads `landed` for a minute whatever its speed, and the ladder resumes afterwards.
+# The touchdown is the moment a person watching came for; it should not depend on when we
+# happened to poll.
+LANDED_LATCH_MS = 60_000
+
+# callsign -> when it first touched down, and who we have actually seen flying. The second is
+# what stops a flight first sighted parked on a stand being announced as a landing.
+_ground_since: dict[str, float] = {}
+_seen_airborne: set[str] = set()
+
+
+def note_ground_state(cs: str, on_ground, now_ms: float) -> float | None:
+    """
+    Remember the air-to-ground transition, and report when it happened.
+
+    Returns the touchdown instant for this callsign, or None if it has not been seen to land.
+    """
+    if not cs:
+        return None
+    if on_ground is False:
+        _seen_airborne.add(cs)
+        _ground_since.pop(cs, None)
+        return None
+    if on_ground is True and cs in _seen_airborne and cs not in _ground_since:
+        _ground_since[cs] = now_ms
+    return _ground_since.get(cs)
+
+
 _route_paths: dict[str, list[dict]] = {}
 
 
@@ -174,7 +211,8 @@ def haversine(a: tuple[float, float], b: tuple[float, float]) -> float:
 
 # ── Derivation ───────────────────────────────────────────────────────────────
 
-def derive_phase(f: dict, pos: dict | None) -> str:
+def derive_phase(f: dict, pos: dict | None,
+                 landed_at_ms: float | None = None, now_ms: float | None = None) -> str:
     """
     The phase vocabulary, agreed 12 Aug.
 
@@ -228,6 +266,14 @@ def derive_phase(f: dict, pos: dict | None) -> str:
     # taxi_to_gate, which is the right words for the wrong half of the trip.
     if on_ground and (confirmed or f.get("real_dep")):
         gs = (pos or {}).get("ground_speed_kts") or 0
+
+        # The latch. For a minute after the wheels touch, this is a landing whatever the speed —
+        # see LANDED_LATCH_MS. Without it a brisk rollout is invisible: FYC781 was airborne at
+        # 108 kt and taxiing at 25 kt in consecutive samples.
+        if (landed_at_ms is not None and now_ms is not None
+                and now_ms - landed_at_ms < LANDED_LATCH_MS):
+            return "landed"
+
         if gs >= 50:
             return "landed"
         if gs > 3:
@@ -239,10 +285,18 @@ def derive_phase(f: dict, pos: dict | None) -> str:
         return "arrived" if confirmed else "at_gate"
 
     if confirmed:
-        # Confirmed down with no position to say more. The coarser word, as ever.
         if f.get("arr_baggage"):
             return "bags_on_belt"
-        return "arrived"
+        # Confirmed down, but the fix still shows it flying.
+        #
+        # FR24 published FYC781's landing at 03:40:22 while our own fix at 03:40:27 still had it
+        # airborne at 350 ft — a 22-second window where the record is ahead of the aeroplane.
+        # `arrived` means stopped at the end of the trip and would be a lie there; `landed` says
+        # the flight is over without claiming it has finished moving.
+        #
+        # With no position at all there is nothing to contradict the record, and nothing more
+        # to say, so the terminal word is honest.
+        return "arrived" if pos is None else "landed"
 
     if f.get("real_dep"):
         # `en_route` is the claim a live fix supports; `departed` is what we say when we know it
@@ -902,6 +956,15 @@ async def build_live() -> dict:
             pos_by_id.get(f.get("fr24_id")),
             circles.get((f.get("callsign") or "").strip().upper()),
         )
+        # Remember the air-to-ground transition before deriving anything from it, so the
+        # touchdown instant survives the ten-second document cache and the phase can be latched
+        # to it rather than to whatever speed the current fix happens to carry.
+        landed_at = note_ground_state(
+            (f.get("callsign") or "").strip().upper(),
+            (pos or {}).get("on_ground"),
+            now_ms,
+        )
+
         progress, p_basis = derive_progress(f, pos, aps)
         eta, e_basis = derive_eta(f)
         delay, d_basis = derive_delay(f)
@@ -958,7 +1021,7 @@ async def build_live() -> dict:
             "callsign": f.get("callsign"),
             "fr24_id": f.get("fr24_id"),
             "flight_date": f["flight_date"],
-            "phase": derive_phase(f, pos),
+            "phase": derive_phase(f, pos, landed_at, now_ms),
             "progress": progress,
             "progress_basis": p_basis,
             "eta_utc": eta,
@@ -1006,6 +1069,17 @@ async def build_live() -> dict:
             "arr_iata": f.get("arr_iata"),
             "duration_min": effective_duration(f),
         })
+    # Forget flights this document no longer carries. Both maps are keyed by callsign and would
+    # otherwise grow for the life of the process — and a stale entry would make tomorrow's leg
+    # of the same number believe it had already landed.
+    live_now = {(x.get("callsign") or "").strip().upper() for x in out}
+    for cs in list(_ground_since):
+        if cs not in live_now:
+            _ground_since.pop(cs, None)
+    for cs in list(_seen_airborne):
+        if cs not in live_now:
+            _seen_airborne.discard(cs)
+
     return {"as_of": now_iso(), "flights": out}
 
 
