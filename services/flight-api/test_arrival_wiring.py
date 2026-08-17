@@ -15,7 +15,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import main
 from arrivals import POLL_FROM_MS, POLL_UNTIL_MS, awaiting_arrival
-from main import apply_confirmed_arrivals, derive_phase, eta_key
+from main import (FUTURE_ARRIVAL_GRACE_MS, apply_confirmed_arrivals, derive_phase,
+                  eta_key, persist_arrival, plausible_arrival)
 
 NOW_MS = 1786957508 * 1000
 ETA = NOW_MS
@@ -40,9 +41,16 @@ def test_a_flight_in_the_air_near_its_arrival_is_asked_about():
     assert awaiting_arrival(flight(), NOW_MS) is True
 
 
-def test_a_flight_that_has_not_departed_is_not_asked_about():
-    # Nothing to confirm. Asking would spend a request to learn the schedule we already have.
-    assert awaiting_arrival(flight(real_dep=None), NOW_MS) is False
+def test_a_flight_we_never_saw_depart_is_still_asked_about():
+    """
+    This required a recorded departure at first, and that was backwards. Of 35 unconfirmed legs in
+    a fortnight, 32 have no real_dep — a flight we never saw leave is the one we know LEAST about,
+    and gating on the departure skipped 91% of the rows this exists to close.
+
+    Nothing is risked by asking: confirm_arrival matches on date and route and accepts only an
+    explicit landing, so a flight that never operated returns None.
+    """
+    assert awaiting_arrival(flight(real_dep=None), NOW_MS) is True
 
 
 def test_a_flight_already_closed_is_not_asked_about():
@@ -168,6 +176,96 @@ def test_with_no_fix_at_all_the_confirmation_is_the_only_thing_that_can_end_it()
     main._arr_confirmed[eta_key(f)] = HIT
     row = apply_confirmed_arrivals([f])[0]
     assert derive_phase(row, None, None, NOW_MS) == "arrived"
+
+
+# ── Before it becomes a fact on the website ───────────────────────────────────
+
+def test_an_arrival_in_the_past_is_plausible():
+    assert plausible_arrival(HIT, NOW_MS + 600_000) is True
+
+
+def test_an_arrival_in_the_future_is_refused():
+    """
+    status_arrival chooses between three candidate days, so a badly-placed text could resolve
+    ahead of the clock. This is the last thing between that and a row on the website.
+    """
+    future = dict(HIT, arrived_at_ms=NOW_MS + FUTURE_ARRIVAL_GRACE_MS + 60_000)
+    assert plausible_arrival(future, NOW_MS) is False
+
+
+def test_a_touchdown_a_moment_from_now_is_tolerated():
+    # Clocks are not perfectly aligned; a few seconds either way is not an error.
+    close = dict(HIT, arrived_at_ms=NOW_MS + 60_000)
+    assert plausible_arrival(close, NOW_MS) is True
+
+
+def test_an_arrival_with_no_timestamp_is_refused():
+    assert plausible_arrival({"arrived_at": "x"}, NOW_MS) is False
+
+
+# ── The write ─────────────────────────────────────────────────────────────────
+
+class FakePatch:
+    """Records the request instead of making it."""
+    def __init__(self, status=200, body=None):
+        self.status, self.body, self.calls = status, body if body is not None else [{}], []
+
+    async def patch(self, url, headers=None, json=None, timeout=None):
+        self.calls.append({"url": url, "json": json})
+        class R:
+            status_code = self.status
+            def json(_): return self.body
+        return R()
+
+
+def test_the_write_targets_one_row_and_only_while_it_is_unconfirmed():
+    """
+    The two null filters are load-bearing. They make this a compare-and-set, so a real arrival
+    published between the poll and the write is not overwritten by a time read out of prose.
+    """
+    import asyncio
+    c = FakePatch()
+    f = flight()
+    assert asyncio.run(persist_arrival(c, f, HIT)) is True
+    url = c.calls[0]["url"]
+    for expected in ("flight_date=eq.2026-08-17", "iata_number=eq.XH701",
+                     "dep_iata=eq.DAM", "arr_iata=eq.KWI",
+                     "real_arr=is.null", "arr_confirmed_at=is.null"):
+        assert expected in url, expected
+    assert c.calls[0]["json"] == {"arr_confirmed_at": HIT["arrived_at"],
+                                  "arr_confirmed_src": "fr24_flight_status"}
+
+
+def test_losing_the_race_is_reported_as_not_written():
+    # Zero rows matched: something better got there first. Not an error, and not a write.
+    import asyncio
+    c = FakePatch(body=[])
+    assert asyncio.run(persist_arrival(c, flight(), HIT)) is False
+
+
+def test_an_error_from_the_database_is_not_a_write():
+    import asyncio
+    c = FakePatch(status=409)
+    assert asyncio.run(persist_arrival(c, flight(), HIT)) is False
+
+
+def test_a_row_that_cannot_be_addressed_is_not_written():
+    # Without the full identity the filter could match more than one leg.
+    import asyncio
+    c = FakePatch()
+    assert asyncio.run(persist_arrival(c, flight(iata_number=None), HIT)) is False
+    assert c.calls == [], "nothing was sent"
+
+
+def test_readonly_mode_writes_nothing():
+    import asyncio
+    c = FakePatch()
+    main.FLIGHT_API_READONLY = True
+    try:
+        assert asyncio.run(persist_arrival(c, flight(), HIT)) is False
+        assert c.calls == []
+    finally:
+        main.FLIGHT_API_READONLY = False
 
 
 if __name__ == "__main__":

@@ -156,6 +156,10 @@ async def airport_offsets(client: httpx.AsyncClient) -> dict[str, float]:
 # by the poller below, read when the live document is assembled.
 _arr_confirmed: dict[tuple, dict] = {}
 
+# Counters for /health. `rejected` and `write_failures` are the two that matter: this source now
+# writes to a table the website reads, so a silent stream of either is the thing to notice.
+_arr_state: dict = {"written": 0, "rejected": 0, "write_failures": 0}
+
 # Between passes. A flight is polled at most once per CACHE_TTL_S regardless, so this only sets
 # how quickly a newly-landed flight is picked up — not how much traffic we generate.
 ARRIVAL_POLL_S = 90.0
@@ -189,6 +193,56 @@ def apply_confirmed_arrivals(flights: list[dict]) -> list[dict]:
     return out
 
 
+# An arrival cannot be in the future. The day-nearest logic in arrivals.status_arrival picks
+# between three candidate days, so a badly-placed text could in principle land ahead of the clock,
+# and this is the last thing standing between that and a row on the website.
+FUTURE_ARRIVAL_GRACE_MS = 5 * 60_000
+
+
+def plausible_arrival(hit: dict, now_ms: float) -> bool:
+    """A last sanity check before this becomes a fact anyone else reads."""
+    t = hit.get("arrived_at_ms")
+    return bool(t) and t <= now_ms + FUTURE_ARRIVAL_GRACE_MS
+
+
+async def persist_arrival(client: httpx.AsyncClient, f: dict, hit: dict) -> bool:
+    """
+    Write the confirmation onto the flight row. True if this call is what wrote it.
+
+    The two null filters are load-bearing, not belt and braces. They make this a compare-and-set:
+    if the harvester published a real arrival between the poll and this write, the PATCH matches
+    zero rows and we lose the race harmlessly instead of overwriting a better answer with a time
+    read out of prose. FR24's own timestamp always wins, and the last-writer-wins version of this
+    function would quietly break that rule under exactly the conditions it matters.
+
+    Written to arr_confirmed_at, alongside the sources already in that column — fr24_estimate,
+    fr24_last_seen, position_rebuttal — so nothing downstream needs to learn a new field. The
+    source tag distinguishes a published timestamp (fr24_flight) from one parsed out of the
+    status text (fr24_flight_status), because they are not equally precise and whoever audits
+    this later will want to tell them apart.
+    """
+    if FLIGHT_API_READONLY:
+        return False
+    for k in ("flight_date", "iata_number", "dep_iata", "arr_iata"):
+        if not f.get(k):
+            return False                       # cannot address the row unambiguously
+    q = (f"flight?flight_date=eq.{quote(str(f['flight_date']), safe='')}"
+         f"&iata_number=eq.{quote(str(f['iata_number']), safe='')}"
+         f"&dep_iata=eq.{quote(str(f['dep_iata']), safe='')}"
+         f"&arr_iata=eq.{quote(str(f['arr_iata']), safe='')}"
+         "&real_arr=is.null&arr_confirmed_at=is.null")
+    r = await client.patch(
+        f"{SB_URL}/rest/v1/{q}",
+        headers={**SB_HEADERS, "Content-Type": "application/json",
+                 "Prefer": "return=representation"},
+        json={"arr_confirmed_at": hit["arrived_at"], "arr_confirmed_src": hit["source"]},
+        timeout=30,
+    )
+    if r.status_code >= 300:
+        return False
+    return len(r.json() or []) > 0
+
+
 async def poll_arrivals() -> int:
     """
     Ask FR24 about each flight we are still waiting on. One pass.
@@ -199,8 +253,14 @@ async def poll_arrivals() -> int:
     """
     async with httpx.AsyncClient() as client:
         offsets = await airport_offsets(client)
-        rows = await sb(client, "flight?select=*&real_dep=not.is.null"
-                                "&real_arr=is.null&arr_confirmed_at=is.null")
+        # Bounded so the query cannot grow without limit as unresolved rows accumulate. The
+        # window below discards anything older anyway.
+        cutoff = (datetime.now(timezone.utc)
+                  - timedelta(milliseconds=arrivals.POLL_UNTIL_MS + 6 * 3600_000)).isoformat()
+        # Not filtered on real_dep: 32 of 35 unconfirmed legs in a fortnight have none, and a
+        # flight we never saw leave is the one we know least about. See awaiting_arrival.
+        rows = await sb(client, "flight?select=*&real_arr=is.null&arr_confirmed_at=is.null"
+                                f"&sched_arr=gte.{quote(cutoff, safe='')}")
         now_ms = datetime.now(timezone.utc).timestamp() * 1000
 
         found = 0
@@ -220,9 +280,23 @@ async def poll_arrivals() -> int:
                 continue
             hit = await arrivals.confirm_arrival(
                 probe, offsets.get((f.get("arr_iata") or "").strip().upper()))
-            if hit:
-                _arr_confirmed[key] = hit
-                found += 1
+            if not hit:
+                continue
+            if not plausible_arrival(hit, now_ms):
+                _arr_state["rejected"] += 1
+                continue
+            _arr_confirmed[key] = hit
+            found += 1
+
+            # Persisted as well as held, so the website's board and everything else reading the
+            # table learn it too — and so it survives a redeploy rather than being re-derived.
+            # Never fatal: a poll that raised because one PATCH timed out would stop confirming
+            # every other flight behind it.
+            try:
+                if await persist_arrival(client, f, hit):
+                    _arr_state["written"] += 1
+            except Exception:
+                _arr_state["write_failures"] += 1
         return found
 
 
@@ -1429,5 +1503,6 @@ async def health():
         "ok": True,
         "as_of": now_iso(),
         "adsb": adsb.state(),
-        "arrivals": {**arrivals.state(), "confirmed_held": len(_arr_confirmed)},
+        "arrivals": {**arrivals.state(), **_arr_state,
+                     "confirmed_held": len(_arr_confirmed)},
     }

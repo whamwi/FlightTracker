@@ -69,8 +69,16 @@ def awaiting_arrival(flight: dict, now_ms: float) -> bool:
     """
     if flight.get("real_arr") or flight.get("arr_confirmed_at"):
         return False
-    if not flight.get("real_dep"):
-        return False                                   # not airborne; nothing to confirm
+
+    # A recorded departure is deliberately NOT required.
+    #
+    # It was, and that was backwards. Of 35 unconfirmed legs in a fortnight, 32 have no real_dep
+    # at all — a flight we never saw leave is the one we know LEAST about, and gating on the
+    # departure skipped 91% of the very rows this exists to close. FR24 frequently holds both
+    # ends of a leg we recorded neither of.
+    #
+    # Nothing is lost by asking: confirm_arrival matches on date and route and accepts only an
+    # explicit landing, so a flight that never operated simply returns None.
     eta = flight.get("est_arr_ms") or flight.get("sched_arr_ms")
     if not eta:
         return False
