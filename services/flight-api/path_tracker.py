@@ -162,6 +162,17 @@ class PathTracker:
 
         # Seed from elapsed time, exactly as the website does: a tracker created mid-flight starts
         # where the schedule says, not at the departure gate.
+        #
+        # WHERE WE DIVERGE FROM THE WEBSITE, deliberately. It will not start a flight at all until
+        # a departure signal arrives; we start the moment speed and altitude prove the aeroplane
+        # is flying. FDB1192 ALP-DXB on 16 Aug was climbing through 25,900 ft at 425 knots with
+        # FR24 still publishing no departure at all, and the site had not started it.
+        #
+        # With no departure instant there is no elapsed time to seed from, so the first accepted
+        # fix seeds instead — see needs_seed in apply_fix. Until then s stays 0, which is why the
+        # seed must not be subject to the usual 0.15 snap limit: a flight found halfway along its
+        # route would otherwise sit at the departure gate and crawl.
+        self.needs_seed = ctx.get("departed_at_ms") is None
         if ctx.get("departed_at_ms") is not None:
             total = self._total_duration_ms()
             if total > 0:
@@ -192,7 +203,7 @@ class PathTracker:
             rate = remaining_s / remaining_ms
         else:
             total = self._total_duration_ms()
-            rate = 1 / total if total > 0 else 0
+            rate = (1 - self.s) / total if total > 0 else 0
         return min(rate, self._max_physical_rate())
 
     def _rate_bounds(self, nominal: float) -> tuple[float, float]:
@@ -291,6 +302,16 @@ class PathTracker:
 
         # The first fix is believed rather than refused as backward, but only near startup and
         # only for a small disagreement — otherwise a bad first fix would define the flight.
+        # No departure instant to seed from: this fix IS the seed, at whatever progress it
+        # implies. Unconditional, because the snap limit below exists to stop a bad fix moving a
+        # tracker that already knows where it is — and this one does not.
+        if self.needs_seed:
+            self.needs_seed = False
+            self.has_accepted_fix = True
+            self.s = clamp(s_live, 0, 1)
+            self.v = self._nominal_rate(now_ms)
+            return {"accepted": True, "reason": None, "error_s": 0.0}
+
         within_startup = now_ms - self.created_at_ms <= self.cfg["initial_snap_window_ms"]
         if not self.has_accepted_fix:
             self.has_accepted_fix = True
