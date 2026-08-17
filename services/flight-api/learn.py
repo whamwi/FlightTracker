@@ -87,7 +87,7 @@ async def learn(client, sb, sb_headers: dict, aps: dict) -> list[dict]:
                   safe="")
     rows = await _get(client, sb, sb_headers,
                       "flight_track_samples?select=callsign,operator,dep_iata,arr_iata,"
-                      f"flight_date,lat,lon,gc_fraction&seen_at=gte.{since}&limit=200000")
+                      f"flight_date,lat,lon,gc_fraction&seen_at=gte.{since}&order=id")
 
     # (dep, arr, operator) -> flight key -> points
     grouped: dict[tuple, dict[tuple, list[dict]]] = {}
@@ -147,7 +147,32 @@ def _off_path_km(path: list[dict], point: dict) -> float:
     return min(haversine_km((w["lat"], w["lon"]), (point["lat"], point["lon"])) for w in path)
 
 
+PAGE = 1000          # PostgREST's server-side ceiling, whatever the query string asks for
+
+
 async def _get(client, sb, sb_headers, q: str) -> list[dict]:
-    r = await client.get(f"{sb}/rest/v1/{q}", headers=sb_headers, timeout=120)
-    r.raise_for_status()
-    return r.json()
+    """
+    Every row, in pages.
+
+    PostgREST caps a response at 1,000 rows and ignores a larger `limit` in the query string —
+    silently, with a 200. The first version of this asked for 200,000, got 1,000, and produced
+    zero corridors from 2,837 samples because almost every route came back with one usable track
+    instead of two. A truncation that looks like a successful answer is worse than an error.
+
+    Paged by Range rather than offset: PostgREST answers it natively and reports the total in
+    Content-Range, so a short page is a real end rather than a guess.
+    """
+    out: list[dict] = []
+    start = 0
+    while True:
+        r = await client.get(
+            f"{sb}/rest/v1/{q}",
+            headers={**sb_headers, "Range-Unit": "items", "Range": f"{start}-{start + PAGE - 1}"},
+            timeout=120,
+        )
+        r.raise_for_status()
+        page = r.json()
+        out.extend(page)
+        if len(page) < PAGE:
+            return out
+        start += PAGE
