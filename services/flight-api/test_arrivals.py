@@ -8,12 +8,13 @@ around it is I/O and is not tested here.
 """
 
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 from arrivals import (LEG_TOLERANCE_MS, arrival_of, flight_url, normalise_number, parse_legs,
-                      pick_leg, query_forms)
+                      pick_leg, query_forms, status_arrival)
 
 DAY = 86_400
 # FYC701's real list, trimmed. Verbatim from 17 Aug: scheduled 09:30Z daily, on the ground at
@@ -182,6 +183,82 @@ def test_a_real_payload_shape_is_flattened():
     assert len(legs) == 1
     assert legs[0]["dep_iata"] == "DAM" and legs[0]["arr_iata"] == "KWI"
     assert legs[0]["real_arrival"] == 1786957508
+
+
+# ── The arrival written in prose ──────────────────────────────────────────────
+
+ALP = 3.0          # Aleppo, UTC+3
+
+
+def test_the_time_is_read_out_of_the_status_when_the_field_is_empty():
+    """
+    FR24 does not always fill time.real.arrival, and on Syrian arrivals it usually does not — but
+    the status still says so in words. Reading only the numeric field scored 0 of 45 on exactly
+    the legs we most need; with this it scored 28.
+
+        TK844 into Aleppo, 12 Aug:  real —  "Landed 09:35"
+    """
+    leg = {"sched_arrival": 1786772700, "real_arrival": None, "status": "Landed 09:35"}
+    t = status_arrival(leg, ALP)
+    assert t is not None
+    assert datetime.fromtimestamp(t, timezone.utc).strftime("%H:%M") == "06:35", "local -> UTC"
+
+
+def test_the_text_agrees_with_the_field_when_both_are_present():
+    """
+    Measured across 41 legs carrying both: 40 agreed within a minute. Same event, two spellings.
+
+    TK844 into Aleppo on 16 Aug, verbatim: scheduled 06:45Z, real 06:38Z, "Landed 09:38".
+    """
+    day = 1786752000                                   # a midnight UTC
+    leg = {"sched_arrival": day + 6 * 3600 + 45 * 60,
+           "real_arrival":  day + 6 * 3600 + 38 * 60,
+           "status": "Landed 09:38"}
+    assert abs(status_arrival(leg, ALP) - leg["real_arrival"]) <= 60
+
+
+def test_a_landing_after_midnight_belongs_to_the_next_day():
+    # Scheduled 23:50 local, on the ground 00:15. Anchored naively this lands 24 hours out.
+    sched = 1786772700 - (1786772700 % 86400) + (23 * 3600 + 50 * 60) - int(ALP * 3600)
+    t = status_arrival({"sched_arrival": sched, "real_arrival": None,
+                        "status": "Landed 00:15"}, ALP)
+    assert 0 < t - sched < 3600, "just after the schedule, not a day before it"
+
+
+def test_an_arrival_that_would_precede_its_departure_is_declined():
+    """
+    The text is dated to the day the flight ACTUALLY arrived; we can only anchor on the day it was
+    SCHEDULED to. A leg running a day late resolves to the wrong day — RB272 into Amsterdam came
+    out 1,441 minutes early, the only failure in 41 legs. The departure is what exposes it, and
+    declining is the contract: a wrong arrival time is worse than an absent one.
+    """
+    leg = {"sched_arrival": 1786772700, "real_arrival": None, "status": "Landed 09:35",
+           "real_departure": 1786772700 + 86400}
+    assert status_arrival(leg, ALP) is None
+
+
+def test_a_status_that_is_not_a_landing_yields_no_time():
+    for text in ("Scheduled", "Unknown", "Estimated 13:10", "Canceled", "Landed", ""):
+        assert status_arrival({"sched_arrival": 1786772700, "status": text}, ALP) is None
+
+
+def test_an_impossible_clock_time_is_rejected():
+    assert status_arrival({"sched_arrival": 1786772700, "status": "Landed 25:99"}, ALP) is None
+
+
+def test_without_the_airports_offset_the_text_cannot_be_placed():
+    # Better to decline than to assert a time three hours wrong.
+    assert status_arrival({"sched_arrival": 1786772700, "status": "Landed 09:35"}, None) is None
+
+
+def test_a_time_from_prose_is_flagged_as_less_precise_than_a_timestamp():
+    # A caller weighing this against ADS-B needs to know which of the two it is holding.
+    numeric = arrival_of({"sched_arrival": 1786772700, "real_arrival": 1786768680,
+                          "status": "Landed 09:38"}, ALP)
+    prose = arrival_of({"sched_arrival": 1786772700, "real_arrival": None,
+                        "status": "Landed 09:35"}, ALP)
+    assert numeric["precise"] is True and numeric["source"] == "fr24_flight"
+    assert prose["precise"] is False and prose["source"] == "fr24_flight_status"
 
 
 if __name__ == "__main__":

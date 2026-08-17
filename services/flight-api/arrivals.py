@@ -149,7 +149,56 @@ def pick_leg(legs: list[dict], dep_iata: str | None, arr_iata: str | None,
     return best
 
 
-def arrival_of(leg: dict | None) -> dict | None:
+_LANDED_AT = re.compile(r"^\s*Landed\s+(\d{1,2}):(\d{2})\s*$", re.I)
+
+
+def status_arrival(leg: dict, utc_offset_h: float | None) -> int | None:
+    """
+    The touchdown as written in the status TEXT, in unix seconds.
+
+    FR24 does not always fill time.real.arrival, and at the Syrian airports it usually does not —
+    but the status still says so in words. Measured 17 Aug over a week of TK844 into Aleppo:
+
+        16 Aug   real 06:38Z   "Landed 09:38"     both
+        12 Aug   real  —       "Landed 09:35"     text only
+        11 Aug   real  —       "Landed 09:32"     text only
+
+    Reading only the numeric field scored 0 of 45 on exactly the legs we most need. That is not
+    FR24 being blind over Syria — it is us not reading the answer.
+
+    The text is LOCAL time at the arrival airport and carries no date, so it is placed on the day
+    of the scheduled arrival and then pulled to whichever adjacent day it sits closest to. That
+    wrap is not decoration: a flight scheduled 23:50 and landing 00:15 belongs to the next day,
+    and without it every midnight arrival would be recorded 24 hours out.
+    """
+    m = _LANDED_AT.match(leg.get("status") or "")
+    sched = leg.get("sched_arrival")
+    if not m or not sched or utc_offset_h is None:
+        return None
+    hh, mm = int(m.group(1)), int(m.group(2))
+    if not (0 <= hh <= 23 and 0 <= mm <= 59):
+        return None
+
+    offset = int(utc_offset_h * 3600)
+    local_day = (sched + offset) // 86400 * 86400          # midnight of the scheduled local day
+    candidate = local_day + hh * 3600 + mm * 60 - offset
+    best = min((candidate + d * 86400 for d in (-1, 0, 1)), key=lambda t: abs(t - sched))
+
+    # An aeroplane cannot land before it takes off.
+    #
+    # The text is dated to the day the flight ACTUALLY arrived, and we can only anchor it on the
+    # day it was SCHEDULED to. A leg that runs a day late therefore lands on the wrong day:
+    # RB272 into Amsterdam, scheduled 10 Aug, resolved exactly 1,441 minutes early — the only
+    # failure in 41 legs that carried both forms. There is no way to detect that from the text
+    # alone, but the departure gives it away, and declining is the contract here. A wrong arrival
+    # time is far worse than an absent one.
+    dep = leg.get("real_departure")
+    if dep and best <= dep:
+        return None
+    return best
+
+
+def arrival_of(leg: dict | None, utc_offset_h: float | None = None) -> dict | None:
     """
     A confirmed touchdown, or None.
 
@@ -157,12 +206,20 @@ def arrival_of(leg: dict | None) -> dict | None:
     contract: a caller reading None as a negative would un-land flights every time FR24 publishes
     late, and the marker would resurrect.
     """
-    if not leg or not leg.get("real_arrival"):
+    if not leg:
+        return None
+    real, precise = leg.get("real_arrival"), True
+    if not real:
+        real, precise = status_arrival(leg, utc_offset_h), False
+    if not real:
         return None                                  # scheduled or estimated: not evidence
     return {
-        "arrived_at": datetime.fromtimestamp(leg["real_arrival"], timezone.utc).isoformat(),
-        "arrived_at_ms": leg["real_arrival"] * 1000,
-        "source": "fr24_flight",
+        "arrived_at": datetime.fromtimestamp(real, timezone.utc).isoformat(),
+        "arrived_at_ms": real * 1000,
+        "source": "fr24_flight" if precise else "fr24_flight_status",
+        # A minute-resolution time read out of prose, versus a timestamp. Same event, different
+        # confidence, and a caller weighing this against ADS-B needs to know which it has.
+        "precise": precise,
         "status_text": leg.get("status"),
     }
 
@@ -195,12 +252,16 @@ async def legs_for(number: str, now: float | None = None) -> list[dict]:
     return legs
 
 
-async def confirm_arrival(flight: dict) -> dict | None:
+async def confirm_arrival(flight: dict, utc_offset_h: float | None = None) -> dict | None:
     """
     Has this flight landed? The whole question, for one flight.
 
     Tries each identity form until one answers with legs, then pins the right date. Returns None
     for "we do not know", never for "no".
+
+    `utc_offset_h` is the arrival airport's offset, needed only to read a time out of the status
+    text. Without it that fallback is skipped and the numeric field is all we can use — which on
+    Syrian arrivals means almost nothing.
     """
     sched_arr_ms = flight.get("est_arr_ms") or flight.get("sched_arr_ms")
     if not sched_arr_ms:
@@ -210,7 +271,7 @@ async def confirm_arrival(flight: dict) -> dict | None:
         if not legs:
             continue                                 # this form is not the one FR24 indexes
         hit = arrival_of(pick_leg(legs, flight.get("dep_iata"),
-                                  flight.get("arr_iata"), sched_arr_ms))
+                                  flight.get("arr_iata"), sched_arr_ms), utc_offset_h)
         _state["last_lookup_at"] = datetime.now(timezone.utc).isoformat()
         if hit:
             _state["matched"] += 1
