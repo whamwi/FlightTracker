@@ -207,18 +207,26 @@ def derive_phase(f: dict, pos: dict | None) -> str:
     #
     # Every branch above waits for real_dep, so an aircraft we can SEE flying was called
     # "scheduled" until FR24 got round to filing a departure. FDB1192 ALP-DXB on 16 Aug was
-    # reported scheduled while climbing through 25,900 ft at 425 knots, 1,728 fpm, on a fix
-    # 26 seconds old — and its own progress field already read 7% with an ETA of 15:13, so the
-    # document contradicted itself.
+    # reported scheduled while climbing through 25,900 ft at 425 knots — its own progress field
+    # already read 7% with an ETA of 15:13, so the document contradicted itself.
     #
-    # The thresholds are deliberately conservative, because the rule of this function is that a
-    # phase never claims more than the position supports: 50 knots is far above any taxi speed,
-    # and 5,000 ft clears the highest field this network touches (AMM 2,395) by enough that
-    # pressure error cannot reach it. An aircraft on its take-off roll therefore still reads
-    # taxiing for a few seconds rather than jumping to en_route, which is the safe direction.
+    # THE FLAG DOES THE WORK, NOT THE ALTITUDE. This began at 5,000 ft, chosen so a parked
+    # aircraft reporting field elevation could never be promoted — AMM is 2,395 ft, RUH 2,082.
+    # That floor was too blunt: FYC762 SHJ-ALP on 17 Aug climbed out at 1,125 ft and 182 knots
+    # with `on_ground: false` on every fix from two independent sources, and read scheduled for
+    # 55 seconds until FR24's departure arrived at 01:50:00. Over 24 hours, 825 fixes are
+    # explicitly airborne below 5,000 ft, and the flag is present on 99.8% of them.
+    #
+    # So an explicit false is believed at any height, and 250 ft is only the fallback for the
+    # 0.2% that omit the flag — high enough above a runway to mean something, low enough to
+    # catch a departure as it rotates.
+    #
+    # `is not True` guards all of it: a fix that says it is ON the ground is never promoted,
+    # however fast. That is the take-off roll — 16 fixes in 24 hours — and it keeps reading
+    # taxiing for a few more seconds, which is the safe direction to be wrong in.
     if (pos and pos.get("on_ground") is not True
             and (pos.get("ground_speed_kts") or 0) >= 50
-            and (pos.get("altitude_ft") or 0) >= 5_000):
+            and (pos.get("on_ground") is False or (pos.get("altitude_ft") or 0) >= 250)):
         return "en_route"
 
     return "scheduled"

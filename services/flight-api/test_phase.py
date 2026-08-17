@@ -28,6 +28,37 @@ def test_fdb1192_climbing_out_of_aleppo_is_not_scheduled():
     assert derive_phase(f, pos) == "en_route"
 
 
+def test_fyc762_climbing_out_of_sharjah_below_the_old_floor():
+    """
+    17 Aug, verbatim. 1,125 ft and 182 knots with on_ground false on every fix from two
+    independent sources, called "scheduled" for 55 seconds because 1,125 is under the old
+    5,000 ft floor. FR24's departure reached us at 01:50:00; the aircraft was demonstrably
+    flying at 01:49:05.
+    """
+    f = {"real_dep": None, "real_arr": None}
+    pos = {"altitude_ft": 1125, "ground_speed_kts": 182, "on_ground": False}
+    assert derive_phase(f, pos) == "en_route"
+
+
+def test_an_explicit_airborne_flag_is_believed_at_any_height():
+    f = {"real_dep": None, "real_arr": None}
+    assert derive_phase(f, {"altitude_ft": 300, "ground_speed_kts": 160, "on_ground": False}) == "en_route"
+
+
+def test_a_fix_that_says_it_is_on_the_ground_is_never_promoted():
+    # The take-off roll: fast, low, and still on the runway. 16 such fixes in 24 hours.
+    f = {"real_dep": None, "real_arr": None}
+    pos = {"altitude_ft": 2020, "ground_speed_kts": 140, "on_ground": True}
+    assert derive_phase(f, pos) == "taxiing"
+
+
+def test_without_the_flag_it_falls_back_to_the_altitude_floor():
+    # 0.2% of fixes omit on_ground. Silence is not evidence of flight.
+    f = {"real_dep": None, "real_arr": None}
+    assert derive_phase(f, {"altitude_ft": 200, "ground_speed_kts": 160}) == "scheduled"
+    assert derive_phase(f, {"altitude_ft": 900, "ground_speed_kts": 160}) == "en_route"
+
+
 def test_a_published_departure_still_wins():
     f = {"real_dep": "2026-08-16T11:35:00Z", "real_arr": None}
     assert derive_phase(f, {"on_ground": False, "ground_speed_kts": 420}) == "en_route"
