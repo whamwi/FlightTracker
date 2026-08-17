@@ -70,6 +70,19 @@ TZ = timezone(timedelta(hours=3))
 # behind a switch so it can be turned off without a deploy if it ever misbehaves.
 FLIGHT_API_READONLY = os.environ.get("FLIGHT_API_READONLY", "").lower() in ("1", "true", "yes")
 
+# The arrival poller. OFF unless explicitly switched on, and off by default deliberately.
+#
+# It writes arr_confirmed_at, and that column is not test data: lib/flight-status.ts reads it,
+# and app/board, app/map, app/api/airspace and components/Map.tsx all read that. So a row written
+# from a branch — or from a laptop pointed at the same Supabase — appears on the live website as
+# an arrived flight. The write path does not care that the code around it is a test.
+#
+# Measured value, once the baseline was corrected: one confirmable leg in 22 genuinely
+# unconfirmed ones, for roughly 2,000 requests a day. The earlier 62% was against a gap
+# definition that ignored arr_confirmed_at, and 99 of those 134 "gaps" were already closed.
+# confirm_arrival stays callable on demand, which is where its value actually is.
+ARRIVAL_POLLER_ENABLED = os.environ.get("ARRIVAL_POLLER", "").lower() in ("1", "true", "yes")
+
 FIX_STALE_SEC = 300
 # How long a landed flight stays in the live document after touchdown. See build_live: the ground
 # phases only exist for a flight that has stopped moving, which is exactly when FIX_STALE_SEC has
@@ -104,7 +117,8 @@ async def _start_sweeper() -> None:
     better failure than refusing to boot.
     """
     asyncio.create_task(adsb.run_sweeper())
-    asyncio.create_task(run_arrival_poller())
+    if ARRIVAL_POLLER_ENABLED:
+        asyncio.create_task(run_arrival_poller())
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"],
 )
