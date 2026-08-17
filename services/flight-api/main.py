@@ -40,6 +40,7 @@ from typing import Any
 from urllib.parse import quote
 
 import adsb
+import arrivals
 import learn
 from geo import (
     is_plausible_fix,
@@ -103,12 +104,14 @@ async def _start_sweeper() -> None:
     better failure than refusing to boot.
     """
     asyncio.create_task(adsb.run_sweeper())
+    asyncio.create_task(run_arrival_poller())
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"],
 )
 
 _cache: dict[str, tuple[float, Any]] = {}
 _airports: dict[str, tuple[float, float]] = {}
+_offsets: dict[str, float] = {}
 _airlines: dict[str, dict] = {}
 
 
@@ -128,6 +131,115 @@ async def airports(client: httpx.AsyncClient) -> dict[str, tuple[float, float]]:
         for a in await sb(client, "airports?select=iata,lat,lon&lat=not.is.null"):
             _airports[a["iata"]] = (a["lat"], a["lon"])
     return _airports
+
+
+async def airport_offsets(client: httpx.AsyncClient) -> dict[str, float]:
+    """
+    Each airport's UTC offset, loaded once.
+
+    Only the arrival confirmation needs these, to place a local clock time from FR24's status
+    text. Kept apart from `airports` because that dict is coordinates and every caller unpacks
+    it as a pair.
+
+    NOTE the offset is stored, not computed from the zone, so it is wrong for a European arrival
+    across a DST boundary — see #42 and the late-October cliff. An hour of error on an arrival
+    time is visible but not dangerous; a missing offset means no confirmation at all, which on
+    Syrian arrivals is most of them.
+    """
+    if not _offsets:
+        for a in await sb(client, "airports?select=iata,utc_offset&utc_offset=not.is.null"):
+            _offsets[a["iata"]] = float(a["utc_offset"])
+    return _offsets
+
+
+# What the arrival poller has confirmed, keyed on the flight's identity for the day. Written only
+# by the poller below, read when the live document is assembled.
+_arr_confirmed: dict[tuple, dict] = {}
+
+# Between passes. A flight is polled at most once per CACHE_TTL_S regardless, so this only sets
+# how quickly a newly-landed flight is picked up — not how much traffic we generate.
+ARRIVAL_POLL_S = 90.0
+
+
+def apply_confirmed_arrivals(flights: list[dict]) -> list[dict]:
+    """
+    Fold what the poller learned into the rows, before anything reads them.
+
+    Deliberately expressed as `arr_confirmed_at` rather than as a new field or a phase override.
+    That is the column derive_phase already treats as "FR24 has the landing", so the entire
+    ground ladder — landed, taxi_to_gate, at_gate, bags_on_belt, arrived — keeps working with no
+    knowledge that this source exists.
+
+    It also settles the trust order without a line of code about it. A live fix still decides
+    WHEN the aircraft is down and what it is doing, because the ladder reads on_ground and the
+    touchdown latch first; this only supplies the final `confirmed`, which is what turns at_gate
+    into arrived. Where there is no fix at all, it is the only thing that can end the flight.
+
+    Never overwrites a published arrival: FR24's own timestamp is better than a time read out of
+    its prose, and 25 of 25 control legs showed the two agree exactly where both exist.
+    """
+    out = []
+    for f in flights:
+        hit = _arr_confirmed.get(eta_key(f))
+        if hit and not (f.get("real_arr") or f.get("arr_confirmed_at")):
+            f = {**f,
+                 "arr_confirmed_at": hit["arrived_at"],
+                 "arr_confirmed_src": hit["source"]}
+        out.append(f)
+    return out
+
+
+async def poll_arrivals() -> int:
+    """
+    Ask FR24 about each flight we are still waiting on. One pass.
+
+    Reads the board itself rather than piggy-backing on the live document, so it does not depend
+    on a flight being visible to any position feed — which is the entire point: the flights this
+    helps are the ones nothing can see.
+    """
+    async with httpx.AsyncClient() as client:
+        offsets = await airport_offsets(client)
+        rows = await sb(client, "flight?select=*&real_dep=not.is.null"
+                                "&real_arr=is.null&arr_confirmed_at=is.null")
+        now_ms = datetime.now(timezone.utc).timestamp() * 1000
+
+        found = 0
+        for f in rows:
+            key = eta_key(f)
+            if key in _arr_confirmed:
+                continue                               # already answered
+            sa, ea = iso(f.get("sched_arr")), iso(f.get("est_arr"))
+            probe = {
+                "iata_number": f.get("iata_number"), "callsign": f.get("callsign"),
+                "dep_iata": f.get("dep_iata"), "arr_iata": f.get("arr_iata"),
+                "real_dep": f.get("real_dep"), "real_arr": None, "arr_confirmed_at": None,
+                "sched_arr_ms": sa.timestamp() * 1000 if sa else None,
+                "est_arr_ms": ea.timestamp() * 1000 if ea else None,
+            }
+            if not arrivals.awaiting_arrival(probe, now_ms):
+                continue
+            hit = await arrivals.confirm_arrival(
+                probe, offsets.get((f.get("arr_iata") or "").strip().upper()))
+            if hit:
+                _arr_confirmed[key] = hit
+                found += 1
+        return found
+
+
+async def run_arrival_poller() -> None:
+    """
+    Keep asking, for the life of the process.
+
+    Never exits. A poller that died on one bad night upstream would silently return us to
+    guessing at arrivals, and the symptom — flights quietly never ending — is the one that took
+    a backtest to notice in the first place.
+    """
+    while True:
+        try:
+            await poll_arrivals()
+        except Exception:
+            pass
+        await asyncio.sleep(ARRIVAL_POLL_S)
 
 
 # How long the touchdown stays on screen after it happens.
@@ -998,6 +1110,12 @@ async def build_live() -> dict:
         if not flights:
             return {"as_of": now_iso(), "flights": []}
 
+        # What the arrival poller has confirmed, folded in first.
+        #
+        # Before is_live_leg deliberately: a confirmation is what CLOSES a leg, so applying it
+        # afterwards would keep a finished flight in the document until the next pass.
+        flights = apply_confirmed_arrivals(flights)
+
         # Legs that have already closed, dropped before anything binds a position to one.
         #
         # See is_live_leg: the fr24_id query carries no date or arrival filter, so yesterday's
@@ -1292,4 +1410,17 @@ async def learn_routes():
 
 @app.get("/health")
 async def health():
-    return {"ok": True, "as_of": now_iso()}
+    """
+    Enough to tell a working service from a quiet one.
+
+    Both background loops report, because both fail silently by design: the sweeper falling over
+    returns us to minute-old positions, and the arrival poller falling over returns us to flights
+    that never end. Neither shows up as an error anywhere — a count that has stopped moving is
+    the only symptom.
+    """
+    return {
+        "ok": True,
+        "as_of": now_iso(),
+        "adsb": adsb.state(),
+        "arrivals": {**arrivals.state(), "confirmed_held": len(_arr_confirmed)},
+    }

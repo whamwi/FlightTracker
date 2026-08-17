@@ -47,8 +47,34 @@ DEFAULT_LIMIT = 25
 # today's on a daily route.
 LEG_TOLERANCE_MS = 8 * 3600_000
 
+# When a flight is worth asking about, relative to its expected arrival.
+#
+# Early enough to catch one that lands ahead of schedule — FYC701 was on the ground 25 minutes
+# early — and long enough afterwards to cover a late publication, then give up rather than ask
+# for ever. A confirmed flight stops being asked about immediately, so the tail only costs
+# anything for the legs FR24 has not published.
+POLL_FROM_MS = 20 * 60_000
+POLL_UNTIL_MS = 2 * 3600_000
+
 _cache: dict[str, tuple[float, list[dict]]] = {}
 _state: dict = {"last_lookup_at": None, "fetches": 0, "failures": 0, "matched": 0}
+
+
+def awaiting_arrival(flight: dict, now_ms: float) -> bool:
+    """
+    Is this a flight we are still waiting on, near enough its arrival to ask?
+
+    Departed, not already closed, and inside the window. Everything else is either not yet a
+    question or no longer one.
+    """
+    if flight.get("real_arr") or flight.get("arr_confirmed_at"):
+        return False
+    if not flight.get("real_dep"):
+        return False                                   # not airborne; nothing to confirm
+    eta = flight.get("est_arr_ms") or flight.get("sched_arr_ms")
+    if not eta:
+        return False
+    return eta - POLL_FROM_MS <= now_ms <= eta + POLL_UNTIL_MS
 
 
 def state() -> dict:
