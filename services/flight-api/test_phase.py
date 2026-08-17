@@ -86,9 +86,82 @@ def test_parked_with_no_departure_is_still_scheduled():
     assert derive_phase(f, None) == "scheduled"
 
 
-def test_an_arrival_is_untouched_by_any_of_this():
+DOWN = {"real_dep": "2026-08-17T01:27:09Z", "real_arr": None}
+CONFIRMED = {"real_dep": "2026-08-17T01:27:09Z", "real_arr": "2026-08-17T02:24:16Z"}
+
+
+def ground(gs, **kw):
+    return {"on_ground": True, "altitude_ft": 0, "ground_speed_kts": gs, **kw}
+
+
+# ── The four stages a person waiting actually experiences ─────────────────────
+
+def test_rollout_is_landed():
+    # Wheels down, still fast. The moment someone at the window sees it touch.
+    assert derive_phase(DOWN, ground(120)) == "landed"
+    assert derive_phase(CONFIRMED, ground(120)) == "landed"
+
+
+def test_crossing_the_airfield_is_taxi_to_gate():
+    assert derive_phase(DOWN, ground(22)) == "taxi_to_gate"
+    assert derive_phase(CONFIRMED, ground(8)) == "taxi_to_gate"
+
+
+def test_stopped_without_a_landing_on_the_record_is_at_gate():
+    # We watched it stop, and that is worth saying. Ending the flight's life is a claim about a
+    # record we do not have.
+    assert derive_phase(DOWN, ground(0)) == "at_gate"
+
+
+def test_stopped_with_the_landing_on_the_record_is_arrived():
+    # The terminal state, and the only one that needs the published signal.
+    assert derive_phase(CONFIRMED, ground(0)) == "arrived"
+
+
+def test_the_boundary_between_rollout_and_taxi_is_fifty_knots():
+    # The same number the departure rule uses for "faster than any taxi", so the file has one
+    # boundary rather than two.
+    assert derive_phase(DOWN, ground(50)) == "landed"
+    assert derive_phase(DOWN, ground(49)) == "taxi_to_gate"
+
+
+def test_a_crawl_counts_as_stopped():
+    # GPS noise on a parked aircraft. Three knots is not crossing an airfield.
+    assert derive_phase(CONFIRMED, ground(3)) == "arrived"
+    assert derive_phase(CONFIRMED, ground(4)) == "taxi_to_gate"
+
+
+def test_the_belt_beats_the_gate_but_not_the_taxi():
+    # It is the last thing published and the thing a person waiting came for — VF341 got CAR4
+    # twenty minutes after landing. But a moving aircraft has not reached a belt.
+    assert derive_phase(dict(CONFIRMED, arr_baggage="CAR4"), ground(0)) == "bags_on_belt"
+    assert derive_phase(dict(CONFIRMED, arr_baggage="CAR4"), ground(22)) == "taxi_to_gate"
+
+
+def test_confirmed_down_with_no_position_is_arrived():
+    # No fix to say which stage; the coarser word, as ever.
+    assert derive_phase(CONFIRMED, None) == "arrived"
+
+
+def test_rja431_would_no_longer_read_departed_on_the_ground():
+    """
+    Into Aleppo, 17 Aug: on the ground for five minutes reading `departed`, because every
+    arrival branch waited for real_arr — which landed at 02:24:16.
+    """
+    assert derive_phase(DOWN, ground(22)) != "departed"
+    assert derive_phase(DOWN, ground(0)) != "departed"
+
+
+def test_airborne_after_departure_is_unaffected():
+    assert derive_phase(DOWN, {"on_ground": False, "ground_speed_kts": 460,
+                               "altitude_ft": 34000}) == "en_route"
+
+
+def test_a_confirmed_arrival_beats_a_fix_that_still_looks_airborne():
+    # Contradictory data: the record says it landed, the fix says 25,900 ft. The record wins,
+    # and with no ground position to say which stage, the terminal word is the honest one.
     f = {"real_dep": None, "real_arr": "2026-08-16T15:10:00Z"}
-    assert derive_phase(f, {"on_ground": False, "ground_speed_kts": 425, "altitude_ft": 25900}) == "landed"
+    assert derive_phase(f, {"on_ground": False, "ground_speed_kts": 425, "altitude_ft": 25900}) == "arrived"
 
 
 def test_cancelled_and_diverted_still_win_over_everything():

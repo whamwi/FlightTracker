@@ -200,14 +200,49 @@ def derive_phase(f: dict, pos: dict | None) -> str:
     on_ground = bool(pos and pos.get("on_ground"))
     moving = bool(pos and (pos.get("ground_speed_kts") or 0) > 3)
 
-    if f.get("real_arr") or f.get("arr_confirmed_at"):
-        # Belt first: it is the last thing to arrive and the thing a person waiting cares about.
-        # VF341 got CAR4 twenty minutes after landing, so arrival is not the end of the story.
+    confirmed = bool(f.get("real_arr") or f.get("arr_confirmed_at"))
+
+    # ── The ground, in the order a person waiting actually experiences it ─────
+    #
+    # Four stages, not one word. Someone meeting a flight wants to know the difference between
+    # "it has touched down", "it is coming in", "it is on stand" and "that is the end of it",
+    # and all four are visible in the fix: altitude says it is down, ground speed says which of
+    # the three it is doing.
+    #
+    #   landed        wheels down, still rolling out       gs >= 50
+    #   taxi_to_gate  crossing the airfield                3 < gs < 50
+    #   at_gate       stopped, nobody has confirmed yet    gs <= 3
+    #   arrived       stopped AND FR24 has the landing     gs <= 3, terminal
+    #
+    # 50 knots is the same number the departure rule uses for "moving faster than any taxi", so
+    # rollout and taxi divide on a boundary the file already trusts rather than a new one.
+    #
+    # `arrived` is deliberately the only state that requires the published signal. Everything
+    # before it is something we watched happen; ending the flight's life is a claim about a
+    # record, and that record is FR24's. RJA431 into Aleppo on 17 Aug is the case: on the ground
+    # for five minutes reading `departed`, because every branch here waited for a signal that
+    # had not come. Now it reads landed, then taxi_to_gate, then at_gate, and only becomes
+    # arrived when 02:24:16 lands.
+    # Only on the way IN. Without this gate the ladder catches an aircraft that has not left
+    # yet — a departure parked at its stand would read at_gate, and one taxiing out would read
+    # taxi_to_gate, which is the right words for the wrong half of the trip.
+    if on_ground and (confirmed or f.get("real_dep")):
+        gs = (pos or {}).get("ground_speed_kts") or 0
+        if gs >= 50:
+            return "landed"
+        if gs > 3:
+            return "taxi_to_gate"
+        # Belt beats at_gate but not arrival: it is the last thing to be published and the thing
+        # a person waiting actually came for. VF341 got CAR4 twenty minutes after landing.
         if f.get("arr_baggage"):
             return "bags_on_belt"
-        if on_ground:
-            return "taxi_to_gate" if moving else "at_gate"
-        return "landed"
+        return "arrived" if confirmed else "at_gate"
+
+    if confirmed:
+        # Confirmed down with no position to say more. The coarser word, as ever.
+        if f.get("arr_baggage"):
+            return "bags_on_belt"
+        return "arrived"
 
     if f.get("real_dep"):
         # `en_route` is the claim a live fix supports; `departed` is what we say when we know it
