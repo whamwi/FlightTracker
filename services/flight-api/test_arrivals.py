@@ -1,10 +1,10 @@
 """
-Reading an arrival off the destination airport's board.
+Asking FR24 about one flight.
 
 Run:  python3 services/flight-api/test_arrivals.py
 
-Everything here is pure — a board in, a verdict out, `now` a parameter — so none of it touches
-the network. The fetch around it is I/O and is not tested here.
+Everything here is pure — legs in, a verdict out — so none of it touches the network. The fetch
+around it is I/O and is not tested here.
 """
 
 import sys
@@ -12,29 +12,38 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from arrivals import (LOOKBACK_MS, MAX_LIMIT, MIN_LIMIT, POLL_FROM_MS, POLL_UNTIL_MS,
-                      airports_due, flight_identities, limit_for, match_arrival,
-                      normalise_number, note_density, parse_arrivals, widget_url)
+from arrivals import (LEG_TOLERANCE_MS, arrival_of, flight_url, normalise_number, parse_legs,
+                      pick_leg, query_forms)
 
-# The board FR24 served for Kuwait on 17 Aug, trimmed to the rows that matter. FYC701's numbers
-# are verbatim: scheduled 12:30 Damascus, on the ground at 12:05, twenty-five minutes early.
-FYC701 = {"number": "FYC701", "callsign": "FYC701", "origin": "DAM",
-          "real_arrival": 1786957508, "sched_arrival": 1786959000, "status": "Landed 12:05"}
-KWI_BOARD = [
-    {"number": "J91312", "callsign": "JZR1312", "origin": "TZX",
-     "real_arrival": 1786956840, "sched_arrival": 1786958700, "status": "Landed 10:54"},
-    FYC701,
-    {"number": "KU286", "callsign": "KAC286", "origin": "DAC",
-     "real_arrival": None, "sched_arrival": 1786962600, "status": "Estimated 13:10"},
+DAY = 86_400
+# FYC701's real list, trimmed. Verbatim from 17 Aug: scheduled 09:30Z daily, on the ground at
+# 09:05Z on the 17th — twenty-five minutes early — and nothing at all recorded for the 16th.
+TODAY_ARR = 1786959000          # 17 Aug 09:30Z scheduled
+LEGS = [
+    {"number": "FYC701", "dep_iata": "DAM", "arr_iata": "KWI",
+     "sched_arrival": TODAY_ARR + 2 * DAY, "real_arrival": None,
+     "real_departure": None, "status": "Scheduled"},
+    {"number": "FYC701", "dep_iata": "DAM", "arr_iata": "KWI",
+     "sched_arrival": TODAY_ARR + DAY, "real_arrival": None,
+     "real_departure": None, "status": "Scheduled"},
+    {"number": "FYC701", "dep_iata": "DAM", "arr_iata": "KWI",
+     "sched_arrival": TODAY_ARR, "real_arrival": 1786957508,
+     "real_departure": 1786945000, "status": "Landed 12:05"},
+    {"number": "FYC701", "dep_iata": "DAM", "arr_iata": "KWI",
+     "sched_arrival": TODAY_ARR - DAY, "real_arrival": None,
+     "real_departure": None, "status": "Unknown"},
+    {"number": "FYC701", "dep_iata": "DAM", "arr_iata": "KWI",
+     "sched_arrival": TODAY_ARR - 2 * DAY, "real_arrival": 1786870380,
+     "real_departure": None, "status": "Landed 11:53"},
 ]
 
-OURS = {"iata_number": "XH701", "callsign": "FYC701", "dep_iata": "DAM", "arr_iata": "KWI"}
+OURS = {"iata_number": "XH701", "callsign": "FYC701", "dep_iata": "DAM", "arr_iata": "KWI",
+        "sched_arr_ms": TODAY_ARR * 1000}
 
 
 # ── Identity ──────────────────────────────────────────────────────────────────
 
 def test_padding_and_spacing_do_not_break_a_match():
-    # FR24 writes the same flight three ways. An exact string compare drops real arrivals.
     assert normalise_number("RB 0441") == "RB441"
     assert normalise_number("RB0441") == "RB441"
     assert normalise_number("RB441") == "RB441"
@@ -45,165 +54,134 @@ def test_an_empty_number_is_no_number():
     assert normalise_number("") is None
 
 
-def test_a_flight_is_known_by_both_of_its_names():
-    # The trap that has cost this project three bugs in one day.
-    assert flight_identities(OURS) == {"XH701", "FYC701"}
+def test_both_identity_forms_are_asked_about():
+    """
+    Which form FR24 indexes is decided per airline and cannot be predicted. Measured 17 Aug, all
+    HTTP 200: FYC701 returned 14 rows and XH701 zero; RB441 returned a row and SYR441 zero.
+    Asking only one form would return nothing for half the fleet — and nothing from this source
+    is indistinguishable from "has not landed".
+    """
+    assert query_forms(OURS) == ["FYC701", "XH701"]
+    assert query_forms({"iata_number": "RB441", "callsign": "SYR441"}) == ["SYR441", "RB441"]
 
 
-def test_the_icao_form_on_their_board_matches_the_iata_form_on_ours():
+def test_a_flight_with_only_one_name_asks_once():
+    assert query_forms({"iata_number": "RB272"}) == ["RB272"]
+
+
+def test_the_same_name_twice_is_not_two_questions():
+    assert query_forms({"iata_number": "RB272", "callsign": "RB 0272"}) == ["RB272"]
+
+
+def test_a_flight_with_no_identifiers_is_not_guessed_at():
+    assert query_forms({"dep_iata": "DAM"}) == []
+
+
+# ── Picking the right date ────────────────────────────────────────────────────
+
+def test_todays_leg_is_chosen_from_a_list_of_many_dates():
     """
-    The KWI board called it FYC701. Our route_master calls it XH701. Matching on iata_number
-    alone would have missed the exact flight that proved this source works.
+    The list holds a week of future schedule and a fortnight of history for the same number. If
+    the date is not pinned, last week's landing gets reported as today's.
     """
-    hit = match_arrival(OURS, KWI_BOARD)
-    assert hit is not None, "matched on the callsign form"
-    assert hit["arrived_at_ms"] == 1786957508 * 1000
-    assert hit["source"] == "fr24_widget"
-    assert hit["status_text"] == "Landed 12:05"
+    leg = pick_leg(LEGS, "DAM", "KWI", TODAY_ARR * 1000)
+    assert leg["real_arrival"] == 1786957508
+    assert leg["status"] == "Landed 12:05"
+
+
+def test_a_leg_on_another_date_is_not_todays_arrival():
+    # Asking about the 16th, which FR24 recorded as Unknown, must not return the 17th's landing.
+    leg = pick_leg(LEGS, "DAM", "KWI", (TODAY_ARR - DAY) * 1000)
+    assert leg is not None and leg["real_arrival"] is None
+    assert arrival_of(leg) is None
+
+
+def test_the_nearest_leg_wins_when_two_are_within_tolerance():
+    # A delayed flight can sit closer to the next day's slot than its own. Nearest, not first.
+    leg = pick_leg(LEGS, "DAM", "KWI", (TODAY_ARR + DAY - 3600) * 1000)
+    assert leg["sched_arrival"] == TODAY_ARR + DAY
+
+
+def test_a_date_nothing_is_near_returns_nothing():
+    assert pick_leg(LEGS, "DAM", "KWI", (TODAY_ARR + 30 * DAY) * 1000) is None
+
+
+def test_a_delayed_leg_inside_the_tolerance_is_still_found():
+    late = (TODAY_ARR * 1000) - LEG_TOLERANCE_MS + 60_000
+    assert pick_leg(LEGS, "DAM", "KWI", late) is not None
+
+
+def test_the_same_number_on_a_different_route_is_a_different_flight():
+    assert pick_leg(LEGS, "DAM", "AUH", TODAY_ARR * 1000) is None
+
+
+def test_a_leg_with_no_route_recorded_still_matches_on_the_date():
+    # Missing information is not a contradiction.
+    legs = [dict(LEGS[2], dep_iata=None, arr_iata=None)]
+    assert pick_leg(legs, "DAM", "KWI", TODAY_ARR * 1000) is not None
 
 
 # ── What counts as evidence ───────────────────────────────────────────────────
 
-def test_an_estimate_is_not_an_arrival():
-    # KU286 is on the board with a time, but it is an estimate. Treating that as a touchdown
-    # would land flights that are still an hour out.
-    kuwait_airways = {"iata_number": "KU286", "callsign": "KAC286",
-                      "dep_iata": "DAC", "arr_iata": "KWI"}
-    assert match_arrival(kuwait_airways, KWI_BOARD) is None
+def test_a_confirmed_touchdown_is_reported_with_its_time():
+    hit = arrival_of(pick_leg(LEGS, "DAM", "KWI", TODAY_ARR * 1000))
+    assert hit["arrived_at_ms"] == 1786957508 * 1000
+    assert hit["arrived_at"] == "2026-08-17T09:05:08+00:00"
+    assert hit["source"] == "fr24_flight"
+    assert hit["status_text"] == "Landed 12:05"
 
 
-def test_a_flight_the_board_does_not_mention_returns_nothing():
+def test_a_scheduled_leg_is_not_an_arrival():
+    assert arrival_of(LEGS[0]) is None
+
+
+def test_nothing_at_all_is_not_an_arrival():
     """
-    None means "the board does not tell us", never "it did not land". A caller that read this as
-    a negative would un-land flights whenever FR24 publishes late, and the marker would resurrect.
+    None means "FR24 does not tell us", never "it did not land". A caller reading this as a
+    negative would un-land flights whenever FR24 publishes late, and the marker would resurrect.
     """
-    assert match_arrival({"iata_number": "RB441", "callsign": "SYR441",
-                          "dep_iata": "DAM", "arr_iata": "KWI"}, KWI_BOARD) is None
-
-
-def test_yesterdays_leg_with_the_same_number_is_not_todays_arrival():
-    # A flight number is unique per airline per day, and a board spanning midnight has both legs
-    # on it. The origin is what tells them apart.
-    from_somewhere_else = dict(OURS, dep_iata="AUH")
-    assert match_arrival(from_somewhere_else, KWI_BOARD) is None
-
-
-def test_a_board_with_no_origin_recorded_still_matches_on_the_number():
-    # Missing origin is missing information, not a contradiction.
-    board = [dict(FYC701, origin=None)]
-    assert match_arrival(OURS, board) is not None
-
-
-def test_a_flight_with_no_identifiers_at_all_is_not_guessed_at():
-    assert match_arrival({"dep_iata": "DAM", "arr_iata": "KWI"}, KWI_BOARD) is None
-
-
-# ── Which airports get asked ──────────────────────────────────────────────────
-
-NOW = 1786957508 * 1000
-
-
-def test_an_airport_is_asked_from_an_hour_before_the_arrival():
-    f = {"arr_iata": "KWI", "sched_arr_ms": NOW + POLL_FROM_MS - 60_000}
-    assert "KWI" in airports_due([f], NOW)
-
-
-def test_an_airport_is_not_asked_long_before_the_flight_is_due():
-    f = {"arr_iata": "DXB", "sched_arr_ms": NOW + 6 * 3600_000}
-    assert airports_due([f], NOW) == {}
-
-
-def test_asking_stops_some_hours_after_the_flight_should_have_arrived():
-    # Otherwise a flight FR24 never publishes keeps its airport in the sweep forever.
-    f = {"arr_iata": "DXB", "sched_arr_ms": NOW - POLL_UNTIL_MS - 60_000}
-    assert airports_due([f], NOW) == {}
-
-
-def test_a_confirmed_arrival_stops_being_asked_about():
-    f = {"arr_iata": "KWI", "sched_arr_ms": NOW, "arrived_at": "2026-08-17T09:05:08+00:00"}
-    assert airports_due([f], NOW) == {}
-
-
-def test_two_flights_into_one_airport_are_one_question():
-    # 29 airports in route_master; asking per-flight rather than per-airport is how a pass turns
-    # into megabytes of the same board.
-    due = airports_due([{"arr_iata": "KWI", "sched_arr_ms": NOW + 600_000},
-                        {"arr_iata": "KWI", "sched_arr_ms": NOW}], NOW)
-    assert list(due) == ["KWI"]
-    assert due["KWI"] == NOW, "anchored on the earlier of the two"
-
-
-def test_the_estimate_is_preferred_over_the_schedule_when_deciding_to_ask():
-    # A flight running three hours late should be asked about late, not on its original slot.
-    f = {"arr_iata": "KWI", "sched_arr_ms": NOW - 5 * 3600_000, "est_arr_ms": NOW}
-    assert "KWI" in airports_due([f], NOW)
+    assert arrival_of(None) is None
 
 
 # ── The request ───────────────────────────────────────────────────────────────
 
-def test_the_window_is_anchored_on_now_not_on_midnight():
+def test_the_query_asks_for_one_flight_not_an_airport():
+    url = flight_url("FYC701")
+    assert "query=FYC701" in url and "fetchBy=flight" in url
+
+
+def test_enough_rows_are_asked_for_to_see_past_the_future_schedule():
     """
-    A hundred rows from local midnight run out long before an evening arrival at Dubai. The page
-    this borrows from uses midnight, which is fine at Deir ez-Zor and useless at a hub.
+    The list arrives newest-first and a daily service has a week of scheduled legs on the front of
+    it. limit=5 saw nothing but schedule; 25 reached six days back for 26 KB.
     """
-    url = widget_url("DXB", NOW)
-    assert f"[timestamp]={int((NOW - LOOKBACK_MS) / 1000)}" in url
-    assert "code=DXB" in url
-
-
-def test_a_quiet_airport_is_asked_for_few_rows_and_a_busy_one_for_many():
-    """
-    Measured 17 Aug: 20 rows is 4.3 h at Kuwait and 0.3 h at Istanbul. One constant cannot serve
-    both — it either wastes most of a megabyte or covers twenty minutes.
-    """
-    note_density("KWI", [{"sched_arrival": 0}, {"sched_arrival": 4 * 3600}] +
-                        [{"sched_arrival": i * 800} for i in range(18)])
-    note_density("IST", [{"sched_arrival": i * 12} for i in range(100)])   # ~0.3 h of board
-    assert limit_for("KWI") < limit_for("IST")
-    assert limit_for("IST") == MAX_LIMIT, "a hub is asked for everything it will give"
-    assert limit_for("KWI") == MIN_LIMIT, "and a quiet stand costs the floor"
-
-
-def test_the_row_count_never_exceeds_what_the_endpoint_allows():
-    # limit=200 is answered with HTTP 400 and no rows at all, which would blind us entirely.
-    note_density("XXX", [{"sched_arrival": i} for i in range(100)])
-    assert limit_for("XXX") <= MAX_LIMIT
-
-
-def test_an_airport_that_has_never_answered_still_gets_a_sane_request():
-    assert MIN_LIMIT <= limit_for("NEVER_SEEN") <= MAX_LIMIT
-
-
-def test_a_board_too_thin_to_measure_does_not_poison_the_density():
-    # Deir ez-Zor returns zero arrival rows: FR24 knows the airport but lists no schedule for it.
-    # One row, or none, is not a span, and dividing by it would be a fabricated number.
-    before = limit_for("DEZ")
-    note_density("DEZ", [])
-    note_density("DEZ", [{"sched_arrival": 12345}])
-    assert limit_for("DEZ") == before
+    import arrivals
+    assert arrivals.DEFAULT_LIMIT >= 15
+    assert f"limit={arrivals.DEFAULT_LIMIT}" in flight_url("FYC701")
 
 
 # ── Shape changes ─────────────────────────────────────────────────────────────
 
 def test_an_unrecognisable_payload_is_empty_not_an_exception():
-    # It is an undocumented endpoint. It will change shape one day, and when it does this should
-    # go quiet rather than take the service down.
-    assert parse_arrivals({}) == []
-    assert parse_arrivals({"result": {"response": None}}) == []
+    # It is an undocumented endpoint. When it changes shape this should go quiet rather than take
+    # the service down.
+    assert parse_legs({}) == []
+    assert parse_legs({"result": {"response": None}}) == []
+    assert parse_legs({"result": {"response": {"data": None}}}) == []
 
 
 def test_a_real_payload_shape_is_flattened():
-    payload = {"result": {"response": {"airport": {"pluginData": {"schedule": {"arrivals": {"data": [
-        {"flight": {"identification": {"number": {"default": "FYC701"}, "callsign": "FYC701"},
-                    "airport": {"origin": {"code": {"iata": "DAM"}}},
-                    "time": {"real": {"arrival": 1786957508},
-                             "scheduled": {"arrival": 1786959000}},
-                    "status": {"text": "Landed 12:05"}}}
-    ]}}}}}}}
-    rows = parse_arrivals(payload)
-    assert len(rows) == 1
-    assert rows[0]["number"] == "FYC701" and rows[0]["origin"] == "DAM"
-    assert rows[0]["real_arrival"] == 1786957508
+    payload = {"result": {"response": {"data": [
+        {"identification": {"number": {"default": "FYC701"}},
+         "airport": {"origin": {"code": {"iata": "DAM"}},
+                     "destination": {"code": {"iata": "KWI"}}},
+         "time": {"scheduled": {"arrival": TODAY_ARR}, "real": {"arrival": 1786957508}},
+         "status": {"text": "Landed 12:05"}}
+    ]}}}
+    legs = parse_legs(payload)
+    assert len(legs) == 1
+    assert legs[0]["dep_iata"] == "DAM" and legs[0]["arr_iata"] == "KWI"
+    assert legs[0]["real_arrival"] == 1786957508
 
 
 if __name__ == "__main__":
