@@ -51,6 +51,10 @@ async def record(client, sb, sb_headers: dict, flights: list[dict], aps: dict) -
             continue
         rows.append({
             "callsign": cs,
+            # Both identifiers. Every flight here has two — THY846 broadcasts, TK846 is on the
+            # ticket — and assuming one has broken things silently before. Storing the pair also
+            # means per-flight-number analysis needs no callsign parsing.
+            "iata_number": f.get("iata_number"),
             "dep_iata": dep,
             "arr_iata": arr,
             "flight_date": f.get("flight_date"),
