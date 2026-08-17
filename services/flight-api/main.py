@@ -146,8 +146,52 @@ LANDED_LATCH_MS = 60_000
 
 # callsign -> when it first touched down, and who we have actually seen flying. The second is
 # what stops a flight first sighted parked on a stand being announced as a landing.
+# The last heading and speed we were told, per callsign. Written only by carry_vector.
+_last_vector: dict[str, dict] = {}
+
 _ground_since: dict[str, float] = {}
 _seen_airborne: set[str] = set()
+
+
+def carry_vector(cs: str, pos: dict | None) -> dict | None:
+    """
+    Keep the last heading and speed when a fix arrives without them.
+
+    A position with no velocity is common — 12 of 48 aircraft in the Syria circle at any moment —
+    and it reaches us through the FR24 table as well as the sweep: FYC782 MCT-DAM was caught at
+    34,000 ft reading "track —, gs — kt". The renderer defaults a missing track to zero, so the
+    marker snaps due north while the aeroplane is flying south-west.
+
+    An aeroplane doing 470 knots on 300 degrees a minute ago is still doing roughly that.
+    Carrying the last value is not a prediction; it is a refusal to assert north.
+
+    Only REPORTED values are remembered. A carried value must never seed the next carry, or one
+    silent fix would pin the heading for the rest of the flight with nothing to correct it.
+    """
+    if not cs or pos is None:
+        return pos
+
+    prev = _last_vector.get(cs) or {}
+    out = dict(pos)
+    carried = []
+    if out.get("track_deg") is None and prev.get("track_deg") is not None:
+        out["track_deg"] = prev["track_deg"]
+        carried.append("track")
+    if out.get("ground_speed_kts") is None and prev.get("ground_speed_kts") is not None:
+        out["ground_speed_kts"] = prev["ground_speed_kts"]
+        carried.append("gs")
+    if carried:
+        out["carried"] = carried            # so a reader can tell remembered from reported
+
+    remember = {}
+    if pos.get("track_deg") is not None:
+        remember["track_deg"] = pos["track_deg"]
+    if pos.get("ground_speed_kts") is not None:
+        remember["ground_speed_kts"] = pos["ground_speed_kts"]
+    if remember:
+        _last_vector[cs] = {**prev, **remember}
+
+    return out
 
 
 def note_ground_state(cs: str, on_ground, now_ms: float) -> float | None:
@@ -966,6 +1010,9 @@ async def build_live() -> dict:
             pos_by_id.get(f.get("fr24_id")),
             circles.get((f.get("callsign") or "").strip().upper()),
         )
+        # Fill in a heading the fix did not carry, before anything reads it.
+        pos = carry_vector((f.get("callsign") or "").strip().upper(), pos)
+
         # Remember the air-to-ground transition before deriving anything from it, so the
         # touchdown instant survives the ten-second document cache and the phase can be latched
         # to it rather than to whatever speed the current fix happens to carry.
@@ -1098,6 +1145,9 @@ async def build_live() -> dict:
     for cs in list(_seen_airborne):
         if cs not in live_now:
             _seen_airborne.discard(cs)
+    for cs in list(_last_vector):
+        if cs not in live_now:
+            _last_vector.pop(cs, None)
 
     return {"as_of": now_iso(), "flights": out}
 

@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 os.environ.setdefault("SUPABASE_URL", "https://example.invalid")
 os.environ.setdefault("SUPABASE_SERVICE_KEY", "test")
 
-from main import derive_phase, note_ground_state, LANDED_LATCH_MS
+from main import derive_phase, note_ground_state, carry_vector, LANDED_LATCH_MS
 import main as _main
 
 
@@ -93,6 +93,73 @@ CONFIRMED = {"real_dep": "2026-08-17T01:27:09Z", "real_arr": "2026-08-17T02:24:1
 
 def ground(gs, **kw):
     return {"on_ground": True, "altitude_ft": 0, "ground_speed_kts": gs, **kw}
+
+
+# ── Keeping the last heading ──────────────────────────────────────────────────
+
+def reset_vectors():
+    _main._last_vector.clear()
+
+
+def test_a_reported_heading_is_passed_through_and_remembered():
+    reset_vectors()
+    p = carry_vector("X", {"lat": 27.29, "lon": 48.99, "track_deg": 300, "ground_speed_kts": 470})
+    assert p["track_deg"] == 300 and p["ground_speed_kts"] == 470
+    assert p.get("carried") is None, "nothing was remembered, it was reported"
+
+
+def test_a_silent_fix_keeps_the_last_heading():
+    """
+    FYC782 MCT-DAM, 17 Aug: a position at 34,000 ft reading "track —, gs — kt". The renderer
+    defaults a missing track to zero, so the marker snapped due north while the aeroplane was
+    flying south-west. It reaches us through the FR24 table, which adsb.py never sees.
+    """
+    reset_vectors()
+    carry_vector("FYC782", {"lat": 27.29, "lon": 48.99, "track_deg": 300, "ground_speed_kts": 470})
+    p = carry_vector("FYC782", {"lat": 27.10, "lon": 48.70})
+    assert p["track_deg"] == 300
+    assert p["ground_speed_kts"] == 470
+    assert set(p["carried"]) == {"track", "gs"}
+
+
+def test_only_the_missing_half_is_carried():
+    reset_vectors()
+    carry_vector("X", {"track_deg": 300, "ground_speed_kts": 470})
+    p = carry_vector("X", {"track_deg": 310})
+    assert p["track_deg"] == 310, "reported wins"
+    assert p["ground_speed_kts"] == 470, "remembered"
+    assert p["carried"] == ["gs"]
+
+
+def test_a_carried_value_does_not_become_the_next_source():
+    # Otherwise one silent fix pins the heading for the rest of the flight, with nothing able to
+    # correct it — a remembered value would keep re-remembering itself.
+    reset_vectors()
+    carry_vector("X", {"track_deg": 300})
+    carry_vector("X", {})                     # carries 300, must not re-store it as reported
+    assert _main._last_vector["X"] == {"track_deg": 300}
+
+
+def test_a_genuine_zero_is_not_treated_as_missing():
+    # An aircraft stopped on a stand reports gs 0 and track 0. Carrying 470 there would be a lie.
+    reset_vectors()
+    carry_vector("X", {"track_deg": 300, "ground_speed_kts": 470})
+    p = carry_vector("X", {"track_deg": 0, "ground_speed_kts": 0})
+    assert p["track_deg"] == 0 and p["ground_speed_kts"] == 0
+    assert p.get("carried") is None
+
+
+def test_with_no_history_the_gap_stays_a_gap():
+    # Silence reported as silence. The renderer must handle it rather than be handed a default.
+    reset_vectors()
+    p = carry_vector("NEW", {"lat": 1, "lon": 2})
+    assert p.get("track_deg") is None and p.get("carried") is None
+
+
+def test_no_callsign_and_no_position_are_left_alone():
+    reset_vectors()
+    assert carry_vector("", {"track_deg": 1}) == {"track_deg": 1}
+    assert carry_vector("X", None) is None
 
 
 # ── The touchdown latch ───────────────────────────────────────────────────────
