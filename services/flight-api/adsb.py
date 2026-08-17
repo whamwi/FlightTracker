@@ -32,6 +32,10 @@ import httpx
 from geo import is_plausible_fix, drop_sentinel_fixes
 
 # Syria first — on an aircraft two circles can both see, the home circle's fix wins.
+#
+# Each circle costs about 1.1 s of the sweep, because adsb.fi allows roughly one request a
+# second. Seven circles is ~8 s of sweeping on a ~12 s cycle, which is the ceiling before the
+# document starts going stale between passes.
 CIRCLES: list[list[str]] = [
     [  # Syria
         "https://opendata.adsb.fi/api/v3/lat/33.41/lon/36.52/dist/250",
@@ -56,6 +60,16 @@ CIRCLES: list[list[str]] = [
     [  # Europe
         "https://opendata.adsb.fi/api/v3/lat/52.34/lon/9.13/dist/250",
         "https://api.adsb.lol/v2/lat/52.34/lon/9.13/dist/250",
+    ],
+    [  # Moscow
+        #
+        # Added 17 Aug after a Syrian trial flight to Moscow that neither surface could see. It
+        # was outside every circle — Moscow is about 1,800 km from the Hannover one — and an
+        # unscheduled flight is not in FR24's filed schedule either, so we were blind twice over.
+        # Centred between Sheremetyevo, Vnukovo, Domodedovo and Zhukovsky; 250 nm covers all four
+        # and a long way down the approach from the south.
+        "https://opendata.adsb.fi/api/v3/lat/55.75/lon/37.60/dist/250",
+        "https://api.adsb.lol/v2/lat/55.75/lon/37.60/dist/250",
     ],
 ]
 
