@@ -123,38 +123,90 @@ async def sweep(client: httpx.AsyncClient) -> dict[str, dict]:
 
     merged = drop_sentinel_fixes([a for a in merged if is_plausible_fix(a)], key="hex")
 
-    # `seen` is seconds since the receiver last heard it, which is the only age the feed gives.
     now = datetime.now(timezone.utc)
     out: dict[str, dict] = {}
     for a in merged:
         cs = (a.get("flight") or "").strip().upper()
         if not cs:
             continue                              # identity comes from the board, never the fix
-        age = a.get("seen")
-        fix_at = now.timestamp() - (age if isinstance(age, (int, float)) else 0)
+        out[cs] = to_position(a, _positions.get(cs), now)
 
-        # The aggregators encode "on the ground" as the STRING "ground" in alt_baro rather than
-        # as a flag. Passing that straight through would put a string in altitude_ft and, worse,
-        # leave on_ground unknown for precisely the aircraft that are telling us plainly — which
-        # is the field derive_phase now leans on to call a departure before FR24 does.
-        raw_alt = a.get("alt_baro")
-        grounded = raw_alt == "ground"
-        alt = 0 if grounded else (raw_alt if isinstance(raw_alt, (int, float)) else None)
-
-        out[cs] = {
-            "lat": a.get("lat"), "lon": a.get("lon"),
-            "altitude_ft": alt,
-            "ground_speed_kts": a.get("gs"),
-            "track_deg": a.get("track"),
-            "vertical_speed_fpm": a.get("baro_rate"),
-            # True when it says so, False when it gives a real altitude, None when we cannot tell.
-            # An explicit False is evidence; silence is not.
-            "on_ground": True if grounded else (False if isinstance(alt, (int, float)) else None),
-            "fix_at": datetime.fromtimestamp(fix_at, timezone.utc).isoformat(),
-            "source": "adsb",
-        }
     _state.update(circles_ok=circles_ok, aircraft=len(out), last_sweep_at=now.isoformat())
     return out
+
+
+def to_position(a: dict, prev: dict | None, now: datetime) -> dict:
+    """
+    One aggregator record in the shape the rest of the service reads. Pure, so it can be tested
+    without a network.
+
+    `prev` is the last position we held for this callsign, used only to fill in fields the new
+    record omits — never to override anything it does tell us.
+    """
+    # seen_pos, not seen. They are different ages and using the wrong one is a real bug: `seen`
+    # is how long since the last MESSAGE, `seen_pos` how long since the last POSITION. An
+    # aircraft still transmitting whose coordinate has not moved gets stamped as current while
+    # its position is up to half a minute old — measured across the Syria circle, median
+    # difference 0.2s but ABY265 at 33.2s.
+    #
+    # That is what made a marker sit still and then leap. ABY433 moved 0.0 km in 52 seconds and
+    # then 22.8 km in 26; FYC486 froze mid-turn and covered 54.1 km in one step. The gap was
+    # always real — stamping a stale coordinate as fresh is what hid it and then delivered it
+    # all at once.
+    age = a.get("seen_pos")
+    if not isinstance(age, (int, float)):
+        age = a.get("seen")
+    if not isinstance(age, (int, float)):
+        age = 0
+
+    # The aggregators encode "on the ground" as the STRING "ground" in alt_baro rather than as a
+    # flag. Passed straight through it would put a string in altitude_ft and, worse, leave
+    # on_ground unknown for exactly the aircraft telling us plainly — which is the field
+    # derive_phase leans on to call a departure before FR24 does.
+    raw_alt = a.get("alt_baro")
+    numeric_alt = raw_alt if isinstance(raw_alt, (int, float)) and not isinstance(raw_alt, bool) else None
+    # Zero feet is the ground, whichever way the feed spells it.
+    #
+    # The aggregators usually send the STRING "ground", but not always — and a numeric 0 was
+    # being mapped to on_ground False, which says the opposite of what the record means. No
+    # aircraft in this network reports 0 ft pressure altitude while flying; at or below zero it
+    # is on a runway or a stand.
+    #
+    # `<= 0` rather than `== 0` because pressure altitude is referenced to 1013 hPa and reads
+    # slightly negative at a sea-level airport in high pressure. Those are parked aeroplanes too.
+    grounded = raw_alt == "ground" or (numeric_alt is not None and numeric_alt <= 0)
+    alt = 0 if raw_alt == "ground" else numeric_alt
+
+    # An aeroplane doing 490 knots on 091 nineteen seconds ago is still doing roughly that. 12
+    # of 48 aircraft in the Syria circle carry a position with no gs or no track at any moment,
+    # and drawing that as stationary pointing north asserts something we have no reason to
+    # believe: FYC486 was screenshotted mid-turn reading "track –, gs – kt" with the nose due
+    # north, because the renderer defaults a missing track to zero.
+    prev = prev or {}
+    gs = a.get("gs")
+    track = a.get("track")
+    carried = []
+    if gs is None:
+        gs = prev.get("ground_speed_kts")
+        carried.append("gs")
+    if track is None:
+        track = prev.get("track_deg")
+        carried.append("track")
+
+    return {
+        "lat": a.get("lat"), "lon": a.get("lon"),
+        "altitude_ft": alt,
+        "ground_speed_kts": gs,
+        "track_deg": track,
+        "vertical_speed_fpm": a.get("baro_rate"),
+        # True when it says so, False when it gives a real altitude, None when we cannot tell.
+        # An explicit False is evidence; silence is not.
+        "on_ground": True if grounded else (False if isinstance(alt, (int, float)) else None),
+        "fix_at": datetime.fromtimestamp(now.timestamp() - age, timezone.utc).isoformat(),
+        "source": "adsb",
+        # So a reader can tell a reported value from a remembered one.
+        "carried": carried or None,
+    }
 
 
 def positions() -> dict[str, dict]:
