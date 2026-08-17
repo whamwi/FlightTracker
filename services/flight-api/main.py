@@ -1324,11 +1324,32 @@ async def build_live() -> dict:
                     path,
                     datetime.now(timezone.utc).timestamp() * 1000,
                 )
+        # The scheduled frame, carried here as well as on the board.
+        #
+        # Not duplication for its own sake. The app takes these off /api/airspace today, and the
+        # whole point of retiring that fetch is that ONE document answers everything about a live
+        # flight — a client joining a position from here to a scheduled time from the board, per
+        # marker, per poll, is the reconciliation we are removing, not a smaller version of it.
+        #
+        # dep_delay_min in particular exists in neither document today: /api/airspace is the only
+        # place it has ever been published, so retiring that fetch would silently delete the
+        # departure delay from the app. Derived here from what the row already holds rather than
+        # in each client, for the same reason arr_delay_min should be (#6).
+        sched_dep_i, sched_arr_i = iso(f.get("sched_dep")), iso(f.get("sched_arr"))
+        real_dep_i = iso(f.get("real_dep"))
+        dep_delay = (round((real_dep_i - sched_dep_i).total_seconds() / 60)
+                     if real_dep_i and sched_dep_i else None)
+
         out.append({
             "iata_number": f["iata_number"],
             "callsign": f.get("callsign"),
             "fr24_id": f.get("fr24_id"),
             "flight_date": f["flight_date"],
+            "airline_iata": f.get("airline_iata"),
+            "dep_time_utc": sched_dep_i.astimezone(timezone.utc).strftime("%H:%M") if sched_dep_i else None,
+            "arr_time_utc": sched_arr_i.astimezone(timezone.utc).strftime("%H:%M") if sched_arr_i else None,
+            "revised_arr_utc": zulu(revision(f.get("est_arr"), f.get("sched_arr"))),
+            "dep_delay_min": dep_delay,
             "phase": derive_phase(f, pos, landed_at, now_ms),
             "progress": progress,
             "progress_basis": p_basis,
