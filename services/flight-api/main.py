@@ -949,6 +949,11 @@ async def build_live() -> dict:
 
         paths = await route_paths(client)
 
+    # One instant for the whole document. Two flights resolved microseconds apart would
+    # otherwise be advanced to different clocks, and the touchdown latch would compare against
+    # a moving target.
+    now_ms = datetime.now(timezone.utc).timestamp() * 1000
+
     out = []
     for f in flights:
         # Whichever source saw this aircraft last — see merge_position.
