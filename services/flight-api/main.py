@@ -31,6 +31,7 @@ fetched at three different times. No surface should calculate anything a reader 
 
 from __future__ import annotations
 
+import asyncio
 import math
 import os
 import time
@@ -38,6 +39,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote
 
+import adsb
 from geo import (
     is_plausible_fix,
     drop_sentinel_fixes,
@@ -84,6 +86,18 @@ BOARD_TTL = 20
 LIVE_TTL = 10
 
 app = FastAPI(title="FlySyria flight API v2")
+
+
+@app.on_event("startup")
+async def _start_sweeper() -> None:
+    """
+    One background sweep loop for the life of the process.
+
+    Deliberately fire-and-forget: if it could not start, every request still falls back to
+    aircraft_last_seen and the service is merely as slow as it was yesterday, which is a far
+    better failure than refusing to boot.
+    """
+    asyncio.create_task(adsb.run_sweeper())
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"],
 )
@@ -668,7 +682,38 @@ async def circle_positions(client: httpx.AsyncClient) -> dict[str, dict]:
         cs = (r.get("callsign") or "").strip().upper()
         if cs and cs not in out and r.get("lat") is not None:
             out[cs] = r
+
+    # Our own sweep wins wherever it has an answer.
+    #
+    # Same aggregators, seconds old instead of up to a minute: this table is written by a cron
+    # that runs once a minute, so reading it made our freshest source arrive by our slowest
+    # path. Measured 17 Aug, five of six flights were 58 seconds behind the website, which
+    # sweeps the circles itself.
+    #
+    # The table stays underneath rather than being replaced. It survives a restart, it covers
+    # the first ten seconds before the first sweep completes, and if the sweeper is failing it
+    # is the difference between a slightly stale map and no map.
+    live = adsb.positions()
+    for cs, fix in live.items():
+        out[cs] = _from_sweep(fix)
     return out
+
+
+def _from_sweep(fix: dict) -> dict:
+    """
+    A swept fix in the shape aircraft_last_seen rows arrive in, so merge_position and everything
+    downstream cannot tell which door a position came through.
+    """
+    return {
+        "callsign": None,
+        "lat": fix["lat"], "lon": fix["lon"],
+        "alt_baro": fix.get("altitude_ft"),
+        "gs": fix.get("ground_speed_kts"),
+        "track": fix.get("track_deg"),
+        "on_ground": fix.get("on_ground"),
+        "seen_at": fix.get("fix_at"),
+        "_swept": True,
+    }
 
 
 def merge_position(fr24: dict | None, circle: dict | None) -> dict | None:
@@ -702,13 +747,17 @@ def merge_position(fr24: dict | None, circle: dict | None) -> dict | None:
 
 
 def _from_circle(c: dict) -> dict:
+    # on_ground is carried through rather than hardcoded to None. The table has no such column,
+    # so a row read from it still yields None — but a swept fix knows the answer, and that field
+    # is what lets derive_phase call a departure the moment the aircraft rotates instead of
+    # waiting for 250 ft or for FR24.
     return {
         "lat": c.get("lat"), "lon": c.get("lon"),
         "altitude_ft": c.get("alt_baro"),
         "ground_speed_kts": c.get("gs"),
         "track_deg": c.get("track"),
         "vertical_speed_fpm": None,
-        "on_ground": None,
+        "on_ground": c.get("on_ground"),
         "fix_at": c.get("seen_at"),
         "source": "adsb",
     }
