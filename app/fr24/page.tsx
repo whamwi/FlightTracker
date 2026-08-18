@@ -78,12 +78,12 @@ function parseFlights(data: any, dir: 'arrivals' | 'departures') {
  * each arrival and fetches that too, which is where the other twenty in fr24_daily_cache come
  * from. These are the ones worth being able to pull by hand.
  *
- * BEY and KWI are here because the outstations are the half of every flight the Syrian boards
+ * BEY and AMM are here because the outstations are the half of every flight the Syrian boards
  * cannot see, and a manual refresh is the only way to force one now that the server cannot
  * reach the widget: Cloudflare answers a Vercel function with a challenge page regardless of
  * headers, so this must run in a browser.
  */
-const AIRPORTS = ['DAM', 'ALP', 'DEZ', 'BEY', 'KWI']
+const AIRPORTS = ['DAM', 'ALP', 'DEZ', 'BEY', 'AMM']
 const DIRS = ['arrivals', 'departures'] as const
 
 export default function Fr24DumpPage() {
