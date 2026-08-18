@@ -96,11 +96,28 @@ export async function GET(req: Request) {
     `${SB_URL}/rest/v1/flight` +
     `?flight_date=eq.${targetDate}` +
     `&or=(dep_iata.in.(${syrianList}),arr_iata.in.(${syrianList}))` +
-    `&select=iata_number,callsign,dep_iata,arr_iata,sched_dep,sched_arr,duration_min`,
+    // No duration_min: `flight` has no duration column at all. Asking for one returned
+    // HTTP 400 "column flight.duration_min does not exist", flightRes.ok was false, and this
+    // route returned 502 before reaching the comparison — silently, on every scheduled run
+    // since 15 Aug. The field came across unchanged from fr24_daily_cache, which did have it.
+    // It is computed below from the two timestamps instead, which is what it always meant.
+    `&select=iata_number,callsign,dep_iata,arr_iata,sched_dep,sched_arr`,
     { headers: HEADERS }
   )
   if (!flightRes.ok) {
-    return NextResponse.json({ ok: false, error: `flight fetch failed: ${flightRes.status}` }, { status: 502 })
+    /*
+     * Loud, because quiet is how this went unnoticed for three days.
+     *
+     * A 502 here is indistinguishable from a night with nothing to report: the admin page simply
+     * shows no new rows either way. The body is included so the reason is in the log rather than
+     * only the status.
+     */
+    const body = await flightRes.text().catch(() => '')
+    console.error('[route-reconcile] flight fetch failed:', flightRes.status, body)
+    return NextResponse.json(
+      { ok: false, error: `flight fetch failed: ${flightRes.status}`, detail: body.slice(0, 300) },
+      { status: 502 },
+    )
   }
   const flightRows: RouteRow[] = await flightRes.json()
 
@@ -137,7 +154,16 @@ export async function GET(req: Request) {
 
     const cacheDep  = unixToUtcHHMM(sched_dep)
     const cacheArr  = sched_arr ? unixToUtcHHMM(sched_arr) : null
-    const cacheDur  = f.duration_min ?? null
+    /*
+     * Block time, computed rather than read.
+     *
+     * `flight` carries full timestamps, so an overnight leg's arrival is genuinely on the next
+     * day and the subtraction needs no wraparound — unlike the time-only columns in route_master,
+     * where 23:50 to 00:25 has to be handled explicitly.
+     */
+    const cacheDur  = Number.isFinite(arrMs)
+      ? Math.round((arrMs - depMs) / 60000)
+      : null
     const dow       = unixToSyriaDow(sched_dep)
 
     const candidates = (num ? rmByKey.get(`${num}|${dep}|${arr}|${dow}`) : undefined)
