@@ -16,3 +16,8 @@ out/
 # misc
 .DS_Store
 *.pem
+
+# Python bytecode. Two .pyc files were committed by an over-broad `git add` in the
+# flight-api work; they churn on every run and carry no information the source lacks.
+__pycache__/
+*.py[cod]

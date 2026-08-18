@@ -1,0 +1,535 @@
+"""
+Where an aeroplane is, decided once, on the server.
+
+Every position defect this project has had was two implementations of this question disagreeing:
+the site drawing FYC361 where its fix said and the phone drawing it 190 km away on the corridor;
+one PathTracker closing a 298 km error while the other grew it to 440 km; a countdown damped by
+the server and damped again by the client, so the site held 12:07 while the phone read 12:07,
+12:09, 12:07. The values were rarely in dispute. The number of opinions was.
+
+So everything here is a PURE FUNCTION. No accumulated progress scalar, no rate, no chasing flag,
+no correction factor. Those exist in the client trackers only because they carry state between
+polls, and carried state is what drifts — both from reality and from the other surface's copy of
+it. A function of (schedule, corridor, now) cannot drift: two callers asking at the same instant
+get the same answer because there is nothing else to get. It is also reproducible, which the
+client trackers never were: a marker in the wrong place can be replayed from its inputs.
+
+No I/O, no clock reads, no globals. `now` is always a parameter.
+"""
+
+from __future__ import annotations
+
+import math
+
+# ── Fix plausibility ──────────────────────────────────────────────────────────
+
+# Above this an aircraft is unambiguously airborne rather than parked or taxiing.
+#
+# Bounded from below by field elevation: a parked aircraft reports the airport's altitude at zero
+# ground speed and must not be rejected for it. AMM is 2,395 ft, RUH 2,082, DAM 2,020.
+#
+# KNOWN LIMIT, measured 16 Aug. This does not catch a bad fix that lands inside the plausible
+# ground band. KNE591 JED-DAM was served at 31.72/36.00 — Queen Alia — reporting 3,550 ft at
+# 10 knots, two minutes before it landed at Damascus, while our own receiver had had it at
+# 33.43/37.57, 17,000 ft, 384 kt eleven minutes earlier: 95 km east of Damascus, descending.
+#
+# Lowering the ceiling to 5,000 does not help — 3,550 is under that too — and going below ~3,000
+# starts clipping aircraft parked at Amman once pressure varies, since 1 hPa is about 27 ft and a
+# 20 hPa swing is 540. The fix is at a real airport at a believable ground speed and altitude:
+# no rule over one fix in isolation can tell it from an aeroplane genuinely on a stand. What makes
+# it wrong is that THIS flight had no business at Amman, which is route knowledge, not physics.
+# Tracked separately rather than papered over with a threshold that would delete real traffic.
+AIRBORNE_FT = 10_000
+# No aircraft holds 10,000 ft below this. Stalling speeds are far above it.
+MIN_AIRBORNE_KT = 50
+# About a metre. Far finer than two aircraft ever genuinely share.
+COORD_DP = 5
+
+
+def _num(v) -> float | None:
+    """A finite number, or nothing. bool is excluded: True would otherwise pass as 1.0."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    f = float(v)
+    return f if math.isfinite(f) else None
+
+
+def is_plausible_fix(fix: dict) -> bool:
+    """
+    Could an aeroplane actually be here, doing this?
+
+    On 15 and 16 Aug the aggregator served 47 distinct aircraft — Qatar, Turkish, Saudia,
+    Jazeera, flyadeal, MEA, Condor, flydubai — every one of them stamped 31.71711, 35.999341
+    with gs 0.7 and track 0, while their altitudes stayed real and distinct: 39,000, 37,025,
+    33,000 ft. The raw records carried identical `dst` and `dir` as well, so upstream had
+    computed both from a constant. Only position and velocity were replaced; ias, mach and
+    true_heading were genuine throughout.
+
+    Those coordinates are Queen Alia airport, Amman. The website survived it because its map
+    draws the corridor and treats a fix as a nudge; the app draws the fix and put a dozen
+    airliners in a car park in Jordan.
+
+    A cruising aircraft reporting 0.7 knots is not a slow aircraft. It is a null wearing a
+    number. Nothing here hardcodes Amman — the next sentinel will be somewhere else.
+    """
+    lat = _num(fix.get("lat"))
+    lon = _num(fix.get("lon"))
+    if lat is None or lon is None:
+        return False
+    if abs(lat) > 90 or abs(lon) > 180:
+        return False
+    # 0,0 is the Gulf of Guinea, and far more often an uninitialised pair than a position.
+    if lat == 0 and lon == 0:
+        return False
+
+    alt = _num(fix.get("alt_baro"))
+    if alt is None:
+        alt = _num(fix.get("altitude_ft"))
+    gs = _num(fix.get("gs"))
+    if gs is None:
+        gs = _num(fix.get("ground_speed_kts"))
+    if alt is not None and gs is not None and alt > AIRBORNE_FT and gs < MIN_AIRBORNE_KT:
+        return False
+
+    return True
+
+
+def drop_sentinel_fixes(fixes: list[dict], key: str = "hex") -> list[dict]:
+    """
+    Discard any coordinate that more than one aircraft claims at the same moment.
+
+    The plausibility rule above catches a sentinel that also clobbers speed. It does not catch
+    one that leaves speed intact — PER002 came back from the same corrupt sweep at gs 456,
+    entirely reasonable on its own, and still sitting on Queen Alia with nineteen others.
+
+    Two aircraft do not occupy the same square metre. When a coordinate is claimed by two
+    distinct identities in one sweep it is a placeholder, and every row carrying it goes —
+    including the one that might have been real, because there is no way to tell which. Self
+    tuning, and free when the feed is healthy.
+
+    `key` is whatever identifies an airframe in the rows being filtered: hex for the aggregator
+    feed, callsign for aircraft_last_seen, which has no hex.
+    """
+    claimants: dict[tuple, set] = {}
+    for i, f in enumerate(fixes):
+        lat, lon = _num(f.get("lat")), _num(f.get("lon"))
+        if lat is None or lon is None:
+            continue
+        k = (round(lat, COORD_DP), round(lon, COORD_DP))
+        # A row with no identity counts as its own claimant, so a feed that omits the key
+        # cannot hide a sentinel behind one empty identity.
+        claimants.setdefault(k, set()).add(f.get(key) or f"anon:{i}")
+
+    out = []
+    for f in fixes:
+        lat, lon = _num(f.get("lat")), _num(f.get("lon"))
+        if lat is None or lon is None:
+            out.append(f)                      # nothing to judge; is_plausible_fix handles it
+            continue
+        if len(claimants[(round(lat, COORD_DP), round(lon, COORD_DP))]) < 2:
+            out.append(f)
+    return out
+
+
+# ── Corridor geometry ─────────────────────────────────────────────────────────
+
+def _slerp(a: tuple[float, float], b: tuple[float, float], t: float) -> tuple[float, float]:
+    """
+    Great-circle interpolation between two points.
+
+    Spherical rather than linear because linear interpolation of latitude and longitude bends
+    away from the route: over DAM–DXB it is tens of kilometres out in the middle, which on a map
+    reads as an aircraft flying beside its own path.
+    """
+    lat1, lon1 = math.radians(a[0]), math.radians(a[1])
+    lat2, lon2 = math.radians(b[0]), math.radians(b[1])
+
+    d = 2 * math.asin(math.sqrt(
+        math.sin((lat2 - lat1) / 2) ** 2
+        + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
+    ))
+    if d < 1e-12:
+        return a
+
+    A = math.sin((1 - t) * d) / math.sin(d)
+    B = math.sin(t * d) / math.sin(d)
+    x = A * math.cos(lat1) * math.cos(lon1) + B * math.cos(lat2) * math.cos(lon2)
+    y = A * math.cos(lat1) * math.sin(lon1) + B * math.cos(lat2) * math.sin(lon2)
+    z = A * math.sin(lat1) + B * math.sin(lat2)
+    return (math.degrees(math.atan2(z, math.hypot(x, y))),
+            math.degrees(math.atan2(y, x)))
+
+
+def interpolate_path(waypoints: list[dict], f: float) -> tuple[float, float] | None:
+    """
+    The point at fraction `f` along a corridor.
+
+    Waypoints carry their own fraction `f` — the share of the route flown by the time they are
+    reached — so an evenly spaced list and a bunched one both behave. Ported from the
+    TypeScript both clients use today, deliberately unchanged in behaviour so a position computed
+    here matches one computed there while both exist.
+    """
+    pts = [w for w in waypoints if _num(w.get("lat")) is not None and _num(w.get("lon")) is not None]
+    if not pts:
+        return None
+    if len(pts) == 1:
+        return (pts[0]["lat"], pts[0]["lon"])
+
+    fs = [_num(w.get("f")) for w in pts]
+    if any(v is None for v in fs):
+        # No fractions stored: fall back to even spacing rather than refusing to draw.
+        fs = [i / (len(pts) - 1) for i in range(len(pts))]
+
+    if f <= fs[0]:
+        return (pts[0]["lat"], pts[0]["lon"])
+    if f >= fs[-1]:
+        return (pts[-1]["lat"], pts[-1]["lon"])
+
+    lo, hi = 0, len(pts) - 1
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if fs[mid] <= f:
+            lo = mid
+        else:
+            hi = mid
+
+    span = fs[hi] - fs[lo]
+    if span < 1e-9:
+        return (pts[lo]["lat"], pts[lo]["lon"])
+    return _slerp((pts[lo]["lat"], pts[lo]["lon"]),
+                  (pts[hi]["lat"], pts[hi]["lon"]),
+                  (f - fs[lo]) / span)
+
+
+def bearing_from_path(waypoints: list[dict], f: float) -> float | None:
+    """
+    Which way the corridor points at fraction `f`.
+
+    Sampled either side of the point rather than taken from the enclosing segment, so the nose
+    turns smoothly through a waypoint instead of snapping. The marker's heading and its motion
+    come from this one function; when they came from two, they drifted 57 degrees apart on a
+    Damascus approach and the aircraft appeared to fly sideways.
+    """
+    dt = 0.005
+    a = interpolate_path(waypoints, max(0.0, f - dt))
+    b = interpolate_path(waypoints, min(1.0, f + dt))
+    if a is None or b is None or a == b:
+        return None
+    lat1, lat2 = math.radians(a[0]), math.radians(b[0])
+    dlon = math.radians(b[1] - a[1])
+    y = math.sin(dlon) * math.cos(lat2)
+    x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(dlon)
+    return (math.degrees(math.atan2(y, x)) + 360) % 360
+
+
+# How much of the route to blend over where a corridor ends.
+#
+# The corridor and the great circle do not meet at the seam — the corridor is wherever aircraft
+# actually fly, which is the whole point, and that is up to OUTLIER_KM away. Switching between
+# them at a single fraction would teleport the marker sideways by that much. 5% of the route is
+# about twelve minutes at cruise on a Gulf sector: long enough that the correction is a drift
+# rather than a jump.
+SEAM_BLEND_F = 0.05
+
+
+def covered_span(corridor: list[dict] | None) -> tuple[float, float] | None:
+    """The fractions a corridor actually describes, or None if it describes nothing."""
+    if not corridor:
+        return None
+    fs = [_num(w.get("f")) for w in corridor
+          if _num(w.get("lat")) is not None and _num(w.get("lon")) is not None]
+    fs = [v for v in fs if v is not None]
+    if len(fs) < 2:
+        return None
+    return (min(fs), max(fs))
+
+
+def position_on_route(corridor: list[dict] | None, great_circle: list[dict],
+                      f: float) -> tuple[float, float] | None:
+    """
+    Where the aircraft is at progress `f`: the corridor where it covers this part of the route,
+    the great circle where it does not.
+
+    A LEARNED CORRIDOR IS ROUTINELY PARTIAL. It only exists where two or more flights shared a
+    bin, so it grows from wherever coverage is best and reaches the ends last. Feeding such a
+    path straight to interpolate_path is actively harmful, because that function clamps: every
+    fraction beyond the corridor's last waypoint returns that waypoint, so an aircraft two thirds
+    of the way to Dubai is drawn pinned at the point where our samples ran out.
+
+    Measured 17 Aug, holding FDB1848 out of DAM-DXB and projecting it from the other two legs,
+    whose consensus spanned f 0.013 to 0.588:
+
+        45 fixes inside that span    median error   18.5 km
+        65 fixes beyond it           51 km at the seam, hundreds by the end
+        overall                     156.8 km, against 59 km for the plain great circle
+
+    So a half-learned corridor used naively is WORSE than no corridor at all — and corridors are
+    always half-learned early in a route's life, which is exactly when they are relied on.
+    """
+    gc_pos = interpolate_path(great_circle, f)
+    span = covered_span(corridor)
+    if span is None:
+        return gc_pos
+
+    lo, hi = span
+    if lo <= f <= hi:
+        return interpolate_path(corridor, f)
+
+    # Outside it. Walk off the corridor's edge towards the great circle rather than stepping.
+    if f < lo:
+        distance, edge = lo - f, interpolate_path(corridor, lo)
+    else:
+        distance, edge = f - hi, interpolate_path(corridor, hi)
+    if edge is None or gc_pos is None or distance >= SEAM_BLEND_F:
+        return gc_pos
+
+    w = distance / SEAM_BLEND_F
+    return (edge[0] + (gc_pos[0] - edge[0]) * w,
+            edge[1] + (gc_pos[1] - edge[1]) * w)
+
+
+def great_circle_path(dep: tuple[float, float], arr: tuple[float, float]) -> list[dict]:
+    """
+    A two-point corridor, for an OD pair no path has ever been recorded for.
+
+    The same shape as a real corridor on purpose: interpolate_path treats it identically, so
+    there is no second branch anywhere downstream and no second way to ask the question.
+    """
+    return [{"lat": dep[0], "lon": dep[1], "f": 0.0},
+            {"lat": arr[0], "lon": arr[1], "f": 1.0}]
+
+
+def project_position(dep_ms: float, arr_ms: float, path: list[dict], now_ms: float) -> dict | None:
+    """
+    Where a flight should be, from its schedule and its corridor. The whole of the projection.
+
+    Three lines of arithmetic: how far through the flight are we, where is that on the path,
+    which way does the path point there.
+
+    `arr_ms` is the stabilised arrival the countdown already uses, so the aeroplane and the
+    clock it is racing cannot disagree — a delay absorbed into the ETA slows the marker down
+    here rather than teleporting it on arrival.
+
+    Clamped at both ends. Before departure it waits at the gate rather than reversing down the
+    corridor; after arrival it stays at the destination rather than continuing past it.
+
+    Returns None when the inputs cannot support an answer, rather than guessing. A caller that
+    gets None draws nothing, which is honest; a caller that gets a fabricated point cannot tell.
+    """
+    if not path:
+        return None
+    for v in (dep_ms, arr_ms, now_ms):
+        if v is None or not math.isfinite(v):
+            return None
+    if arr_ms <= dep_ms:
+        return None
+
+    f = (now_ms - dep_ms) / (arr_ms - dep_ms)
+    f = min(1.0, max(0.0, f))
+
+    point = interpolate_path(path, f)
+    if point is None:
+        return None
+    return {"lat": point[0], "lon": point[1],
+            "track_deg": bearing_from_path(path, f),
+            "fraction": f}
+
+
+def within_projection_window(arr_ms: float | None, now_ms: float, linger_ms: float) -> bool:
+    """
+    Is it still honest to draw this aeroplane?
+
+    A projection has no way to know a flight has landed — it only knows the schedule ran out. So
+    a flight past its arrival with nothing recorded pins at the destination and stays there,
+    which is how the website ended up with arrived markers that never expire on its schedule
+    overlay. The same rule in a new place would be the same defect.
+
+    After the window closes the flight simply has no position, and a client that is given no
+    position draws nothing. That is the honest answer: we do not know where it is, and it is
+    almost certainly on the ground.
+
+    An unknown arrival keeps the flight, rather than dropping it — the schedule is the thing in
+    doubt there, not the aeroplane.
+    """
+    if arr_ms is None or not math.isfinite(arr_ms):
+        return True
+    return now_ms <= arr_ms + linger_ms
+
+
+# ── Does this fix make sense for THIS flight? ────────────────────────────────
+
+# Below this an aircraft is not flying. Well under any airliner's approach speed.
+MIN_MOVING_KT = 50
+# Within this of an airport, being stationary is ordinary: a stand, a taxiway, a runway.
+NEAR_AIRPORT_KM = 30
+
+
+def haversine_km(a: tuple[float, float], b: tuple[float, float]) -> float:
+    R = 6371.0
+    p1, p2 = math.radians(a[0]), math.radians(b[0])
+    dphi = p2 - p1
+    dlam = math.radians(b[1] - a[1])
+    h = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlam / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(h))
+
+
+def fix_contradicts_flight(
+    fix: dict,
+    dep: tuple[float, float] | None,
+    arr: tuple[float, float] | None,
+    arrived: bool,
+) -> bool:
+    """
+    A fix can be perfectly possible and still not be about this aeroplane.
+
+    KNE591 JED–DAM, 16 Aug: FR24 served 31.72/36.00 — Queen Alia, Amman — at 3,550 ft and 10
+    knots, two minutes before it landed at Damascus. Our own receiver had had it eleven minutes
+    earlier at 33.43/37.57, 17,000 ft, 384 kt, descending 95 km east of Damascus. The bad row won
+    the merge for being newer, and every rule about a fix IN ISOLATION passed it: the coordinate
+    is a real airport, the altitude is a believable field elevation, the speed is a believable
+    taxi. The website never drew it, because it draws the corridor and treats a fix as a nudge.
+    The test map drew it, sat in Jordan, and then jumped to Damascus on arrival.
+
+    Distance from the projection cannot be the test. Measured across live traffic the same day,
+    fix and projection routinely disagree by 15–80 km, median 37, and the LARGEST gap — FDB1113
+    DXB–DAM at 184.9 km — was a case where the projection was wrong and the fix was right: its
+    ETA had expired, so the projection had pinned at Damascus while the aircraft was genuinely
+    185 km out. KNE591's bad fix was ~195 km from its projection. A distance threshold separating
+    those two does not exist, and one that tried would redraw a real aeroplane at an airport it
+    had not reached — which is the FYC361 defect, in the other direction.
+
+    What separates them is motion. A flight still en route is somewhere between two airports; if
+    it is reported STATIONARY and it is at neither end of its own route, the fix is not about
+    this flight. FDB1113 was doing cruise speed and is untouched by this.
+
+    Deliberately narrow. It says nothing about a moving aircraft, however far from its corridor,
+    because aeroplanes really do fly off the stored airway — DAM–SHJ is filed via Saudi Arabia
+    and often flown via Iraq. It only refuses to believe an aeroplane is parked in a place it has
+    no business being parked.
+    """
+    if arrived:
+        return False                       # stationary at the end of the trip is the normal case
+
+    gs = _num(fix.get("gs"))
+    if gs is None:
+        gs = _num(fix.get("ground_speed_kts"))
+    if gs is None or gs >= MIN_MOVING_KT:
+        return False                       # moving, or no speed to judge by
+
+    lat, lon = _num(fix.get("lat")), _num(fix.get("lon"))
+    if lat is None or lon is None:
+        return False                       # not this function's job
+
+    here = (lat, lon)
+    for airport in (dep, arr):
+        if airport and haversine_km(here, airport) <= NEAR_AIRPORT_KM:
+            return False                   # on the ground at one of its own airports
+
+    return True
+
+
+# ── Learning a corridor from what was actually flown ─────────────────────────
+
+def gc_fraction(dep: tuple[float, float], arr: tuple[float, float],
+                lat: float, lon: float) -> float:
+    """
+    How far along the great circle from dep to arr this point is, 0 to 1.
+
+    Deliberately owes nothing to any stored corridor. `route_path_samples.s` is progress measured
+    AGAINST the stored path, so on DAM-JED — where the corridor matches Syrian Air and flynas
+    flies ~170 km away from it — `s` is wrong for exactly the flights whose paths we most need to
+    learn. Binning by that would aggregate the right coordinates into the wrong buckets.
+
+    Projected onto the dep->arr axis by along-track distance, so an aircraft 200 km off to one
+    side still reports the progress its position implies rather than being pushed toward an end.
+    """
+    total = haversine_km(dep, arr)
+    if total < 1e-6:
+        return 0.0
+    # Along-track distance via the spherical law of cosines on the triangle dep-arr-point.
+    d_dep = haversine_km(dep, (lat, lon))
+    d_arr = haversine_km((lat, lon), arr)
+    # Positive when the point lies between the two, and clamped when it does not — an aircraft
+    # still on the ground behind its origin is at 0, not at a negative fraction.
+    along = (d_dep ** 2 - d_arr ** 2 + total ** 2) / (2 * total)
+    return min(1.0, max(0.0, along / total))
+
+
+# How finely to slice a route, given how long it is.
+#
+# A bin must not be narrower than the ground an aircraft covers between two of our samples, or two
+# flights will keep landing in different bins and never agree on one — and a bin needs at least
+# two flights in it to contribute a waypoint.
+#
+# We sample roughly every 60 seconds and cruise is roughly 450 kt, so a sample is about 14 km
+# apart. 25 km per bin leaves room for a slow cadence without smearing the corridor.
+#
+# Measured 17 Aug, with a flat 40 bins, counting bins where BOTH legs of a route had a point:
+#
+#     DAM-SHJ  ~2,000 km   41 shared bins    learned
+#     DXB-DAM  ~2,000 km   39               learned
+#     DAM-RUH  ~1,300 km    9               refused, needs 10
+#     DAM-KWI  ~1,200 km    7               refused
+#     AMM-DAM    ~180 km    0               refused — the two legs never once coincided
+#
+# 40 bins over 180 km is 4.5 km a bin, about 19 seconds at cruise, against a 60-second cadence:
+# a flight lands a point every third bin and two flights almost never share one. The long routes
+# were never at risk — 50 km a bin is 3.6 minutes, three or more samples deep.
+KM_PER_BIN = 25.0
+MIN_BINS, MAX_BINS = 8, 40
+
+
+def bins_for_route(km: float | None) -> int:
+    """How many bins to slice a route of this length into. 40 when the length is unknown."""
+    if not km or km <= 0:
+        return MAX_BINS
+    return max(MIN_BINS, min(MAX_BINS, round(km / KM_PER_BIN)))
+
+
+def consensus_path(tracks: list[list[dict]], bins: int = 40) -> list[dict] | None:
+    """
+    One corridor from many flown tracks: the per-bin median position.
+
+    Median rather than mean, and this is the whole design. SYR342 flew KWI-DAM at 7 km from the
+    consensus one day and 231 km another; an average would drag the corridor 12 km sideways
+    permanently, while a median ignores that flight entirely and keeps the path the other
+    nineteen actually fly.
+
+    Each track is a list of {gc_fraction, lat, lon}. A bin with no samples is skipped rather than
+    interpolated: a gap in coverage is not a waypoint, and interpolate_path will bridge it.
+
+    Returns None when there is not enough to be a consensus — fewer than two flights, or too few
+    bins covered to describe a route. A caller with None should keep the great circle and wait.
+    """
+    if len(tracks) < 2:
+        return None
+
+    buckets: list[list[tuple[float, float]]] = [[] for _ in range(bins)]
+    for track in tracks:
+        # One point per bin per flight, so a slow-sampled flight and a fast-sampled one carry
+        # the same weight. Without this a flight with 150 fixes outvotes one with 20.
+        seen: dict[int, tuple[float, float]] = {}
+        for p in track:
+            f = p.get("gc_fraction")
+            if f is None:
+                continue
+            i = min(bins - 1, max(0, int(f * bins)))
+            seen.setdefault(i, (p["lat"], p["lon"]))
+        for i, latlon in seen.items():
+            buckets[i].append(latlon)
+
+    out: list[dict] = []
+    for i, pts in enumerate(buckets):
+        if len(pts) < 2:
+            continue
+        lats = sorted(p[0] for p in pts)
+        lons = sorted(p[1] for p in pts)
+        mid = len(pts) // 2
+        out.append({
+            "f": (i + 0.5) / bins,
+            "lat": lats[mid],
+            "lon": lons[mid],
+        })
+
+    # A handful of bins is a fragment, not a route.
+    return out if len(out) >= max(4, bins // 4) else None

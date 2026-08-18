@@ -588,21 +588,7 @@ def sweep() -> None:
 
     # Our own reception, into the same table. Not gated on `live`: the receiver sees an aircraft
     # whether or not FR24 has decided to track it, and that gap is the whole reason we have one.
-    #
-    # A callsign is not unique across a sweep. SYR444 operates daily, so page -1 carries
-    # yesterday's arrived instance and page 1 today's airborne one, under different fr24_ids —
-    # and the first attempt at this filed our fix against the wrong one, which would have drawn
-    # a landed flight moving over Turkey. Rank instead of overwrite: airborne beats not-yet-live
-    # beats arrived, so a repeated callsign resolves to the instance actually in the air.
-    by_callsign: dict[str, tuple[str, int]] = {}
-    rank: dict[str, int] = {}
-    for fid, (row, cs, is_live, arrived) in seen.items():
-        if not cs:
-            continue
-        r = 2 if (is_live and not arrived) else (0 if arrived else 1)
-        if r > rank.get(cs, -1):
-            rank[cs], by_callsign[cs] = r, (fid, row)
-    n = collect_adsb(by_callsign)
+    n = collect_adsb(instances_by_callsign(seen))
     if n:
         log(f"  adsb: {n} fixes from our own receivers")
 
@@ -686,6 +672,43 @@ def fetch_feed() -> tuple[dict, int]:
             log(f"  feed attempt {attempt + 1} failed: {type(e).__name__}: {e}")
             time.sleep(2)
     return {}, FEED_RETRIES
+
+
+def instances_by_callsign(
+    seen: dict[str, tuple[int, str | None, bool, bool]],
+) -> dict[str, tuple[str, int]]:
+    """
+    Which FR24 instance to file our own reception against, per callsign.
+
+    A callsign is not unique across a sweep. SYR444 operates daily, so page -1 carries yesterday's
+    arrived instance and page 1 today's airborne one under different fr24_ids, and the first
+    attempt at this filed our fix against the wrong one — which would have drawn a landed flight
+    moving over Turkey.
+
+    AN ARRIVED INSTANCE IS REFUSED, NOT MERELY RANKED LAST. That distinction is the whole fix.
+    Ranking stopped a finished flight beating a live one; it did nothing when the finished flight
+    was the ONLY candidate, because any rank beats an empty map. RJ437 on 17 Aug is the case:
+    it left Amman at 13:21:32Z, FR24 had not yet published today's instance, and for eight
+    minutes — 13:23:29 to 13:31:27, nine fixes — our receivers' view of today's aeroplane was
+    filed under yesterday's flight id, which had landed at 13:05:25Z the day before. Everything
+    downstream then believed it: flight-api pulled the previous day's row into a live document
+    and wrote a track sample under two dates.
+
+    The cost is deliberate. Those eight minutes now produce NO row in fr24_live_position rather
+    than a wrongly-attributed one, because there is no honest id to file them under. Nothing is
+    lost to the map: flight-api sweeps the ADS-B circles itself and does not need this table to
+    see the aircraft. A position attributed to the wrong flight is worse than a position we
+    simply did not store — the first is believed, the second is merely missing.
+    """
+    out: dict[str, tuple[str, int]] = {}
+    rank: dict[str, int] = {}
+    for fid, (row, cs, is_live, arrived) in seen.items():
+        if not cs or arrived:
+            continue
+        r = 2 if is_live else 1          # airborne beats filed-but-not-yet-flying
+        if r > rank.get(cs, -1):
+            rank[cs], out[cs] = r, (fid, row)
+    return out
 
 
 def collect_adsb(live_by_callsign: dict[str, tuple[str, int]]) -> int:

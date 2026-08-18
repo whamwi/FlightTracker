@@ -31,12 +31,25 @@ fetched at three different times. No surface should calculate anything a reader 
 
 from __future__ import annotations
 
+import asyncio
 import math
 import os
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote
+
+import adsb
+import arrivals
+import learn
+from geo import (
+    is_plausible_fix,
+    drop_sentinel_fixes,
+    fix_contradicts_flight,
+    great_circle_path,
+    project_position,
+    within_projection_window,
+)
 
 import httpx
 from fastapi import FastAPI, Query
@@ -53,6 +66,23 @@ TZ = timezone(timedelta(hours=3))
 # healthy fix is under two minutes old; beyond five it has either left the collection box or the
 # feed has stopped carrying it, and a stale position is worse than none because the phase derived
 # from it would still read as confident.
+# This service was read-only until 17 Aug. Sample recording is the first write, and it is
+# behind a switch so it can be turned off without a deploy if it ever misbehaves.
+FLIGHT_API_READONLY = os.environ.get("FLIGHT_API_READONLY", "").lower() in ("1", "true", "yes")
+
+# The arrival poller. OFF unless explicitly switched on, and off by default deliberately.
+#
+# It writes arr_confirmed_at, and that column is not test data: lib/flight-status.ts reads it,
+# and app/board, app/map, app/api/airspace and components/Map.tsx all read that. So a row written
+# from a branch — or from a laptop pointed at the same Supabase — appears on the live website as
+# an arrived flight. The write path does not care that the code around it is a test.
+#
+# Measured value, once the baseline was corrected: one confirmable leg in 22 genuinely
+# unconfirmed ones, for roughly 2,000 requests a day. The earlier 62% was against a gap
+# definition that ignored arr_confirmed_at, and 99 of those 134 "gaps" were already closed.
+# confirm_arrival stays callable on demand, which is where its value actually is.
+ARRIVAL_POLLER_ENABLED = os.environ.get("ARRIVAL_POLLER", "").lower() in ("1", "true", "yes")
+
 FIX_STALE_SEC = 300
 # How long a landed flight stays in the live document after touchdown. See build_live: the ground
 # phases only exist for a flight that has stopped moving, which is exactly when FIX_STALE_SEC has
@@ -75,12 +105,27 @@ BOARD_TTL = 20
 LIVE_TTL = 10
 
 app = FastAPI(title="FlySyria flight API v2")
+
+
+@app.on_event("startup")
+async def _start_sweeper() -> None:
+    """
+    One background sweep loop for the life of the process.
+
+    Deliberately fire-and-forget: if it could not start, every request still falls back to
+    aircraft_last_seen and the service is merely as slow as it was yesterday, which is a far
+    better failure than refusing to boot.
+    """
+    asyncio.create_task(adsb.run_sweeper())
+    if ARRIVAL_POLLER_ENABLED:
+        asyncio.create_task(run_arrival_poller())
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"],
 )
 
 _cache: dict[str, tuple[float, Any]] = {}
 _airports: dict[str, tuple[float, float]] = {}
+_offsets: dict[str, float] = {}
 _airlines: dict[str, dict] = {}
 
 
@@ -100,6 +145,298 @@ async def airports(client: httpx.AsyncClient) -> dict[str, tuple[float, float]]:
         for a in await sb(client, "airports?select=iata,lat,lon&lat=not.is.null"):
             _airports[a["iata"]] = (a["lat"], a["lon"])
     return _airports
+
+
+async def airport_offsets(client: httpx.AsyncClient) -> dict[str, float]:
+    """
+    Each airport's UTC offset, loaded once.
+
+    Only the arrival confirmation needs these, to place a local clock time from FR24's status
+    text. Kept apart from `airports` because that dict is coordinates and every caller unpacks
+    it as a pair.
+
+    NOTE the offset is stored, not computed from the zone, so it is wrong for a European arrival
+    across a DST boundary — see #42 and the late-October cliff. An hour of error on an arrival
+    time is visible but not dangerous; a missing offset means no confirmation at all, which on
+    Syrian arrivals is most of them.
+    """
+    if not _offsets:
+        for a in await sb(client, "airports?select=iata,utc_offset&utc_offset=not.is.null"):
+            _offsets[a["iata"]] = float(a["utc_offset"])
+    return _offsets
+
+
+# What the arrival poller has confirmed, keyed on the flight's identity for the day. Written only
+# by the poller below, read when the live document is assembled.
+_arr_confirmed: dict[tuple, dict] = {}
+
+# Counters for /health. `rejected` and `write_failures` are the two that matter: this source now
+# writes to a table the website reads, so a silent stream of either is the thing to notice.
+_arr_state: dict = {"written": 0, "rejected": 0, "write_failures": 0}
+
+# Between passes. A flight is polled at most once per CACHE_TTL_S regardless, so this only sets
+# how quickly a newly-landed flight is picked up — not how much traffic we generate.
+ARRIVAL_POLL_S = 90.0
+
+
+def apply_confirmed_arrivals(flights: list[dict]) -> list[dict]:
+    """
+    Fold what the poller learned into the rows, before anything reads them.
+
+    Deliberately expressed as `arr_confirmed_at` rather than as a new field or a phase override.
+    That is the column derive_phase already treats as "FR24 has the landing", so the entire
+    ground ladder — landed, taxi_to_gate, at_gate, bags_on_belt, arrived — keeps working with no
+    knowledge that this source exists.
+
+    It also settles the trust order without a line of code about it. A live fix still decides
+    WHEN the aircraft is down and what it is doing, because the ladder reads on_ground and the
+    touchdown latch first; this only supplies the final `confirmed`, which is what turns at_gate
+    into arrived. Where there is no fix at all, it is the only thing that can end the flight.
+
+    Never overwrites a published arrival: FR24's own timestamp is better than a time read out of
+    its prose, and 25 of 25 control legs showed the two agree exactly where both exist.
+    """
+    out = []
+    for f in flights:
+        hit = _arr_confirmed.get(eta_key(f))
+        if hit and not (f.get("real_arr") or f.get("arr_confirmed_at")):
+            f = {**f,
+                 "arr_confirmed_at": hit["arrived_at"],
+                 "arr_confirmed_src": hit["source"]}
+        out.append(f)
+    return out
+
+
+# An arrival cannot be in the future. The day-nearest logic in arrivals.status_arrival picks
+# between three candidate days, so a badly-placed text could in principle land ahead of the clock,
+# and this is the last thing standing between that and a row on the website.
+FUTURE_ARRIVAL_GRACE_MS = 5 * 60_000
+
+
+def plausible_arrival(hit: dict, now_ms: float) -> bool:
+    """A last sanity check before this becomes a fact anyone else reads."""
+    t = hit.get("arrived_at_ms")
+    return bool(t) and t <= now_ms + FUTURE_ARRIVAL_GRACE_MS
+
+
+async def persist_arrival(client: httpx.AsyncClient, f: dict, hit: dict) -> bool:
+    """
+    Write the confirmation onto the flight row. True if this call is what wrote it.
+
+    The two null filters are load-bearing, not belt and braces. They make this a compare-and-set:
+    if the harvester published a real arrival between the poll and this write, the PATCH matches
+    zero rows and we lose the race harmlessly instead of overwriting a better answer with a time
+    read out of prose. FR24's own timestamp always wins, and the last-writer-wins version of this
+    function would quietly break that rule under exactly the conditions it matters.
+
+    Written to arr_confirmed_at, alongside the sources already in that column — fr24_estimate,
+    fr24_last_seen, position_rebuttal — so nothing downstream needs to learn a new field. The
+    source tag distinguishes a published timestamp (fr24_flight) from one parsed out of the
+    status text (fr24_flight_status), because they are not equally precise and whoever audits
+    this later will want to tell them apart.
+    """
+    if FLIGHT_API_READONLY:
+        return False
+    for k in ("flight_date", "iata_number", "dep_iata", "arr_iata"):
+        if not f.get(k):
+            return False                       # cannot address the row unambiguously
+    q = (f"flight?flight_date=eq.{quote(str(f['flight_date']), safe='')}"
+         f"&iata_number=eq.{quote(str(f['iata_number']), safe='')}"
+         f"&dep_iata=eq.{quote(str(f['dep_iata']), safe='')}"
+         f"&arr_iata=eq.{quote(str(f['arr_iata']), safe='')}"
+         "&real_arr=is.null&arr_confirmed_at=is.null")
+    r = await client.patch(
+        f"{SB_URL}/rest/v1/{q}",
+        headers={**SB_HEADERS, "Content-Type": "application/json",
+                 "Prefer": "return=representation"},
+        json={"arr_confirmed_at": hit["arrived_at"], "arr_confirmed_src": hit["source"]},
+        timeout=30,
+    )
+    if r.status_code >= 300:
+        return False
+    return len(r.json() or []) > 0
+
+
+async def poll_arrivals() -> int:
+    """
+    Ask FR24 about each flight we are still waiting on. One pass.
+
+    Reads the board itself rather than piggy-backing on the live document, so it does not depend
+    on a flight being visible to any position feed — which is the entire point: the flights this
+    helps are the ones nothing can see.
+    """
+    async with httpx.AsyncClient() as client:
+        offsets = await airport_offsets(client)
+        # Bounded so the query cannot grow without limit as unresolved rows accumulate. The
+        # window below discards anything older anyway.
+        cutoff = (datetime.now(timezone.utc)
+                  - timedelta(milliseconds=arrivals.POLL_UNTIL_MS + 6 * 3600_000)).isoformat()
+        # Not filtered on real_dep: 32 of 35 unconfirmed legs in a fortnight have none, and a
+        # flight we never saw leave is the one we know least about. See awaiting_arrival.
+        rows = await sb(client, "flight?select=*&real_arr=is.null&arr_confirmed_at=is.null"
+                                f"&sched_arr=gte.{quote(cutoff, safe='')}")
+        now_ms = datetime.now(timezone.utc).timestamp() * 1000
+
+        found = 0
+        for f in rows:
+            key = eta_key(f)
+            if key in _arr_confirmed:
+                continue                               # already answered
+            sa, ea = iso(f.get("sched_arr")), iso(f.get("est_arr"))
+            probe = {
+                "iata_number": f.get("iata_number"), "callsign": f.get("callsign"),
+                "dep_iata": f.get("dep_iata"), "arr_iata": f.get("arr_iata"),
+                "real_dep": f.get("real_dep"), "real_arr": None, "arr_confirmed_at": None,
+                "sched_arr_ms": sa.timestamp() * 1000 if sa else None,
+                "est_arr_ms": ea.timestamp() * 1000 if ea else None,
+            }
+            if not arrivals.awaiting_arrival(probe, now_ms):
+                continue
+            hit = await arrivals.confirm_arrival(
+                probe, offsets.get((f.get("arr_iata") or "").strip().upper()))
+            if not hit:
+                continue
+            if not plausible_arrival(hit, now_ms):
+                _arr_state["rejected"] += 1
+                continue
+            _arr_confirmed[key] = hit
+            found += 1
+
+            # Persisted as well as held, so the website's board and everything else reading the
+            # table learn it too — and so it survives a redeploy rather than being re-derived.
+            # Never fatal: a poll that raised because one PATCH timed out would stop confirming
+            # every other flight behind it.
+            try:
+                if await persist_arrival(client, f, hit):
+                    _arr_state["written"] += 1
+            except Exception:
+                _arr_state["write_failures"] += 1
+        return found
+
+
+async def run_arrival_poller() -> None:
+    """
+    Keep asking, for the life of the process.
+
+    Never exits. A poller that died on one bad night upstream would silently return us to
+    guessing at arrivals, and the symptom — flights quietly never ending — is the one that took
+    a backtest to notice in the first place.
+    """
+    while True:
+        try:
+            await poll_arrivals()
+        except Exception:
+            pass
+        await asyncio.sleep(ARRIVAL_POLL_S)
+
+
+# How long the touchdown stays on screen after it happens.
+#
+# FYC781 into Muscat on 17 Aug went from "350 ft, 108 kt" to "0 ft, 25 kt" in one 17-second
+# step: the whole landing roll fitted inside a single gap, so the `landed` stage never appeared
+# and the flight jumped straight to taxi_to_gate. A rollout takes roughly 20-30 seconds and our
+# effective resolution is 15-25, so deriving that stage from the CURRENT speed means catching it
+# sometimes and missing it often.
+#
+# Latched from the transition instead. Once a flight we have seen airborne shows up on the
+# ground, it reads `landed` for a minute whatever its speed, and the ladder resumes afterwards.
+# The touchdown is the moment a person watching came for; it should not depend on when we
+# happened to poll.
+LANDED_LATCH_MS = 60_000
+
+# callsign -> when it first touched down, and who we have actually seen flying. The second is
+# what stops a flight first sighted parked on a stand being announced as a landing.
+# The last heading and speed we were told, per callsign. Written only by carry_vector.
+_last_vector: dict[str, dict] = {}
+
+_ground_since: dict[str, float] = {}
+_seen_airborne: set[str] = set()
+
+
+def carry_vector(cs: str, pos: dict | None) -> dict | None:
+    """
+    Keep the last heading and speed when a fix arrives without them.
+
+    A position with no velocity is common — 12 of 48 aircraft in the Syria circle at any moment —
+    and it reaches us through the FR24 table as well as the sweep: FYC782 MCT-DAM was caught at
+    34,000 ft reading "track —, gs — kt". The renderer defaults a missing track to zero, so the
+    marker snaps due north while the aeroplane is flying south-west.
+
+    An aeroplane doing 470 knots on 300 degrees a minute ago is still doing roughly that.
+    Carrying the last value is not a prediction; it is a refusal to assert north.
+
+    Only REPORTED values are remembered. A carried value must never seed the next carry, or one
+    silent fix would pin the heading for the rest of the flight with nothing to correct it.
+    """
+    if not cs or pos is None:
+        return pos
+
+    prev = _last_vector.get(cs) or {}
+    out = dict(pos)
+    carried = []
+    if out.get("track_deg") is None and prev.get("track_deg") is not None:
+        out["track_deg"] = prev["track_deg"]
+        carried.append("track")
+    if out.get("ground_speed_kts") is None and prev.get("ground_speed_kts") is not None:
+        out["ground_speed_kts"] = prev["ground_speed_kts"]
+        carried.append("gs")
+    if carried:
+        out["carried"] = carried            # so a reader can tell remembered from reported
+
+    remember = {}
+    if pos.get("track_deg") is not None:
+        remember["track_deg"] = pos["track_deg"]
+    if pos.get("ground_speed_kts") is not None:
+        remember["ground_speed_kts"] = pos["ground_speed_kts"]
+    if remember:
+        _last_vector[cs] = {**prev, **remember}
+
+    return out
+
+
+def note_ground_state(cs: str, on_ground, now_ms: float) -> float | None:
+    """
+    Remember the air-to-ground transition, and report when it happened.
+
+    Returns the touchdown instant for this callsign, or None if it has not been seen to land.
+    """
+    if not cs:
+        return None
+    if on_ground is False:
+        _seen_airborne.add(cs)
+        _ground_since.pop(cs, None)
+        return None
+    if on_ground is True and cs in _seen_airborne and cs not in _ground_since:
+        _ground_since[cs] = now_ms
+    return _ground_since.get(cs)
+
+
+_route_paths: dict[str, list[dict]] = {}
+
+
+async def route_paths(client: httpx.AsyncClient) -> dict[str, list[dict]]:
+    """
+    Recorded corridors, keyed by OD pair.
+
+    Collapsed to one path per pair by observed_count, the same rule /api/routes applies — a
+    second variant silently overwriting the first is a bug that endpoint already found.
+
+    Cached for the process lifetime like airports and airlines: these change when someone
+    imports a route, not between polls.
+    """
+    if _route_paths:
+        return _route_paths
+    rows = await sb(
+        client,
+        "route_paths?select=dep_iata,arr_iata,waypoints,observed_count"
+        "&order=observed_count.desc,variant.asc",
+    )
+    for r in rows:
+        od = f"{r.get('dep_iata')}|{r.get('arr_iata')}"
+        wps = r.get("waypoints")
+        if od not in _route_paths and isinstance(wps, list) and wps:
+            _route_paths[od] = wps
+    return _route_paths
 
 
 async def airlines(client: httpx.AsyncClient) -> dict[str, dict]:
@@ -123,7 +460,8 @@ def haversine(a: tuple[float, float], b: tuple[float, float]) -> float:
 
 # ── Derivation ───────────────────────────────────────────────────────────────
 
-def derive_phase(f: dict, pos: dict | None) -> str:
+def derive_phase(f: dict, pos: dict | None,
+                 landed_at_ms: float | None = None, now_ms: float | None = None) -> str:
     """
     The phase vocabulary, agreed 12 Aug.
 
@@ -149,14 +487,65 @@ def derive_phase(f: dict, pos: dict | None) -> str:
     on_ground = bool(pos and pos.get("on_ground"))
     moving = bool(pos and (pos.get("ground_speed_kts") or 0) > 3)
 
-    if f.get("real_arr") or f.get("arr_confirmed_at"):
-        # Belt first: it is the last thing to arrive and the thing a person waiting cares about.
-        # VF341 got CAR4 twenty minutes after landing, so arrival is not the end of the story.
+    confirmed = bool(f.get("real_arr") or f.get("arr_confirmed_at"))
+
+    # ── The ground, in the order a person waiting actually experiences it ─────
+    #
+    # Four stages, not one word. Someone meeting a flight wants to know the difference between
+    # "it has touched down", "it is coming in", "it is on stand" and "that is the end of it",
+    # and all four are visible in the fix: altitude says it is down, ground speed says which of
+    # the three it is doing.
+    #
+    #   landed        wheels down, still rolling out       gs >= 50
+    #   taxi_to_gate  crossing the airfield                3 < gs < 50
+    #   at_gate       stopped, nobody has confirmed yet    gs <= 3
+    #   arrived       stopped AND FR24 has the landing     gs <= 3, terminal
+    #
+    # 50 knots is the same number the departure rule uses for "moving faster than any taxi", so
+    # rollout and taxi divide on a boundary the file already trusts rather than a new one.
+    #
+    # `arrived` is deliberately the only state that requires the published signal. Everything
+    # before it is something we watched happen; ending the flight's life is a claim about a
+    # record, and that record is FR24's. RJA431 into Aleppo on 17 Aug is the case: on the ground
+    # for five minutes reading `departed`, because every branch here waited for a signal that
+    # had not come. Now it reads landed, then taxi_to_gate, then at_gate, and only becomes
+    # arrived when 02:24:16 lands.
+    # Only on the way IN. Without this gate the ladder catches an aircraft that has not left
+    # yet — a departure parked at its stand would read at_gate, and one taxiing out would read
+    # taxi_to_gate, which is the right words for the wrong half of the trip.
+    if on_ground and (confirmed or f.get("real_dep")):
+        gs = (pos or {}).get("ground_speed_kts") or 0
+
+        # The latch. For a minute after the wheels touch, this is a landing whatever the speed —
+        # see LANDED_LATCH_MS. Without it a brisk rollout is invisible: FYC781 was airborne at
+        # 108 kt and taxiing at 25 kt in consecutive samples.
+        if (landed_at_ms is not None and now_ms is not None
+                and now_ms - landed_at_ms < LANDED_LATCH_MS):
+            return "landed"
+
+        if gs >= 50:
+            return "landed"
+        if gs > 3:
+            return "taxi_to_gate"
+        # Belt beats at_gate but not arrival: it is the last thing to be published and the thing
+        # a person waiting actually came for. VF341 got CAR4 twenty minutes after landing.
         if f.get("arr_baggage"):
             return "bags_on_belt"
-        if on_ground:
-            return "taxi_to_gate" if moving else "at_gate"
-        return "landed"
+        return "arrived" if confirmed else "at_gate"
+
+    if confirmed:
+        if f.get("arr_baggage"):
+            return "bags_on_belt"
+        # Confirmed down, but the fix still shows it flying.
+        #
+        # FR24 published FYC781's landing at 03:40:22 while our own fix at 03:40:27 still had it
+        # airborne at 350 ft — a 22-second window where the record is ahead of the aeroplane.
+        # `arrived` means stopped at the end of the trip and would be a lie there; `landed` says
+        # the flight is over without claiming it has finished moving.
+        #
+        # With no position at all there is nothing to contradict the record, and nothing more
+        # to say, so the terminal word is honest.
+        return "arrived" if pos is None else "landed"
 
     if f.get("real_dep"):
         # `en_route` is the claim a live fix supports; `departed` is what we say when we know it
@@ -165,6 +554,33 @@ def derive_phase(f: dict, pos: dict | None) -> str:
 
     if on_ground and moving:
         return "taxiing"
+
+    # Departed, whatever FR24 has published.
+    #
+    # Every branch above waits for real_dep, so an aircraft we can SEE flying was called
+    # "scheduled" until FR24 got round to filing a departure. FDB1192 ALP-DXB on 16 Aug was
+    # reported scheduled while climbing through 25,900 ft at 425 knots — its own progress field
+    # already read 7% with an ETA of 15:13, so the document contradicted itself.
+    #
+    # THE FLAG DOES THE WORK, NOT THE ALTITUDE. This began at 5,000 ft, chosen so a parked
+    # aircraft reporting field elevation could never be promoted — AMM is 2,395 ft, RUH 2,082.
+    # That floor was too blunt: FYC762 SHJ-ALP on 17 Aug climbed out at 1,125 ft and 182 knots
+    # with `on_ground: false` on every fix from two independent sources, and read scheduled for
+    # 55 seconds until FR24's departure arrived at 01:50:00. Over 24 hours, 825 fixes are
+    # explicitly airborne below 5,000 ft, and the flag is present on 99.8% of them.
+    #
+    # So an explicit false is believed at any height, and 250 ft is only the fallback for the
+    # 0.2% that omit the flag — high enough above a runway to mean something, low enough to
+    # catch a departure as it rotates.
+    #
+    # `is not True` guards all of it: a fix that says it is ON the ground is never promoted,
+    # however fast. That is the take-off roll — 16 fixes in 24 hours — and it keeps reading
+    # taxiing for a few more seconds, which is the safe direction to be wrong in.
+    if (pos and pos.get("on_ground") is not True
+            and (pos.get("ground_speed_kts") or 0) >= 50
+            and (pos.get("on_ground") is False or (pos.get("altitude_ft") or 0) >= 250)):
+        return "en_route"
+
     return "scheduled"
 
 
@@ -221,6 +637,44 @@ _ETA_HELD: dict[tuple, str] = {}
 def eta_key(f: dict) -> tuple:
     """A flight's identity for the day. The same key the live document dedupes on."""
     return (f.get("flight_date"), f.get("iata_number"), f.get("dep_iata"), f.get("arr_iata"))
+
+
+# A leg that has not arrived, long after it should have. FR24 sometimes never publishes an
+# arrival, leaving the row open for ever, and an open row is exactly what a callsign or a
+# recycled fr24_id can latch onto days later. Longer than any route we fly — DAM-SVO is 280
+# minutes — plus room for a badly delayed one.
+STALE_UNARRIVED_SEC = 18 * 3600
+
+
+def is_live_leg(f: dict, now: datetime) -> bool:
+    """
+    Could this board row be the aircraft we are hearing right now?
+
+    RJA437 on 17 Aug was scheduled out of Amman at 10:55Z and left at 13:21Z, two and a half
+    hours late. For its first ten minutes airborne this service bound it to YESTERDAY's row —
+    a leg that had already landed at 13:05Z on the 16th — and it carried yesterday's schedule
+    and yesterday's ETA until 13:34Z, when it flipped to today's row mid-flight.
+
+    The three queries that assemble the document do not guard equally. The circle query is
+    restricted to today and to flights that have departed and not arrived; the arrival query is
+    bounded by ARRIVED_LINGER_SEC. The FIRST one selects purely on fr24_id, with no filter on
+    the date or on whether the leg is already closed — so a completed flight comes back into a
+    live document the moment its id reappears upstream.
+
+    Guarding here rather than in that one query, because the rule is about what a live leg IS,
+    not about how it happened to be fetched, and the next source added would need it too.
+    """
+    arrived = max((t for t in (iso(f.get("real_arr")), iso(f.get("arr_confirmed_at"))) if t),
+                  default=None)
+    if arrived:
+        # Recently landed belongs here — the ground phases depend on it. Landed yesterday
+        # does not.
+        return (now - arrived).total_seconds() <= ARRIVED_LINGER_SEC
+
+    dep = iso(f.get("real_dep")) or iso(f.get("sched_dep"))
+    if dep and (now - dep).total_seconds() > STALE_UNARRIVED_SEC:
+        return False                       # open for ever, and not today's aeroplane
+    return True
 
 
 def hold_eta(key: tuple, raw: str | None, held: dict[tuple, str]) -> str | None:
@@ -532,6 +986,13 @@ async def latest_positions(client: httpx.AsyncClient) -> dict[str, dict]:
         "track_deg,vertical_speed_fpm,on_ground,fix_at,source"
         f"&fix_at=gte.{cutoff}&order=fix_at.desc",
     )
+
+    # Believe nothing impossible, whatever wrote it.
+    #
+    # Both fix sources are guarded, not just the aggregator, because the harvester writes direct
+    # reception into this same table — a corrupt sweep upstream reaches clients through either
+    # door. Keyed by fr24_id here: that is what identifies an airframe in this table.
+    rows = drop_sentinel_fixes([r for r in rows if is_plausible_fix(r)], key="fr24_id")
     # Direct reception beats a network aggregate *of comparable age*, and only that.
     #
     # This preferred `source='adsb'` over recency unconditionally, which is wrong the moment the
@@ -587,12 +1048,48 @@ async def circle_positions(client: httpx.AsyncClient) -> dict[str, dict]:
         "aircraft_last_seen?select=callsign,lat,lon,alt_baro,gs,track,seen_at"
         f"&seen_at=gte.{cutoff}&callsign=not.is.null&order=seen_at.desc",
     )
+    # The door the 15-16 Aug corruption actually came through: 47 aircraft stamped on Queen
+    # Alia airport with gs 0.7 while their altitudes stayed real. Keyed by callsign because
+    # aircraft_last_seen has no hex to group by.
+    rows = drop_sentinel_fixes([r for r in rows if is_plausible_fix(r)], key="callsign")
+
     out: dict[str, dict] = {}
     for r in rows:                            # ordered desc, so first of a callsign is newest
         cs = (r.get("callsign") or "").strip().upper()
         if cs and cs not in out and r.get("lat") is not None:
             out[cs] = r
+
+    # Our own sweep wins wherever it has an answer.
+    #
+    # Same aggregators, seconds old instead of up to a minute: this table is written by a cron
+    # that runs once a minute, so reading it made our freshest source arrive by our slowest
+    # path. Measured 17 Aug, five of six flights were 58 seconds behind the website, which
+    # sweeps the circles itself.
+    #
+    # The table stays underneath rather than being replaced. It survives a restart, it covers
+    # the first ten seconds before the first sweep completes, and if the sweeper is failing it
+    # is the difference between a slightly stale map and no map.
+    live = adsb.positions()
+    for cs, fix in live.items():
+        out[cs] = _from_sweep(fix)
     return out
+
+
+def _from_sweep(fix: dict) -> dict:
+    """
+    A swept fix in the shape aircraft_last_seen rows arrive in, so merge_position and everything
+    downstream cannot tell which door a position came through.
+    """
+    return {
+        "callsign": None,
+        "lat": fix["lat"], "lon": fix["lon"],
+        "alt_baro": fix.get("altitude_ft"),
+        "gs": fix.get("ground_speed_kts"),
+        "track": fix.get("track_deg"),
+        "on_ground": fix.get("on_ground"),
+        "seen_at": fix.get("fix_at"),
+        "_swept": True,
+    }
 
 
 def merge_position(fr24: dict | None, circle: dict | None) -> dict | None:
@@ -626,13 +1123,17 @@ def merge_position(fr24: dict | None, circle: dict | None) -> dict | None:
 
 
 def _from_circle(c: dict) -> dict:
+    # on_ground is carried through rather than hardcoded to None. The table has no such column,
+    # so a row read from it still yields None — but a swept fix knows the answer, and that field
+    # is what lets derive_phase call a departure the moment the aircraft rotates instead of
+    # waiting for 250 ft or for FR24.
     return {
         "lat": c.get("lat"), "lon": c.get("lon"),
         "altitude_ft": c.get("alt_baro"),
         "ground_speed_kts": c.get("gs"),
         "track_deg": c.get("track"),
         "vertical_speed_fpm": None,
-        "on_ground": None,
+        "on_ground": c.get("on_ground"),
         "fix_at": c.get("seen_at"),
         "source": "adsb",
     }
@@ -697,6 +1198,19 @@ async def build_live() -> dict:
         if not flights:
             return {"as_of": now_iso(), "flights": []}
 
+        # What the arrival poller has confirmed, folded in first.
+        #
+        # Before is_live_leg deliberately: a confirmation is what CLOSES a leg, so applying it
+        # afterwards would keep a finished flight in the document until the next pass.
+        flights = apply_confirmed_arrivals(flights)
+
+        # Legs that have already closed, dropped before anything binds a position to one.
+        #
+        # See is_live_leg: the fr24_id query carries no date or arrival filter, so yesterday's
+        # finished flight can re-enter a live document and take a live aircraft's identity with
+        # it. Applied to the assembled list so every source is covered, including the next one.
+        flights = [f for f in flights if is_live_leg(f, datetime.now(timezone.utc))]
+
         # A flight can arrive by both routes — a fresh on-ground fix and a recent arrival, or both
         # arrival columns — and the reader must not see it twice. Keyed on the row's identity,
         # which is the table's own primary key.
@@ -710,6 +1224,36 @@ async def build_live() -> dict:
             deduped.append(f)
         flights = deduped
 
+        # ── The flights nobody can hear ──────────────────────────────────────
+        #
+        # Everything above is built FROM a position, so a flight no feed can see was absent
+        # from this document entirely — about one airborne flight in five, because ADS-B is
+        # largely blind over Syria. That gap is the whole reason each client grew its own
+        # corridor tracker, and the reason the two then disagreed: FYC361 drawn 190 km apart
+        # on the site and the phone, one tracker closing a 298 km error while the other grew
+        # it to 440 km.
+        #
+        # So they are pulled in here and projected below. Departed and not yet arrived, today
+        # only — a callsign match alone would resurrect yesterday's instance of the number.
+        day = datetime.now(TZ).strftime("%Y-%m-%d")
+        have = {(f.get("flight_date"), f.get("iata_number"),
+                 f.get("dep_iata"), f.get("arr_iata")) for f in flights}
+        unheard = await sb(
+            client,
+            f"flight?select=*&flight_date=eq.{day}"
+            "&real_dep=not.is.null&real_arr=is.null&arr_confirmed_at=is.null",
+        )
+        flights += [f for f in unheard
+                    if (f.get("flight_date"), f.get("iata_number"),
+                        f.get("dep_iata"), f.get("arr_iata")) not in have]
+
+        paths = await route_paths(client)
+
+    # One instant for the whole document. Two flights resolved microseconds apart would
+    # otherwise be advanced to different clocks, and the touchdown latch would compare against
+    # a moving target.
+    now_ms = datetime.now(timezone.utc).timestamp() * 1000
+
     out = []
     for f in flights:
         # Whichever source saw this aircraft last — see merge_position.
@@ -717,15 +1261,96 @@ async def build_live() -> dict:
             pos_by_id.get(f.get("fr24_id")),
             circles.get((f.get("callsign") or "").strip().upper()),
         )
+        # Fill in a heading the fix did not carry, before anything reads it.
+        pos = carry_vector((f.get("callsign") or "").strip().upper(), pos)
+
+        # Remember the air-to-ground transition before deriving anything from it, so the
+        # touchdown instant survives the ten-second document cache and the phase can be latched
+        # to it rather than to whatever speed the current fix happens to carry.
+        landed_at = note_ground_state(
+            (f.get("callsign") or "").strip().upper(),
+            (pos or {}).get("on_ground"),
+            now_ms,
+        )
+
         progress, p_basis = derive_progress(f, pos, aps)
         eta, e_basis = derive_eta(f)
         delay, d_basis = derive_delay(f)
+
+        # A fix can be possible and still not be about this aeroplane.
+        #
+        # KNE591 on 16 Aug was served parked at Queen Alia two minutes before it landed at
+        # Damascus, and every rule about a fix in isolation passed it. The website never drew it
+        # because it draws the corridor and treats a fix as a nudge; the test map drew it, sat in
+        # Jordan, and jumped to Damascus on arrival. Refusing it here gives the app the website's
+        # robustness without giving it the website's blind spot, because a MOVING aircraft is
+        # still believed wherever it is — which is what FYC361 needed.
+        if pos is not None and fix_contradicts_flight(
+            pos,
+            aps.get(f.get("dep_iata") or ""),
+            aps.get(f.get("arr_iata") or ""),
+            arrived=bool(f.get("real_arr") or f.get("arr_confirmed_at")),
+        ):
+            pos = None
+
+        # No fix — say where it should be, and say that is what we are doing.
+        #
+        # Counted against the stabilised arrival rather than the raw estimate, so the aeroplane
+        # and the clock it is racing cannot disagree: a delay already absorbed into the countdown
+        # slows the marker here instead of teleporting it on arrival.
+        #
+        # A recorded corridor when we have one, a great circle when we do not. Same shape either
+        # way, so nothing downstream needs a second branch.
+        projected = None
+        if pos is None:
+            dep_at = iso(f.get("real_dep"))
+            arr_at = iso(stable_eta(f, eta) or eta)
+            dep_c = aps.get(f.get("dep_iata") or "")
+            arr_c = aps.get(f.get("arr_iata") or "")
+            path = paths.get(f"{f.get('dep_iata')}|{f.get('arr_iata')}")
+            if not path and dep_c and arr_c:
+                path = great_circle_path(dep_c, arr_c)
+            # ARRIVED_LINGER_SEC, the same window the arrival queries above use, so a flight
+            # that has landed leaves the map at the same moment it leaves the arrivals list.
+            drawable = within_projection_window(
+                arr_at.timestamp() * 1000 if arr_at else None,
+                datetime.now(timezone.utc).timestamp() * 1000,
+                ARRIVED_LINGER_SEC * 1000,
+            )
+            if dep_at and arr_at and path and drawable:
+                projected = project_position(
+                    dep_at.timestamp() * 1000,
+                    arr_at.timestamp() * 1000,
+                    path,
+                    datetime.now(timezone.utc).timestamp() * 1000,
+                )
+        # The scheduled frame, carried here as well as on the board.
+        #
+        # Not duplication for its own sake. The app takes these off /api/airspace today, and the
+        # whole point of retiring that fetch is that ONE document answers everything about a live
+        # flight — a client joining a position from here to a scheduled time from the board, per
+        # marker, per poll, is the reconciliation we are removing, not a smaller version of it.
+        #
+        # dep_delay_min in particular exists in neither document today: /api/airspace is the only
+        # place it has ever been published, so retiring that fetch would silently delete the
+        # departure delay from the app. Derived here from what the row already holds rather than
+        # in each client, for the same reason arr_delay_min should be (#6).
+        sched_dep_i, sched_arr_i = iso(f.get("sched_dep")), iso(f.get("sched_arr"))
+        real_dep_i = iso(f.get("real_dep"))
+        dep_delay = (round((real_dep_i - sched_dep_i).total_seconds() / 60)
+                     if real_dep_i and sched_dep_i else None)
+
         out.append({
             "iata_number": f["iata_number"],
             "callsign": f.get("callsign"),
             "fr24_id": f.get("fr24_id"),
             "flight_date": f["flight_date"],
-            "phase": derive_phase(f, pos),
+            "airline_iata": f.get("airline_iata"),
+            "dep_time_utc": sched_dep_i.astimezone(timezone.utc).strftime("%H:%M") if sched_dep_i else None,
+            "arr_time_utc": sched_arr_i.astimezone(timezone.utc).strftime("%H:%M") if sched_arr_i else None,
+            "revised_arr_utc": zulu(revision(f.get("est_arr"), f.get("sched_arr"))),
+            "dep_delay_min": dep_delay,
+            "phase": derive_phase(f, pos, landed_at, now_ms),
             "progress": progress,
             "progress_basis": p_basis,
             "eta_utc": eta,
@@ -736,6 +1361,13 @@ async def build_live() -> dict:
             "eta_stable_utc": stable_eta(f, eta),
             "delay_min": delay,
             "delay_basis": d_basis,
+            # One position field, whether we saw the aircraft or worked out where it must be.
+            #
+            # `pos_source` is published rather than inferred from which fields are null: a
+            # reader is entitled to know the difference, and the marker needs it to fade.
+            # Altitude and speed stay null on a projection — we do not know them, and inventing
+            # a cruise altitude to fill the row is how a card ends up asserting 35,000 ft about
+            # an aeroplane nobody can hear.
             "position": {
                 "lat": pos["lat"], "lon": pos["lon"],
                 "altitude_ft": pos.get("altitude_ft"),
@@ -745,7 +1377,19 @@ async def build_live() -> dict:
                 "on_ground": pos.get("on_ground"),
                 "fix_at": pos.get("fix_at"),
                 "source": pos.get("source"),
-            } if pos else None,
+                "pos_source": "observed",
+            } if pos else {
+                "lat": projected["lat"], "lon": projected["lon"],
+                "altitude_ft": None,
+                "ground_speed_kts": None,
+                "track_deg": projected["track_deg"],
+                "vertical_speed_fpm": None,
+                "on_ground": False,
+                "fix_at": None,
+                "source": None,
+                "pos_source": "projected",
+                "fraction": projected["fraction"],
+            } if projected else None,
             # Both actuals travel with the live document now, so a consumer never needs a second
             # source to know whether the flight is still flying.
             "actual_dep_utc": zulu(f.get("real_dep")),
@@ -754,6 +1398,29 @@ async def build_live() -> dict:
             "arr_iata": f.get("arr_iata"),
             "duration_min": effective_duration(f),
         })
+    # Record what we saw, for the corridor learning. Fire-and-forget and never fatal: a document
+    # that fails to serve because a sample insert timed out would be a poor trade.
+    if not FLIGHT_API_READONLY:
+        try:
+            async with httpx.AsyncClient() as _c:
+                await learn.record(_c, SB_URL, SB_HEADERS, out, aps)
+        except Exception:
+            pass
+
+    # Forget flights this document no longer carries. Both maps are keyed by callsign and would
+    # otherwise grow for the life of the process — and a stale entry would make tomorrow's leg
+    # of the same number believe it had already landed.
+    live_now = {(x.get("callsign") or "").strip().upper() for x in out}
+    for cs in list(_ground_since):
+        if cs not in live_now:
+            _ground_since.pop(cs, None)
+    for cs in list(_seen_airborne):
+        if cs not in live_now:
+            _seen_airborne.discard(cs)
+    for cs in list(_last_vector):
+        if cs not in live_now:
+            _last_vector.pop(cs, None)
+
     return {"as_of": now_iso(), "flights": out}
 
 
@@ -784,7 +1451,14 @@ async def build_board(date: str) -> dict:
 
     want = datetime.strptime(date, "%Y-%m-%d").date()
     out = []
-    for f in [*rows, *span]:
+    # The same confirmations the live document folds in.
+    #
+    # Applied here as well because otherwise the two documents this one service publishes
+    # disagree about whether a flight has landed: the map would show `arrived` and the board
+    # would still be waiting for it, from the same process, on the same request. That split —
+    # board and map telling a reader different things about one flight — is a defect this
+    # project has already paid for more than once.
+    for f in apply_confirmed_arrivals([*rows, *span]):
         sd, sa = iso(f["sched_dep"]), iso(f["sched_arr"])
         if not sd or not sa:
             continue
@@ -826,6 +1500,44 @@ async def board(date: str | None = Query(None)):
     return await cached(f"board:{day}", BOARD_TTL, lambda: build_board(day))
 
 
+@app.post("/v2/learn-routes")
+async def learn_routes():
+    """
+    Rebuild the learned corridors from the samples.
+
+    A POST rather than a cron for now, so it is run deliberately and its output read, rather
+    than quietly rewriting corridors on a schedule nobody watches — which is how route_paths
+    came to hold 68 hand-imported paths that nothing has checked since.
+    """
+    async with httpx.AsyncClient() as client:
+        aps = await airports(client)
+        written = await learn.learn(client, SB_URL, SB_HEADERS, aps)
+    return {
+        "ok": True,
+        "corridors": len(written),
+        "routes": [
+            {"route": f"{w['dep_iata']}->{w['arr_iata']}", "operator": w["operator"],
+             "flights": w["observed_count"], "waypoints": len(w["waypoints"]),
+             "outliers": w["outliers_excluded"]}
+            for w in sorted(written, key=lambda w: -w["observed_count"])
+        ],
+    }
+
+
 @app.get("/health")
 async def health():
-    return {"ok": True, "as_of": now_iso()}
+    """
+    Enough to tell a working service from a quiet one.
+
+    Both background loops report, because both fail silently by design: the sweeper falling over
+    returns us to minute-old positions, and the arrival poller falling over returns us to flights
+    that never end. Neither shows up as an error anywhere — a count that has stopped moving is
+    the only symptom.
+    """
+    return {
+        "ok": True,
+        "as_of": now_iso(),
+        "adsb": adsb.state(),
+        "arrivals": {**arrivals.state(), **_arr_state,
+                     "confirmed_held": len(_arr_confirmed)},
+    }
