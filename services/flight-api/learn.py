@@ -29,6 +29,23 @@ from geo import gc_fraction, bins_for_route, consensus_path, haversine_km
 SAMPLE_WINDOW_DAYS = 60          # rolling: airspace here changes politically, not seasonally
 MIN_FLIGHTS = 2                  # below this there is no consensus, only an anecdote
 OUTLIER_KM = 60                  # a flight this far from the consensus is a reroute, not noise
+MIN_POINTS = 8                   # fewer fixes than this is a fragment, not a track
+
+# Learning and promoting are deliberately different bars.
+#
+# MIN_FLIGHTS is what it takes to WRITE a corridor: cheap, reversible, and nothing downstream
+# reads it. PROMOTE_MIN_FLIGHTS is what it takes to let one decide where the map draws an
+# aircraft, and two flights agreeing is one anecdote confirming another. The gap between the two
+# is where a corridor sits while it earns its place.
+#
+# On 18 Aug, of 70 route+operator pairs in the samples, 25 cleared MIN_FLIGHTS and none reached
+# 10. Roughly a week of recording gets the Gulf, Amman and Istanbul pairs there.
+PROMOTE_MIN_FLIGHTS = 10
+
+
+def is_promotable(observed_count: int | None) -> bool:
+    """Whether a learned corridor has earned the right to be drawn."""
+    return (observed_count or 0) >= PROMOTE_MIN_FLIGHTS
 
 
 async def record(client, sb, sb_headers: dict, flights: list[dict], aps: dict) -> int:
@@ -104,13 +121,19 @@ async def record(client, sb, sb_headers: dict, flights: list[dict], aps: dict) -
     return len(rows) if r.status_code < 300 else 0
 
 
-async def learn(client, sb, sb_headers: dict, aps: dict) -> list[dict]:
+async def learn(client, sb, sb_headers: dict, aps: dict) -> tuple[list[dict], list[dict]]:
     """
     Turn the samples into corridors. Intended for a scheduled call, not a request.
 
     Grouped by (dep, arr, operator) because that is where the variance lives: the same airline's
     flight numbers agree within about 5 km on thirteen of fourteen routes measured, while two
     airlines on one city pair differ by 170.
+
+    Returns (written, skipped). The second half is the point: a pair that produced no corridor
+    used to just `continue`, so "we have never seen this route" and "we have seen it and its
+    flights contradict each other" were the same silence. The second is a finding — DAM-RUH is
+    two routings, not one noisy one — and it was invisible in route_paths_learned precisely
+    BECAUSE it was interesting enough to be dropped.
     """
     since = quote((datetime.now(timezone.utc) - timedelta(days=SAMPLE_WINDOW_DAYS)).isoformat(),
                   safe="")
@@ -125,10 +148,17 @@ async def learn(client, sb, sb_headers: dict, aps: dict) -> list[dict]:
         flight = (r["callsign"], r["flight_date"])
         grouped.setdefault(key, {}).setdefault(flight, []).append(r)
 
-    written = []
+    written, skipped = [], []
+
+    def skip(dep, arr, op, reason, **extra):
+        skipped.append({"dep_iata": dep, "arr_iata": arr, "operator": op,
+                        "reason": reason, **extra})
+
     for (dep, arr, op), flights in grouped.items():
-        tracks = [pts for pts in flights.values() if len(pts) >= 8]
+        tracks = [pts for pts in flights.values() if len(pts) >= MIN_POINTS]
         if len(tracks) < MIN_FLIGHTS:
+            skip(dep, arr, op, "too_few_flights",
+                 usable_tracks=len(tracks), legs_seen=len(flights))
             continue
 
         # Sliced to the length of the route, not to a constant.
@@ -144,31 +174,31 @@ async def learn(client, sb, sb_headers: dict, aps: dict) -> list[dict]:
 
         path = consensus_path(tracks, bins=nbins)
         if not path:
+            # No bin that two flights both crossed. Sampling too sparse for the route's length.
+            skip(dep, arr, op, "no_shared_bins", usable_tracks=len(tracks), bins=nbins)
             continue
 
-        # Which flights actually agree with it. A reroute is real and belongs in the samples,
-        # but not in the consensus — SYR342 flew KWI-DAM 231 km from the others one day.
-        kept, outliers = [], 0
-        for key, pts in flights.items():
-            if len(pts) < 8:
-                continue
-            offs = sorted(_off_path_km(path, p) for p in pts)
-            if offs and offs[len(offs) // 2] > OUTLIER_KM:
-                outliers += 1
-            else:
-                kept.append(key)
+        kept, outliers = partition_by_agreement(path, flights)
 
         if outliers:
             if len(kept) < MIN_FLIGHTS:
                 # Nothing agrees with anything. Two flights 417 km apart — KNE388 and KNE378 into
                 # Riyadh on 17 Aug — are two different routings with one example each, not a
-                # corridor and its outlier, and the median of them is a line down the middle that
-                # neither flew. Storing that is worse than storing nothing: the tracker would
-                # draw every DAM-RUH flight 200 km from wherever it actually is.
+                # corridor and its outlier.
+                #
+                # This used to say the median of two is "a line down the middle that neither
+                # flew". It is not: consensus_path takes lats[len // 2], so with exactly two
+                # tracks the corridor IS the upper one, and the other becomes the lone outlier.
+                # The rule is right for a different reason — one surviving flight is an anecdote,
+                # and storing it would draw every DAM-RUH flight along whichever of the two
+                # routings happened to sort higher. Half the time that is the wrong one, and
+                # nothing downstream would say so.
                 #
                 # Discovered only once variable binning let this route past the resolution gate,
                 # which had been hiding it. The old code wrote the contaminated path anyway and
                 # labelled it observed_count 1.
+                skip(dep, arr, op, "no_agreement",
+                     usable_tracks=len(tracks), outliers=outliers, agreed=len(kept))
                 continue
             # Recompute without them, so one bad day cannot even half-shift the median.
             path = consensus_path([flights[k] for k in kept], bins=nbins) or path
@@ -190,7 +220,33 @@ async def learn(client, sb, sb_headers: dict, aps: dict) -> list[dict]:
                      "Prefer": "resolution=merge-duplicates,return=minimal"},
             json=written[i:i + 50], timeout=60,
         )
-    return written
+    return written, skipped
+
+
+def partition_by_agreement(path: list[dict], flights: dict) -> tuple[list, int]:
+    """
+    Which flights actually agree with the consensus, and how many did not.
+
+    A reroute is real and belongs in the samples, but not in the consensus — SYR342 flew KWI-DAM
+    7 km from the others one day and 231 km another. Judged on the MEDIAN offset rather than the
+    worst one, so a flight that merely dog-legs around weather for ten minutes still counts as
+    agreeing.
+
+    Extracted so that the test and the caller run the same code. It used to live inline in learn(),
+    which meant the test that proves outliers are rejected was a re-implementation of the rule
+    rather than an exercise of it — the arrangement in which a filter can quietly stop working
+    while its test goes on passing.
+    """
+    kept, outliers = [], 0
+    for key, pts in flights.items():
+        if len(pts) < MIN_POINTS:
+            continue
+        offs = sorted(_off_path_km(path, p) for p in pts)
+        if offs and offs[len(offs) // 2] > OUTLIER_KM:
+            outliers += 1
+        else:
+            kept.append(key)
+    return kept, outliers
 
 
 def _off_path_km(path: list[dict], point: dict) -> float:
