@@ -195,26 +195,84 @@ def test_a_route_with_no_agreement_at_all_stores_nothing():
     This is asserted through learn()'s rule rather than consensus_path, which will happily
     average anything it is given: the judgement belongs to the caller that knows what an outlier
     is.
-    """
-    from learn import MIN_FLIGHTS, OUTLIER_KM, _off_path_km
 
-    def straight(lat0, lon0, lat1, lon1, n=12):
-        return [{"gc_fraction": i / (n - 1),
-                 "lat": lat0 + (lat1 - lat0) * i / (n - 1),
-                 "lon": lon0 + (lon1 - lon0) * i / (n - 1)} for i in range(n)]
+    It calls partition_by_agreement — the function learn() itself calls. It used to re-implement
+    that loop here, which meant the test could keep passing while the real filter was broken or
+    bypassed. A test that reproduces the logic it is checking proves only that the logic can be
+    written twice.
+    """
+    from learn import MIN_FLIGHTS, partition_by_agreement
 
     # Same endpoints, wildly different middles.
-    a = straight(33.41, 36.52, 24.96, 46.70)
+    a = straight_between(33.41, 36.52, 24.96, 46.70)
     b = [dict(p, lat=p["lat"] + 3.5) for p in a]          # a few hundred km north
     path = consensus_path([a, b], bins=40)
     assert path, "a median exists, which is exactly the danger"
 
-    kept = []
-    for track in (a, b):
-        offs = sorted(_off_path_km(path, p) for p in track)
-        if offs[len(offs) // 2] <= OUTLIER_KM:
-            kept.append(track)
-    assert len(kept) < MIN_FLIGHTS, "neither flight agrees with the average of the two"
+    kept, outliers = partition_by_agreement(path, {("KNE388", "d"): a, ("KNE378", "d"): b})
+
+    # ONE outlier, not two, and the reason matters more than the count.
+    #
+    # consensus_path takes lats[len // 2], which for two flights is the upper one rather than the
+    # mean — so with exactly two tracks the corridor IS one of them, exactly. That flight then
+    # sits 0 km from the consensus and only its opposite is rejected.
+    #
+    # The outcome is still right, and for a better reason than the one originally written down
+    # here: the pair is dropped because one surviving flight is below MIN_FLIGHTS, not because
+    # the median was a line down the middle nobody flew. At two flights it never is.
+    assert outliers == 1, f"the median is one of the two, so only its opposite is off: {outliers}"
+    assert len(kept) < MIN_FLIGHTS, "one flight left is an anecdote, not a corridor"
+
+
+def straight_between(lat0, lon0, lat1, lon1, n=12):
+    return [{"gc_fraction": i / (n - 1),
+             "lat": lat0 + (lat1 - lat0) * i / (n - 1),
+             "lon": lon0 + (lon1 - lon0) * i / (n - 1)} for i in range(n)]
+
+
+def test_the_outlier_is_dropped_and_the_agreeing_flights_are_kept():
+    """
+    The other half of the same rule, which nothing covered: when MOST flights agree, the filter
+    must keep them and reject only the reroute. `test_a_route_with_no_agreement` proves it can
+    reject everything, which a filter that rejects unconditionally would also pass.
+    """
+    from learn import partition_by_agreement
+
+    base = straight_between(33.41, 36.52, 24.96, 46.70)
+    flights = {(f"KNE{i}", "d"): [dict(p) for p in base] for i in range(4)}
+    flights[("KNE999", "d")] = [dict(p, lat=p["lat"] + 3.5) for p in base]   # the reroute
+
+    path = consensus_path(list(flights.values())[:4], bins=40)
+    kept, outliers = partition_by_agreement(path, flights)
+
+    assert outliers == 1, f"only the reroute should be rejected, got {outliers}"
+    assert len(kept) == 4
+    assert ("KNE999", "d") not in kept
+
+
+def test_a_fragment_is_not_counted_as_a_flight_that_agrees():
+    """A track too short to judge must not quietly become a vote. MIN_POINTS, not len() > 0."""
+    from learn import partition_by_agreement, MIN_POINTS
+
+    base = straight_between(33.41, 36.52, 24.96, 46.70)
+    path = consensus_path([base, [dict(p) for p in base]], bins=40)
+    kept, outliers = partition_by_agreement(path, {("SHORT", "d"): base[:MIN_POINTS - 1]})
+    assert kept == [] and outliers == 0, "a fragment is neither agreement nor disagreement"
+
+
+def test_learning_and_promoting_are_different_bars():
+    """
+    Two flights are enough to WRITE a corridor and must never be enough to DRAW one. The whole
+    point of the second constant is that it is strictly higher than the first.
+    """
+    from learn import MIN_FLIGHTS, PROMOTE_MIN_FLIGHTS, is_promotable
+
+    assert PROMOTE_MIN_FLIGHTS > MIN_FLIGHTS
+    assert not is_promotable(MIN_FLIGHTS)
+    assert not is_promotable(PROMOTE_MIN_FLIGHTS - 1)
+    assert is_promotable(PROMOTE_MIN_FLIGHTS)
+    assert not is_promotable(None), "a corridor with no count is not promotable"
+    assert not is_promotable(0)
 
 
 # ── Using a corridor that does not cover the whole route ──────────────────────

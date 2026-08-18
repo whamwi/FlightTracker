@@ -1511,16 +1511,126 @@ async def learn_routes():
     """
     async with httpx.AsyncClient() as client:
         aps = await airports(client)
-        written = await learn.learn(client, SB_URL, SB_HEADERS, aps)
+        written, skipped = await learn.learn(client, SB_URL, SB_HEADERS, aps)
+
+    # Skips are reported, not swallowed. `no_agreement` in particular is a FINDING — that pair
+    # flies two different routings — and it was previously indistinguishable from a route we had
+    # simply never seen, because both produced no row.
+    by_reason: dict[str, int] = {}
+    for s in skipped:
+        by_reason[s["reason"]] = by_reason.get(s["reason"], 0) + 1
+
     return {
         "ok": True,
         "corridors": len(written),
+        "promotable": sum(1 for w in written if learn.is_promotable(w["observed_count"])),
+        "promote_at": learn.PROMOTE_MIN_FLIGHTS,
         "routes": [
             {"route": f"{w['dep_iata']}->{w['arr_iata']}", "operator": w["operator"],
              "flights": w["observed_count"], "waypoints": len(w["waypoints"]),
-             "outliers": w["outliers_excluded"]}
+             "outliers": w["outliers_excluded"],
+             "promotable": learn.is_promotable(w["observed_count"])}
             for w in sorted(written, key=lambda w: -w["observed_count"])
         ],
+        "skipped": by_reason,
+        "disagreements": [
+            {"route": f"{s['dep_iata']}->{s['arr_iata']}", "operator": s["operator"],
+             "tracks": s.get("usable_tracks"), "outliers": s.get("outliers"),
+             "agreed": s.get("agreed")}
+            for s in skipped if s["reason"] == "no_agreement"
+        ],
+    }
+
+
+@app.get("/v2/route-readiness")
+async def route_readiness():
+    """
+    How close each route+operator is to a corridor that may be drawn.
+
+    Answers the question that otherwise takes four ad-hoc SQL queries: is this pair short of
+    DATA, or short of AGREEMENT? Those look identical in route_paths_learned — both are an
+    absent row — and they need opposite responses. More data fixes the first; only clustering
+    (#44) fixes the second, because averaging two real routings produces a third that nobody flew.
+
+    Reads the samples and the learned table; it does not re-run the learner, so it is cheap
+    enough to poll while waiting for the counts to build.
+    """
+    async with httpx.AsyncClient() as client:
+        samples = await learn._get(
+            client, SB_URL, SB_HEADERS,
+            "flight_track_samples?select=callsign,operator,dep_iata,arr_iata,flight_date,seen_at"
+            f"&seen_at=gte.{quote((datetime.now(timezone.utc) - timedelta(days=learn.SAMPLE_WINDOW_DAYS)).isoformat(), safe='')}",
+        )
+        learned = await learn._get(
+            client, SB_URL, SB_HEADERS,
+            "route_paths_learned?select=dep_iata,arr_iata,operator,observed_count,"
+            "outliers_excluded,sample_count,updated_at",
+        )
+
+    # Usable tracks per pair — the learner's own bar, so the number here is the number it sees.
+    pts: dict[tuple, dict[tuple, int]] = {}
+    newest: dict[tuple, str] = {}
+    for r in samples:
+        key = (r["dep_iata"], r["arr_iata"], r["operator"])
+        leg = (r["callsign"], r["flight_date"])
+        pts.setdefault(key, {})
+        pts[key][leg] = pts[key].get(leg, 0) + 1
+        if r["seen_at"] > newest.get(key, ""):
+            newest[key] = r["seen_at"]
+
+    have = {k: sum(1 for n in legs.values() if n >= learn.MIN_POINTS) for k, legs in pts.items()}
+    lrn = {(l["dep_iata"], l["arr_iata"], l["operator"]): l for l in learned}
+
+    out = []
+    for key in sorted(set(have) | set(lrn), key=lambda k: -have.get(k, 0)):
+        dep, arr, op = key
+        tracks = have.get(key, 0)
+        row = lrn.get(key)
+
+        # Has the learner seen these tracks yet?
+        #
+        # Without this the endpoint cannot tell "the learner refused this pair" from "the learner
+        # has not run since these flights landed", and it would report the second as the first —
+        # inventing a disagreement that was never found. Measured on 18 Aug: 20 pairs would learn
+        # from the samples then present, while the table held 14 from the previous run. Six pairs
+        # would have been libelled.
+        stale = bool(row and newest.get(key) and row.get("updated_at", "") < newest[key])
+
+        if row and learn.is_promotable(row.get("observed_count")):
+            status = "promotable"
+        elif row:
+            status = "learning"
+        elif tracks >= learn.MIN_FLIGHTS:
+            # Enough tracks to have tried, and nothing stored. Either the learner rejected the
+            # pair — its flights disagree, or they never shared a bin — or it has not been run
+            # since they arrived. `learner_ran_at` is what separates the two; run /v2/learn-routes
+            # and look again before reading this as a finding.
+            status = "no_corridor"
+        else:
+            status = "too_few_flights"
+
+        out.append({
+            "route": f"{dep}->{arr}", "operator": op,
+            "usable_tracks": tracks,
+            "learned_from": (row or {}).get("observed_count"),
+            "outliers_excluded": (row or {}).get("outliers_excluded"),
+            "needs": max(0, learn.PROMOTE_MIN_FLIGHTS - tracks),
+            "newest_sample": newest.get(key),
+            "learned_at": (row or {}).get("updated_at"),
+            "stale": stale,
+            "status": status,
+        })
+
+    tally: dict[str, int] = {}
+    for r in out:
+        tally[r["status"]] = tally.get(r["status"], 0) + 1
+    return {
+        "ok": True,
+        "promote_at": learn.PROMOTE_MIN_FLIGHTS,
+        "learner_ran_at": max((l.get("updated_at") or "" for l in learned), default=None),
+        "stale": sum(1 for r in out if r["stale"]),
+        "summary": tally,
+        "pairs": out,
     }
 
 
