@@ -78,6 +78,27 @@ export async function GET(req: Request) {
     }
   }
 
+  /*
+   * A second index, WITHOUT the flight number: (dep|arr|dow) → rows.
+   *
+   * A route already filed can operate under a different number. Sundair flew the Saturday Berlin
+   * service as SDR16GL/SDR17HL on 15 Aug rather than its filed SDR196/SDR197 — same route, same
+   * times, same day, same airline. Keyed on the number alone that reads as a brand-new route, and
+   * applying it created a second route_master row identical to the one already there, so the
+   * destinations page listed Berlin twice.
+   *
+   * This index is what tells the two apart: no number match, but something else already flies
+   * this pairing at this time on this day, so it is an alias rather than a discovery.
+   */
+  const rmByRoute = new Map<string, RouteRow[]>()
+  for (const rm of rmRows) {
+    for (const dow of (rm.days_of_week ?? [])) {
+      const key = `${rm.dep_iata}|${rm.arr_iata}|${dow}`
+      if (!rmByRoute.has(key)) rmByRoute.set(key, [])
+      rmByRoute.get(key)!.push(rm)
+    }
+  }
+
   // ── 2. Load yesterday's flights for Syrian airports ────────────────────────
   /*
    * `flight`, not fr24_daily_cache.
@@ -171,6 +192,46 @@ export async function GET(req: Request) {
                     ?? []
 
     if (candidates.length === 0) {
+      /*
+       * Nothing matches this NUMBER — but does anything already fly this route, this day, at this
+       * time? If so it is the same service under another name, not a new one.
+       *
+       * Filed as `alias` with the row it duplicates attached, so the admin page can offer the
+       * action that is actually correct: teach flight_lookup the alternative number, rather than
+       * create a route that already exists.
+       */
+      const sameRoute = rmByRoute.get(`${dep}|${arr}|${dow}`) ?? []
+      const depMin = hhmmToMin(cacheDep)
+      let aliasOf: RouteRow | null = null
+      let aliasDiff = Infinity
+      for (const c of sameRoute) {
+        if (!c.dep_time_utc) continue
+        // slice(0,5): route_master stores HH:MM:SS, and hhmmToMin reads HH:MM.
+        const rmMin = hhmmToMin(c.dep_time_utc.slice(0, 5))
+        // Same midnight-crossing guard as the drift comparison below.
+        const d = Math.min(Math.abs(depMin - rmMin), 1440 - Math.abs(depMin - rmMin))
+        if (d < aliasDiff) { aliasDiff = d; aliasOf = c }
+      }
+
+      if (aliasOf && aliasDiff <= 10) {
+        toInsert.push({
+          flight_date:     targetDate,
+          iata_number:     num,
+          dep_iata:        dep,
+          arr_iata:        arr,
+          sched_dep_utc:   cacheDep,
+          sched_arr_utc:   cacheArr,
+          duration_min:    cacheDur,
+          day_of_week:     dow,
+          route_master_id: aliasOf.id,
+          rm_dep_time_utc: aliasOf.dep_time_utc,
+          rm_arr_time_utc: aliasOf.arr_time_utc,
+          diff_minutes:    aliasDiff,
+          reason:          'alias',
+        })
+        continue
+      }
+
       toInsert.push({
         flight_date:     targetDate,
         iata_number:     num,
