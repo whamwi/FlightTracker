@@ -276,6 +276,10 @@ export async function GET(req: Request) {
           rm_arr_time_utc: near.row.arr_time_utc?.slice(0, 5) ?? null,
           diff_minutes:    near.diff,
           reason:          'new_day',
+          // Present on every branch: PostgREST rejects a bulk insert whose objects do not
+          // all carry the same keys (PGRST102), so the alias branch's flag has to exist here
+          // too. Caught by a local run; in production it would have been another silent 502.
+          reviewed:        false,
         })
         continue
       }
@@ -306,6 +310,25 @@ export async function GET(req: Request) {
           rm_arr_time_utc: aliasOf.arr_time_utc,
           diff_minutes:    aliasDiff,
           reason:          'alias',
+          /*
+           * An exact match is filed already reviewed.
+           *
+           * Sundair's Berlin service changes its flight number on every single operation —
+           * SR16GL/SR17HL on 15 Aug, SR14ML/SR15NL on 18 Aug, letters in the suffix, never
+           * repeated — while the route, both directions, both days and both times sit in
+           * route_master exactly as filed. Teaching flight_lookup each number is a treadmill: the
+           * next flight invents another one. Left alone it is two rows a week to dismiss by hand,
+           * forever.
+           *
+           * Zero minutes against a route already filed carries no information, for any carrier,
+           * which is why this is not special-cased to one airline. The row is still written, so
+           * the Aliases tab keeps the audit trail; it simply does not ask for a decision.
+           *
+           * It hides nothing: if the service is ever RETIMED the number will not match and the
+           * time will not match either, so it misses the alias branch entirely and surfaces as
+           * new_route. Only the case with nothing to decide is silenced.
+           */
+          reviewed:        aliasDiff === 0,
         })
         continue
       }
@@ -324,6 +347,8 @@ export async function GET(req: Request) {
         rm_arr_time_utc: null,
         diff_minutes:    null,
         reason:          'new_route',
+        // Same key set as every other branch — see the note above (PGRST102).
+        reviewed:        false,
       })
       continue
     }
@@ -348,6 +373,8 @@ export async function GET(req: Request) {
         rm_arr_time_utc: best.arr_time_utc?.slice(0, 5) ?? null,
         diff_minutes:    bestDiff,
         reason:          'time_drift',
+        // Same key set as every other branch — see the note above (PGRST102).
+        reviewed:        false,
       })
     }
   }
