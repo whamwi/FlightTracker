@@ -320,3 +320,47 @@ if __name__ == "__main__":
                 print(f"FAIL {name}: {e}")
     print(f"\n{fails} failed")
     sys.exit(1 if fails else 0)
+
+
+# ── The map stops drawing an arrival ──────────────────────────────────────────
+#
+# The rule agreed 18 Aug: the map's job is to track, so a flight leaves it at the terminal
+# phase and is looked up on the board or the arrivals panel instead. Everything before
+# `arrived` is still motion and still drawn.
+
+def _drawable(phase: str, landed_at=None, now_ms=None):
+    """The shipping gate itself, not a copy of it."""
+    from main import draws_on_map
+    return draws_on_map(phase, landed_at, now_ms)
+
+
+def test_the_terminal_phase_loses_its_marker():
+    assert _drawable("arrived") is False
+
+
+def test_every_phase_before_arrived_keeps_its_marker():
+    # Rolling out, crossing the airfield, and stopped-but-unconfirmed are all still motion,
+    # and a passenger meeting the flight wants to see each of them.
+    for phase in ("scheduled", "taxiing", "departed", "en_route", "landed", "taxi_to_gate"):
+        assert _drawable(phase) is True, phase
+
+
+def test_at_gate_is_drawn_while_the_record_might_still_arrive():
+    now = 1_000_000_000_000
+    assert _drawable("at_gate", landed_at=now - 60_000, now_ms=now) is True
+
+
+def test_at_gate_gives_up_waiting_for_a_record_that_never_comes():
+    """
+    FR24 is silent on 22 of 35 Aleppo arrivals. Without this the flight sits at its destination
+    for STALE_UNARRIVED_SEC — eighteen hours — because is_live_leg only expires on an arrival
+    timestamp and `at_gate` has none.
+    """
+    now = 1_000_000_000_000
+    assert _drawable("at_gate", landed_at=now - 31 * 60_000, now_ms=now) is False
+
+
+def test_at_gate_without_a_landing_time_is_left_alone():
+    # No touchdown instant means nothing to measure the grace against; guessing would be worse
+    # than drawing it.
+    assert _drawable("at_gate", landed_at=None, now_ms=1_000) is True

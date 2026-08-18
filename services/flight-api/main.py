@@ -460,6 +460,22 @@ def haversine(a: tuple[float, float], b: tuple[float, float]) -> float:
 
 # ── Derivation ───────────────────────────────────────────────────────────────
 
+def draws_on_map(phase: str, landed_at_ms: float | None = None,
+                 now_ms: float | None = None) -> bool:
+    """
+    Whether a flight in this phase still belongs on the map.
+
+    Split out rather than left inline so the test exercises the shipping rule instead of a copy
+    of it — the arrangement that let an outlier filter in learn.py look tested while the real
+    path went the other way.
+    """
+    if phase == "arrived":
+        return False
+    if phase == "at_gate" and landed_at_ms is not None and now_ms is not None:
+        return now_ms - landed_at_ms <= AT_GATE_GRACE_SEC * 1000
+    return True
+
+
 def derive_phase(f: dict, pos: dict | None,
                  landed_at_ms: float | None = None, now_ms: float | None = None) -> str:
     """
@@ -644,6 +660,18 @@ def eta_key(f: dict) -> tuple:
 # recycled fr24_id can latch onto days later. Longer than any route we fly — DAM-SVO is 280
 # minutes — plus room for a badly delayed one.
 STALE_UNARRIVED_SEC = 18 * 3600
+
+# How long an aeroplane may sit stopped at its destination before we call it arrived ourselves.
+#
+# `arrived` is the only phase that waits for a published record, deliberately — ending a flight's
+# life is a claim about a record, not about a fix. But the record does not always come: FR24 is
+# silent on 22 of 35 Aleppo arrivals, and until arr_confirmed_at settles one, the flight stays at
+# `at_gate`. Thirty minutes stopped on the ground where it was going is not ambiguous, and the
+# alternative is a marker on the airport until STALE_UNARRIVED_SEC — most of a day.
+#
+# Only removes the MARKER. The phase still reads at_gate, honestly, because that is what the
+# record supports.
+AT_GATE_GRACE_SEC = 30 * 60
 
 
 def is_live_leg(f: dict, now: datetime) -> bool:
@@ -1340,6 +1368,32 @@ async def build_live() -> dict:
         dep_delay = (round((real_dep_i - sched_dep_i).total_seconds() / 60)
                      if real_dep_i and sched_dep_i else None)
 
+        phase = derive_phase(f, pos, landed_at, now_ms)
+
+        # ── The map tracks flights. An arrival is not a flight any more. ──────────
+        #
+        # `arrived` is the last rung of the ladder and the only terminal one, so it is the moment
+        # the aircraft stops being something to follow and becomes something to look up — on the
+        # board, or in the arrivals panel. Everything before it is still motion and still drawn:
+        # `landed` is rolling out, `taxi_to_gate` is crossing the airfield, `at_gate` has stopped
+        # but nobody has confirmed it. A marker parked on the airport it arrived at says nothing
+        # the airport marker does not, and on a phone it covers it.
+        #
+        # Done by withholding the POSITION rather than dropping the leg, because those are
+        # different claims. "Where is it" now has no answer; "what happened to it" still does, and
+        # the card, the phase and the ETA all keep working. A client that draws only what it is
+        # given a position for needs no change at all — which is exactly how the web's
+        # /api/airspace behaves, since it already skips a flight with no position.
+        #
+        # THE BACKSTOP IS NOT OPTIONAL. `arrived` needs real_arr or arr_confirmed_at, and neither
+        # ever comes for a fair share of Aleppo — FR24 is silent on 22 of 35. Such a flight stops
+        # at `at_gate`, and is_live_leg only expires on an arrival timestamp, so without this it
+        # would sit on the map at its destination for STALE_UNARRIVED_SEC: eighteen hours. An
+        # aeroplane stopped on the ground at the airport it was flying to has arrived, whatever
+        # the record says, and after AT_GATE_GRACE_SEC we stop pretending otherwise.
+        if not draws_on_map(phase, landed_at, now_ms):
+            pos, projected = None, None
+
         out.append({
             "iata_number": f["iata_number"],
             "callsign": f.get("callsign"),
@@ -1350,7 +1404,7 @@ async def build_live() -> dict:
             "arr_time_utc": sched_arr_i.astimezone(timezone.utc).strftime("%H:%M") if sched_arr_i else None,
             "revised_arr_utc": zulu(revision(f.get("est_arr"), f.get("sched_arr"))),
             "dep_delay_min": dep_delay,
-            "phase": derive_phase(f, pos, landed_at, now_ms),
+            "phase": phase,
             "progress": progress,
             "progress_basis": p_basis,
             "eta_utc": eta,
