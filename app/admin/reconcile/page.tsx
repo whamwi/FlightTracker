@@ -17,7 +17,7 @@ interface UnfiledRow {
   rm_dep_time_utc: string | null
   rm_arr_time_utc: string | null
   diff_minutes:    number | null
-  reason:          'time_drift' | 'new_route' | 'alias'
+  reason:          'time_drift' | 'new_route' | 'alias' | 'new_day'
   reviewed:        boolean
   created_at:      string
 }
@@ -131,7 +131,7 @@ const DOW_ORDER_ALL = ['mon','tue','wed','thu','fri','sat','sun']
 export default function ReconcilePage() {
   const [rows, setRows]           = useState<UnfiledRow[]>([])
   const [loading, setLoading]     = useState(true)
-  const [tab, setTab]             = useState<'time_drift' | 'new_route' | 'alias' | 'no_activity'>('time_drift')
+  const [tab, setTab]             = useState<'time_drift' | 'new_route' | 'alias' | 'new_day' | 'no_activity'>('time_drift')
   const [hideReviewed, setHide]   = useState(true)
   const [saving, setSaving]       = useState<number | null>(null)
   const [deleting, setDeleting]   = useState<string | null>(null)
@@ -270,9 +270,26 @@ export default function ReconcilePage() {
    * to teach flight_lookup the alternative number, not to create a route.
    */
   const aliasRows   = rows.filter(r => r.reason === 'alias')
-  const displayed   = tab === 'time_drift' ? driftRows
-                    : tab === 'alias'      ? aliasRows
-                    : newRows
+  /*
+   * Already filed, on other days of the week.
+   *
+   * XH743 DAM->SHJ was filed fri,sat at 21:05 and started running Monday and Tuesday at 21:15.
+   * Keyed on the day, that reads as a new route, and applying it created a second route_master row
+   * ten minutes from the first. The correct action is to append the day to the existing row's
+   * days_of_week — which is only right because the cron files this as new_day ONLY when the
+   * departure times agree to within ten minutes.
+   */
+  const newDayRows  = rows.filter(r => r.reason === 'new_day')
+
+  /*
+   * The parentheses matter. Without them the .filter and .sort bind to `newRows` alone — member
+   * access is tighter than ?: — so Hide reviewed and the sort arrow silently did nothing on every
+   * tab except New Routes.
+   */
+  const displayed   = (tab === 'time_drift' ? driftRows
+                     : tab === 'alias'      ? aliasRows
+                     : tab === 'new_day'    ? newDayRows
+                     : newRows)
     .filter(r => hideReviewed ? !r.reviewed : true)
     .sort((a, b) => {
       if (!sortDir) return 0
@@ -292,6 +309,7 @@ export default function ReconcilePage() {
   const pendingDrift = driftRows.filter(r => !r.reviewed).length
   const pendingNew   = newRows.filter(r => !r.reviewed).length
   const pendingAlias = aliasRows.filter(r => !r.reviewed).length
+  const pendingNewDay= newDayRows.filter(r => !r.reviewed).length
 
   return (
     <div style={s.page}>
@@ -331,6 +349,9 @@ export default function ReconcilePage() {
         </button>
         <button style={tab === 'alias' ? s.tabA : s.tab} onClick={() => setTab('alias')}>
           Aliases ({pendingAlias} pending)
+        </button>
+        <button style={tab === 'new_day' ? s.tabA : s.tab} onClick={() => setTab('new_day')}>
+          New Days ({pendingNewDay} pending)
         </button>
         <button style={tab === 'no_activity' ? s.tabA : s.tab} onClick={() => setTab('no_activity')}>
           No Activity ({(idle ?? []).filter(r => !r.outcome).length} open)
@@ -412,7 +433,7 @@ export default function ReconcilePage() {
         <p style={{ color: '#999', padding: '32px 0', textAlign: 'center' }}>
           {hideReviewed ? 'All caught up — nothing pending review.' : 'No entries yet.'}
         </p>
-      ) : (tab === 'time_drift' || tab === 'alias') ? (
+      ) : (tab === 'time_drift' || tab === 'alias' || tab === 'new_day') ? (
         <table style={s.table}>
           <thead>
             <tr>
