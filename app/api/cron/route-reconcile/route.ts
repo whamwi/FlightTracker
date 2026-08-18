@@ -21,15 +21,35 @@ function hhmmToMin(hhmm: string): number {
   return h * 60 + m
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type RouteRow = any
+
+/**
+ * The route_master row whose scheduled departure is nearest, and by how many minutes.
+ *
+ * Three branches below need this and all three need the same midnight-crossing guard, which is the
+ * kind of thing that gets copied twice and fixed once.
+ */
+function closestByDep(rows: RouteRow[], depMin: number): { row: RouteRow | null; diff: number } {
+  let row: RouteRow | null = null
+  let diff = Infinity
+  for (const c of rows) {
+    if (!c.dep_time_utc) continue
+    // slice(0,5): route_master stores HH:MM:SS, hhmmToMin reads HH:MM.
+    const rmMin = hhmmToMin(c.dep_time_utc.slice(0, 5))
+    // 23:55 against 00:05 is 10 minutes apart, not 1430.
+    const d = Math.min(Math.abs(depMin - rmMin), 1440 - Math.abs(depMin - rmMin))
+    if (d < diff) { diff = d; row = c }
+  }
+  return { row, diff }
+}
+
 function unixToSyriaDow(unix: number): string {
   const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
   // Shift to Syria local time (UTC+3) before reading the day
   const d = new Date((unix + 3 * 3600) * 1000)
   return DAYS[d.getUTCDay()]
 }
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type RouteRow = any
 
 export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET
@@ -96,6 +116,29 @@ export async function GET(req: Request) {
       const key = `${rm.dep_iata}|${rm.arr_iata}|${dow}`
       if (!rmByRoute.has(key)) rmByRoute.set(key, [])
       rmByRoute.get(key)!.push(rm)
+    }
+  }
+
+  /*
+   * A third index, this time WITHOUT the day: (flight_num|dep|arr) → rows.
+   *
+   * The same mistake as the alias one, in the other dimension. An airline that adds a weekday to a
+   * route it already flies keeps its number and its pairing and changes only the day — and because
+   * the first index is keyed on the day, that finds nothing and reads as a discovery. XH743
+   * DAM->SHJ was filed fri,sat at 21:05, started running Monday and Tuesday at 21:15, and got a
+   * second route_master row ten minutes away from the first: one service, two rows.
+   *
+   * The alias index cannot catch it, because that one matches on route and day while ignoring the
+   * NUMBER — and on a brand-new day nothing else is flying the pairing either.
+   */
+  const rmByNumRoute = new Map<string, RouteRow[]>()
+  for (const rm of rmRows) {
+    const fl = rm.flight_lookup
+    if (!fl) continue
+    for (const num of [fl.iata_number, fl.broadcast_callsign].filter(Boolean)) {
+      const key = `${num}|${rm.dep_iata}|${rm.arr_iata}`
+      if (!rmByNumRoute.has(key)) rmByNumRoute.set(key, [])
+      rmByNumRoute.get(key)!.push(rm)
     }
   }
 
@@ -192,6 +235,51 @@ export async function GET(req: Request) {
                     ?? []
 
     if (candidates.length === 0) {
+      const depMin = hhmmToMin(cacheDep)
+
+      /*
+       * Before anything else: is this the SAME flight, on a day it has not flown before?
+       *
+       * Checked ahead of the alias branch because a number-and-route match is stronger evidence
+       * than a route match alone. Reversed, XH743 on its first Monday could be claimed as an alias
+       * of whatever else happens to fly DAM->SHJ on Mondays — a different airline's service — and
+       * the number, the thing that actually identifies it, would be the one signal ignored.
+       */
+      const sameNumRoute = rmByNumRoute.get(`${num}|${dep}|${arr}`)
+                        ?? (cs ? rmByNumRoute.get(`${cs}|${dep}|${arr}`) : undefined)
+                        ?? []
+      const near = closestByDep(sameNumRoute, depMin)
+
+      /*
+       * The 10-minute tolerance is doing real work here, not just matching the rest of the file.
+       *
+       * `new_day` means one action: append this day to that row's days_of_week. That is only
+       * truthful if the row's departure time is also this day's departure time. XH485 DAM->SAW
+       * flies 22:20 on Friday and 22:40 on Sunday; folding Sunday into the Friday row would file
+       * Sunday as departing 22:20, which is wrong by twenty minutes on every board that reads it.
+       *
+       * So a same-number, same-route, different-day, DIFFERENT-TIME service stays `new_route`.
+       * It genuinely needs its own row — that is what route_master's per-day-group rows are for.
+       */
+      if (near.row && near.diff <= 10) {
+        toInsert.push({
+          flight_date:     targetDate,
+          iata_number:     num,
+          dep_iata:        dep,
+          arr_iata:        arr,
+          sched_dep_utc:   cacheDep,
+          sched_arr_utc:   cacheArr,
+          duration_min:    cacheDur,
+          day_of_week:     dow,
+          route_master_id: near.row.id,
+          rm_dep_time_utc: near.row.dep_time_utc?.slice(0, 5) ?? null,
+          rm_arr_time_utc: near.row.arr_time_utc?.slice(0, 5) ?? null,
+          diff_minutes:    near.diff,
+          reason:          'new_day',
+        })
+        continue
+      }
+
       /*
        * Nothing matches this NUMBER — but does anything already fly this route, this day, at this
        * time? If so it is the same service under another name, not a new one.
@@ -201,17 +289,7 @@ export async function GET(req: Request) {
        * create a route that already exists.
        */
       const sameRoute = rmByRoute.get(`${dep}|${arr}|${dow}`) ?? []
-      const depMin = hhmmToMin(cacheDep)
-      let aliasOf: RouteRow | null = null
-      let aliasDiff = Infinity
-      for (const c of sameRoute) {
-        if (!c.dep_time_utc) continue
-        // slice(0,5): route_master stores HH:MM:SS, and hhmmToMin reads HH:MM.
-        const rmMin = hhmmToMin(c.dep_time_utc.slice(0, 5))
-        // Same midnight-crossing guard as the drift comparison below.
-        const d = Math.min(Math.abs(depMin - rmMin), 1440 - Math.abs(depMin - rmMin))
-        if (d < aliasDiff) { aliasDiff = d; aliasOf = c }
-      }
+      const { row: aliasOf, diff: aliasDiff } = closestByDep(sameRoute, depMin)
 
       if (aliasOf && aliasDiff <= 10) {
         toInsert.push({
@@ -250,22 +328,12 @@ export async function GET(req: Request) {
       continue
     }
 
-    // Find the best-matching route_master row (smallest dep-time difference)
-    const cacheDepMin = hhmmToMin(cacheDep)
-    let best: RouteRow = candidates[0]
-    let bestDiff = Infinity
-    for (const c of candidates) {
-      if (!c.dep_time_utc) continue
-      const rmMin = hhmmToMin(c.dep_time_utc.slice(0, 5))
-      // Midnight-crossing guard: 23:55 vs 00:05 = 10 min, not 1430
-      const diff = Math.min(
-        Math.abs(cacheDepMin - rmMin),
-        1440 - Math.abs(cacheDepMin - rmMin)
-      )
-      if (diff < bestDiff) { bestDiff = diff; best = c }
-    }
+    // The candidate whose departure is nearest. If not one of them carries a dep_time_utc there is
+    // nothing to compare against, so the flight is left alone rather than filed against a row at an
+    // unknown time — which is what an infinite diff used to become on the way through JSON.
+    const { row: best, diff: bestDiff } = closestByDep(candidates, hhmmToMin(cacheDep))
 
-    if (bestDiff > 10) {
+    if (best && bestDiff > 10) {
       toInsert.push({
         flight_date:     targetDate,
         iata_number:     num,
@@ -310,9 +378,14 @@ export async function GET(req: Request) {
     checked:   seen.size,
     flagged:   toInsert.length,
     inserted,
-    breakdown: {
-      time_drift: toInsert.filter((r: object) => (r as { reason: string }).reason === 'time_drift').length,
-      new_route:  toInsert.filter((r: object) => (r as { reason: string }).reason === 'new_route').length,
-    },
+    breakdown: (['time_drift', 'new_route', 'alias', 'new_day'] as const).reduce(
+      (acc, reason) => {
+        // Counted from the list rather than hand-written, because the two that were added since
+        // are exactly the ones a hand-written literal would have gone on omitting.
+        acc[reason] = toInsert.filter(r => (r as { reason: string }).reason === reason).length
+        return acc
+      },
+      {} as Record<string, number>,
+    ),
   })
 }

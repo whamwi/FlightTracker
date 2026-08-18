@@ -188,6 +188,34 @@ async function applyDrift(rm: RmRow, day: string, depUtc: string, arrUtc: string
   return { action: 'split_new_row', day, left_on: rm.id, remaining }
 }
 
+/**
+ * A day this service now flies, added to the row that already describes it.
+ *
+ * Much smaller than applyDrift, and deliberately so. The times are already known to agree to
+ * within ten minutes — that is the condition under which the cron files a row as `new_day` at all
+ * — so nothing is retimed, nothing is split, and no row is created. Only the day set grows.
+ *
+ * Idempotent: a day already present is left alone and reported as such, so pressing the button
+ * twice is not a second write.
+ */
+async function applyNewDay(rmId: number, day: string) {
+  const rmRows: RmRow[] = await sb(`/route_master?id=eq.${rmId}&select=*`)
+  const rm = rmRows?.[0]
+  if (!rm) throw new Error(`route_master ${rmId} not found`)
+
+  const days = rm.days_of_week ?? []
+  if (days.includes(day)) return { action: 'already_present', row: rm.id, day }
+
+  await sb(`/route_master?id=eq.${rm.id}`, {
+    method: 'PATCH', headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({
+      days_of_week: [...days, day],
+      data_updated: new Date().toISOString(),
+    }),
+  })
+  return { action: 'day_added', row: rm.id, day, days_of_week: [...days, day] }
+}
+
 export async function PATCH(req: Request) {
   const { id, reviewed } = await req.json()
   if (!id) return NextResponse.json({ ok: false, error: 'id required' }, { status: 400 })
@@ -198,21 +226,35 @@ export async function PATCH(req: Request) {
   )
   const row = rows?.[0]
 
+  /*
+   * What "reviewed" DOES depends on the reason, and the gate is what keeps that safe.
+   *
+   *   time_drift  retimes the route_master row (applyDrift — splits, merges, may delete a row)
+   *   new_day     appends the day to the row it matched, nothing else
+   *   alias       nothing. The useful action is teaching flight_lookup the alternative number,
+   *               which is a different screen; marking it reviewed only takes it off the list.
+   *   new_route   nothing here — those are created from the grouped New Routes tab.
+   *
+   * The gate is the reason an alias or a new_day row cannot have a drift applied to it by
+   * pressing the same button, so the shared table is safe to reuse for all three.
+   */
   let applied: unknown = null
-  if (row?.reason === 'time_drift' && row.route_master_id && row.sched_dep_utc && row.day_of_week) {
-    try {
+  try {
+    if (row?.reason === 'time_drift' && row.route_master_id && row.sched_dep_utc && row.day_of_week) {
       const rmRows: RmRow[] = await sb(`/route_master?id=eq.${row.route_master_id}&select=*`)
       const rm = rmRows?.[0]
       if (!rm) throw new Error(`route_master ${row.route_master_id} not found`)
       applied = await applyDrift(rm, row.day_of_week, row.sched_dep_utc, row.sched_arr_utc, row.duration_min)
-    } catch (e) {
-      // Reported rather than swallowed, and the unfiled row is deliberately NOT marked
-      // reviewed: a drift that was not applied must stay on the list.
-      return NextResponse.json(
-        { ok: false, error: `route_master update failed: ${e instanceof Error ? e.message : String(e)}` },
-        { status: 409 },
-      )
+    } else if (row?.reason === 'new_day' && row.route_master_id && row.day_of_week) {
+      applied = await applyNewDay(row.route_master_id, row.day_of_week)
     }
+  } catch (e) {
+    // Reported rather than swallowed, and the unfiled row is deliberately NOT marked
+    // reviewed: a change that was not applied must stay on the list.
+    return NextResponse.json(
+      { ok: false, error: `route_master update failed: ${e instanceof Error ? e.message : String(e)}` },
+      { status: 409 },
+    )
   }
 
   await sb(`/unfiled_flights?id=eq.${id}`, {
