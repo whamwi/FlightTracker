@@ -17,7 +17,7 @@ interface UnfiledRow {
   rm_dep_time_utc: string | null
   rm_arr_time_utc: string | null
   diff_minutes:    number | null
-  reason:          'time_drift' | 'new_route'
+  reason:          'time_drift' | 'new_route' | 'alias'
   reviewed:        boolean
   created_at:      string
 }
@@ -131,7 +131,7 @@ const DOW_ORDER_ALL = ['mon','tue','wed','thu','fri','sat','sun']
 export default function ReconcilePage() {
   const [rows, setRows]           = useState<UnfiledRow[]>([])
   const [loading, setLoading]     = useState(true)
-  const [tab, setTab]             = useState<'time_drift' | 'new_route' | 'no_activity'>('time_drift')
+  const [tab, setTab]             = useState<'time_drift' | 'new_route' | 'alias' | 'no_activity'>('time_drift')
   const [hideReviewed, setHide]   = useState(true)
   const [saving, setSaving]       = useState<number | null>(null)
   const [deleting, setDeleting]   = useState<string | null>(null)
@@ -261,7 +261,18 @@ export default function ReconcilePage() {
 
   const driftRows   = rows.filter(r => r.reason === 'time_drift')
   const newRows     = rows.filter(r => r.reason === 'new_route')
-  const displayed   = (tab === 'time_drift' ? driftRows : newRows)
+  /*
+   * Already filed, under another flight number.
+   *
+   * Sundair flew the Saturday Berlin service as SDR16GL/SDR17HL rather than its filed
+   * SDR196/SDR197. Matching on the number alone that reads as a new route, and applying it
+   * created a second route_master row identical to the one already there. The correct action is
+   * to teach flight_lookup the alternative number, not to create a route.
+   */
+  const aliasRows   = rows.filter(r => r.reason === 'alias')
+  const displayed   = tab === 'time_drift' ? driftRows
+                    : tab === 'alias'      ? aliasRows
+                    : newRows
     .filter(r => hideReviewed ? !r.reviewed : true)
     .sort((a, b) => {
       if (!sortDir) return 0
@@ -280,6 +291,7 @@ export default function ReconcilePage() {
 
   const pendingDrift = driftRows.filter(r => !r.reviewed).length
   const pendingNew   = newRows.filter(r => !r.reviewed).length
+  const pendingAlias = aliasRows.filter(r => !r.reviewed).length
 
   return (
     <div style={s.page}>
@@ -316,6 +328,9 @@ export default function ReconcilePage() {
         </button>
         <button style={tab === 'new_route' ? s.tabA : s.tab} onClick={() => setTab('new_route')}>
           New Routes ({pendingNew} pending)
+        </button>
+        <button style={tab === 'alias' ? s.tabA : s.tab} onClick={() => setTab('alias')}>
+          Aliases ({pendingAlias} pending)
         </button>
         <button style={tab === 'no_activity' ? s.tabA : s.tab} onClick={() => setTab('no_activity')}>
           No Activity ({(idle ?? []).filter(r => !r.outcome).length} open)
@@ -397,7 +412,7 @@ export default function ReconcilePage() {
         <p style={{ color: '#999', padding: '32px 0', textAlign: 'center' }}>
           {hideReviewed ? 'All caught up — nothing pending review.' : 'No entries yet.'}
         </p>
-      ) : tab === 'time_drift' ? (
+      ) : (tab === 'time_drift' || tab === 'alias') ? (
         <table style={s.table}>
           <thead>
             <tr>
