@@ -8,7 +8,7 @@ import { Suspense, useState, useEffect, useCallback, useRef } from 'react'
 import { AIRLINE_LOGOS, LOGO_WHITE_BG } from '@/lib/airlines'
 import { cityFor, airlineNameFor, getActiveLocale, airportFlag as apFlag, loadGeoData } from '@/lib/geo-data'
 import { useT, useLocale, useHref } from '@/components/LocaleProvider'
-import { effectiveStatus, calcDelay } from '@/lib/flight-status'
+import { effectiveStatus, calcDelay, rankInstance } from '@/lib/flight-status'
 import { formatAirportTime, airportTimeParts } from '@/lib/airport-time'
 import { DelayChip, Meridiem } from '@/components/FlightMeta'
 import { STATUS_KEY, counted } from '@/lib/i18n'
@@ -474,7 +474,24 @@ function useInAirFlights() {
        */
       // A plain object, not a Map: `Map` at this module's scope is the dynamically imported
       // map component, so `new Map()` here builds a React element.
-      const rank = (f: InAirFlight) => (f.actual_dep_utc ? 2 : f.status && f.status !== 'Scheduled' ? 1 : 0)
+      /*
+       * rankInstance, not a local rule — because the local one could not tell an aeroplane in
+       * the air from one that had already landed.
+       *
+       * It scored `actual_dep_utc ? 2 : ...`, and an ARRIVED row has an actual departure too: it
+       * left and then it landed. So both instances of a flight that has flown this route twice
+       * today tied on 2, the comparison is strict, and the first row encountered kept the slot —
+       * the arrived one. isFlying then dropped it, and the airborne instance was never considered
+       * at all.
+       *
+       * XH728 DXB-DAM on 19 Aug: two rows, one Arrived and one Departed. The map drew it from the
+       * feed the whole time while the panel beside it showed one flight instead of two.
+       *
+       * rankInstance already draws that distinction — airborne 3, recently arrived 2, scheduled 1,
+       * stale arrival 0 — and is tested. The local copy existed because this list was written
+       * before it.
+       */
+      const rank = (f: InAirFlight) => rankInstance(f)
       const best: Record<string, InAirFlight> = {}
       // Parallel to the array the two boards were fetched with, so each row keeps the day its
       // bare HH:MM times belong to once the two are flattened together.
