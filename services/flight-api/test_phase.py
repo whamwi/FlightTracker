@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 """
 derive_phase, against the cases that were wrong.
 
@@ -364,3 +365,29 @@ def test_at_gate_without_a_landing_time_is_left_alone():
     # No touchdown instant means nothing to measure the grace against; guessing would be worse
     # than drawing it.
     assert _drawable("at_gate", landed_at=None, now_ms=1_000) is True
+
+
+def test_a_stale_fix_does_not_keep_a_confirmed_arrival_flying():
+    """
+    XH523/FYC523 DAM-EBL, 18 Aug. arr_confirmed_at settled at 18:04, FR24 never published
+    real_arr, and Erbil is far outside ADS-B coverage — so the freshest fix was from mid-flight
+    over Syria. The board said Arrived and the map drew it airborne hundreds of kilometres away,
+    because any fix at all counted as evidence it was still rolling out.
+
+    The contradiction window this branch exists for is 22 seconds. Ten minutes is not it.
+    """
+    from main import derive_phase
+    base = datetime(2026, 8, 18, 18, 10, tzinfo=timezone.utc)   # ten minutes after the landing
+    now_ms = base.timestamp() * 1000
+
+    def fix(minutes_old):
+        at = base - timedelta(minutes=minutes_old)
+        return {"on_ground": False, "altitude_ft": 31000, "ground_speed_kts": 430,
+                "fix_at": at.isoformat()}
+
+    assert derive_phase(CONFIRMED, fix(10), None, now_ms) == "arrived", \
+        "ten minutes old is not a contradiction, it is an out-of-date fix"
+    assert derive_phase(CONFIRMED, fix(0.3), None, now_ms) == "landed", \
+        "a fix inside the window still contradicts the record"
+    assert derive_phase(CONFIRMED, {"on_ground": False}, None, now_ms) == "landed", \
+        "no timestamp means unknown age, and unknown is not stale"
