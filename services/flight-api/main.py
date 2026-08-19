@@ -561,7 +561,26 @@ def derive_phase(f: dict, pos: dict | None,
         #
         # With no position at all there is nothing to contradict the record, and nothing more
         # to say, so the terminal word is honest.
-        return "arrived" if pos is None else "landed"
+        #
+        # AND A STALE FIX IS NO POSITION. This read `pos is None`, so any fix at all — however
+        # old — counted as evidence the aeroplane was still rolling out. XH523/FYC523 DAM-EBL on
+        # 18 Aug is the case: arr_confirmed_at settled at 18:04, FR24 never published real_arr,
+        # and Erbil is far outside ADS-B coverage, so the freshest fix was from mid-flight over
+        # Syria. The record said arrived, this returned `landed`, draws_on_map kept the position
+        # because landed is still motion, and the map drew it airborne hundreds of kilometres
+        # from where the board said it had landed. Board and map disagreeing about one flight is
+        # the exact fault this whole phase layer exists to remove.
+        #
+        # The contradiction window is real but SHORT — 22 seconds measured on FYC781. A fix older
+        # than the staleness bar is not contradicting the record, it is simply out of date, and
+        # the record is then the only thing that knows anything.
+        # Unknown age is NOT staleness. If the fix carries no timestamp, or there is no clock to
+        # measure against, we cannot say it is old — so the contradiction stands and `landed` is
+        # kept, which is the behaviour this branch has always had.
+        fix_at = iso((pos or {}).get("fix_at"))
+        age_s = (now_ms / 1000 - fix_at.timestamp()) if (fix_at and now_ms is not None) else None
+        stale = age_s is not None and age_s > STALE_FIX_SEC
+        return "arrived" if (pos is None or stale) else "landed"
 
     if f.get("real_dep"):
         # `en_route` is the claim a live fix supports; `departed` is what we say when we know it
@@ -672,6 +691,14 @@ STALE_UNARRIVED_SEC = 18 * 3600
 # Only removes the MARKER. The phase still reads at_gate, honestly, because that is what the
 # record supports.
 AT_GATE_GRACE_SEC = 30 * 60
+
+# How old a fix may be and still describe where an aircraft is.
+#
+# 150 seconds, the same number the clients use (STALE_FIX_MS in the app, STALE_FIX_MS in the
+# web's Map.tsx) so all three cross the threshold on the same flight at the same moment. Matching
+# it is the point: a passenger checking the phone and then the laptop must not be told a fix is
+# current on one and stale on the other.
+STALE_FIX_SEC = 150
 
 
 def is_live_leg(f: dict, now: datetime) -> bool:
