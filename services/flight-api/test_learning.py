@@ -359,3 +359,27 @@ if __name__ == "__main__":
                 print(f"FAIL {name}: {e}")
     print(f"\n{fails} failed")
     sys.exit(1 if fails else 0)
+
+
+def test_a_paged_read_refuses_to_run_unordered():
+    """
+    Range paging over a result with no ORDER BY is undefined in Postgres: pages may repeat rows
+    and skip others, and the loss grows with the table — the worst shape, because it looks
+    correct while small.
+
+    /v2/route-readiness shipped without an order and reported 295 tracks where there were 488,
+    calling 7 corridors promotable when 14 had qualified. The learner was unaffected only
+    because its own query happened to carry order=id.
+    """
+    import asyncio
+    from learn import _get
+
+    async def run():
+        await _get(None, "http://x", {}, "flight_track_samples?select=callsign")
+
+    try:
+        asyncio.run(run())
+    except ValueError as e:
+        assert "order=" in str(e)
+    else:
+        raise AssertionError("an unordered paged read must be refused, not attempted")

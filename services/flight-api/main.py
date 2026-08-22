@@ -1640,12 +1640,18 @@ async def route_readiness():
         samples = await learn._get(
             client, SB_URL, SB_HEADERS,
             "flight_track_samples?select=callsign,operator,dep_iata,arr_iata,flight_date,seen_at"
-            f"&seen_at=gte.{quote((datetime.now(timezone.utc) - timedelta(days=learn.SAMPLE_WINDOW_DAYS)).isoformat(), safe='')}",
+            f"&seen_at=gte.{quote((datetime.now(timezone.utc) - timedelta(days=learn.SAMPLE_WINDOW_DAYS)).isoformat(), safe='')}"
+            # order=id is not decoration. _get pages by Range, and a Range over an UNORDERED
+            # result is undefined in Postgres — rows are skipped and repeated across page
+            # boundaries, and it worsens as the table grows and the plan shifts. This query had
+            # no order and under-reported 295 tracks where there were 488, calling 7 pairs
+            # promotable when 14 were.
+            "&order=id",
         )
         learned = await learn._get(
             client, SB_URL, SB_HEADERS,
             "route_paths_learned?select=dep_iata,arr_iata,operator,observed_count,"
-            "outliers_excluded,sample_count,updated_at",
+            "outliers_excluded,sample_count,updated_at&order=dep_iata,arr_iata,operator",
         )
 
     # Usable tracks per pair — the learner's own bar, so the number here is the number it sees.
