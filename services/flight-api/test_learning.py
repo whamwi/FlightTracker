@@ -383,3 +383,26 @@ def test_a_paged_read_refuses_to_run_unordered():
         assert "order=" in str(e)
     else:
         raise AssertionError("an unordered paged read must be refused, not attempted")
+
+
+def test_the_thin_route_floor_needs_age_as_well_as_agreement():
+    """
+    Deir ez-Zor flies a couple of times a week, so five tracks is over a month. Two is the least
+    that can be a consensus at all, and for a route that will never do better it beats a great
+    circle. But two tracks alone cannot mean it: a daily route observed since yesterday also has
+    two, and would be promoted on an anecdote.
+
+    Seven days of holding a corridor and still not reaching five is what separates them.
+    """
+    from datetime import datetime, timedelta, timezone
+    from learn import is_promotable, PROMOTE_MIN_FLIGHTS, PROMOTE_MIN_THIN
+
+    now = datetime(2026, 8, 22, tzinfo=timezone.utc)
+    old = (now - timedelta(days=8)).isoformat()
+    new = (now - timedelta(days=1)).isoformat()
+
+    assert is_promotable(PROMOTE_MIN_FLIGHTS, None, now), "the ordinary bar needs no age"
+    assert is_promotable(PROMOTE_MIN_THIN, old, now), "thin and old enough"
+    assert not is_promotable(PROMOTE_MIN_THIN, new, now), "thin but only a day old is an anecdote"
+    assert not is_promotable(1, old, now), "one track is never a corridor, at any age"
+    assert not is_promotable(PROMOTE_MIN_THIN, None, now), "no age known, no floor applied"
