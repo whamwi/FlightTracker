@@ -269,6 +269,17 @@ async def _get(client, sb, sb_headers, q: str) -> list[dict]:
     Paged by Range rather than offset: PostgREST answers it natively and reports the total in
     Content-Range, so a short page is a real end rather than a guess.
     """
+    # An unordered paged read is a silent data loss, so it is refused rather than allowed.
+    #
+    # Range paging over a result with no ORDER BY is undefined: Postgres may return rows in any
+    # order per page, so page 2 can repeat page 1 and skip rows entirely — and the failure grows
+    # with the table, which is the worst shape for it. /v2/route-readiness shipped without one and
+    # reported 295 tracks against a true 488, hiding half the corridors that had qualified.
+    #
+    # Raised, not silently appended: the caller must choose a key that is stable for its query.
+    if "order=" not in q:
+        raise ValueError(f"_get requires an explicit order= for stable paging: {q[:80]}")
+
     out: list[dict] = []
     start = 0
     while True:
