@@ -35,17 +35,55 @@ MIN_POINTS = 8                   # fewer fixes than this is a fragment, not a tr
 #
 # MIN_FLIGHTS is what it takes to WRITE a corridor: cheap, reversible, and nothing downstream
 # reads it. PROMOTE_MIN_FLIGHTS is what it takes to let one decide where the map draws an
-# aircraft, and two flights agreeing is one anecdote confirming another. The gap between the two
-# is where a corridor sits while it earns its place.
+# aircraft.
 #
-# On 18 Aug, of 70 route+operator pairs in the samples, 25 cleared MIN_FLIGHTS and none reached
-# 10. Roughly a week of recording gets the Gulf, Amman and Istanbul pairs there.
-PROMOTE_MIN_FLIGHTS = 10
+# FIVE, lowered from ten on 22 Aug. Ten was chosen when the alternative was two — "two flights
+# agreeing is one anecdote confirming another" — and against that, ten was cautious in the right
+# direction. What it was not weighed against is how wrong the ALTERNATIVE is: the stored paths
+# these replace sit 80 to 224 km from where aircraft actually fly, because they were imported
+# from single tracks back when Iraqi overflight was normal and the Gulf routes now go around it.
+# Waiting for a tenth flight to replace a corridor that puts an aeroplane in the wrong country is
+# the wrong trade. Measured: at ten, 14 pairs carrying 38% of legs; at five, the 34-pair block
+# sitting at 4-6 promotes too, taking it past 70%.
+PROMOTE_MIN_FLIGHTS = 5
+
+# The thin-route floor, and the age a route must reach before it applies.
+#
+# Once-weekly services cannot reach five in any useful time — Deir ez-Zor's routes fly a couple
+# of times a week, so five is over a month. Two is the least that can be a consensus at all
+# (MIN_FLIGHTS), and for a route that will never do better it beats a great circle drawn through
+# whatever the terrain happens to be.
+#
+# The age requirement is what stops this becoming "promote everything at two". A pair with two
+# tracks might be a weekly service that will never have more, or a daily one observed since
+# yesterday — and they need opposite treatment. Seven days of having a corridor and still not
+# reaching five is the evidence that separates them. A busy route crosses five within that week
+# and never touches this rule.
+PROMOTE_MIN_THIN = 2
+THIN_AFTER_DAYS = 7
 
 
-def is_promotable(observed_count: int | None) -> bool:
-    """Whether a learned corridor has earned the right to be drawn."""
-    return (observed_count or 0) >= PROMOTE_MIN_FLIGHTS
+def is_promotable(observed_count: int | None, first_learned_at: str | None = None,
+                  now: datetime | None = None) -> bool:
+    """
+    Whether a learned corridor has earned the right to be drawn.
+
+    Two ways to qualify: the ordinary bar, or the thin-route floor once the corridor has had a
+    week to do better and has not. `first_learned_at` is omitted where it is not known — the
+    learner's own response reports the strict bar, and /v2/route-readiness, which reads the
+    stored rows, is the one that applies the floor.
+    """
+    n = observed_count or 0
+    if n >= PROMOTE_MIN_FLIGHTS:
+        return True
+    if n < PROMOTE_MIN_THIN or not first_learned_at:
+        return False
+    try:
+        born = datetime.fromisoformat(first_learned_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    age_days = ((now or datetime.now(timezone.utc)) - born).total_seconds() / 86400
+    return age_days >= THIN_AFTER_DAYS
 
 
 async def record(client, sb, sb_headers: dict, flights: list[dict], aps: dict) -> int:

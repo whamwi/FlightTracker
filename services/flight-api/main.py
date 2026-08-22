@@ -1651,7 +1651,8 @@ async def route_readiness():
         learned = await learn._get(
             client, SB_URL, SB_HEADERS,
             "route_paths_learned?select=dep_iata,arr_iata,operator,observed_count,"
-            "outliers_excluded,sample_count,updated_at&order=dep_iata,arr_iata,operator",
+            "outliers_excluded,sample_count,updated_at,first_learned_at"
+            "&order=dep_iata,arr_iata,operator",
         )
 
     # Usable tracks per pair — the learner's own bar, so the number here is the number it sees.
@@ -1683,7 +1684,7 @@ async def route_readiness():
         # would have been libelled.
         stale = bool(row and newest.get(key) and row.get("updated_at", "") < newest[key])
 
-        if row and learn.is_promotable(row.get("observed_count")):
+        if row and learn.is_promotable(row.get("observed_count"), row.get("first_learned_at")):
             status = "promotable"
         elif row:
             status = "learning"
@@ -1700,6 +1701,7 @@ async def route_readiness():
             "route": f"{dep}->{arr}", "operator": op,
             "usable_tracks": tracks,
             "learned_from": (row or {}).get("observed_count"),
+            "learned_at_first": (row or {}).get("first_learned_at"),
             "outliers_excluded": (row or {}).get("outliers_excluded"),
             "needs": max(0, learn.PROMOTE_MIN_FLIGHTS - tracks),
             "newest_sample": newest.get(key),
