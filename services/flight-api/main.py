@@ -1648,10 +1648,16 @@ async def route_readiness():
             # promotable when 14 were.
             "&order=id",
         )
+        # The filed schedule, for the thin-route floor. days_of_week is what says a service runs
+        # twice a week and so will never reach the ordinary bar.
+        rm = await learn._get(
+            client, SB_URL, SB_HEADERS,
+            "route_master?select=dep_iata,arr_iata,days_of_week&active=eq.true&order=id",
+        )
         learned = await learn._get(
             client, SB_URL, SB_HEADERS,
             "route_paths_learned?select=dep_iata,arr_iata,operator,observed_count,"
-            "outliers_excluded,sample_count,updated_at,first_learned_at"
+            "outliers_excluded,sample_count,updated_at"
             "&order=dep_iata,arr_iata,operator",
         )
 
@@ -1667,6 +1673,13 @@ async def route_readiness():
             newest[key] = r["seen_at"]
 
     have = {k: sum(1 for n in legs.values() if n >= learn.MIN_POINTS) for k, legs in pts.items()}
+
+    # Most days a week this pairing is filed for. Max rather than sum: two rows for one route are
+    # different times or day-groups of the same service, and the busiest describes its frequency.
+    dow: dict[tuple, int] = {}
+    for r in rm:
+        k = (r["dep_iata"], r["arr_iata"])
+        dow[k] = max(dow.get(k, 0), len(r.get("days_of_week") or []))
     lrn = {(l["dep_iata"], l["arr_iata"], l["operator"]): l for l in learned}
 
     out = []
@@ -1684,7 +1697,7 @@ async def route_readiness():
         # would have been libelled.
         stale = bool(row and newest.get(key) and row.get("updated_at", "") < newest[key])
 
-        if row and learn.is_promotable(row.get("observed_count"), row.get("first_learned_at")):
+        if row and learn.is_promotable(row.get("observed_count"), dow.get((dep, arr))):
             status = "promotable"
         elif row:
             status = "learning"
@@ -1701,7 +1714,7 @@ async def route_readiness():
             "route": f"{dep}->{arr}", "operator": op,
             "usable_tracks": tracks,
             "learned_from": (row or {}).get("observed_count"),
-            "learned_at_first": (row or {}).get("first_learned_at"),
+            "days_per_week": dow.get((dep, arr)),
             "outliers_excluded": (row or {}).get("outliers_excluded"),
             "needs": max(0, learn.PROMOTE_MIN_FLIGHTS - tracks),
             "newest_sample": newest.get(key),
