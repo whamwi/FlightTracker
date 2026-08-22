@@ -385,24 +385,22 @@ def test_a_paged_read_refuses_to_run_unordered():
         raise AssertionError("an unordered paged read must be refused, not attempted")
 
 
-def test_the_thin_route_floor_needs_age_as_well_as_agreement():
+def test_the_thin_route_floor_reads_the_schedule_not_the_clock():
     """
-    Deir ez-Zor flies a couple of times a week, so five tracks is over a month. Two is the least
-    that can be a consensus at all, and for a route that will never do better it beats a great
-    circle. But two tracks alone cannot mean it: a daily route observed since yesterday also has
-    two, and would be promoted on an anecdote.
+    Deir ez-Zor is filed {sat,wed}, so five tracks is over a month. Two is the least that can be a
+    consensus, and for a route that will never do better it beats a great circle.
 
-    Seven days of holding a corridor and still not reaching five is what separates them.
+    But two alone cannot mean it: a DAILY route with two tracks is one observed since yesterday,
+    and promoting that is the anecdote problem the bar exists to prevent. The filed schedule
+    separates them on the first flight, where waiting for the route to prove itself thin spends a
+    week rediscovering what route_master already records.
     """
-    from datetime import datetime, timedelta, timezone
     from learn import is_promotable, PROMOTE_MIN_FLIGHTS, PROMOTE_MIN_THIN
 
-    now = datetime(2026, 8, 22, tzinfo=timezone.utc)
-    old = (now - timedelta(days=8)).isoformat()
-    new = (now - timedelta(days=1)).isoformat()
-
-    assert is_promotable(PROMOTE_MIN_FLIGHTS, None, now), "the ordinary bar needs no age"
-    assert is_promotable(PROMOTE_MIN_THIN, old, now), "thin and old enough"
-    assert not is_promotable(PROMOTE_MIN_THIN, new, now), "thin but only a day old is an anecdote"
-    assert not is_promotable(1, old, now), "one track is never a corridor, at any age"
-    assert not is_promotable(PROMOTE_MIN_THIN, None, now), "no age known, no floor applied"
+    assert is_promotable(PROMOTE_MIN_FLIGHTS, None), "the ordinary bar needs no schedule"
+    assert is_promotable(PROMOTE_MIN_THIN, 2), "filed twice a week is thin"
+    assert is_promotable(PROMOTE_MIN_THIN, 1), "filed once a week is thinner still"
+    assert not is_promotable(PROMOTE_MIN_THIN, 7), "a daily route with two tracks is just new"
+    assert not is_promotable(PROMOTE_MIN_THIN, 3), "three days a week reaches five soon enough"
+    assert not is_promotable(1, 2), "one track is never a corridor, however thin the route"
+    assert not is_promotable(PROMOTE_MIN_THIN, None), "no schedule filed, no floor applied"

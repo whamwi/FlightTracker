@@ -47,43 +47,46 @@ MIN_POINTS = 8                   # fewer fixes than this is a fragment, not a tr
 # sitting at 4-6 promotes too, taking it past 70%.
 PROMOTE_MIN_FLIGHTS = 5
 
-# The thin-route floor, and the age a route must reach before it applies.
+# The thin-route floor, and how a route is known to be thin.
 #
-# Once-weekly services cannot reach five in any useful time — Deir ez-Zor's routes fly a couple
-# of times a week, so five is over a month. Two is the least that can be a consensus at all
-# (MIN_FLIGHTS), and for a route that will never do better it beats a great circle drawn through
-# whatever the terrain happens to be.
+# Once-weekly services cannot reach five in any useful time — Deir ez-Zor is filed {sat,wed}, so
+# five tracks is over a month. Two is the least that can be a consensus at all (MIN_FLIGHTS), and
+# for a route that will never do better it beats a great circle drawn through whatever terrain
+# happens to lie between the airports.
 #
-# The age requirement is what stops this becoming "promote everything at two". A pair with two
-# tracks might be a weekly service that will never have more, or a daily one observed since
-# yesterday — and they need opposite treatment. Seven days of having a corridor and still not
-# reaching five is the evidence that separates them. A busy route crosses five within that week
-# and never touches this rule.
+# THINNESS IS READ FROM THE SCHEDULE, NOT INFERRED FROM TIME. The first version of this waited
+# seven days and then decided a route was thin because it still had not reached five. That works,
+# but it spends a week rediscovering something route_master has always known: how many days a week
+# the service operates. A route filed on two days or fewer is thin on its first flight.
+#
+# The distinction the age test was protecting still matters — a DAILY route with two tracks is a
+# route observed since yesterday, and promoting it is the anecdote problem this bar exists to
+# prevent. The schedule separates them outright instead of waiting: two filed days means thin,
+# seven means new.
+#
+# Where no schedule is filed, no floor applies. An unknown route waits for the ordinary bar, which
+# is the safe direction.
 PROMOTE_MIN_THIN = 2
-THIN_AFTER_DAYS = 7
+THIN_MAX_DAYS_PER_WEEK = 2
 
 
-def is_promotable(observed_count: int | None, first_learned_at: str | None = None,
-                  now: datetime | None = None) -> bool:
+def is_promotable(observed_count: int | None, days_per_week: int | None = None) -> bool:
     """
     Whether a learned corridor has earned the right to be drawn.
 
-    Two ways to qualify: the ordinary bar, or the thin-route floor once the corridor has had a
-    week to do better and has not. `first_learned_at` is omitted where it is not known — the
-    learner's own response reports the strict bar, and /v2/route-readiness, which reads the
-    stored rows, is the one that applies the floor.
+    Two ways to qualify: the ordinary bar, or the thin-route floor when the filed schedule says
+    the service runs on two days a week or fewer and so will never reach the ordinary one.
+
+    `days_per_week` is omitted where the schedule is not to hand — the learner's own response
+    reports the strict bar, and /v2/route-readiness, which has route_master beside it, applies
+    the floor.
     """
     n = observed_count or 0
     if n >= PROMOTE_MIN_FLIGHTS:
         return True
-    if n < PROMOTE_MIN_THIN or not first_learned_at:
+    if n < PROMOTE_MIN_THIN or not days_per_week:
         return False
-    try:
-        born = datetime.fromisoformat(first_learned_at.replace("Z", "+00:00"))
-    except ValueError:
-        return False
-    age_days = ((now or datetime.now(timezone.utc)) - born).total_seconds() / 86400
-    return age_days >= THIN_AFTER_DAYS
+    return days_per_week <= THIN_MAX_DAYS_PER_WEEK
 
 
 async def record(client, sb, sb_headers: dict, flights: list[dict], aps: dict) -> int:
