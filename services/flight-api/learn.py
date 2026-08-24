@@ -264,6 +264,43 @@ async def learn(client, sb, sb_headers: dict, aps: dict) -> tuple[list[dict], li
     return written, skipped
 
 
+# ── #44: some pairs fly TWO corridors, and the median picks one and calls the rest outliers ──
+#
+# Measured 24 Aug on IST->DAM THY, 15 legs:
+#
+#   cluster A  mid ~37.0N 32.2E   6 legs   (near the great circle, via Antalya)
+#   cluster B  mid ~38.2N 34.2E   9 legs   (the dogleg, via Ankara)
+#                                 ~200 km apart at mid-route
+#
+# Nine won the median and six were rejected — the 9/6 in that run's outlier count. Every other
+# pair rejects zero or one, so a 40% rejection rate is the signature of this, not of noise.
+#
+# THREE THINGS THAT ARE NOT THE ANSWER, each checked rather than assumed:
+#
+#   Finer grouping. Splitting by flight number explains 22% of the spread on this pair and 0-30%
+#   across every pair with more than one number — negative on three. THY846 and THY848 each
+#   appear in BOTH clusters. Below operator there is nothing left to explain, which is the same
+#   conclusion the grouping comment above reaches from the other direction.
+#
+#   Averaging them. The median of both sits ~100 km from each, worse than picking either.
+#
+#   A stored default. The airline varies it day to day, so whichever is stored is wrong ~40% of
+#   the time by 200 km.
+#
+# WHAT DOES WORK: pick the corridor from the flight's OWN fixes. The two routings separate fast —
+# 52 km at ten minutes from the first fix, 110 at fifteen, 176 at twenty, peaking near 260 over
+# central Anatolia before converging toward Damascus. So one fix a quarter of an hour in decides
+# it for the remaining hour and three quarters, and that is exactly where coverage is good, since
+# Istanbul sits inside the 41.0/29.0 circle.
+#
+# So the shape is: keep BOTH clusters for a pair that has them, and choose per flight by
+# proximity to what has actually been observed. A flight seen nowhere at all stays ambiguous, and
+# for that one the great circle is the honest answer rather than a coin flip between two.
+#
+# Until this exists, IST->DAM THY should not be trusted for projection even though it counts as
+# promotable: its stored corridor is the dogleg, so the six direct legs would be drawn 200 km off.
+
+
 def partition_by_agreement(path: list[dict], flights: dict) -> tuple[list, int]:
     """
     Which flights actually agree with the consensus, and how many did not.
