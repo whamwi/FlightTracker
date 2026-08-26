@@ -1375,7 +1375,9 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
        * version of the same map instead of a different one.
        */
       const useRaster = (why: string) => {
-        if (process.env.NODE_ENV !== 'production') console.warn(`[map] raster basemap: ${why}`)
+        // Unconditional, including in production. Falling back is rare and always means
+        // something we want to know about; one warn on an exceptional path is not noise.
+        console.warn(`[map] raster basemap: ${why}`)
         L.tileLayer(BASEMAP_FALLBACK.url, BASEMAP_FALLBACK.options).addTo(map)
         L.tileLayer(BASEMAP_FALLBACK_LABELS.url, BASEMAP_FALLBACK_LABELS.options).addTo(map)
       }
@@ -1459,10 +1461,53 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
             const attach = () => {
               // The effect may have torn this map down while the library was downloading.
               if (mapInstanceRef.current !== map) return
+              /*
+               * The Leaflet view must be VALID, not merely present.
+               *
+               * The plugin seeds the GL map with `center: [c.lng, c.lat]` and `zoom` read from
+               * Leaflet at the moment the layer is added. This page can be mid-flight on its own
+               * view when that happens — it throws "Invalid LatLng object: (NaN, NaN)" during
+               * setup — and a NaN centre reaching MapLibre produces a map that reports no error,
+               * loads no tiles, and paints nothing but the background colour. Which is precisely
+               * the blank basemap this went to production with.
+               *
+               * A view that never becomes valid falls through to raster via the timeout below.
+               */
+              const c = map.getCenter()
+              if (!Number.isFinite(c?.lat) || !Number.isFinite(c?.lng) || !Number.isFinite(map.getZoom())) {
+                console.warn('[map] vector basemap waiting: view not valid yet')
+                map.once('moveend zoomend', attach)
+                return
+              }
               try {
                 map.invalidateSize()
                 // Safe to call detached — it closes over its own Leaflet reference.
-                maplibreGL({ style: BASEMAP_STYLE }).addTo(map)
+                const layer = maplibreGL({ style: BASEMAP_STYLE })
+                layer.addTo(map)
+
+                /*
+                 * Watch the GL map itself, not just the code that built it.
+                 *
+                 * Everything above can succeed and still leave a blank basemap: MapLibre parses
+                 * vector tiles in a Web Worker, and if that worker cannot start — a bundler
+                 * mis-resolving it, a CSP, a sandboxed context — the background paints and the
+                 * data layers never arrive. No exception reaches us, because the failure happens
+                 * asynchronously inside the library.
+                 *
+                 * So a source that fails to load is treated as the layer having failed, and the
+                 * raster path takes over. A blank basemap is worse for a reader than a plain one.
+                 */
+                const gl = layer.getMaplibreMap?.()
+                if (gl) {
+                  let fellBack = false
+                  gl.on('error', (ev: { error?: Error }) => {
+                    console.warn('[map] gl error:', ev?.error)
+                    if (fellBack) return
+                    fellBack = true
+                    try { map.removeLayer(layer) } catch { /* already gone */ }
+                    useRaster(`gl error: ${ev?.error?.message ?? 'unknown'}`)
+                  })
+                }
               } catch (e) {
                 useRaster(`vector attach failed: ${e}`)
               }
