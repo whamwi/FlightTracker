@@ -190,7 +190,19 @@ async function tick() {
     // Everything the frame loop needs, captured at the moment the document was read.
     if (ANIMATE) {
       motion.set(cs, {
-        at: Date.now(),
+        /*
+         * The SERVER's build time, not ours.
+         *
+         * /v2/live is cached for LIVE_TTL, and this page polls at the same period but out of
+         * phase — so about half the polls return a document that has not changed. Basing elapsed
+         * on Date.now() reset the clock each time while the fraction stayed put, snapping the
+         * marker back to where it was ten seconds ago and re-advancing. That is the backwards
+         * step; the sideways jitter is the same snap replayed across a bend.
+         *
+         * as_of is the instant the fractions were true. A re-served document carries the same
+         * one, so elapsed keeps growing and the marker keeps moving.
+         */
+        at: Date.parse(doc.as_of) || Date.now(),
         motion: f.motion,
         path: isProj && f.path_key ? (doc.paths || {})[f.path_key] : null,
         hub, isProj, label: cs,
