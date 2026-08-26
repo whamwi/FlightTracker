@@ -439,6 +439,66 @@ async def route_paths(client: httpx.AsyncClient) -> dict[str, list[dict]]:
     return _route_paths
 
 
+_learned_paths: dict[str, list[dict]] = {}
+_learned_at: float = 0.0
+LEARNED_TTL_SEC = 15 * 60
+
+
+async def learned_paths(client: httpx.AsyncClient) -> dict[str, list[dict]]:
+    """
+    Corridors learned from what aircraft actually flew, keyed `dep|arr|operator`.
+
+    These replace route_paths wherever they exist, and the gap between the two is the reason:
+    68 of the 70 stored paths were hand-imported from a single FR24 track each, back when Iraqi
+    overflight was normal. Measured 22 Aug against the learned corridors, DAM-KWI is 224 km
+    apart at its worst point, DXB-DAM 117, RUH-DAM 95 — and the Amman routes, which never go
+    near Iraq, agree to within 6. The error is one systematic mistake, not noise.
+
+    ONLY PROMOTABLE ONES. A corridor is written at two flights and is not fit to draw with
+    until it has five, or two on a route the schedule says can never reach five. is_promotable
+    holds that rule; this is the only place it decides anything user-visible.
+
+    Keyed by OPERATOR as well as the pair, because that is where the variance lives — the same
+    airline's flight numbers agree within about 5 km, two airlines on one city pair differ by
+    170. `operator` is left(callsign, 3) in the database, so the caller derives it the same way.
+
+    TTL rather than cached for the process lifetime, unlike airports and route_paths. Those
+    change when someone edits a row; these change whenever the learner runs, and a corridor that
+    has just qualified should not wait for a redeploy to be used.
+    """
+    global _learned_at
+    now = time.time()
+    if _learned_paths and now - _learned_at < LEARNED_TTL_SEC:
+        return _learned_paths
+
+    rows = await sb(
+        client,
+        "route_paths_learned?select=dep_iata,arr_iata,operator,waypoints,observed_count"
+        "&order=dep_iata,arr_iata,operator",
+    )
+    # The filed schedule, for the thin-route floor: a service running two days a week or fewer
+    # qualifies at two flights because it will never reach five.
+    rm = await sb(client, "route_master?select=dep_iata,arr_iata,days_of_week&active=eq.true&order=id")
+    dow: dict[tuple, int] = {}
+    for r in rm:
+        k = (r["dep_iata"], r["arr_iata"])
+        dow[k] = max(dow.get(k, 0), len(r.get("days_of_week") or []))
+
+    fresh: dict[str, list[dict]] = {}
+    for r in rows:
+        wps = r.get("waypoints")
+        if not (isinstance(wps, list) and wps):
+            continue
+        if not learn.is_promotable(r.get("observed_count"), dow.get((r["dep_iata"], r["arr_iata"]))):
+            continue
+        fresh[f"{r['dep_iata']}|{r['arr_iata']}|{r['operator']}"] = wps
+
+    _learned_paths.clear()
+    _learned_paths.update(fresh)
+    _learned_at = now
+    return _learned_paths
+
+
 async def airlines(client: httpx.AsyncClient) -> dict[str, dict]:
     """The curated allow-list, by IATA code. A carrier absent from it is not a flight we show."""
     if not _airlines:
@@ -1303,6 +1363,7 @@ async def build_live() -> dict:
                         f.get("dep_iata"), f.get("arr_iata")) not in have]
 
         paths = await route_paths(client)
+        learned = await learned_paths(client)
 
     # One instant for the whole document. Two flights resolved microseconds apart would
     # otherwise be advanced to different clocks, and the touchdown latch would compare against
@@ -1362,7 +1423,16 @@ async def build_live() -> dict:
             arr_at = iso(stable_eta(f, eta) or eta)
             dep_c = aps.get(f.get("dep_iata") or "")
             arr_c = aps.get(f.get("arr_iata") or "")
-            path = paths.get(f"{f.get('dep_iata')}|{f.get('arr_iata')}")
+            # Learned first, then the hand-imported path, then the great circle.
+            #
+            # The order is the whole of the adoption: a corridor built from five or more real
+            # flights by THIS operator beats one imported from a single track years ago, and both
+            # beat a straight line. Nothing is lost where no corridor has qualified yet — that
+            # route falls through to exactly what it drew before.
+            op = (f.get("callsign") or "")[:3].upper()
+            path = learned.get(f"{f.get('dep_iata')}|{f.get('arr_iata')}|{op}")
+            if not path:
+                path = paths.get(f"{f.get('dep_iata')}|{f.get('arr_iata')}")
             if not path and dep_c and arr_c:
                 path = great_circle_path(dep_c, arr_c)
             # ARRIVED_LINGER_SEC, the same window the arrival queries above use, so a flight
