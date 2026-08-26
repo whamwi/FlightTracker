@@ -445,6 +445,44 @@ _contested_count: int = 0
 LEARNED_TTL_SEC = 15 * 60
 
 
+def motion_of(fraction: float | None, eta: datetime | None,
+              now_ms: float) -> dict | None:
+    """
+    How fast the marker must move along its path to arrive exactly on time.
+
+    Expressed as fraction-per-second toward 1.0 at the stabilised ETA, rather than as a ground
+    speed, and the difference is the whole point. A speed says how fast the aeroplane is going; a
+    rate to a deadline says where it will be when it lands. Animating on the first drifts against
+    the countdown beside it — the marker still short of the field while the card reads Arrived, or
+    parked on the airport with eleven minutes to run. Animating on the second cannot: both are
+    counting toward the same instant.
+
+    Recomputed on every poll, so each new fix corrects it. A flight that made up time speeds the
+    marker up, one that lost it slows down — which is exactly what "the refresh enhances the
+    speed and the accuracy to the finish" asks for, and it falls out rather than being arranged.
+
+    None when there is nothing to count toward: no fraction, no ETA, or an ETA already past. The
+    caller then has a position and no motion, which is honest — an aeroplane whose arrival time
+    has gone is not moving predictably.
+    """
+    if fraction is None or eta is None:
+        return None
+    remaining_s = eta.timestamp() - now_ms / 1000
+    if remaining_s <= 0:
+        return None
+    left = max(0.0, 1.0 - fraction)
+    return {
+        "fraction": round(fraction, 5),
+        # Zero is a real answer, not a missing one: a flight already at its destination has
+        # nowhere left to go and should sit still rather than creep.
+        "fraction_per_sec": round(left / remaining_s, 9),
+        # Formatted here rather than through zulu(), which takes the string form and would
+        # round-trip a datetime back through iso() — silently, since datetime.replace accepts
+        # the same argument names and fails only on the value.
+        "arrives_utc": eta.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+    }
+
+
 async def learned_paths(client: httpx.AsyncClient) -> dict[str, list[dict]]:
     """
     Corridors learned from what aircraft actually flew, keyed `dep|arr|operator`.
@@ -1426,6 +1464,7 @@ async def build_live() -> dict:
         # A recorded corridor when we have one, a great circle when we do not. Same shape either
         # way, so nothing downstream needs a second branch.
         projected = None
+        path_key = path_source = None
         if pos is None:
             dep_at = iso(f.get("real_dep"))
             arr_at = iso(stable_eta(f, eta) or eta)
@@ -1438,11 +1477,17 @@ async def build_live() -> dict:
             # beat a straight line. Nothing is lost where no corridor has qualified yet — that
             # route falls through to exactly what it drew before.
             op = (f.get("callsign") or "")[:3].upper()
-            path = learned.get(f"{f.get('dep_iata')}|{f.get('arr_iata')}|{op}")
+            path_key = f"{f.get('dep_iata')}|{f.get('arr_iata')}|{op}"
+            path = learned.get(path_key)
+            path_source = "learned" if path else None
             if not path:
-                path = paths.get(f"{f.get('dep_iata')}|{f.get('arr_iata')}")
+                path_key = f"{f.get('dep_iata')}|{f.get('arr_iata')}"
+                path = paths.get(path_key)
+                path_source = "stored" if path else None
             if not path and dep_c and arr_c:
                 path = great_circle_path(dep_c, arr_c)
+                path_key = f"{f.get('dep_iata')}|{f.get('arr_iata')}|gc"
+                path_source = "great_circle"
             # ARRIVED_LINGER_SEC, the same window the arrival queries above use, so a flight
             # that has landed leaves the map at the same moment it leaves the arrivals list.
             drawable = within_projection_window(
@@ -1520,6 +1565,21 @@ async def build_live() -> dict:
             "eta_stable_utc": stable_eta(f, eta),
             "delay_min": delay,
             "delay_basis": d_basis,
+            # How the marker should MOVE between polls, not just where it is.
+            #
+            # A client animating along `path` advances `fraction` by `fraction_per_sec` and
+            # arrives at 1.0 as the countdown reaches zero. Absent when there is nothing to
+            # count toward — see motion_of.
+            "motion": motion_of(
+                (projected or {}).get("fraction") if pos is None else progress,
+                iso(stable_eta(f, eta) or eta),
+                now_ms,
+            ),
+            # Which corridor this flight is drawn along, and how good it is. The waypoints
+            # themselves are published once per route under the document's `paths`, not repeated
+            # on every flight that happens to fly it.
+            "path_key": path_key,
+            "path_source": path_source,
             # One position field, whether we saw the aircraft or worked out where it must be.
             #
             # `pos_source` is published rather than inferred from which fields are null: a
@@ -1649,8 +1709,46 @@ async def cached(key: str, ttl: int, build):
 
 
 @app.get("/v2/live")
-async def live():
-    return await cached("live", LIVE_TTL, build_live)
+async def live(paths: int = Query(0)):
+    """
+    The live document. `?paths=1` attaches the corridors the flights are drawn along.
+
+    OPT-IN, because the two consumers want different things. The website calls this for positions
+    and would carry roughly 20 KB of waypoints on every poll for nothing. A client that animates
+    needs them once and can cache them for as long as it likes — corridors change when the
+    learner runs, not between polls.
+
+    Keyed by path, not repeated per flight. Twenty flights over a dozen distinct routes send
+    twelve paths; each flight carries only its `path_key`. Repeating the waypoints on every
+    flight would have made the document four times larger to say the same thing.
+    """
+    doc = await cached("live", LIVE_TTL, build_live)
+    if not paths:
+        return doc
+
+    used = {f.get("path_key") for f in doc.get("flights", []) if f.get("path_key")}
+    if not used:
+        return {**doc, "paths": {}}
+
+    async with httpx.AsyncClient() as client:
+        learned = await learned_paths(client)
+        stored = await route_paths(client)
+        aps = await airports(client)
+
+    out: dict[str, list[dict]] = {}
+    for key in used:
+        if key in learned:
+            out[key] = learned[key]
+        elif key in stored:
+            out[key] = stored[key]
+        elif key.endswith("|gc"):
+            dep, arr, _ = key.split("|")
+            dc, ac = aps.get(dep), aps.get(arr)
+            # Rebuilt rather than stored: a great circle is a function of its endpoints, and
+            # keeping a copy would be a second place for it to go stale.
+            if dc and ac:
+                out[key] = great_circle_path(dc, ac)
+    return {**doc, "paths": out}
 
 
 @app.get("/v2/board")

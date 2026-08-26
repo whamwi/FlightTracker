@@ -433,3 +433,59 @@ def test_only_promotable_corridors_are_offered():
     assert not is_promotable(4, None), "four flights is still learning"
     assert is_promotable(2, 2), "twice a week qualifies at two"
     assert not is_promotable(2, 7), "daily with two tracks is just new"
+
+
+# ── Motion: the rate that lands the marker on time ────────────────────────────
+
+def test_the_rate_reaches_one_exactly_at_the_eta():
+    """
+    The whole reason it is a rate to a deadline rather than a ground speed. A client advancing
+    `fraction` by `fraction_per_sec` must arrive at 1.0 as the countdown beside it reaches zero,
+    or the marker sits short of the field while the card reads Arrived.
+    """
+    from datetime import datetime, timedelta, timezone
+    from main import motion_of
+
+    now = datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc)
+    eta = now + timedelta(minutes=30)
+    m = motion_of(0.4, eta, now.timestamp() * 1000)
+
+    assert m is not None
+    travelled = m["fraction_per_sec"] * 1800          # thirty minutes of it
+    assert abs((0.4 + travelled) - 1.0) < 1e-6, "lands on 1.0 exactly as the ETA arrives"
+
+
+def test_a_delay_slows_the_marker_rather_than_teleporting_it():
+    """
+    The same remaining distance over a longer countdown is a slower marker. This is what makes a
+    refresh 'enhance the accuracy to the finish time': each poll re-derives the rate from the
+    current ETA, so time made up speeds it and time lost slows it, with no special case.
+    """
+    from datetime import datetime, timedelta, timezone
+    from main import motion_of
+
+    now = datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc)
+    on_time = motion_of(0.5, now + timedelta(minutes=30), now.timestamp() * 1000)
+    delayed = motion_of(0.5, now + timedelta(minutes=60), now.timestamp() * 1000)
+    assert delayed["fraction_per_sec"] < on_time["fraction_per_sec"]
+
+
+def test_no_motion_where_there_is_nothing_to_count_toward():
+    from datetime import datetime, timedelta, timezone
+    from main import motion_of
+
+    now = datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc)
+    ms = now.timestamp() * 1000
+    assert motion_of(None, now + timedelta(minutes=10), ms) is None, "no position, no motion"
+    assert motion_of(0.5, None, ms) is None, "no ETA, nothing to arrive at"
+    assert motion_of(0.5, now - timedelta(minutes=1), ms) is None, \
+        "an ETA already past cannot be moved toward"
+
+
+def test_a_flight_already_there_sits_still():
+    from datetime import datetime, timedelta, timezone
+    from main import motion_of
+
+    now = datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc)
+    m = motion_of(1.0, now + timedelta(minutes=5), now.timestamp() * 1000)
+    assert m["fraction_per_sec"] == 0.0, "nowhere left to go is zero, not a creep"
