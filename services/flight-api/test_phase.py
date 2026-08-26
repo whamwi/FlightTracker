@@ -391,3 +391,45 @@ def test_a_stale_fix_does_not_keep_a_confirmed_arrival_flying():
         "a fix inside the window still contradicts the record"
     assert derive_phase(CONFIRMED, {"on_ground": False}, None, now_ms) == "landed", \
         "no timestamp means unknown age, and unknown is not stale"
+
+
+# ── Adoption: learned corridors take precedence over the hand-imported ones ────
+
+def test_the_lookup_order_is_learned_then_stored_then_great_circle():
+    """
+    The whole of the adoption is an order. A corridor built from five or more real flights by
+    THIS operator beats one imported from a single FR24 track years ago, and both beat a straight
+    line — but a route with no qualified corridor must fall through to exactly what it drew
+    before, so adoption can never make a route worse than it already was.
+
+    Reproduced as the three-step lookup rather than by calling the endpoint, which needs a
+    database. The keys are what matter: learned carries the operator, stored does not.
+    """
+    learned = {"DAM|KWI|JZR": [{"f": 0.5, "lat": 31.0, "lon": 42.0}]}
+    stored = {"DAM|KWI": [{"f": 0.5, "lat": 32.0, "lon": 41.0}]}
+
+    def pick(dep, arr, callsign):
+        op = (callsign or "")[:3].upper()
+        return (learned.get(f"{dep}|{arr}|{op}")
+                or stored.get(f"{dep}|{arr}")
+                or "great_circle")
+
+    assert pick("DAM", "KWI", "JZR175") is learned["DAM|KWI|JZR"], "learned wins"
+    assert pick("DAM", "KWI", "SYR123") is stored["DAM|KWI"], \
+        "another operator on the same pair falls back to the stored path, not JZR's corridor"
+    assert pick("DAM", "EBL", "FYC521") == "great_circle", "neither, so the straight line"
+    assert pick("DAM", "KWI", None) is stored["DAM|KWI"], "no callsign, no operator, no learned"
+
+
+def test_only_promotable_corridors_are_offered():
+    """
+    A corridor is written at two flights and is not fit to draw with until it has five — or two
+    on a route the filed schedule says can never reach five. The loader filters on exactly that,
+    so an unqualified corridor is absent from the map rather than merely ranked lower.
+    """
+    from learn import is_promotable
+
+    assert is_promotable(5, None)
+    assert not is_promotable(4, None), "four flights is still learning"
+    assert is_promotable(2, 2), "twice a week qualifies at two"
+    assert not is_promotable(2, 7), "daily with two tracks is just new"
