@@ -43,6 +43,7 @@ import adsb
 import arrivals
 import learn
 from geo import (
+    gc_fraction,
     is_plausible_fix,
     drop_sentinel_fixes,
     fix_contradicts_flight,
@@ -1465,29 +1466,48 @@ async def build_live() -> dict:
         # way, so nothing downstream needs a second branch.
         projected = None
         path_key = path_source = None
+
+        # ── The corridor this flight belongs on, whether or not we can see it ──────
+        #
+        # Published for EVERY flight now, not only the projected ones. The map draws the marker
+        # ALONG the corridor and uses the fix to correct its RATE rather than its position — so
+        # an observed flight needs the same path a projected one does, and the difference between
+        # them stops being where they are drawn and becomes only how confident the fraction is.
+        #
+        # The trade is deliberate and worth stating: cross-track accuracy is given up. An aircraft
+        # twenty kilometres north of the corridor avoiding weather is drawn on the corridor. The
+        # outlier filter makes that rare, because the corridor is where that operator actually
+        # flies, and the gain is that the marker never jumps between a line and a fix.
+        op = (f.get("callsign") or "")[:3].upper()
+        dep_c = aps.get(f.get("dep_iata") or "")
+        arr_c = aps.get(f.get("arr_iata") or "")
+        for key, src in ((f"{f.get('dep_iata')}|{f.get('arr_iata')}|{op}", "learned"),
+                         (f"{f.get('dep_iata')}|{f.get('arr_iata')}", "stored")):
+            if (learned if src == "learned" else paths).get(key):
+                path_key, path_source = key, src
+                break
+        if not path_key and dep_c and arr_c:
+            path_key, path_source = f"{f.get('dep_iata')}|{f.get('arr_iata')}|gc", "great_circle"
+
+        # Where the fix sits ALONG the route, measured the way the corridor is parameterised.
+        #
+        # gc_fraction, not derive_progress. The corridors are binned by gc_fraction in record(),
+        # so a fix's gc_fraction indexes straight into a corridor's `f`. derive_progress uses a
+        # distance ratio, which is close but not the same number — and "close" is exactly the kind
+        # of near-miss that puts a marker a few kilometres out and looks like a rendering fault.
+        corridor_f = None
+        if pos and dep_c and arr_c and pos.get("lat") is not None:
+            corridor_f = gc_fraction(dep_c, arr_c, pos["lat"], pos["lon"])
+
         if pos is None:
             dep_at = iso(f.get("real_dep"))
             arr_at = iso(stable_eta(f, eta) or eta)
-            dep_c = aps.get(f.get("dep_iata") or "")
-            arr_c = aps.get(f.get("arr_iata") or "")
-            # Learned first, then the hand-imported path, then the great circle.
-            #
-            # The order is the whole of the adoption: a corridor built from five or more real
-            # flights by THIS operator beats one imported from a single track years ago, and both
-            # beat a straight line. Nothing is lost where no corridor has qualified yet — that
-            # route falls through to exactly what it drew before.
-            op = (f.get("callsign") or "")[:3].upper()
-            path_key = f"{f.get('dep_iata')}|{f.get('arr_iata')}|{op}"
-            path = learned.get(path_key)
-            path_source = "learned" if path else None
-            if not path:
-                path_key = f"{f.get('dep_iata')}|{f.get('arr_iata')}"
-                path = paths.get(path_key)
-                path_source = "stored" if path else None
-            if not path and dep_c and arr_c:
-                path = great_circle_path(dep_c, arr_c)
-                path_key = f"{f.get('dep_iata')}|{f.get('arr_iata')}|gc"
-                path_source = "great_circle"
+            # The key was chosen above, for every flight rather than only this branch — learned
+            # first, then the hand-imported path, then a great circle. Resolved here rather than
+            # re-selected: two places choosing a path is two places for them to diverge, and the
+            # first version of this change had exactly that.
+            path = (learned.get(path_key or "") or paths.get(path_key or "")
+                    or (great_circle_path(dep_c, arr_c) if dep_c and arr_c else None))
             # ARRIVED_LINGER_SEC, the same window the arrival queries above use, so a flight
             # that has landed leaves the map at the same moment it leaves the arrivals list.
             drawable = within_projection_window(
@@ -1571,7 +1591,7 @@ async def build_live() -> dict:
             # arrives at 1.0 as the countdown reaches zero. Absent when there is nothing to
             # count toward — see motion_of.
             "motion": motion_of(
-                (projected or {}).get("fraction") if pos is None else progress,
+                (projected or {}).get("fraction") if pos is None else corridor_f,
                 iso(stable_eta(f, eta) or eta),
                 now_ms,
             ),
