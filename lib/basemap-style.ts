@@ -70,6 +70,15 @@ const PLACE_STEPS: [number, number, number][] = [
   [9, 24, 30_000],
 ]
 
+/**
+ * The ids of the place-label layers, so the Cities toggle can find them.
+ *
+ * Derived from the same PLACE_STEPS the layers are built from, rather than written out again —
+ * a hand-kept copy would silently stop matching the day a zoom band is added, and the symptom
+ * would be one band of zooms whose labels ignore the toggle.
+ */
+export const PLACE_LAYER_IDS = PLACE_STEPS.map(([minzoom]) => `places-${minzoom}`)
+
 const placeLayers = () => PLACE_STEPS.map(([minzoom, maxzoom, minPop]) => ({
   id: `places-${minzoom}`,
   type: 'symbol' as const,

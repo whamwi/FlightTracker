@@ -9,7 +9,7 @@
  */
 
 import {
-  BASEMAP_STYLE, BASEMAP_FALLBACK, BASEMAP_FALLBACK_LABELS, canRenderVector,
+  BASEMAP_STYLE, BASEMAP_FALLBACK, BASEMAP_FALLBACK_LABELS, PLACE_LAYER_IDS, canRenderVector,
 } from './basemap-style'
 
 /** `vector` is ours, styled in the browser. `grey` is Esri's raster canvas — also the fallback. */
@@ -31,8 +31,40 @@ export function storeBasemap(kind: BasemapKind): void {
   try { localStorage.setItem(STORE_KEY, kind) } catch { /* private mode; the choice is per-visit */ }
 }
 
-/** What attachBasemap hands back: the ability to take this basemap off again. */
-export type BasemapHandle = { remove(): void }
+const CITIES_KEY = 'flysyria:basemap-cities'
+
+/** City labels on unless the reader turned them off. Only 'off' is stored as a decision. */
+export function storedCities(): boolean {
+  try { return localStorage.getItem(CITIES_KEY) !== 'off' } catch { return true }
+}
+
+export function storeCities(on: boolean): void {
+  try { localStorage.setItem(CITIES_KEY, on ? 'on' : 'off') } catch { /* per-visit, then */ }
+}
+
+/** What attachBasemap hands back. */
+export type BasemapHandle = {
+  /** Take this basemap off the map, whatever it actually ended up being. */
+  remove(): void
+  /**
+   * Show or hide the city labels. Only the vector map can do this — its labels are a layer we
+   * own, so they come off while borders and coastlines stay. Esri bakes cities and borders into
+   * one raster tile, so there this is a no-op and the UI disables the control.
+   */
+  setCities(on: boolean): void
+}
+
+export type BasemapOpts = {
+  /** Start with city labels shown. Ignored on raster, which cannot honour it either way. */
+  cities?: boolean
+  /**
+   * Called if the vector map could not be used and raster was substituted.
+   *
+   * The UI needs this: a reader who asked for the vector map and silently got raster would
+   * otherwise be left with an enabled Cities control that does nothing.
+   */
+  onFallback?: () => void
+}
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -43,9 +75,28 @@ export type BasemapHandle = { remove(): void }
  * as raster, on a browser that cannot run WebGL or a load that fails. The handle tracks the layers
  * actually on the map rather than the ones that were asked for, so switching away always cleans up.
  */
-export function attachBasemap(L: any, map: any, kind: BasemapKind): BasemapHandle {
+export function attachBasemap(
+  L: any, map: any, kind: BasemapKind, opts: BasemapOpts = {},
+): BasemapHandle {
   const layers: any[] = []
   let cancelled = false
+  let cities = opts.cities !== false
+  // The live GL map, once there is one. Null on every raster path, which is what makes
+  // setCities a no-op there rather than a crash.
+  let gl: any = null
+
+  /*
+   * Applied on 'styledata' as well as immediately, because a layer cannot be addressed until the
+   * style carrying it has loaded. Calling setLayoutProperty before that throws, and the first
+   * call always arrives before it — the layer is created and the preference applied in the same
+   * breath, long before MapLibre has parsed anything.
+   */
+  const applyCities = () => {
+    if (!gl) return
+    for (const id of PLACE_LAYER_IDS) {
+      try { gl.setLayoutProperty(id, 'visibility', cities ? 'visible' : 'none') } catch { /* style not ready */ }
+    }
+  }
 
   const add = (layer: any) => {
     // A switch (or an unmount) can land while MapLibre is still downloading. Adding then would
@@ -58,7 +109,12 @@ export function attachBasemap(L: any, map: any, kind: BasemapKind): BasemapHandl
   const useRaster = (why: string) => {
     // Unconditional, including in production. Falling back is rare and always means something we
     // want to know about; one warn on an exceptional path is not noise.
-    if (kind === 'vector') console.warn(`[map] raster basemap: ${why}`)
+    if (kind === 'vector') {
+      console.warn(`[map] raster basemap: ${why}`)
+      // Tell the caller the vector map is not what is on screen, so the Cities control can grey
+      // itself out instead of pretending to work.
+      opts.onFallback?.()
+    }
     add(L.tileLayer(BASEMAP_FALLBACK.url, BASEMAP_FALLBACK.options))
     add(L.tileLayer(BASEMAP_FALLBACK_LABELS.url, BASEMAP_FALLBACK_LABELS.options))
   }
@@ -142,14 +198,17 @@ export function attachBasemap(L: any, map: any, kind: BasemapKind): BasemapHandl
              * paints and the data never arrives, asynchronously and without an exception. A blank
              * basemap is worse for a reader than a plain one, so that drops to raster too.
              */
-            const gl = layer.getMaplibreMap?.()
+            gl = layer.getMaplibreMap?.() ?? null
             if (gl) {
+              applyCities()
+              gl.on('styledata', applyCities)
               let fellBack = false
               gl.on('error', (ev: { error?: Error }) => {
                 console.warn('[map] gl error:', ev?.error)
                 if (fellBack || cancelled) return
                 fellBack = true
                 try { map.removeLayer(layer) } catch { /* already gone */ }
+                gl = null
                 const i = layers.indexOf(layer)
                 if (i >= 0) layers.splice(i, 1)
                 useRaster(`gl error: ${ev?.error?.message ?? 'unknown'}`)
@@ -193,10 +252,17 @@ export function attachBasemap(L: any, map: any, kind: BasemapKind): BasemapHandl
   return {
     remove() {
       cancelled = true
+      gl = null
       for (const layer of layers) {
         try { map.removeLayer(layer) } catch { /* map already torn down */ }
       }
       layers.length = 0
+    },
+    setCities(on: boolean) {
+      cities = on
+      // Remembered even when there is no GL map yet: the preference is applied the moment one
+      // exists, so toggling while MapLibre is still downloading is not lost.
+      applyCities()
     },
   }
 }

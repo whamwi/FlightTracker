@@ -14,7 +14,7 @@ import type { LivePosition as PredictorLivePos } from '@/lib/flight-predictor'
 import { airlineLogo, LOGO_WHITE_BG } from '@/lib/airlines'
 import { TrackerStore, type FlightInput } from '@/lib/tracker-store'
 import {
-  attachBasemap, storedBasemap, storeBasemap,
+  attachBasemap, storedBasemap, storeBasemap, storedCities, storeCities,
   type BasemapKind, type BasemapHandle,
 } from '@/lib/basemap-attach'
 import VideoBox from './VideoBox'
@@ -1112,6 +1112,15 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
    * switcher runs long afterwards; re-importing the library to add a tile layer would be absurd.
    */
   const [basemap, setBasemap] = useState<BasemapKind>(() => storedBasemap())
+  const [cities, setCities] = useState<boolean>(() => storedCities())
+  /*
+   * Whether the Cities control can do anything, which is not the same as which basemap was asked
+   * for. A vector choice can end as raster — no WebGL, a failed load — and the reader would then
+   * be left toggling a checkbox that does nothing. attachBasemap reports that, and the control
+   * greys itself out.
+   */
+  const [citiesAvailable, setCitiesAvailable] = useState(true)
+  const citiesRef       = useRef<boolean>(cities)
   const basemapKindRef  = useRef<BasemapKind>(basemap)
   const basemapRef      = useRef<BasemapHandle | null>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1130,7 +1139,19 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
     // Off before on. attachBasemap's handle tracks the layers actually added rather than the ones
     // requested — a vector choice can end as raster — so this removes whatever is really there.
     basemapRef.current?.remove()
-    basemapRef.current = attachBasemap(L, map, kind)
+    setCitiesAvailable(kind === 'vector')
+    basemapRef.current = attachBasemap(L, map, kind, {
+      cities: citiesRef.current,
+      onFallback: () => setCitiesAvailable(false),
+    })
+  }, [])
+
+  const chooseCities = useCallback((on: boolean) => {
+    citiesRef.current = on
+    setCities(on)
+    storeCities(on)
+    // Straight at the live basemap: hiding a label layer is not worth rebuilding a map for.
+    basemapRef.current?.setCities(on)
   }, [])
 
   /*
@@ -1395,7 +1416,10 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
        * and re-importing Leaflet to add a tile layer would be absurd.
        */
       leafletRef.current = L
-      basemapRef.current = attachBasemap(L, map, basemapKindRef.current)
+      basemapRef.current = attachBasemap(L, map, basemapKindRef.current, {
+        cities: citiesRef.current,
+        onFallback: () => setCitiesAvailable(false),
+      })
 
       mapInstanceRef.current = map
 
@@ -3206,7 +3230,13 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         {/* Directly under the photo box, and only where there is room for it. */}
         {!isPhone && <AirportLegend />}
         {/* And the basemap choice under the key, the last thing in the stack. */}
-        {!isPhone && <BasemapSwitcher value={basemap} onChange={chooseBasemap} />}
+        {!isPhone && (
+          <BasemapSwitcher
+            value={basemap} onChange={chooseBasemap}
+            cities={cities} onCitiesChange={chooseCities}
+            citiesAvailable={citiesAvailable}
+          />
+        )}
         </div>
       )}
       {!embed && isPhone && actionSlot && createPortal(

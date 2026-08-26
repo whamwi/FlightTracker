@@ -1,101 +1,184 @@
 'use client'
 
+import { useState } from 'react'
 import { PANEL } from './MapBox'
 import { useLocale } from '@/components/LocaleProvider'
 import type { BasemapKind } from '@/lib/basemap-attach'
 
 /**
- * Which map to draw underneath, in the control stack below the airport legend.
+ * What the map is drawn on, in the control stack below the airport legend.
  *
- * Two, not a list. The vector map is ours — OpenStreetMap data styled in the browser, no roads or
- * buildings, so the aircraft have a quiet surface to sit on. The grey one is Esri's raster canvas,
- * which is also the automatic fallback where WebGL is unavailable; offering it as a choice costs
- * nothing and gives a reader on a struggling device something to try. A third option would be a
- * menu, and nobody opens a flight tracker to browse basemaps.
+ * A collapsed icon that opens on hover or tap, rather than a row of buttons. The stack above it is
+ * already a video box, a photo box and a colour key; a fourth permanent panel for something most
+ * readers will never touch was too much furniture. The stacked-layers glyph is the convention every
+ * map uses, so it needs no label of its own.
  *
- * The labels say what the reader gets, not what the technology is. "Vector" and "Raster" are
- * facts about us; "Map" and "Plain" are facts about the picture.
+ * ── What is offered, and what is not ──
  *
- * Desktop only, like the legend above it — see AirportLegend. On a phone the control stack
- * collapses to two header buttons, and the basemap is never the reason someone opened the map.
+ * Two basemaps. The test page at services/flight-api/maptest.html carries four, because it is a
+ * comparison bench; two of those have no business in front of readers. CARTO is watermarked — it is
+ * the thing this whole change removed. OpenStreetMap's own style is the EDITING style, drawn to
+ * make map data legible to mappers rather than to sit under aircraft, and it runs on the
+ * Foundation's donated capacity, which a diaspora-wide site should not lean on.
+ *
+ * ── Cities, which is the reason this is more than a re-housing ──
+ *
+ * The label toggle is a real switch only on the vector map, where the place names are a layer we
+ * own: they come off and the borders and coastlines stay. On Esri they are baked into the same
+ * raster tile as the borders, so there is nothing to switch and the control disables itself rather
+ * than pretending. That is the whole difference between rendering a map and receiving a picture of
+ * one, expressed as one checkbox.
+ *
+ * Desktop only, like the legend above it. On a phone the stack collapses to two header buttons.
  */
 
+const T = {
+  layers:  { en: 'Map layers', ar: 'طبقات الخريطة' },
+  plain:   { en: 'Plain',      ar: 'بسيطة' },
+  map:     { en: 'Map',        ar: 'خريطة' },
+  cities:  { en: 'Cities',     ar: 'المدن' },
+  onlyPlain: { en: 'Plain map only', ar: 'الخريطة البسيطة فقط' },
+}
+
 /*
- * The default is the PLAIN one, and the second option is the fuller map.
+ * The default is the PLAIN one and the second option is the fuller map.
  *
- * These read backwards at first glance — ours is the vector map we built, so calling it "Plain"
- * feels like underselling it. But the label has to describe what the reader is looking at, not
- * where it came from, and what they are looking at is deliberately bare: borders, seas and a
- * handful of capitals, with no roads, buildings or towns, so the aircraft have a quiet surface.
- * Esri's canvas carries far more — every provincial city across Turkey and Iran.
- *
- * So the plain map is the default and the detailed one is the alternative, which is the right way
- * round for a flight tracker and the wrong way round from the implementation's point of view.
+ * These read backwards from the implementation's side — ours is the vector map we built, so
+ * calling it "Plain" feels like underselling it. But a label describes what the reader is looking
+ * at, and what they are looking at is deliberately bare: borders, seas and a few capitals, so the
+ * aircraft have a quiet surface. Esri's canvas carries every provincial city across Turkey and Iran.
  */
-const OPTIONS: { kind: BasemapKind; label: { en: string; ar: string } }[] = [
-  { kind: 'vector', label: { en: 'Plain', ar: 'بسيطة' } },
-  { kind: 'grey',   label: { en: 'Map',   ar: 'خريطة' } },
+const OPTIONS: { kind: BasemapKind; key: 'plain' | 'map' }[] = [
+  { kind: 'vector', key: 'plain' },
+  { kind: 'grey',   key: 'map' },
 ]
 
 export default function BasemapSwitcher({
-  value, onChange,
+  value, onChange, cities, onCitiesChange, citiesAvailable,
 }: {
   value: BasemapKind
   onChange: (kind: BasemapKind) => void
+  cities: boolean
+  onCitiesChange: (on: boolean) => void
+  /** False once the vector map is not what is actually on screen — see BasemapOpts.onFallback. */
+  citiesAvailable: boolean
 }) {
   /*
-   * Pinned to the physical right in both languages, exactly as the legend is.
+   * Hover opens it, and a click pins it open.
    *
-   * The control stack aligns its children with flex-end — the *inline* end, which is the left in
-   * Arabic. Left to itself this drifted to the far edge and came unstuck from the key above it.
+   * Hover alone is how Leaflet's own control behaves and is the lighter interaction, but it leaves
+   * keyboard and touch with no way in. Pinning covers both without a second control.
    */
+  const [hovered, setHovered] = useState(false)
+  const [pinned, setPinned] = useState(false)
+  const open = hovered || pinned
+
   const ar = useLocale() === 'ar'
+  const t = (k: keyof typeof T) => (ar ? T[k].ar : T[k].en)
+
+  const citiesOn = cities && citiesAvailable
 
   return (
     <div
-      role="group"
-      aria-label={ar ? 'نوع الخريطة' : 'Base map'}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         background: PANEL.bg,
         border: `1px solid ${PANEL.border}`,
         borderRadius: 12,
-        padding: 3,
         boxShadow: '0 2px 10px rgba(0,0,0,0.10)',
-        display: 'flex',
-        flexDirection: 'row',
-        // No `direction` override: the row follows the page, so Arabic reads the default first
-        // from the right, as an Arabic reader expects. The mirroring is correct, not a fault —
-        // the labels were what needed fixing.
-        gap: 3,
-        whiteSpace: 'nowrap',
-        // As wide as its content, like the caption above it — not stretched to the stack.
+        overflow: 'hidden',
+        // Sized to its content, like the key above it, and pinned to the physical right in both
+        // languages — the stack aligns on the inline end, which in Arabic is the left.
         alignSelf: ar ? 'flex-start' : 'flex-end',
       }}
     >
-      {OPTIONS.map(o => {
-        const on = o.kind === value
-        return (
-          <button
-            key={o.kind}
-            type="button"
-            onClick={() => onChange(o.kind)}
-            aria-pressed={on}
+      {!open ? (
+        <button
+          type="button"
+          onClick={() => setPinned(true)}
+          aria-label={t('layers')}
+          aria-expanded={false}
+          style={{
+            appearance: 'none', border: 'none', background: 'transparent',
+            cursor: 'pointer', display: 'block', padding: '7px 9px', lineHeight: 0,
+            color: PANEL.forest,
+          }}
+        >
+          <LayersIcon />
+        </button>
+      ) : (
+        <div style={{ padding: '8px 10px 9px', minWidth: 128 }}>
+          <div style={{
+            font: `600 10px/1 ui-sans-serif, system-ui, sans-serif`,
+            letterSpacing: '.04em', textTransform: 'uppercase',
+            color: PANEL.forestMid, marginBottom: 7,
+            textAlign: ar ? 'right' : 'left',
+          }}>
+            {t('layers')}
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'row', gap: 3, marginBottom: 8 }}>
+            {OPTIONS.map(o => {
+              const on = o.kind === value
+              return (
+                <button
+                  key={o.kind}
+                  type="button"
+                  onClick={() => onChange(o.kind)}
+                  aria-pressed={on}
+                  style={{
+                    appearance: 'none', border: 'none', flex: 1,
+                    cursor: on ? 'default' : 'pointer',
+                    borderRadius: 8, padding: '5px 10px',
+                    font: '600 12px/1 ui-sans-serif, system-ui, sans-serif',
+                    background: on ? PANEL.forest : 'transparent',
+                    color: on ? '#FFFFFF' : PANEL.forest,
+                    transition: 'background 120ms ease, color 120ms ease',
+                  }}
+                >
+                  {t(o.key)}
+                </button>
+              )
+            })}
+          </div>
+
+          <label
+            title={citiesAvailable ? '' : t('onlyPlain')}
             style={{
-              appearance: 'none',
-              border: 'none',
-              cursor: on ? 'default' : 'pointer',
-              borderRadius: 9,
-              padding: '5px 12px',
-              font: '600 12px/1 ui-sans-serif, system-ui, sans-serif',
-              background: on ? PANEL.forest : 'transparent',
-              color: on ? '#FFFFFF' : PANEL.forest,
-              transition: 'background 120ms ease, color 120ms ease',
+              display: 'flex', alignItems: 'center', gap: 7,
+              flexDirection: ar ? 'row-reverse' : 'row',
+              font: '500 12px/1 ui-sans-serif, system-ui, sans-serif',
+              color: PANEL.forest,
+              cursor: citiesAvailable ? 'pointer' : 'not-allowed',
+              // Greyed rather than hidden: a control that vanishes on one basemap is a puzzle,
+              // and the disabled state is itself the explanation of what raster cannot do.
+              opacity: citiesAvailable ? 1 : 0.45,
             }}
           >
-            {ar ? o.label.ar : o.label.en}
-          </button>
-        )
-      })}
+            <input
+              type="checkbox"
+              checked={citiesOn}
+              disabled={!citiesAvailable}
+              onChange={e => onCitiesChange(e.target.checked)}
+              style={{ accentColor: PANEL.forest, width: 13, height: 13, margin: 0 }}
+            />
+            {t('cities')}
+          </label>
+        </div>
+      )}
     </div>
+  )
+}
+
+/** The stacked-sheets glyph every map uses for this. Inline so it inherits `color`. */
+function LayersIcon() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M12 3 2 8.5 12 14l10-5.5L12 3Z" />
+      <path d="m2 15.5 10 5.5 10-5.5" />
+      <path d="m2 12 10 5.5L22 12" />
+    </svg>
   )
 }
