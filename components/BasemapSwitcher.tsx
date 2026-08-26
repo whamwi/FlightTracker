@@ -20,9 +20,21 @@ import type { BasemapKind } from '@/lib/basemap-attach'
  * collapses to two header buttons, and the basemap is never the reason someone opened the map.
  */
 
+/*
+ * The default is the PLAIN one, and the second option is the fuller map.
+ *
+ * These read backwards at first glance — ours is the vector map we built, so calling it "Plain"
+ * feels like underselling it. But the label has to describe what the reader is looking at, not
+ * where it came from, and what they are looking at is deliberately bare: borders, seas and a
+ * handful of capitals, with no roads, buildings or towns, so the aircraft have a quiet surface.
+ * Esri's canvas carries far more — every provincial city across Turkey and Iran.
+ *
+ * So the plain map is the default and the detailed one is the alternative, which is the right way
+ * round for a flight tracker and the wrong way round from the implementation's point of view.
+ */
 const OPTIONS: { kind: BasemapKind; label: { en: string; ar: string } }[] = [
-  { kind: 'vector', label: { en: 'Map',   ar: 'خريطة' } },
-  { kind: 'grey',   label: { en: 'Plain', ar: 'بسيطة' } },
+  { kind: 'vector', label: { en: 'Plain', ar: 'بسيطة' } },
+  { kind: 'grey',   label: { en: 'Map',   ar: 'خريطة' } },
 ]
 
 export default function BasemapSwitcher({
@@ -51,18 +63,9 @@ export default function BasemapSwitcher({
         boxShadow: '0 2px 10px rgba(0,0,0,0.10)',
         display: 'flex',
         flexDirection: 'row',
-        /*
-         * The two buttons keep the SAME physical order in both languages.
-         *
-         * Under an RTL document a flex row lays its children out right-to-left, so the Arabic
-         * toggle came out mirrored: بسيطة on the left and خريطة on the right, the reverse of
-         * English. The selected option is the default, and a default that moves depending on the
-         * language reads as though the two mean different things in each.
-         *
-         * `direction: ltr` fixes the box order only. The Arabic inside each button still shapes
-         * and renders right-to-left, because that is a property of the text, not of the row.
-         */
-        direction: 'ltr',
+        // No `direction` override: the row follows the page, so Arabic reads the default first
+        // from the right, as an Arabic reader expects. The mirroring is correct, not a fault —
+        // the labels were what needed fixing.
         gap: 3,
         whiteSpace: 'nowrap',
         // As wide as its content, like the caption above it — not stretched to the stack.
