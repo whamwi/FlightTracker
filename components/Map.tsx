@@ -27,7 +27,7 @@ import AirportLegend from './AirportLegend'
 import BasemapSwitcher from './BasemapSwitcher'
 import { PANEL } from './MapBox'
 import { translate, counted } from '@/lib/i18n'
-import { getActiveLocale, cityFor } from '@/lib/geo-data'
+import { getActiveLocale, cityFor, airportLabelFor } from '@/lib/geo-data'
 import { markerHub, MARKER_ACCENT, isSyrianAirport, SYRIA_AIRPORT_SET, type BoardAirport } from '@/lib/syria-airports'
 
 /*
@@ -1125,6 +1125,9 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
   const basemapRef      = useRef<BasemapHandle | null>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const leafletRef      = useRef<any>(null)
+  /* The airport-name layer, shown in place of the city labels when those are switched off. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const airportLabelsRef = useRef<any>(null)
 
   const chooseBasemap = useCallback((kind: BasemapKind) => {
     if (kind === basemapKindRef.current) return
@@ -1152,6 +1155,19 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
     storeCities(on)
     // Straight at the live basemap: hiding a label layer is not worth rebuilding a map for.
     basemapRef.current?.setCities(on)
+
+    /*
+     * The airport names take the cities' place rather than joining them.
+     *
+     * Both sets of labels at once is the crowding this control exists to relieve — and the two
+     * would collide, since Damascus the city and مطار دمشق sit within a few kilometres.
+     */
+    const map = mapInstanceRef.current
+    const labels = airportLabelsRef.current
+    if (map && labels) {
+      if (on) map.removeLayer(labels)
+      else labels.addTo(map)
+    }
   }, [])
 
   /*
@@ -1445,38 +1461,107 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
       }
 
       // ── Syrian airport circles ─────────────────────────────────────────────
-      const SERVICED: [number, number][] = [
+      /*
+       * Every airport the map marks, with its code attached rather than trailing in a comment.
+       *
+       * The codes used to live only in `// DAM` notes beside each pair, which was fine while
+       * nothing needed them. The airport labels do — see AIRPORT_LABELS below — and a name looked
+       * up from a comment is not a thing.
+       */
+      const SERVICED: [number, number, string][] = [
         // Syrian airports
-        [33.4114, 36.5156], // DAM
-        [36.1807, 37.2244], // ALP
-        [35.4011, 35.9488], // LTK
-        [35.2854, 40.1760], // DEZ
+        [33.4114, 36.5156, 'DAM'],
+        [36.1807, 37.2244, 'ALP'],
+        [35.4011, 35.9488, 'LTK'],
+        [35.2854, 40.1760, 'DEZ'],
         // Active destinations (last 7 days)
-        [38.2924, 27.1570], // ADB
-        [31.7226, 35.9930], // AMM
-        [52.3086,  4.7639], // AMS
-        [24.4330, 54.6511], // AUH
-        [33.2626, 44.2346], // BGW
-        [26.4712, 49.7979], // DMM
-        [25.2731, 51.6081], // DOH
-        [25.2528, 55.3644], // DXB
-        [36.2376, 43.9631], // EBL
-        [40.1281, 32.9951], // ESB
-        [41.2608, 28.7418], // IST
-        [21.6796, 39.1565], // JED
-        [29.2267, 47.9689], // KWI
-        [23.5933, 58.2844], // MCT
-        [32.8942, 13.2759], // MJI
-        [44.5711, 26.0850], // OTP
-        [24.9578, 46.6989], // RUH
-        [40.8986, 29.3092], // SAW
-        [25.3285, 55.5172], // SHJ
-        [51.2895,  6.7668], // DUS
-        [52.3667, 13.5033], // BER
-        [36.8987, 30.7999], // AYT
+        [38.2924, 27.1570, 'ADB'],
+        [31.7226, 35.9930, 'AMM'],
+        [52.3086, 4.7639, 'AMS'],
+        [24.4330, 54.6511, 'AUH'],
+        [33.2626, 44.2346, 'BGW'],
+        [26.4712, 49.7979, 'DMM'],
+        [25.2731, 51.6081, 'DOH'],
+        [25.2528, 55.3644, 'DXB'],
+        [36.2376, 43.9631, 'EBL'],
+        [40.1281, 32.9951, 'ESB'],
+        [41.2608, 28.7418, 'IST'],
+        [21.6796, 39.1565, 'JED'],
+        [29.2267, 47.9689, 'KWI'],
+        [23.5933, 58.2844, 'MCT'],
+        [32.8942, 13.2759, 'MJI'],
+        [44.5711, 26.0850, 'OTP'],
+        [24.9578, 46.6989, 'RUH'],
+        [40.8986, 29.3092, 'SAW'],
+        [25.3285, 55.5172, 'SHJ'],
+        [51.2895, 6.7668, 'DUS'],
+        [52.3667, 13.5033, 'BER'],
+        [36.8987, 30.7999, 'AYT'],
       ]
-      for (const coords of SERVICED) {
-        L.circle(coords, {
+
+      /*
+       * Airport names, shown only when the reader has turned the city labels OFF.
+       *
+       * Turning cities off leaves a map of borders and water with nothing named on it, which is
+       * quiet but disorienting — and the things worth naming on a flight tracker are the airports,
+       * not the towns. So the two swap: lose the cities, gain the airports.
+       *
+       * Leaflet markers rather than a MapLibre layer, deliberately. The names come from our own
+       * geo-data — the localised ones the popups and the panel already use — rather than from
+       * whatever OSM happens to carry, so they read the same everywhere and follow the page's
+       * language. Drawing them in Leaflet also keeps them independent of which basemap is
+       * underneath, which matters the day this is offered on the raster one too.
+       *
+       * airportLabelFor gives مطار دمشق in Arabic and the bare code in English — which is right
+       * both ways round: an English reader scans for DAM, and دمشق alone would not say airport.
+       */
+      /*
+       * Two airports serving one city share a name, so the code breaks the tie.
+       *
+       * Istanbul has both IST and SAW, and in Arabic airportLabelFor returns مطار إسطنبول for
+       * each — two identical labels a few centimetres apart, naming different airports. English
+       * never had the problem because it shows the code, which is unique by construction.
+       *
+       * Only the duplicates are disambiguated: appending the code to every label would clutter
+       * the twenty-odd that were already unambiguous to fix the two that were not.
+       */
+      // Plain objects, not Maps: inside THIS file `Map` is the React component, so `new Map()`
+      // resolves to the component and fails to compile. A rare collision, and a confusing error.
+      const nameCounts: Record<string, number> = {}
+      for (const [, , iata] of SERVICED) {
+        const name = airportLabelFor(iata)
+        nameCounts[name] = (nameCounts[name] ?? 0) + 1
+      }
+      const labelFor: Record<string, string> = {}
+      for (const [, , iata] of SERVICED) {
+        const name = airportLabelFor(iata)
+        labelFor[iata] = nameCounts[name] > 1 ? `${name} (${iata})` : name
+      }
+
+      const airportLabels = L.layerGroup()
+      for (const [lat, lon, iata] of SERVICED) {
+        airportLabels.addLayer(L.marker([lat, lon], {
+          interactive: false,
+          keyboard: false,
+          icon: L.divIcon({
+            className: '',
+            // Wide and centred on the circle, with the text pushed below it: a label sitting on
+            // top of its own marker is unreadable against the dashed ring.
+            iconSize: [120, 34],
+            iconAnchor: [60, -6],
+            html: `<div style="text-align:center;font:600 10px/1.2 ui-sans-serif,system-ui,sans-serif;
+                     color:#8a3b3b;text-shadow:0 0 3px #f4f5f0,0 0 3px #f4f5f0,0 0 3px #f4f5f0;
+                     white-space:nowrap">${labelFor[iata] ?? iata}</div>`,
+          }),
+        }))
+      }
+      airportLabelsRef.current = airportLabels
+      // Cities on is the default, so the airport names start hidden and appear when they are
+      // switched off. citiesRef rather than state: this runs once, inside the init effect.
+      if (!citiesRef.current) airportLabels.addTo(map)
+
+      for (const [lat, lon] of SERVICED) {
+        L.circle([lat, lon], {
           radius:      8000,
           color:       '#e53e3e',
           fillColor:   '#e53e3e',
