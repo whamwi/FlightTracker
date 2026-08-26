@@ -27,7 +27,7 @@ import AirportLegend from './AirportLegend'
 import BasemapSwitcher from './BasemapSwitcher'
 import { PANEL } from './MapBox'
 import { translate, counted } from '@/lib/i18n'
-import { getActiveLocale, cityFor, airportLabelFor } from '@/lib/geo-data'
+import { getActiveLocale, cityFor } from '@/lib/geo-data'
 import { markerHub, MARKER_ACCENT, isSyrianAirport, SYRIA_AIRPORT_SET, type BoardAirport } from '@/lib/syria-airports'
 
 /*
@@ -1512,29 +1512,39 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
        * language. Drawing them in Leaflet also keeps them independent of which basemap is
        * underneath, which matters the day this is offered on the raster one too.
        *
-       * airportLabelFor gives مطار دمشق in Arabic and the bare code in English — which is right
-       * both ways round: an English reader scans for DAM, and دمشق alone would not say airport.
+       * The city alone in Arabic — دمشق, بغداد, حلب — not مطار دمشق.
+       *
+       * Every one of these already has a dashed red ring drawn round it, and the panel and the
+       * legend are full of aircraft. Nothing here could be mistaken for a city marker, so the
+       * word مطار was doing no work on twenty-seven labels at once and cost a third of the width
+       * of each. airportLabelFor keeps the prefix because it labels BUTTONS, where a bare city
+       * name genuinely would be ambiguous; on the map the ring says it.
+       *
+       * English keeps the code. DAM is what an English reader scans for, and it is what the
+       * board, the popups and the flight cards all use.
        */
       /*
        * Two airports serving one city share a name, so the code breaks the tie.
        *
-       * Istanbul has both IST and SAW, and in Arabic airportLabelFor returns مطار إسطنبول for
-       * each — two identical labels a few centimetres apart, naming different airports. English
-       * never had the problem because it shows the code, which is unique by construction.
+       * Istanbul has both IST and SAW, and in Arabic both resolve to إسطنبول — two identical
+       * labels a few centimetres apart, naming different airports. English never had the problem
+       * because it shows the code, which is unique by construction.
        *
        * Only the duplicates are disambiguated: appending the code to every label would clutter
        * the twenty-odd that were already unambiguous to fix the two that were not.
        */
       // Plain objects, not Maps: inside THIS file `Map` is the React component, so `new Map()`
       // resolves to the component and fails to compile. A rare collision, and a confusing error.
+      const nameOf = (iata: string) => (getActiveLocale() === 'ar' ? cityFor(iata) : iata)
+
       const nameCounts: Record<string, number> = {}
       for (const [, , iata] of SERVICED) {
-        const name = airportLabelFor(iata)
+        const name = nameOf(iata)
         nameCounts[name] = (nameCounts[name] ?? 0) + 1
       }
       const labelFor: Record<string, string> = {}
       for (const [, , iata] of SERVICED) {
-        const name = airportLabelFor(iata)
+        const name = nameOf(iata)
         labelFor[iata] = nameCounts[name] > 1 ? `${name} (${iata})` : name
       }
 
