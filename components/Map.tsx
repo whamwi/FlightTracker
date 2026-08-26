@@ -14,8 +14,9 @@ import type { LivePosition as PredictorLivePos } from '@/lib/flight-predictor'
 import { airlineLogo, LOGO_WHITE_BG } from '@/lib/airlines'
 import { TrackerStore, type FlightInput } from '@/lib/tracker-store'
 import {
-  BASEMAP_STYLE, BASEMAP_FALLBACK, BASEMAP_FALLBACK_LABELS, canRenderVector,
-} from '@/lib/basemap-style'
+  attachBasemap, storedBasemap, storeBasemap,
+  type BasemapKind, type BasemapHandle,
+} from '@/lib/basemap-attach'
 import VideoBox from './VideoBox'
 
 // Path-anchored motion: markers are positioned by the animation loop rather than written
@@ -23,6 +24,7 @@ import VideoBox from './VideoBox'
 const RAF_MOTION = true
 import PhotoBox from './PhotoBox'
 import AirportLegend from './AirportLegend'
+import BasemapSwitcher from './BasemapSwitcher'
 import { PANEL } from './MapBox'
 import { translate, counted } from '@/lib/i18n'
 import { getActiveLocale, cityFor } from '@/lib/geo-data'
@@ -1100,6 +1102,38 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
   const mapInstanceRef  = useRef<any>(null)
 
   /*
+   * Which basemap is showing, and the pieces needed to change it.
+   *
+   * The kind is mirrored into a ref because the map's init effect runs once and must not re-run
+   * when the reader picks a different basemap — tearing down and rebuilding the whole map to
+   * change what is underneath it would drop every marker and the open popup with them.
+   *
+   * Leaflet itself is kept too. It arrives through a dynamic import inside that effect, and the
+   * switcher runs long afterwards; re-importing the library to add a tile layer would be absurd.
+   */
+  const [basemap, setBasemap] = useState<BasemapKind>(() => storedBasemap())
+  const basemapKindRef  = useRef<BasemapKind>(basemap)
+  const basemapRef      = useRef<BasemapHandle | null>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const leafletRef      = useRef<any>(null)
+
+  const chooseBasemap = useCallback((kind: BasemapKind) => {
+    if (kind === basemapKindRef.current) return
+    basemapKindRef.current = kind
+    setBasemap(kind)
+    storeBasemap(kind)
+
+    const map = mapInstanceRef.current
+    const L = leafletRef.current
+    // Before the map exists there is nothing to swap; the init effect will read the ref.
+    if (!map || !L) return
+    // Off before on. attachBasemap's handle tracks the layers actually added rather than the ones
+    // requested — a vector choice can end as raster — so this removes whatever is really there.
+    basemapRef.current?.remove()
+    basemapRef.current = attachBasemap(L, map, kind)
+  }, [])
+
+  /*
    * Is this map object still the live one, and still attached?
    *
    * The render pass awaits several times — the Leaflet import, then /api/airspace — and the
@@ -1350,188 +1384,19 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         L.control.zoom({ position: 'bottomright' }).addTo(map)
       }
       /*
-       * The basemap. Vector where the browser can run it, raster where it cannot.
+       * The basemap, and the reader can change it — see lib/basemap-attach.
        *
        * Replaces CARTO's raster tiles, which since 26 Aug carry an "API KEY REQUIRED" watermark
-       * baked into a subset of the PNGs — no error, no failed request, just the words across the
-       * map at some zooms. See lib/basemap-style for why a free CARTO key was not the answer.
+       * baked into a subset of the PNGs: no error, no failed request, just the words across the
+       * map at some zooms. lib/basemap-style says why a free CARTO key was not the answer.
        *
-       * ── Loaded on demand, and that is deliberate ──
-       *
-       * MapLibre is about 230 KB gzipped, which is a lot to hand a phone on a Syrian mobile
-       * connection — 72% of this site's traffic is mobile. Importing it here rather than at the
-       * top of the module keeps it out of the main bundle, so it is fetched only by people who
-       * actually open a map, in parallel with the flight data rather than ahead of it.
-       *
-       * ── The fallback is not a nicety ──
-       *
-       * MapLibre needs WebGL. Where it is missing, blocklisted, or fails to initialise — older
-       * Android, in-app browsers, a crashed GPU process — the alternative to falling back is
-       * aircraft floating on blank white, which is strictly worse than the watermark this change
-       * removes. So the raster path stays, and anything at all going wrong takes it: a failed
-       * WebGL probe, a failed import, a throw from the plugin.
-       *
-       * Esri rather than CARTO for that fallback, so a reader who lands on it sees a plainer
-       * version of the same map instead of a different one.
+       * The handle is kept so a switch can take this basemap off before putting the next one on.
+       * L is kept for the same reason — the switcher runs long after this effect has finished,
+       * and re-importing Leaflet to add a tile layer would be absurd.
        */
-      const useRaster = (why: string) => {
-        // Unconditional, including in production. Falling back is rare and always means
-        // something we want to know about; one warn on an exceptional path is not noise.
-        console.warn(`[map] raster basemap: ${why}`)
-        L.tileLayer(BASEMAP_FALLBACK.url, BASEMAP_FALLBACK.options).addTo(map)
-        L.tileLayer(BASEMAP_FALLBACK_LABELS.url, BASEMAP_FALLBACK_LABELS.options).addTo(map)
-      }
+      leafletRef.current = L
+      basemapRef.current = attachBasemap(L, map, basemapKindRef.current)
 
-      if (!canRenderVector()) {
-        useRaster('no WebGL')
-      } else {
-        /*
-         * Deliberately NOT awaited. This runs inside a non-async .then(L => …) callback, and the
-         * whole of the map's setup — the marker layers, the overlays, mapInstanceRef itself —
-         * follows below. Awaiting here would hold every one of them until MapLibre had downloaded
-         * and parsed, so a slow connection would delay the aircraft, not just their backdrop.
-         *
-         * The basemap simply attaches when it arrives. Leaflet puts tile layers under everything
-         * else regardless of the order they were added, so a late basemap lands beneath markers
-         * that are already on screen.
-         */
-        import('maplibre-gl')
-          .then(async mod => {
-            /*
-             * BOTH globals have to exist before the plugin is imported, and this is the part that
-             * does not survive being guessed at.
-             *
-             * leaflet-maplibre-gl is a UMD bundle that reads `window.L` and `window.maplibregl`
-             * and hangs `L.maplibreGL` off whatever it finds. The test page got this for free
-             * because it loads Leaflet from a script tag, so the global was already there. Here
-             * Leaflet is an ES module import and `window.L` does not exist, so the plugin attached
-             * to nothing and the call failed with "L.maplibreGL is not a function" — caught by the
-             * fallback, which quietly served raster and looked almost right.
-             *
-             * Assigned before the import, not after: the plugin reads them as it evaluates.
-             */
-            const w = window as unknown as { L: unknown; maplibregl: unknown }
-            w.maplibregl = mod.default ?? mod
-            w.L = L
-            await import('maplibre-gl/dist/maplibre-gl.css')
-            await import('@maplibre/maplibre-gl-leaflet')
-
-            /*
-             * Read the factory off the CJS exports object, NOT off `L`.
-             *
-             * Under a bundler the plugin's UMD wrapper takes its `typeof exports === 'object'`
-             * branch and assigns `maplibreGL` onto whatever `require('leaflet')` returns. Our `L`
-             * here is the ES module NAMESPACE, whose named exports were synthesised when the
-             * module was evaluated — so a property added to the underlying object afterwards
-             * never shows up on it. `L.tileLayer` works, `L.maplibreGL` is permanently undefined,
-             * and the only symptom is the fallback quietly serving raster.
-             *
-             * `.default` is that underlying object. Checking both, because which one carries it
-             * depends on interop that varies between bundlers and could change under us.
-             */
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const cjs = ((L as any).default ?? L) as any
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const maplibreGL = cjs.maplibreGL ?? (L as any).maplibreGL
-            if (typeof maplibreGL !== 'function') throw new Error('plugin did not register')
-
-            /*
-             * ATTACH ONLY ONCE THE CONTAINER HAS A SIZE, and this is not defensive padding —
-             * without it the basemap is invisible.
-             *
-             * The plugin reads map.getSize() when the layer is added and writes it onto the div
-             * it hands MapLibre. A zero there means MapLibre sees a zero-size container, falls
-             * back to its default 400x300 canvas, and STAYS THERE: it watches the window for
-             * resizes, not the element, so a container that gains size afterwards never prompts a
-             * redraw. The result is a correctly-built map painting into a canvas the size of a
-             * postage stamp — no error anywhere, just a blank page. Measured exactly that.
-             *
-             * The old raster layer was immune because Leaflet re-tiles on its own resize events.
-             * This only became reachable because the import is async: by the time MapLibre lands,
-             * the map may exist but not yet be laid out.
-             *
-             * A ResizeObserver rather than Leaflet's 'resize' event, which fires only when
-             * something calls invalidateSize() — nothing here does, so waiting on it waits forever.
-             *
-             * attach() carries its OWN try/catch because it can run from the observer callback,
-             * outside this promise chain, where the .catch() below cannot see a throw. Without it
-             * a failure would be silent AND unfallen-back: no vector, no raster, aircraft on white.
-             */
-            const el = map.getContainer()
-            const attach = () => {
-              // The effect may have torn this map down while the library was downloading.
-              if (mapInstanceRef.current !== map) return
-              /*
-               * The Leaflet view must be VALID, not merely present.
-               *
-               * The plugin seeds the GL map with `center: [c.lng, c.lat]` and `zoom` read from
-               * Leaflet at the moment the layer is added. This page can be mid-flight on its own
-               * view when that happens — it throws "Invalid LatLng object: (NaN, NaN)" during
-               * setup — and a NaN centre reaching MapLibre produces a map that reports no error,
-               * loads no tiles, and paints nothing but the background colour. Which is precisely
-               * the blank basemap this went to production with.
-               *
-               * A view that never becomes valid falls through to raster via the timeout below.
-               */
-              const c = map.getCenter()
-              if (!Number.isFinite(c?.lat) || !Number.isFinite(c?.lng) || !Number.isFinite(map.getZoom())) {
-                console.warn('[map] vector basemap waiting: view not valid yet')
-                map.once('moveend zoomend', attach)
-                return
-              }
-              try {
-                map.invalidateSize()
-                // Safe to call detached — it closes over its own Leaflet reference.
-                const layer = maplibreGL({ style: BASEMAP_STYLE })
-                layer.addTo(map)
-
-                /*
-                 * Watch the GL map itself, not just the code that built it.
-                 *
-                 * Everything above can succeed and still leave a blank basemap: MapLibre parses
-                 * vector tiles in a Web Worker, and if that worker cannot start — a bundler
-                 * mis-resolving it, a CSP, a sandboxed context — the background paints and the
-                 * data layers never arrive. No exception reaches us, because the failure happens
-                 * asynchronously inside the library.
-                 *
-                 * So a source that fails to load is treated as the layer having failed, and the
-                 * raster path takes over. A blank basemap is worse for a reader than a plain one.
-                 */
-                const gl = layer.getMaplibreMap?.()
-                if (gl) {
-                  let fellBack = false
-                  gl.on('error', (ev: { error?: Error }) => {
-                    console.warn('[map] gl error:', ev?.error)
-                    if (fellBack) return
-                    fellBack = true
-                    try { map.removeLayer(layer) } catch { /* already gone */ }
-                    useRaster(`gl error: ${ev?.error?.message ?? 'unknown'}`)
-                  })
-                }
-              } catch (e) {
-                useRaster(`vector attach failed: ${e}`)
-              }
-            }
-
-            if (el.clientWidth > 0 && el.clientHeight > 0) {
-              attach()
-            } else {
-              const ro = new ResizeObserver(() => {
-                if (el.clientWidth > 0 && el.clientHeight > 0) { ro.disconnect(); attach() }
-              })
-              ro.observe(el)
-              // Never wait forever for a size that may not come. An element still at zero after
-              // this was not going to show a basemap, and raster at least tries.
-              setTimeout(() => {
-                if (el.clientWidth === 0 || el.clientHeight === 0) {
-                  ro.disconnect()
-                  useRaster('container never sized')
-                }
-              }, 10_000)
-            }
-          })
-          .catch(e => useRaster(`vector basemap failed: ${e}`))
-      }
       mapInstanceRef.current = map
 
       if (!embed) {
@@ -3340,6 +3205,8 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         />
         {/* Directly under the photo box, and only where there is room for it. */}
         {!isPhone && <AirportLegend />}
+        {/* And the basemap choice under the key, the last thing in the stack. */}
+        {!isPhone && <BasemapSwitcher value={basemap} onChange={chooseBasemap} />}
         </div>
       )}
       {!embed && isPhone && actionSlot && createPortal(
