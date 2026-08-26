@@ -1489,6 +1489,23 @@ async def build_live() -> dict:
         if not path_key and dep_c and arr_c:
             path_key, path_source = f"{f.get('dep_iata')}|{f.get('arr_iata')}|gc", "great_circle"
 
+        # Is the corridor close enough to STAND IN for the fix?
+        #
+        # Drawing an observed flight on its corridor trades cross-track accuracy for smooth
+        # motion, and how bad that trade is depends entirely on which corridor. Measured 26 Aug
+        # across 15 observed flights: learned corridors sit a median 7 km from the actual fix and
+        # mostly under 17; stored and great-circle ones sit 37 to 72 km away.
+        #
+        # Seventy kilometres is not a rendering nicety, it is the wrong side of a border. So the
+        # trade is offered only where it was earned — a corridor built from real flights by this
+        # operator. Everywhere else the client keeps drawing at the fix, which is what it does
+        # today, and loses nothing.
+        #
+        # A PROJECTED flight is unaffected either way. It has no fix to be wrong about, so it
+        # follows whatever path it has, stored or otherwise: a hand-imported corridor beats a
+        # straight line, and both beat nothing.
+        draw_on_path = path_source == "learned"
+
         # Where the fix sits ALONG the route, measured the way the corridor is parameterised.
         #
         # gc_fraction, not derive_progress. The corridors are binned by gc_fraction in record(),
@@ -1600,6 +1617,10 @@ async def build_live() -> dict:
             # on every flight that happens to fly it.
             "path_key": path_key,
             "path_source": path_source,
+            # Whether the client should draw this flight ON its corridor rather than at its fix.
+            # True only for a learned corridor, or for a flight with no fix to prefer. See
+            # draw_on_path above for the measurement behind it.
+            "draw_on_path": bool(draw_on_path or pos is None),
             # One position field, whether we saw the aircraft or worked out where it must be.
             #
             # `pos_source` is published rather than inferred from which fields are null: a
