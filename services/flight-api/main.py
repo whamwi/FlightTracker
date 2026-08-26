@@ -441,6 +441,7 @@ async def route_paths(client: httpx.AsyncClient) -> dict[str, list[dict]]:
 
 _learned_paths: dict[str, list[dict]] = {}
 _learned_at: float = 0.0
+_contested_count: int = 0
 LEARNED_TTL_SEC = 15 * 60
 
 
@@ -466,15 +467,15 @@ async def learned_paths(client: httpx.AsyncClient) -> dict[str, list[dict]]:
     change when someone edits a row; these change whenever the learner runs, and a corridor that
     has just qualified should not wait for a redeploy to be used.
     """
-    global _learned_at
+    global _learned_at, _contested_count
     now = time.time()
     if _learned_paths and now - _learned_at < LEARNED_TTL_SEC:
         return _learned_paths
 
     rows = await sb(
         client,
-        "route_paths_learned?select=dep_iata,arr_iata,operator,waypoints,observed_count"
-        "&order=dep_iata,arr_iata,operator",
+        "route_paths_learned?select=dep_iata,arr_iata,operator,waypoints,observed_count,"
+        "outliers_excluded&order=dep_iata,arr_iata,operator",
     )
     # The filed schedule, for the thin-route floor: a service running two days a week or fewer
     # qualifies at two flights because it will never reach five.
@@ -485,17 +486,24 @@ async def learned_paths(client: httpx.AsyncClient) -> dict[str, list[dict]]:
         dow[k] = max(dow.get(k, 0), len(r.get("days_of_week") or []))
 
     fresh: dict[str, list[dict]] = {}
+    contested = 0
     for r in rows:
         wps = r.get("waypoints")
         if not (isinstance(wps, list) and wps):
             continue
         if not learn.is_promotable(r.get("observed_count"), dow.get((r["dep_iata"], r["arr_iata"]))):
             continue
+        # A corridor that rejected a third of its own flights is two corridors, and drawing it
+        # as one is worse than the great circle it replaces. See is_contested.
+        if learn.is_contested(r.get("observed_count"), r.get("outliers_excluded")):
+            contested += 1
+            continue
         fresh[f"{r['dep_iata']}|{r['arr_iata']}|{r['operator']}"] = wps
 
     _learned_paths.clear()
     _learned_paths.update(fresh)
     _learned_at = now
+    _contested_count = contested
     return _learned_paths
 
 
@@ -1833,6 +1841,7 @@ async def health():
                      "confirmed_held": len(_arr_confirmed)},
         "corridors": {
             "learned": len(_learned_paths),
+            "contested_excluded": _contested_count,
             "stored": len(_route_paths),
             # Zero here after a poll has run means the loader is failing silently. Null means it
             # has not been asked yet, which is ordinary on a service that has just started.

@@ -404,3 +404,27 @@ def test_the_thin_route_floor_reads_the_schedule_not_the_clock():
     assert not is_promotable(PROMOTE_MIN_THIN, 3), "three days a week reaches five soon enough"
     assert not is_promotable(1, 2), "one track is never a corridor, however thin the route"
     assert not is_promotable(PROMOTE_MIN_THIN, None), "no schedule filed, no floor applied"
+
+
+def test_a_corridor_that_rejects_a_third_of_itself_is_two_corridors():
+    """
+    The outlier filter throws out the occasional reroute. When it throws out a third of the
+    route, it is choosing between two standing routings and calling the losers outliers — and the
+    stored corridor is then whichever cluster happened to be larger.
+
+    IST->DAM THY, 26 Aug: 12 kept, 7 rejected. Two routings 200 km apart, one via Antalya and one
+    via Ankara, chosen per day. Drawing either as THE corridor is worse than the great circle,
+    which at least sits between them.
+
+    A rate rather than a named pair: on the same day every other corridor rejected 11% or less,
+    so the separation is clean and the next case is caught without anyone noticing it.
+    """
+    from learn import is_contested
+
+    assert is_contested(12, 7), "IST->DAM THY, 37% rejected"
+    assert not is_contested(27, 1), "one reroute in twenty-eight is a reroute"
+    assert not is_contested(9, 1), "10% is ordinary"
+    assert not is_contested(8, 1), "11% is ordinary"
+    assert not is_contested(10, 0), "nothing rejected, nothing contested"
+    assert not is_contested(0, 0), "no flights at all is not contested, just absent"
+    assert is_contested(1, 1), "one against one is as contested as it gets"
