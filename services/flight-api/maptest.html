@@ -184,12 +184,17 @@ async function tick() {
     if (hub) byHub[hub]++
     seen.add(cs)
 
-    // Nothing is interpolated, smoothed, or advanced between polls. The marker is placed where
-    // the server said, and moves only when the server says something new.
+    // Without ?animate=1 nothing is interpolated or advanced between polls: the marker is placed
+    // where the server said and moves only when the server says something new. With it, an
+    // eligible flight is instead flown along its corridor and this fix only corrects the rate.
     const ll = [p.lat, p.lon]
     // Everything the frame loop needs, captured at the moment the document was read.
     if (ANIMATE) {
       motion.set(cs, {
+        // Eligible when the SERVER says so — a learned corridor, or no fix to prefer. Where the
+        // only corridor is hand-imported the marker stays at its fix, because those sit 37 to
+        // 72 km from the aircraft against a learned corridor's median of 7.
+        eligible: f.draw_on_path !== false,
         /*
          * The SERVER's build time, not ours.
          *
@@ -204,13 +209,16 @@ async function tick() {
          */
         at: Date.parse(doc.as_of) || Date.now(),
         motion: f.motion,
-        path: isProj && f.path_key ? (doc.paths || {})[f.path_key] : null,
+        path: f.path_key ? (doc.paths || {})[f.path_key] : null,
         hub, isProj, label: cs,
       })
     }
     const m = markers.get(cs)
+    const onPath = ANIMATE && f.draw_on_path !== false && f.path_key && (doc.paths || {})[f.path_key]
     if (m) {
-      m.setLatLng(ll)
+      // A flight being drawn on its corridor keeps the position the frame loop gave it; setting
+      // the fix here would snap it back every ten seconds, which is the leap this exists to remove.
+      if (!onPath) m.setLatLng(ll)
       m.setIcon(icon(cs, p.track_deg, isProj, hub))
     } else {
       markers.set(cs, L.marker(ll, { icon: icon(cs, p.track_deg, isProj, hub) })
@@ -268,14 +276,36 @@ function pointAt(path, f) {
   return last
 }
 
+/*
+ * The easing, matching lib/v3-motion.ts in the app.
+ *
+ * Exponential rather than a fixed step per second: a step of gap/60 leaves 36% of the gap after
+ * a minute and gives different answers for one long frame than for several short ones. Three
+ * time constants is the conventional "arrived", so tau is a third of CATCH_UP.
+ *
+ * Never backwards. Ahead of the server the marker holds and waits to be overtaken.
+ */
+const CATCH_UP = 60, TAU = CATCH_UP / 3, MAX_EASE = 0.25
+const drawnAt = new Map()
+
+function ease(shown, target) {
+  if (shown === undefined || shown === null) return target
+  const gap = target - shown
+  if (Math.abs(gap) > MAX_EASE || Math.abs(gap) < 1e-6) return target
+  if (gap < 0) return shown
+  return Math.min(target, target - gap * Math.exp(-1 / TAU))
+}
+
 function frame() {
   if (!ANIMATE) return
   const now = Date.now()
   for (const [cs, st] of motion) {
     const mk = markers.get(cs)
-    if (!mk || !st.motion || !st.path) continue
+    if (!mk || !st.motion || !st.path || !st.eligible) continue
     const elapsed = Math.max(0, (now - st.at) / 1000)
-    const f = Math.min(1, Math.max(0, st.motion.fraction + st.motion.fraction_per_sec * elapsed))
+    const target = Math.min(1, Math.max(0, st.motion.fraction + st.motion.fraction_per_sec * elapsed))
+    const f = ease(drawnAt.get(cs), target)
+    drawnAt.set(cs, f)
     const pt = pointAt(st.path, f)
     if (pt) mk.setLatLng([pt.lat, pt.lon])
   }
