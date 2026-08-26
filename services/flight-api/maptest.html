@@ -20,6 +20,15 @@
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!--
+  MapLibre GL, for the vector basemap prototype only. Everything else on this page is Leaflet and
+  stays Leaflet: the plugin renders a GL canvas as one more Leaflet layer, so the markers, the
+  panel and the animation are untouched and the comparison is basemap against basemap.
+-->
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js"></script>
 <style>
   :root { color-scheme: light dark; }
   html, body { margin: 0; height: 100%; font: 13px/1.45 ui-sans-serif, system-ui, sans-serif; }
@@ -48,13 +57,42 @@
   td.n { text-align: right; color: #6b7280; }
   .plane { font-size: 38px; line-height: 1; text-align: center; }
   /*
-   * The halo is white regardless of the page theme, because the map tiles are light in both.
-   * Keying it to prefers-color-scheme drew a black halo over pale terrain and every label read
-   * as a smudge — the label has to contrast with what is UNDER it, not with the page chrome.
+   * No halo. The white text-shadow that used to sit behind every callsign is gone.
+   *
+   * It was never a background — four stacked `0 0 3px #fff` shadows, which pile up into a soft
+   * white lozenge and read as one. It existed because CARTO's tiles carry roads, borders and
+   * place names right under the markers, and a bare label over that is unreadable.
+   *
+   * Esri's grey canvas is a much quieter surface, so the halo is doing less work than it was.
+   * Worth knowing what was traded away: over the darker grey of a built-up area, or where a
+   * callsign lands on top of an Esri place name, the label now has nothing separating it from
+   * what is behind it. If that bites, the fix is a halo tuned to the new basemap rather than
+   * this one restored.
    */
-  .lbl { font-size: 12px; font-weight: 700; text-align: center; white-space: nowrap;
-         text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff; }
+  .lbl { font-size: 12px; font-weight: 700; text-align: center; white-space: nowrap; }
   .err { color: #b91c1c; }
+
+  /*
+   * Muting a raster basemap from outside the tile.
+   *
+   * The pixels in a PNG are not ours to change, but what the BROWSER does with them is. This
+   * filter runs on the tile container, so OSM's colourful editing style is desaturated and
+   * lightened on the way to the screen and the aircraft stop competing with it.
+   *
+   * grayscale(.85), not 1 — a trace of colour keeps water reading as water rather than as another
+   * shade of grey land, which is worth more on this map than perfect neutrality. brightness above
+   * 1 with contrast below it pushes everything toward pale: the terrain recedes, and OSM's dense
+   * labels fade to something the markers can sit on top of.
+   *
+   * WHAT IT CANNOT DO, and the reason it is a mitigation rather than a fix: the filter is applied
+   * uniformly to a finished image. It cannot remove a single label, thin the roads, or drop the
+   * provincial boundaries, because by the time the browser sees the tile those are the same pixels
+   * as everything else. That needs vector tiles — the 'OSM Vector (ours)' layer.
+   *
+   * Applies to the whole container, and Leaflet keeps markers in a separate pane, so the aircraft
+   * and their callsigns are not touched.
+   */
+  .muted { filter: grayscale(.85) brightness(1.12) contrast(.88); }
 </style>
 </head>
 <body>
@@ -93,10 +131,278 @@ const ANIMATE = new URLSearchParams(location.search).get('animate') === '1'
 /** Per-callsign state the frame loop advances: when the document was read, its rate, its path. */
 const motion = new Map()
 
-const map = L.map('map', { zoomControl: true }).setView([33.5, 38.0], 5)
-L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-  attribution: '&copy; OpenStreetMap, &copy; CARTO', maxZoom: 19,
-}).addTo(map)
+/*
+ * ?view=lat,lon,zoom opens somewhere other than the default.
+ *
+ * For checking a basemap over a particular place without panning there afterwards. That matters
+ * more than it sounds: the GL layer places its labels asynchronously, so a map moved by script
+ * immediately after load can be caught with its terrain drawn and its labels still pending, which
+ * looks exactly like a style that renders no labels at all. Opening AT the view removes the
+ * question.
+ */
+const params = new URLSearchParams(location.search)
+const view = (new URLSearchParams(location.search).get('view') || '').split(',').map(Number)
+const START = view.length === 3 && view.every(Number.isFinite) ? view : [33.5, 38.0, 5]
+/*
+ * ?zoomsnap=0.25 reproduces the website's map, which sets zoomSnap so fitBounds can land on the
+ * bounds it is given instead of rounding down a whole level. This page has always run whole-integer
+ * zoom, and that is the one configuration difference between the two that the vector basemap could
+ * plausibly care about — the GL layer syncs a transform against Leaflet's zoom on every move.
+ */
+const snap = Number(params.get('zoomsnap'))
+const map = L.map('map', {
+  zoomControl: true,
+  ...(Number.isFinite(snap) && snap > 0 ? { zoomSnap: snap, zoomDelta: 1 } : {}),
+}).setView([START[0], START[1]], START[2])
+
+/*
+ * A basemap switcher, because CARTO started watermarking its keyless tiles on 26 Aug and the
+ * replacement has to be judged by looking at it, not by reading about it.
+ *
+ * WE ARE ALREADY USING OPENSTREETMAP under all three of these. The live site's attribution has
+ * always read "OpenStreetMap contributors, CARTO", and Esri's canvas is OSM-derived too. OSM is
+ * the DATA; what this control actually switches is who RENDERS and SERVES it. The `osm` entry
+ * differs only in going straight to the Foundation's own servers rather than through a renderer —
+ * which their policy permits, with attribution and no bulk downloading, but which draws the
+ * EDITING style: built to make map data legible to mappers, not to sit quietly under our markers.
+ */
+
+/*
+ * Labels ride in their own pane, ABOVE whichever basemap is showing.
+ *
+ * Both are tile layers, so without this they share the tilePane and the one added most recently
+ * wins — meaning the moment you switched basemap, the new terrain would cover the city names.
+ * 250 sits above the tilePane's 200 and below the overlayPane's 400, so labels stay over the
+ * terrain and under everything that matters. pointerEvents none, or the pane would swallow the
+ * clicks meant for the markers underneath it.
+ */
+map.createPane('labels')
+map.getPane('labels').style.zIndex = 250
+map.getPane('labels').style.pointerEvents = 'none'
+
+/*
+ * ── The vector prototype ────────────────────────────────────────────────────────────────────
+ *
+ * OSM data, OSMF's own servers, no API key, and every colour and label OURS to choose.
+ *
+ * The three layers above are pre-rendered PNGs: whatever the renderer decided is baked into the
+ * image, and the only control we have is which whole layer to switch on. This is the opposite.
+ * The server sends GEOMETRY — coastlines, water, boundaries, place points — and the style below
+ * decides what any of it looks like, in the browser, at draw time.
+ *
+ * Written out by hand rather than borrowed from VersaTiles, whose ready-made Shortbread styles
+ * are 324 layers and would have prototyped somebody else's cartography. The argument being tested
+ * is that we can have exactly the map we want, so the honest demonstration is a style that says
+ * exactly what we want: land, water, borders, and the names of large places. No roads, no
+ * buildings, no landuse, no points of interest. A canvas for aircraft to sit on.
+ *
+ * Why this is the answer to two separate problems at once:
+ *   - CARTO is retiring raster, so a move is coming whether or not we choose it.
+ *   - "Can we drop the cities but keep the borders" is impossible on raster and trivial here —
+ *     it is the one `place_labels` entry at the bottom of this list.
+ *
+ * The tiles stop at z14 and MapLibre over-zooms them, so unlike Esri's z16 ceiling the geometry
+ * stays sharp all the way in — vectors are resolution-free; it is only the DETAIL that stops.
+ *
+ * Glyphs come from VersaTiles because rendering a label needs a font atlas and OSMF publishes
+ * none. It is the one third-party dependency here, it serves fonts rather than map content, and
+ * self-hosting the atlas is a known, small job if this goes further than a prototype.
+ */
+const SHORTBREAD = 'https://vector.openstreetmap.org/shortbread_v1/{z}/{x}/{y}.mvt'
+const LABEL = ['coalesce', ['get', 'name_en'], ['get', 'name']]
+
+/*
+ * Place labels, thinned by POPULATION, with the bar falling as you zoom in.
+ *
+ * The problem this solves: filtering on `kind` alone drew every OSM "city", and Turkey has a great
+ * many — Konya, Kayseri, Corum, Sivas, Elazig and dozens more crowding the opening view. Shortbread
+ * ships `population` on every place, so size can decide instead of category. National capitals are
+ * exempt at every zoom: Nicosia and Valletta are small and are the whole point of their island.
+ *
+ * ── Why this is four layers instead of one interpolate ──
+ *
+ * The obvious version puts an ['interpolate', ['zoom'], ...] threshold inside the filter, and it
+ * silently does not work: MapLibre allows zoom expressions ONLY in layout and paint properties,
+ * never in `filter`. Nothing throws. The comparison simply never becomes true, so capitals kept
+ * rendering off the other branch of the `any` and every city vanished at every zoom — a map that
+ * looked deliberately minimal rather than broken, which is the dangerous kind of wrong.
+ *
+ * So the zoom-dependence lives where it is allowed: in each layer's own minzoom/maxzoom, with a
+ * fixed bar inside. GL draws a layer for minzoom <= z < maxzoom, so the ranges tile the zoom axis
+ * without overlapping and no label is ever drawn twice.
+ *
+ * The stops are MapLibre's zooms, one BELOW what the page's zoom control reads — the plugin runs
+ * the GL map at 512px tiles against Leaflet's 256.
+ */
+const PLACE_STEPS = [
+  // [minzoom, maxzoom, minimum population]
+  [0, 5, 3000000],     // opening view: the giants only
+  [5, 7, 1000000],
+  [7, 9, 250000],
+  [9, 24, 30000],
+]
+
+const placeLayers = () => PLACE_STEPS.map(([minzoom, maxzoom, minPop]) => ({
+  id: `places-${minzoom}`,
+  type: 'symbol', source: 'osm', 'source-layer': 'place_labels',
+  minzoom, maxzoom,
+  filter: ['any',
+    ['==', ['get', 'kind'], 'capital'],
+    ['all',
+      ['in', ['get', 'kind'], ['literal', ['city', 'town']]],
+      ['>=', ['get', 'population'], minPop],
+    ],
+  ],
+  layout: {
+    'text-field': LABEL,
+    'text-font': ['noto_sans_regular'],
+    'text-size': ['interpolate', ['linear'], ['zoom'], 4, 10, 9, 13],
+    // Let GL drop a label rather than overlap one, and break the tie by size — so when two
+    // names collide the bigger place is the one that survives.
+    'text-padding': 6,
+    'symbol-sort-key': ['-', 0, ['get', 'population']],
+  },
+  paint: { 'text-color': '#5b6660', 'text-halo-color': '#f4f5f0', 'text-halo-width': 1.2 },
+}))
+
+const VECTOR_STYLE = {
+  version: 8,
+  glyphs: 'https://tiles.versatiles.org/assets/glyphs/{fontstack}/{range}.pbf',
+  sources: {
+    osm: { type: 'vector', tiles: [SHORTBREAD], maxzoom: 14,
+           attribution: '&copy; OpenStreetMap contributors' },
+  },
+  layers: [
+    // Land is the background; water is painted over it. Shortbread gives ocean and inland water
+    // as separate source-layers, and both must be drawn or the Gulf reads as desert.
+    { id: 'bg', type: 'background', paint: { 'background-color': '#f4f5f0' } },
+    { id: 'ocean', type: 'fill', source: 'osm', 'source-layer': 'ocean',
+      paint: { 'fill-color': '#dde6e8' } },
+    /*
+     * INLAND WATER FROM ZOOM 7, and this minzoom is why the map renders at all.
+     *
+     * Drawn at every zoom, water_polygons pulls every lake and wide river across a continent —
+     * 4084 features, one bucket of 96,370 vertices against MapLibre's hard 65,535 per segment.
+     * The overflow throws nothing and fires no error event; it kills the whole render pass, so
+     * coastlines, borders and labels all vanish and only the background colour is left. The only
+     * sign is a console WARNING that reads like a note about quality. Found by hiding one layer
+     * at a time until the other seven appeared.
+     *
+     * Zoom 7 because `ocean` already carries every sea at this scale.
+     */
+    { id: 'water', type: 'fill', source: 'osm', 'source-layer': 'water_polygons',
+      minzoom: 7,
+      paint: { 'fill-color': '#dde6e8' } },
+
+    // Country borders only. admin_level 2 is the national boundary; without this filter every
+    // provincial line in Syria and Turkey is drawn too, which is the clutter we are removing.
+    { id: 'borders', type: 'line', source: 'osm', 'source-layer': 'boundaries',
+      filter: ['==', ['get', 'admin_level'], 2],
+      paint: { 'line-color': '#c3cdbe', 'line-width': 1 } },
+
+    /*
+     * The labels, and the reason this prototype exists — deleting this one entry removes every
+     * place name while the borders above stay, which raster tiles cannot offer at any price.
+     *
+     * A POPULATION BAR THAT FALLS AS YOU ZOOM IN. The first version filtered on `kind` alone and
+     * drew every OSM "city", which over Turkey meant Corum, Sivas, Elazig, Kutahya and a dozen
+     * more crowding the map at the opening view — the density that made this worth fixing.
+     *
+     * Shortbread ships `population` on every place, so size can decide instead of category. At
+     * the opening zoom only millions-strong places qualify; the threshold drops as the view
+     * tightens, so detail arrives when there is room for it rather than all at once. National
+     * capitals are exempt: Nicosia and Valletta are small and are the whole point of their island.
+     *
+     * The zoom stops are MapLibre's, and the plugin runs the GL map one zoom BELOW Leaflet's —
+     * 512px tiles against 256 — so these numbers are a zoom lower than the page's own control
+     * reads. Tuned by looking, not by arithmetic.
+     */
+    ...placeLayers(),
+  ],
+}
+
+const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas'
+
+/*
+ * Esri wants {z}/{y}/{x} — row then column, the opposite of the XYZ convention Leaflet assumes.
+ * Get it wrong and tiles still load; they are simply the wrong piece of the world, mirrored about
+ * the diagonal, which reads as a projection bug rather than a typo.
+ *
+ * maxNativeZoom, not maxZoom: Esri has no tiles past z16, so without the distinction Leaflet asks
+ * for z17+ and gets nothing, blanking the map exactly when someone zooms in on an airport. With
+ * it, z16 is upscaled instead. Blurry beats empty.
+ */
+const BASES = {
+  'Esri Light Gray': L.tileLayer(`${ESRI}/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}`,
+    { attribution: 'Tiles &copy; Esri', maxNativeZoom: 16, maxZoom: 19 }),
+  // ?raw=1 shows OSM's own colours; by default it is muted by the .muted filter above, which is
+  // the only lever a raster tile leaves us. Both entries exist so the difference is visible.
+  'OpenStreetMap': L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    { attribution: '&copy; OpenStreetMap contributors', maxZoom: 19,
+      className: params.get('raw') === '1' ? '' : 'muted' }),
+  'CARTO Positron': L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+    { attribution: '&copy; OpenStreetMap, &copy; CARTO', maxZoom: 19 }),
+  'OSM Vector (ours)': L.maplibreGL({ style: VECTOR_STYLE }),
+}
+
+/*
+ * Esri alone separates cities and borders from the terrain, and that seam is the whole of what we
+ * control. Toggling it takes cities AND borders together, because they share a tile — there is no
+ * keeping one without the other. OSM and CARTO bake their labels into the terrain tile, so with
+ * those selected this switch can do nothing at all, which is why it disables itself below.
+ *
+ * Nothing INSIDE a tile is ours to change; these are pre-rendered PNGs. Choosing per label —
+ * capitals but not provincial towns, Arabic over Latin — needs VECTOR tiles.
+ */
+const ESRI_LABELS = L.tileLayer(`${ESRI}/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}`,
+  { attribution: 'Tiles &copy; Esri', maxNativeZoom: 16, maxZoom: 19, pane: 'labels' })
+
+const NAMED = { esri: 'Esri Light Gray', osm: 'OpenStreetMap', carto: 'CARTO Positron',
+                vector: 'OSM Vector (ours)' }
+BASES[NAMED[params.get('tiles')] || NAMED.esri].addTo(map)
+
+L.control.layers(BASES, { 'Cities &amp; borders': ESRI_LABELS }).addTo(map)
+
+/*
+ * Keep the labels checkbox honest about the basemap under it.
+ *
+ * The layer only means anything over Esri's canvas: left checked while OSM is showing, it would
+ * paint Esri's place names on top of OSM's own, doubling every city. So it is pulled when the base
+ * changes and put back when Esri returns — but only if the reader had not unchecked it themselves,
+ * which `wanted` remembers.
+ *
+ * `syncing` guards the loop: adding or removing a layer fires the very events that set `wanted`,
+ * so without it, hiding the labels for OSM would be recorded as the reader not wanting them, and
+ * they would never come back.
+ */
+let wanted = params.get('labels') !== 'none'
+let syncing = false
+
+map.on('overlayadd',    e => { if (!syncing && e.layer === ESRI_LABELS) wanted = true })
+map.on('overlayremove', e => { if (!syncing && e.layer === ESRI_LABELS) wanted = false })
+
+function syncLabels() {
+  const esri = map.hasLayer(BASES['Esri Light Gray'])
+
+  // Grey the checkbox out where it can do nothing, rather than leaving it ticked and inert. Over
+  // OSM or CARTO the labels are inside the terrain tile: the control would look like an offer to
+  // remove them and would silently fail to.
+  const box = document.querySelector('.leaflet-control-layers-overlays input[type=checkbox]')
+  if (box) {
+    box.disabled = !esri
+    const row = box.closest('label')
+    if (row) { row.style.opacity = esri ? '' : '.4'; row.title = esri ? '' : 'Esri only' }
+  }
+
+  const show = esri && wanted
+  if (show === map.hasLayer(ESRI_LABELS)) return
+  syncing = true
+  show ? ESRI_LABELS.addTo(map) : map.removeLayer(ESRI_LABELS)
+  syncing = false
+}
+map.on('baselayerchange', syncLabels)
+syncLabels()
+
 
 /*
  * ONE marker per aircraft, in ONE collection, keyed by callsign.

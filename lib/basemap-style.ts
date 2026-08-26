@@ -125,7 +125,30 @@ export const BASEMAP_STYLE = {
     { id: 'bg', type: 'background' as const, paint: { 'background-color': '#f4f5f0' } },
     { id: 'ocean', type: 'fill' as const, source: 'osm', 'source-layer': 'ocean',
       paint: { 'fill-color': '#dde6e8' } },
+
+    /*
+     * INLAND WATER FROM ZOOM 7, and the minzoom is the whole reason this map renders at all.
+     *
+     * Without it, water_polygons is drawn at every zoom — and at the opening view that is every
+     * lake, reservoir and wide river across a continent: 4084 features building a single bucket of
+     * 96,370 vertices against MapLibre's hard limit of 65,535 per segment. The overflow does not
+     * throw and does not fire an error event. It takes down the ENTIRE render pass: no coastlines,
+     * no borders, no labels, nothing but the background colour, on a map whose style validates
+     * clean, whose tiles load and parse, whose canvas is correctly sized and visible, and whose
+     * queryRenderedFeatures cheerfully reports thousands of features being drawn.
+     *
+     * That combination shipped to production and had to be rolled back. The only outward sign was
+     * a console WARNING — "Max vertices per segment is 65535: bucket requested 96370" — which
+     * reads like a note about quality, not a total failure. It was found by hiding one layer at a
+     * time in a live map until the other seven appeared.
+     *
+     * Zoom 7 because the ocean layer already carries every sea that matters at this scale — the
+     * Mediterranean, the Black Sea, the Caspian and the Gulf are all in `ocean`. Inland water is
+     * detail for when someone has zoomed into a country, and by then a tile covers little enough
+     * ground that the bucket stays small.
+     */
     { id: 'water', type: 'fill' as const, source: 'osm', 'source-layer': 'water_polygons',
+      minzoom: 7,
       paint: { 'fill-color': '#dde6e8' } },
 
     // National borders only. admin_level 2 is the country line; without the filter every
