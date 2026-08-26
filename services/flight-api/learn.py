@@ -69,6 +69,35 @@ PROMOTE_MIN_FLIGHTS = 5
 PROMOTE_MIN_THIN = 2
 THIN_MAX_DAYS_PER_WEEK = 2
 
+# A corridor that rejected this share of its own flights is CONTESTED, and must not be drawn.
+#
+# The outlier filter exists to throw out the occasional reroute. When it throws out a third of
+# the route instead, it is not filtering noise — it is choosing between two standing routings and
+# calling the losers outliers. IST-DAM THY measured 12 kept against 7 rejected on 26 Aug: two
+# corridors 200 km apart, one via Antalya and one via Ankara, and Turkish picks one per day.
+#
+# The stored corridor is then whichever cluster happened to be larger, so drawing with it is
+# wrong by 200 km for a substantial minority of flights — worse than the great circle, which at
+# least sits between them.
+#
+# A RATE, not a list. Naming IST-DAM THY would fix today's case and leave the next one to be
+# found by somebody looking at a screen. Measured across every corridor on the same day, the
+# separation is clean: the contested pair rejects 37%, and every other rejects 11% or less.
+CONTESTED_OUTLIER_RATIO = 0.25
+
+
+def is_contested(observed_count: int | None, outliers_excluded: int | None) -> bool:
+    """
+    Whether a corridor is really two, and so cannot be drawn as one.
+
+    Judged on the share rejected rather than the count: one reroute out of twenty-seven is a
+    reroute, seven out of nineteen is a second route.
+    """
+    kept = observed_count or 0
+    out = outliers_excluded or 0
+    total = kept + out
+    return total > 0 and (out / total) >= CONTESTED_OUTLIER_RATIO
+
 
 def is_promotable(observed_count: int | None, days_per_week: int | None = None) -> bool:
     """
