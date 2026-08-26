@@ -1815,6 +1815,15 @@ async def health():
     returns us to minute-old positions, and the arrival poller falling over returns us to flights
     that never end. Neither shows up as an error anywhere — a count that has stopped moving is
     the only symptom.
+
+    The corridors report for exactly that reason. If learned_paths returns nothing — a failed
+    fetch, a filter that rejects everything, a query that silently pages badly — every flight
+    quietly falls back to the hand-imported paths and the map looks EXACTLY as it did before
+    adoption. There is no error, no visible change, and the 224 km improvement on DAM-KWI simply
+    does not happen. A count is the only thing that can distinguish "working" from "reverted".
+
+    `learned` is what is loaded and drawable; `stored` is the fallback set. Their ratio is the
+    honest summary of how much of the map is running on observed corridors.
     """
     return {
         "ok": True,
@@ -1822,4 +1831,12 @@ async def health():
         "adsb": adsb.state(),
         "arrivals": {**arrivals.state(), **_arr_state,
                      "confirmed_held": len(_arr_confirmed)},
+        "corridors": {
+            "learned": len(_learned_paths),
+            "stored": len(_route_paths),
+            # Zero here after a poll has run means the loader is failing silently. Null means it
+            # has not been asked yet, which is ordinary on a service that has just started.
+            "learned_loaded_at": (datetime.fromtimestamp(_learned_at, timezone.utc).isoformat()
+                                  if _learned_at else None),
+        },
     }
