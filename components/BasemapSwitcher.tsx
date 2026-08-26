@@ -51,6 +51,18 @@ export default function BasemapSwitcher({
         boxShadow: '0 2px 10px rgba(0,0,0,0.10)',
         display: 'flex',
         flexDirection: 'row',
+        /*
+         * The two buttons keep the SAME physical order in both languages.
+         *
+         * Under an RTL document a flex row lays its children out right-to-left, so the Arabic
+         * toggle came out mirrored: بسيطة on the left and خريطة on the right, the reverse of
+         * English. The selected option is the default, and a default that moves depending on the
+         * language reads as though the two mean different things in each.
+         *
+         * `direction: ltr` fixes the box order only. The Arabic inside each button still shapes
+         * and renders right-to-left, because that is a property of the text, not of the row.
+         */
+        direction: 'ltr',
         gap: 3,
         whiteSpace: 'nowrap',
         // As wide as its content, like the caption above it — not stretched to the stack.
