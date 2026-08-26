@@ -309,18 +309,44 @@ def test_cancelled_and_diverted_still_win_over_everything():
         assert derive_phase(f, pos) == outcome
 
 
-if __name__ == "__main__":
-    fails = 0
-    for name, fn in sorted(globals().items()):
-        if name.startswith("test_") and callable(fn):
-            try:
-                fn()
-                print(f"ok   {name}")
-            except AssertionError as e:
-                fails += 1
-                print(f"FAIL {name}: {e}")
-    print(f"\n{fails} failed")
-    sys.exit(1 if fails else 0)
+
+# ── A corridor is for flying along ────────────────────────────────────────────
+
+def _on_corridor(path_source, pos=None):
+    """The shipping gate itself, not a copy of it."""
+    from main import draws_on_corridor
+    return draws_on_corridor(path_source, pos)
+
+
+AIRBORNE = {"lat": 33.4, "lon": 36.5, "on_ground": False}
+PARKED = {"lat": 33.41, "lon": 36.52, "on_ground": True,
+          "altitude_ft": 0, "ground_speed_kts": 0}
+
+
+def test_only_a_learned_corridor_is_worth_drawing_on():
+    # Measured 26 Aug: learned corridors sit a median 7 km from the fix, stored and
+    # great-circle ones 37 to 72. Seventy kilometres is the wrong side of a border.
+    assert _on_corridor("learned", AIRBORNE) is True
+    assert _on_corridor("stored", AIRBORNE) is False
+    assert _on_corridor("great_circle", AIRBORNE) is False
+    assert _on_corridor(None, AIRBORNE) is False
+
+
+def test_an_aircraft_on_the_ground_is_never_flown_along_its_corridor():
+    """
+    NGN491, 26 Aug: parked at its Damascus stand, publishing motion at 0.000112 per second.
+
+    Had DAM|DUS been a learned corridor rather than a stored one, a client would have walked it
+    off the stand toward Düsseldorf hours before pushback. The accuracy gate was hiding this —
+    it gave the right answer for a reason that had nothing to do with the aeroplane standing
+    still, and would have stopped giving it the day the learner promoted that route.
+    """
+    assert _on_corridor("learned", PARKED) is False
+
+
+def test_a_taxiing_aircraft_stays_at_its_fix():
+    # It is on a taxiway the corridor knows nothing about, however fast it is moving.
+    assert _on_corridor("learned", {**PARKED, "ground_speed_kts": 22}) is False
 
 
 # ── The map stops drawing an arrival ──────────────────────────────────────────
@@ -339,11 +365,26 @@ def test_the_terminal_phase_loses_its_marker():
     assert _drawable("arrived") is False
 
 
-def test_every_phase_before_arrived_keeps_its_marker():
+def test_every_phase_between_pushback_and_the_gate_keeps_its_marker():
     # Rolling out, crossing the airfield, and stopped-but-unconfirmed are all still motion,
     # and a passenger meeting the flight wants to see each of them.
-    for phase in ("scheduled", "taxiing", "departed", "en_route", "landed", "taxi_to_gate"):
+    for phase in ("taxiing", "departed", "en_route", "landed", "taxi_to_gate"):
         assert _drawable(phase) is True, phase
+
+
+def test_a_flight_that_has_not_departed_has_no_marker():
+    """
+    The same rule as `arrived`, at the other end — and this test used to assert the opposite.
+
+    `scheduled` was in the list above until 26 Aug, when NGN491 DAM-DUS turned up on the map as
+    one of ten "observed" flights while parked at its stand: on_ground true, 0 ft, 0 knots, three
+    hours before it was due to arrive. FR24 publishes a fix for an aircraft on the ground, and
+    nothing here was filtering it.
+
+    A flight that has not left is not traffic. `taxiing` stays drawn, because an aeroplane moving
+    under its own power is something happening; the gate is about the ones standing still.
+    """
+    assert _drawable("scheduled") is False
 
 
 def test_at_gate_is_drawn_while_the_record_might_still_arrive():
@@ -489,3 +530,17 @@ def test_a_flight_already_there_sits_still():
     now = datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc)
     m = motion_of(1.0, now + timedelta(minutes=5), now.timestamp() * 1000)
     assert m["fraction_per_sec"] == 0.0, "nowhere left to go is zero, not a creep"
+
+
+if __name__ == "__main__":
+    fails = 0
+    for name, fn in sorted(globals().items()):
+        if name.startswith("test_") and callable(fn):
+            try:
+                fn()
+                print(f"ok   {name}")
+            except AssertionError as e:
+                fails += 1
+                print(f"FAIL {name}: {e}")
+    print(f"\n{fails} failed")
+    sys.exit(1 if fails else 0)

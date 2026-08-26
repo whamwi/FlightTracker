@@ -578,9 +578,50 @@ def draws_on_map(phase: str, landed_at_ms: float | None = None,
     """
     if phase == "arrived":
         return False
+    # The same rule at the other end of the trip, and it was missing.
+    #
+    # A flight that has not departed is no more map traffic than one that has finished. FR24
+    # publishes a fix for an aircraft sitting on its stand — NGN491 DAM-DUS on 26 Aug, on_ground
+    # true, 0 ft, 0 knots, parked at Damascus three hours before its 15:15 arrival — and with
+    # nothing to stop it that fix became a marker and was counted as one of ten observed flights.
+    #
+    # `scheduled` only, not `taxiing`. An aircraft crossing the airfield under its own power is
+    # something happening, and worth watching; one at the gate is not. The map's job is the
+    # journey, from the moment it starts moving to the moment it stops.
+    if phase == "scheduled":
+        return False
     if phase == "at_gate" and landed_at_ms is not None and now_ms is not None:
         return now_ms - landed_at_ms <= AT_GATE_GRACE_SEC * 1000
     return True
+
+
+def draws_on_corridor(path_source: str | None, pos: dict | None) -> bool:
+    """
+    Whether the client should draw this flight ALONG its corridor rather than at its fix.
+
+    Two conditions, and they guard different failures.
+
+    THE CORRIDOR MUST BE EARNED. Drawing on a corridor trades cross-track accuracy for smooth
+    motion: an aircraft twenty kilometres off its path is drawn on it. Measured 26 Aug across 15
+    observed flights, a learned corridor sits a median 7 km from the actual fix and mostly under
+    17; stored and great-circle ones sit 37 to 72 km away, and seventy kilometres is the wrong
+    side of a border. So the trade is offered only where real flights by this operator built it.
+
+    THE AIRCRAFT MUST BE FLYING. A corridor describes a cruise. On the ground the aeroplane is on
+    a taxiway it knows nothing about, and `motion` still carries a rate — NGN491 sat at its
+    Damascus stand on 26 Aug publishing fraction 0.0 at 0.000112 per second — so a client that
+    animated it would walk it off the stand toward Düsseldorf before it had pushed back.
+
+    Nothing did, but only because DAM|DUS happened to be `stored` rather than `learned`: the
+    accuracy gate producing the right answer for an unrelated reason, which would have stopped
+    the day the learner promoted that route. Two conditions because there are two reasons.
+
+    A flight with no fix at all is decided by the caller, not here — it has nothing to be wrong
+    about, so it follows whatever path it has.
+    """
+    if path_source != "learned":
+        return False
+    return not bool(pos and pos.get("on_ground"))
 
 
 def derive_phase(f: dict, pos: dict | None,
@@ -1504,7 +1545,9 @@ async def build_live() -> dict:
         # A PROJECTED flight is unaffected either way. It has no fix to be wrong about, so it
         # follows whatever path it has, stored or otherwise: a hand-imported corridor beats a
         # straight line, and both beat nothing.
-        draw_on_path = path_source == "learned"
+        #
+        # See draws_on_corridor for the second half of the rule.
+        draw_on_path = draws_on_corridor(path_source, pos)
 
         # Where the fix sits ALONG the route, measured the way the corridor is parameterised.
         #
