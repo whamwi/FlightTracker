@@ -74,6 +74,25 @@
 // service with ?api=https://...
 const API = new URLSearchParams(location.search).get('api') || 'http://127.0.0.1:8077'
 
+/*
+ * ?animate=1 — render BETWEEN the server's answers instead of only at them.
+ *
+ * Off by default, and that default is the whole worth of this page: no tracker, no predictor, no
+ * smoothing, so a marker in the wrong place means the server is wrong and there is nowhere else
+ * for the fault to hide. Turning that off by accident would cost the one surface that can settle
+ * an argument.
+ *
+ * On, it runs the same arithmetic the app's V3 does — advance the server's fraction by the
+ * server's rate along the server's corridor. Nothing here decides where an aeroplane is. Its
+ * purpose is a third surface: page static, page animated, app. If the animated page and the app
+ * disagree, the fault is in the app; if the animated page and the STATIC page disagree at a poll
+ * instant, the fault is in the arithmetic they share.
+ */
+const ANIMATE = new URLSearchParams(location.search).get('animate') === '1'
+
+/** Per-callsign state the frame loop advances: when the document was read, its rate, its path. */
+const motion = new Map()
+
 const map = L.map('map', { zoomControl: true }).setView([33.5, 38.0], 5)
 L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
   attribution: '&copy; OpenStreetMap, &copy; CARTO', maxZoom: 19,
@@ -141,7 +160,7 @@ const fmt = n => (n === null || n === undefined) ? '—' : n
 async function tick() {
   let doc
   try {
-    const res = await fetch(`${API}/v2/live`, { cache: 'no-store' })
+    const res = await fetch(`${API}/v2/live${ANIMATE ? '?paths=1' : ''}`, { cache: 'no-store' })
     doc = await res.json()
   } catch (e) {
     document.getElementById('counts').innerHTML = `<span class="err">${API} unreachable</span>`
@@ -168,6 +187,27 @@ async function tick() {
     // Nothing is interpolated, smoothed, or advanced between polls. The marker is placed where
     // the server said, and moves only when the server says something new.
     const ll = [p.lat, p.lon]
+    // Everything the frame loop needs, captured at the moment the document was read.
+    if (ANIMATE) {
+      motion.set(cs, {
+        /*
+         * The SERVER's build time, not ours.
+         *
+         * /v2/live is cached for LIVE_TTL, and this page polls at the same period but out of
+         * phase — so about half the polls return a document that has not changed. Basing elapsed
+         * on Date.now() reset the clock each time while the fraction stayed put, snapping the
+         * marker back to where it was ten seconds ago and re-advancing. That is the backwards
+         * step; the sideways jitter is the same snap replayed across a bend.
+         *
+         * as_of is the instant the fractions were true. A re-served document carries the same
+         * one, so elapsed keeps growing and the marker keeps moving.
+         */
+        at: Date.parse(doc.as_of) || Date.now(),
+        motion: f.motion,
+        path: isProj && f.path_key ? (doc.paths || {})[f.path_key] : null,
+        hub, isProj, label: cs,
+      })
+    }
     const m = markers.get(cs)
     if (m) {
       m.setLatLng(ll)
@@ -195,17 +235,57 @@ async function tick() {
   // A flight that leaves the document leaves the map. One rule, one place — the web spreads the
   // equivalent across five thresholds and a silence counter in a single poll body.
   for (const [cs, m] of markers) {
-    if (!seen.has(cs)) { m.remove(); markers.delete(cs) }
+    if (!seen.has(cs)) { m.remove(); markers.delete(cs); motion.delete(cs) }
   }
 
   document.getElementById('counts').textContent =
-    `${flights.length} flights · ${observed} observed · ${projected} projected · ${nopos} no position\n`
+    `${flights.length} flights · ${observed} observed · ${projected} projected · ${nopos} no position`
+    + (ANIMATE ? ' · ANIMATED' : '') + '\n'
     + `DAM ${byHub.DAM} · ALP ${byHub.ALP} · DEZ ${byHub.DEZ}`
   document.getElementById('rows').innerHTML = rows.sort().join('')
 }
 
+/*
+ * The animation, and the arithmetic is lib/v3-motion.ts in the app — kept in step by hand.
+ *
+ * Deliberately a copy rather than a shared file: this page is a static file beside the service,
+ * served by python -m http.server with no build step and no imports. A copy that can drift is
+ * the price of that, and the drift is exactly what comparing the two surfaces would reveal.
+ */
+function pointAt(path, f) {
+  if (!path || !path.length) return null
+  const c = Math.min(1, Math.max(0, f))
+  if (c <= path[0].f) return path[0]
+  const last = path[path.length - 1]
+  if (c >= last.f) return last
+  for (let i = 0; i < path.length - 1; i++) {
+    const a = path[i], b = path[i + 1]
+    if (c >= a.f && c <= b.f) {
+      const span = b.f - a.f, t = span > 0 ? (c - a.f) / span : 0
+      return { lat: a.lat + (b.lat - a.lat) * t, lon: a.lon + (b.lon - a.lon) * t }
+    }
+  }
+  return last
+}
+
+function frame() {
+  if (!ANIMATE) return
+  const now = Date.now()
+  for (const [cs, st] of motion) {
+    const mk = markers.get(cs)
+    if (!mk || !st.motion || !st.path) continue
+    const elapsed = Math.max(0, (now - st.at) / 1000)
+    const f = Math.min(1, Math.max(0, st.motion.fraction + st.motion.fraction_per_sec * elapsed))
+    const pt = pointAt(st.path, f)
+    if (pt) mk.setLatLng([pt.lat, pt.lon])
+  }
+}
+
 tick()
 setInterval(tick, 10_000)
+// One second, not a frame loop: a projected flight covers about 0.25 km a second, which at this
+// zoom is well under a pixel. A rAF loop would burn frames to move nothing.
+if (ANIMATE) setInterval(frame, 1000)
 </script>
 </body>
 </html>
