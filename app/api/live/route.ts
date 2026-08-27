@@ -19,15 +19,32 @@ export const dynamic = 'force-dynamic'
  */
 const V2_API = process.env.FLIGHT_API_URL ?? 'https://flight-api-production-5124.up.railway.app'
 
-export async function GET() {
+/*
+ * ?paths=1 asks for the corridors as well.
+ *
+ * OPT-IN, because the two callers want different things. The board reads this for phase alone and
+ * would carry roughly 20 KB of waypoints on every poll for nothing. The map needs them to animate
+ * and can hold them for as long as it likes — corridors change when the learner runs, not between
+ * polls. Same reasoning as /v2/live's own flag, which this forwards to.
+ */
+export async function GET(req: Request) {
+  const wantPaths = new URL(req.url).searchParams.get('paths') === '1'
   try {
-    const r = await fetch(`${V2_API}/v2/live`, { cache: 'no-store' })
+    const r = await fetch(`${V2_API}/v2/live${wantPaths ? '?paths=1' : ''}`, { cache: 'no-store' })
     if (!r.ok) {
       console.warn(`[live] v2 answered ${r.status}`)
       return NextResponse.json({ ok: false, flights: [] }, { status: 200 })
     }
     const body = await r.json()
-    return NextResponse.json({ ok: true, flights: body?.flights ?? [] })
+    return NextResponse.json({
+      ok: true,
+      // The instant the server built it. The map animates from THIS, not from when it fetched —
+      // the document is cached briefly, so fetch time resets a clock the fractions did not.
+      as_of: body?.as_of ?? null,
+      flights: body?.flights ?? [],
+      // Absent unless asked for, so the board's response does not grow.
+      ...(wantPaths ? { paths: body?.paths ?? {} } : {}),
+    })
   } catch (e) {
     // 200 with an empty list, not a 5xx: an absent phase is a normal state the card already
     // handles, and a failing request here must not colour the board's own error handling.

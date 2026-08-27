@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import 'leaflet/dist/leaflet.css'
 import { attachBasemap, type BasemapHandle } from '@/lib/basemap-attach'
 import { getActiveLocale, cityFor } from '@/lib/geo-data'
 import { statusBadge, type PopupFlight } from '@/lib/v3-popup'
 import { buildPopup, type Aircraft } from '@/lib/flight-popup'
+import { advance, ease, pointAt, type Waypoint, type Motion } from '@/lib/v3-motion'
 
 /**
  * The map that draws what the server says, and nothing else.
@@ -40,6 +41,10 @@ type LivePos = {
   fix_at: string | null; pos_source: string | null
 }
 type LiveFlight = PopupFlight & {
+  /* How the marker should MOVE between polls — see lib/v3-motion. */
+  motion?: Motion | null
+  path_key?: string | null
+  draw_on_path?: boolean
   callsign: string | null; iata_number: string | null
   dep_iata: string | null; arr_iata: string | null
   phase: string; position: LivePos | null
@@ -68,6 +73,19 @@ export default function MapV3() {
   const markersRef = useRef<Map<string, any>>(new Map())
   /** The latest document, held apart from the map so the two can arrive in either order. */
   const docRef = useRef<LiveFlight[] | null>(null)
+  /** The corridors, keyed by path. Held across polls — they change when the learner runs. */
+  const pathsRef = useRef<Record<string, Waypoint[]>>({})
+  /** When the server built the document: the instant its fractions were true. */
+  const asOfRef = useRef<number>(0)
+  /*
+   * Where each marker is currently DRAWN, carried across frames.
+   *
+   * Easing needs to know what the reader is looking at, not only what the server last said — a
+   * pure function of the document could only ever jump. A ref rather than state: writing where a
+   * marker sits must not itself cause a render, or every eased frame would schedule another.
+   */
+  const shownRef = useRef<Map<string, number>>(new Map())
+  const lastTickRef = useRef<number>(0)
   const [mapReady, setMapReady] = useState(false)
   /** Bumped on each poll, purely to re-run the draw effect. */
   const [tick, setTick] = useState(0)
@@ -147,10 +165,20 @@ export default function MapV3() {
 
     const poll = async () => {
       try {
-        const r = await fetch('/api/live', { cache: 'no-store' })
+        const r = await fetch('/api/live?paths=1', { cache: 'no-store' })
         const doc = await r.json()
         if (stop) return
         docRef.current = doc?.flights ?? []
+        if (doc?.paths) pathsRef.current = doc.paths
+        /*
+         * The SERVER's build time, not ours.
+         *
+         * /v2/live is cached briefly and this polls on its own schedule, so about half the polls
+         * return a document that has not changed. Measuring elapsed from the moment we fetched
+         * would reset the clock each time while the fraction stayed put — snapping the marker
+         * back and re-advancing it. That is the stepping-sideways fault the app hit on 26 Aug.
+         */
+        asOfRef.current = Date.parse(doc?.as_of ?? '') || Date.now()
         setStatus('ok')
         setTick(t => t + 1)
       } catch {
@@ -173,6 +201,17 @@ export default function MapV3() {
    * Over Syria view — none of which knows about the others, which is how AY352 and ABY352 ended
    * up drawn side by side on 16 Aug. One map, one key, and that fault cannot be expressed.
    */
+  /*
+   * Which flights move between polls, and where they are drawn.
+   *
+   * The server decides eligibility: draw_on_path is true for a learned corridor on an airborne
+   * aircraft that is not yet arriving. Everything else is drawn at its fix, exactly as before.
+   */
+  const animatable = useCallback((f: LiveFlight): Waypoint[] | null => {
+    if (f.draw_on_path === false || !f.motion || !f.path_key) return null
+    return pathsRef.current[f.path_key] ?? null
+  }, [])
+
   useEffect(() => {
     const map = mapRef.current
     const L = LRef.current
@@ -245,7 +284,12 @@ export default function MapV3() {
 
       const existing = markersRef.current.get(cs)
       if (existing) {
-        existing.setLatLng([p.lat, p.lon])
+        /*
+         * A flight being flown along its corridor keeps the position the frame loop gave it.
+         * Setting the fix here would snap it back on every poll, which is the leap the corridor
+         * exists to remove — the same trap the test page hit on 26 Aug.
+         */
+        if (!animatable(f)) existing.setLatLng([p.lat, p.lon])
         existing.setIcon(icon)
         existing.setPopupContent(html)
       } else {
@@ -261,7 +305,47 @@ export default function MapV3() {
       if (!seen.has(cs)) { m.remove(); markersRef.current.delete(cs) }
     }
     setCount(seen.size)
-  }, [mapReady, tick])
+  }, [mapReady, tick, animatable])
+
+  /*
+   * The animation, once a second.
+   *
+   * Separate from the draw effect on purpose. That one rebuilds icons and popup contents, and
+   * doing either every second would re-render an open popup under the reader's cursor. This
+   * moves markers and nothing else.
+   *
+   * One second sounds coarse and is not: a flight covers well under a kilometre in that time,
+   * which at the opening zoom is a fraction of a pixel. The motion is slow because aeroplanes are
+   * far away, not because the clock is lazy.
+   */
+  useEffect(() => {
+    if (!mapReady) return
+    const id = setInterval(() => {
+      const flights = docRef.current
+      if (!flights) return
+      const now = Date.now()
+      const dt = lastTickRef.current ? (now - lastTickRef.current) / 1000 : 1
+      lastTickRef.current = now
+      const elapsed = Math.max(0, (now - asOfRef.current) / 1000)
+
+      for (const f of flights) {
+        const path = animatable(f)
+        if (!path) continue
+        const cs = (f.callsign || f.iata_number || '').trim()
+        const marker = markersRef.current.get(cs)
+        if (!marker) continue
+
+        const target = advance(f.motion ?? null, elapsed)
+        if (target === null) continue
+        // Eased from wherever this marker actually is, never snapped — see lib/v3-motion.
+        const fraction = ease(shownRef.current.get(cs) ?? null, target, dt)
+        shownRef.current.set(cs, fraction)
+        const at = pointAt(path, fraction)
+        if (at) marker.setLatLng([at.lat, at.lon])
+      }
+    }, 1000)
+    return () => clearInterval(id)
+  }, [mapReady, animatable])
 
   return (
     <>
