@@ -60,7 +60,13 @@ export default function MapV3() {
   /** One marker per callsign, in one collection — see the note on markers below. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const markersRef = useRef<Map<string, any>>(new Map())
-  const [count, setCount] = useState<number | null>(null)
+  /** The latest document, held apart from the map so the two can arrive in either order. */
+  const docRef = useRef<LiveFlight[] | null>(null)
+  const [mapReady, setMapReady] = useState(false)
+  /** Bumped on each poll, purely to re-run the draw effect. */
+  const [tick, setTick] = useState(0)
+  const [status, setStatus] = useState<'loading' | 'ok' | 'offline'>('loading')
+  const [count, setCount] = useState(0)
 
   useEffect(() => {
     if (!elRef.current || mapRef.current) return
@@ -76,6 +82,8 @@ export default function MapV3() {
       })
       mapRef.current = map
       L.control.zoom({ position: 'bottomright' }).addTo(map)
+      // Tells the draw effect the map exists. A document that arrived first is drawn immediately.
+      setMapReady(true)
 
       // The same basemap V2 uses, so the comparison is about positions and nothing else.
       basemapRef.current = attachBasemap(L, map, 'vector', { cities: false })
@@ -121,83 +129,108 @@ export default function MapV3() {
   }, [])
 
   /*
-   * The aircraft, straight from /v2/live.
+   * POLLING, which does not wait for the map.
+   *
+   * This used to live inside the draw effect and bail out until Leaflet had imported and the map
+   * existed — so the first request went out only after the basemap was up, and on a cold load
+   * that is fifteen to twenty seconds of an empty map with nothing in flight to explain it. The
+   * document and the map have nothing to do with each other; fetching both at once is free.
+   */
+  useEffect(() => {
+    let stop = false
+
+    const poll = async () => {
+      try {
+        const r = await fetch('/api/live', { cache: 'no-store' })
+        const doc = await r.json()
+        if (stop) return
+        docRef.current = doc?.flights ?? []
+        setStatus('ok')
+        setTick(t => t + 1)
+      } catch {
+        // Only report offline before the first success. After that a failed poll leaves the last
+        // positions alone — stale by one interval beats an empty map, and the next poll corrects.
+        if (!stop) setStatus(s => (s === 'ok' ? 'ok' : 'offline'))
+      }
+    }
+
+    poll()
+    const id = setInterval(poll, POLL_MS)
+    return () => { stop = true; clearInterval(id) }
+  }, [])
+
+  /*
+   * DRAWING, which runs whenever either half is ready — a new document, or the map appearing
+   * under a document that is already here.
    *
    * ONE marker per callsign in ONE collection. V2 keeps three — live, schedule ghosts and its
    * Over Syria view — none of which knows about the others, which is how AY352 and ABY352 ended
    * up drawn side by side on 16 Aug. One map, one key, and that fault cannot be expressed.
    */
   useEffect(() => {
-    let stop = false
+    const map = mapRef.current
+    const L = LRef.current
+    const flights = docRef.current
+    if (!mapReady || !map || !L || !flights) return
 
-    const draw = async () => {
-      const map = mapRef.current
-      const L = LRef.current
-      if (!map || !L) return
-      try {
-        const r = await fetch('/api/live', { cache: 'no-store' })
-        const doc = await r.json()
-        if (stop || mapRef.current !== map) return
+    const seen = new Set<string>()
 
-        const flights: LiveFlight[] = doc?.flights ?? []
-        const seen = new Set<string>()
+    for (const f of flights) {
+      const p = f.position
+      // No position means no marker. The server withholds one for an arrived flight, and filling
+      // that silence with a guess is the entire bug this map exists to remove.
+      if (!p || p.lat == null || p.lon == null) continue
 
-        for (const f of flights) {
-          const p = f.position
-          // No position means no marker. The server withholds one for an arrived flight, and
-          // filling that silence with a guess is the entire bug this map exists to remove.
-          if (!p || p.lat == null || p.lon == null) continue
+      const cs = (f.callsign || f.iata_number || '').trim()
+      if (!cs) continue
+      seen.add(cs)
 
-          const cs = (f.callsign || f.iata_number || '').trim()
-          if (!cs) continue
-          seen.add(cs)
+      const syrian = SYRIAN.has(f.dep_iata ?? '') || SYRIAN.has(f.arr_iata ?? '')
+      const colour = syrian ? '#2f6b3c' : '#6b7280'
+      const faded = p.pos_source === 'projected'
+      const icon = L.divIcon({
+        className: '',
+        iconSize: [96, 52], iconAnchor: [48, 16],
+        html: `<div style="font-size:26px;line-height:1;text-align:center;color:${colour};
+                 opacity:${faded ? 0.65 : 1};transform:rotate(${(p.track_deg ?? 0) - 90}deg)">&#9992;</div>
+               <div style="font:700 11px/1.2 ui-sans-serif,system-ui,sans-serif;text-align:center;
+                 color:${colour};white-space:nowrap">${cs}</div>`,
+      })
 
-          const syrian = SYRIAN.has(f.dep_iata ?? '') || SYRIAN.has(f.arr_iata ?? '')
-          const colour = syrian ? '#2f6b3c' : '#6b7280'
-          const faded = p.pos_source === 'projected'
-          const icon = L.divIcon({
-            className: '',
-            iconSize: [96, 52], iconAnchor: [48, 16],
-            html: `<div style="font-size:26px;line-height:1;text-align:center;color:${colour};
-                     opacity:${faded ? 0.65 : 1};transform:rotate(${(p.track_deg ?? 0) - 90}deg)">&#9992;</div>
-                   <div style="font:700 11px/1.2 ui-sans-serif,system-ui,sans-serif;text-align:center;
-                     color:${colour};white-space:nowrap">${cs}</div>`,
-          })
-
-          const existing = markersRef.current.get(cs)
-          if (existing) { existing.setLatLng([p.lat, p.lon]); existing.setIcon(icon) }
-          else markersRef.current.set(cs, L.marker([p.lat, p.lon], { icon }).addTo(map))
-        }
-
-        // A flight that leaves the document leaves the map. One rule, in one place.
-        for (const [cs, m] of markersRef.current) {
-          if (!seen.has(cs)) { m.remove(); markersRef.current.delete(cs) }
-        }
-        setCount(seen.size)
-      } catch {
-        // A failed poll leaves the last positions alone rather than clearing the map: stale by
-        // one interval is better than empty, and the next poll corrects it.
-      }
+      const existing = markersRef.current.get(cs)
+      if (existing) { existing.setLatLng([p.lat, p.lon]); existing.setIcon(icon) }
+      else markersRef.current.set(cs, L.marker([p.lat, p.lon], { icon }).addTo(map))
     }
 
-    draw()
-    const id = setInterval(draw, POLL_MS)
-    return () => { stop = true; clearInterval(id) }
-  }, [])
+    // A flight that leaves the document leaves the map. One rule, in one place.
+    for (const [cs, m] of markersRef.current) {
+      if (!seen.has(cs)) { m.remove(); markersRef.current.delete(cs) }
+    }
+    setCount(seen.size)
+  }, [mapReady, tick])
 
   return (
     <>
       <div ref={elRef} className="w-full h-full" />
-      {count !== null && (
-        <div style={{
-          position: 'absolute', bottom: 10, left: 10, zIndex: 1000,
-          padding: '5px 10px', borderRadius: 8,
-          background: 'rgba(237,235,224,0.97)', border: '1px solid #D8D3BF',
-          font: '600 11px/1 ui-sans-serif, system-ui, sans-serif', color: '#054239',
-        }}>
-          v3 · {count} drawn
-        </div>
-      )}
+      {/*
+        * Always present, and it says which of the three states this is.
+        *
+        * It used to appear only once flights had been drawn, so the twenty seconds a cold load
+        * spends fetching the basemap looked exactly like a map with nothing on it. An empty map
+        * that says nothing is indistinguishable from a broken one — and I mistook this for a
+        * broken build myself earlier the same day.
+        */}
+      <div style={{
+        position: 'absolute', bottom: 10, left: 10, zIndex: 1000,
+        padding: '5px 10px', borderRadius: 8,
+        background: 'rgba(237,235,224,0.97)', border: '1px solid #D8D3BF',
+        font: '600 11px/1 ui-sans-serif, system-ui, sans-serif',
+        color: status === 'offline' ? '#b91c1c' : '#054239',
+      }}>
+        {status === 'loading' ? 'v3 · loading…'
+          : status === 'offline' ? 'v3 · no data'
+          : `v3 · ${count} drawn`}
+      </div>
     </>
   )
 }
