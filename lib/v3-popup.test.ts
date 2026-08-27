@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  buildV3Popup, statusBadge, phaseLabel, fixAgeSec, STALE_FIX_SEC, type PopupFlight,
+  statusBadge, phaseLabel, fixAgeSec, STALE_FIX_SEC, type PopupFlight,
 } from './v3-popup.ts'
 
 const NOW = Date.parse('2026-08-27T12:00:00Z')
@@ -24,27 +24,25 @@ test('the badge speaks the server phase, not a reconstruction of it', () => {
    * ABY433 read "signal lost" under a marker labelled ARRIVED on 14 Aug. Here the word and the
    * position are the same answer read twice.
    */
-  const [label] = statusBadge(flight({ phase: 'landed' }), NOW, 'en')
-  assert.equal(label, 'Landed')
-  assert.equal(statusBadge(flight({ phase: 'taxi_to_gate' }), NOW, 'en')[0], 'Taxi to gate')
+  assert.equal(statusBadge(flight({ phase: 'landed' }), NOW, 'en').label, 'Landed')
+  assert.equal(statusBadge(flight({ phase: 'taxi_to_gate' }), NOW, 'en').label, 'Taxi to gate')
 })
 
 test('a projected position is marked with a tilde', () => {
   // V2's convention, kept so moving between the two maps does not mean learning a second one.
   const f = flight({ position: { ...flight().position!, pos_source: 'projected' } })
-  assert.ok(statusBadge(f, NOW, 'en')[0].startsWith('~ '))
+  assert.ok(statusBadge(f, NOW, 'en').label.startsWith('~ '))
 })
 
 test('a stale fix is called out rather than shown as current', () => {
   const f = flight({ position: { ...flight().position!, fix_at: '2026-08-27T11:55:00Z' } })  // 5 min
-  const [label, bg] = statusBadge(f, NOW, 'en')
-  assert.match(label, /Signal Lost|Signal lost/i)
-  assert.equal(bg, '#7f1d1d')
+  const b = statusBadge(f, NOW, 'en')
+  assert.match(b.label, /Signal Lost|Signal lost/i)
+  assert.equal(b.bg, '#7f1d1d')
 })
 
 test('a fresh fix is not', () => {
-  const [, bg] = statusBadge(flight(), NOW, 'en')
-  assert.equal(bg, '#166534')
+  assert.equal(statusBadge(flight(), NOW, 'en').bg, '#166534')
 })
 
 test('an unmeasurable fix age is null, never zero', () => {
@@ -57,8 +55,7 @@ test('an unmeasurable fix age is null, never zero', () => {
   assert.equal(fixAgeSec(flight({ position: null }), NOW), null)
   assert.equal(fixAgeSec(flight({ position: { ...flight().position!, fix_at: 'not a date' } }), NOW), null)
   // And an unmeasurable age must not be reported as stale.
-  const [, bg] = statusBadge(flight({ position: { ...flight().position!, fix_at: null } }), NOW, 'en')
-  assert.equal(bg, '#166534')
+  assert.equal(statusBadge(flight({ position: { ...flight().position!, fix_at: null } }), NOW, 'en').bg, '#166534')
 })
 
 test('the stale threshold is two fixes, not one', () => {
@@ -68,7 +65,7 @@ test('the stale threshold is two fixes, not one', () => {
   const justUnder = flight({
     position: { ...flight().position!, fix_at: new Date(NOW - (STALE_FIX_SEC - 5) * 1000).toISOString() },
   })
-  assert.equal(statusBadge(justUnder, NOW, 'en')[1], '#166534')
+  assert.equal(statusBadge(justUnder, NOW, 'en').bg, '#166534')
 })
 
 test('an unknown phase still says something', () => {
@@ -84,28 +81,5 @@ test('Arabic is served from the same vocabulary', () => {
   assert.ok(ar.length > 0)
 })
 
-test('the popup renders the flight without throwing on missing pieces', () => {
-  const bare: PopupFlight = {
-    callsign: null, iata_number: null, dep_iata: null, arr_iata: null,
-    phase: 'en_route', position: null,
-  }
-  const html = buildV3Popup(bare, NOW, 'en')
-  assert.ok(html.includes('<div'), 'still renders')
-})
 
-test('anything that reaches the page is escaped', () => {
-  /*
-   * The document is upstream data. A callsign is not markup, and building HTML by concatenation
-   * without escaping is how a feed becomes an injection.
-   */
-  const html = buildV3Popup(flight({ iata_number: '<img src=x onerror=alert(1)>' }), NOW, 'en')
-  assert.ok(!html.includes('<img src=x'), 'raw tag must not survive')
-  assert.ok(html.includes('&lt;img'), 'it should be escaped instead')
-})
 
-test('a delay is signed and coloured, and zero says nothing', () => {
-  assert.ok(buildV3Popup(flight({ delay_min: 25 }), NOW, 'en').includes('+25m'))
-  assert.ok(buildV3Popup(flight({ delay_min: -10 }), NOW, 'en').includes('-10m'))
-  const onTime = buildV3Popup(flight({ delay_min: 0 }), NOW, 'en')
-  assert.ok(!onTime.includes('0m</span>'), 'on time is not worth a line')
-})

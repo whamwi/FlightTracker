@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from 'react'
 import 'leaflet/dist/leaflet.css'
 import { attachBasemap, type BasemapHandle } from '@/lib/basemap-attach'
 import { getActiveLocale, cityFor } from '@/lib/geo-data'
-import { buildV3Popup, type PopupFlight } from '@/lib/v3-popup'
+import { statusBadge, type PopupFlight } from '@/lib/v3-popup'
+import { buildPopup, type Aircraft } from '@/lib/flight-popup'
 
 /**
  * The map that draws what the server says, and nothing else.
@@ -42,6 +43,10 @@ type LiveFlight = PopupFlight & {
   callsign: string | null; iata_number: string | null
   dep_iata: string | null; arr_iata: string | null
   phase: string; position: LivePos | null
+  /* Times the shared popup renders. Published by /v2/live; absent ones simply do not draw. */
+  actual_dep_utc?: string | null; actual_arr_utc?: string | null
+  revised_arr_utc?: string | null
+  dep_time_utc?: string | null; arr_time_utc?: string | null
 }
 
 /** Matches components/Map.tsx, so switching does not move the map under the reader. */
@@ -209,7 +214,34 @@ export default function MapV3() {
        * setPopupContent on an OPEN popup updates it in place, which is what a reader watching an
        * approach should see.
        */
-      const html = buildV3Popup(f, nowMs)
+      /*
+       * THE SAME popup V2 renders. Only the status is ours.
+       *
+       * lib/flight-popup builds it from an Aircraft, so the live flight is shaped into one — the
+       * fields it reads are the ones /v2/live already carries. Everything below the badge (the
+       * progress bar, the local times, the distance remaining, the aircraft type) is presentation
+       * that does not care where the position came from, so both maps show it identically and the
+       * toggle compares one variable rather than two.
+       */
+      const ac = {
+        hex: cs, flight: cs, lat: p.lat, lon: p.lon,
+        alt_baro: p.altitude_ft ?? undefined, gs: p.ground_speed_kts ?? undefined,
+        track: p.track_deg ?? undefined,
+        dep_iata: f.dep_iata ?? undefined, arr_iata: f.arr_iata ?? undefined,
+      } as unknown as Aircraft
+      const fs = {
+        flight_number: f.iata_number ?? cs,
+        dep_iata: f.dep_iata ?? null, arr_iata: f.arr_iata ?? null,
+        airline_iata: f.airline_iata ?? null,
+        actual_dep_utc: f.actual_dep_utc ?? null,
+        actual_arr_utc: f.actual_arr_utc ?? null,
+        revised_arr_utc: f.revised_arr_utc ?? null,
+        scheduled_dep_utc: f.dep_time_utc ?? null,
+        scheduled_arr_utc: f.arr_time_utc ?? null,
+      } as unknown as Parameters<typeof buildPopup>[3]
+
+      const html = buildPopup(ac, undefined, p.pos_source === 'projected', fs, null,
+                              statusBadge(f, nowMs))
 
       const existing = markersRef.current.get(cs)
       if (existing) {

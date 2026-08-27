@@ -1,9 +1,15 @@
 import { translate } from './i18n.ts'
-import { getActiveLocale, cityFor } from './geo-data.ts'
-import { airlineLogo, LOGO_WHITE_BG } from './airlines.ts'
+import { getActiveLocale } from './geo-data.ts'
+import type { PopupStatus } from './flight-popup.ts'
 
 /**
- * The V3 popup: built from the live document, and from nothing else.
+ * V3's STATUS, decided from the server's phase.
+ *
+ * This used to render a whole popup of its own, which was a mistake: a different popup on each
+ * map confounds the very comparison the v2/v3 toggle exists to make, and the second one was
+ * poorer — it dropped the progress bar, the local times at both airports, the distance remaining,
+ * the aircraft type and the photo. Both maps now render lib/flight-popup, and only this is
+ * different.
  *
  * ── Why it is not V2's builder ──
  *
@@ -78,23 +84,23 @@ export function phaseLabel(phase: string, locale = getActiveLocale()): string {
   return translate(locale, 'status.in_air')
 }
 
-/** [label, background, foreground] for the badge. */
+/** The badge for a flight, in V2's colours so the two maps look the same. */
 export function statusBadge(
   f: PopupFlight,
   nowMs: number,
   locale = getActiveLocale(),
-): [string, string, string] {
+): PopupStatus {
   const label = phaseLabel(f.phase, locale)
 
   // A worked-out position, not an observed one. The tilde is V2's mark for the same thing, kept
   // so a reader moving between the two maps does not have to learn a second convention.
-  if (f.position?.pos_source === 'projected') return [`~ ${label}`, '#713f12', '#fbbf24']
+  if (f.position?.pos_source === 'projected') return { label: `~ ${label}`, bg: '#713f12', fg: '#fbbf24' }
 
   const age = fixAgeSec(f, nowMs)
   if (age !== null && age > STALE_FIX_SEC) {
-    return [`${label} · ${translate(locale, 'map.signal_lost')}`, '#7f1d1d', '#f87171']
+    return { label: `${label} · ${translate(locale, 'map.signal_lost')}`, bg: '#7f1d1d', fg: '#f87171' }
   }
-  return [label, '#166534', '#4ade80']
+  return { label, bg: '#166534', fg: '#4ade80' }
 }
 
 /**
@@ -110,70 +116,4 @@ export function fixAgeSec(f: PopupFlight, nowMs: number): number | null {
   const t = Date.parse(at)
   if (!Number.isFinite(t)) return null
   return Math.max(0, Math.round((nowMs - t) / 1000))
-}
-
-const num = (v: number | null | undefined, unit: string) =>
-  v == null ? null : `${Math.round(v).toLocaleString('en-US')} ${unit}`
-
-/** The popup's HTML. A string rather than a node, because Leaflet's bindPopup takes one. */
-export function buildV3Popup(f: PopupFlight, nowMs: number, locale = getActiveLocale()): string {
-  const callsign = (f.callsign ?? '').trim()
-  const number = (f.iata_number ?? '').trim() || callsign
-  const [label, bg, fg] = statusBadge(f, nowMs, locale)
-
-  const dep = f.dep_iata ?? null
-  const arr = f.arr_iata ?? null
-  const depName = dep ? cityFor(dep) : null
-  const arrName = arr ? cityFor(arr) : null
-
-  const ai = f.airline_iata ?? null
-  const logo = ai
-    ? `<img src="${esc(airlineLogo(ai))}" alt="" style="width:38px;height:38px;border-radius:9px;
-         object-fit:contain;${LOGO_WHITE_BG.has(ai) ? 'background:#fff;' : ''}padding:3px;flex-shrink:0">`
-    : `<div style="width:38px;height:38px;border-radius:9px;background:#1f2937;flex-shrink:0;
-         display:flex;align-items:center;justify-content:center;font-size:19px">&#9992;</div>`
-
-  const p = f.position
-  const facts = [
-    num(p?.altitude_ft, 'ft'),
-    num(p?.ground_speed_kts, 'kt'),
-    p?.track_deg == null ? null : `${Math.round(p.track_deg)}°`,
-  ].filter(Boolean) as string[]
-
-  const age = fixAgeSec(f, nowMs)
-  // Shown only when it is worth saying. A fix seconds old is the normal case and needs no words;
-  // an unmeasurable one says nothing rather than claiming freshness it cannot support.
-  const ageLine = age !== null && age > STALE_FIX_SEC
-    ? `<div style="color:#f87171;font-size:11px;margin-top:4px">${esc(
-        `${translate(locale, 'map.signal_lost')} · ${Math.floor(age / 60)}m`)}</div>`
-    : ''
-
-  const delay = f.delay_min
-  const delayLine = delay == null || delay === 0 ? '' :
-    `<span style="color:${delay > 0 ? '#f87171' : '#4ade80'}">${delay > 0 ? '+' : ''}${Math.round(delay)}m</span>`
-
-  return `
-    <div style="min-width:190px;font:400 12px/1.4 ui-sans-serif,system-ui,sans-serif">
-      <div style="display:flex;align-items:center;gap:9px">
-        ${logo}
-        <div style="min-width:0">
-          <div style="font-weight:700;font-size:14px">${esc(number)}</div>
-          ${callsign && callsign !== number
-            ? `<div style="color:#9ca3af;font-size:11px">${esc(callsign)}</div>` : ''}
-        </div>
-      </div>
-
-      <div style="margin-top:7px;display:inline-block;padding:2px 8px;border-radius:999px;
-        background:${bg};color:${fg};font-size:11px;font-weight:700">${esc(label)}</div>
-
-      ${dep || arr ? `<div style="margin-top:7px">
-        ${esc(depName ?? dep ?? '?')} &rarr; ${esc(arrName ?? arr ?? '?')} ${delayLine}
-      </div>` : ''}
-
-      ${facts.length ? `<div style="margin-top:4px;color:#9ca3af;font-size:11px">
-        ${esc(facts.join(' · '))}
-      </div>` : ''}
-
-      ${ageLine}
-    </div>`
 }
