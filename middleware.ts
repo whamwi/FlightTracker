@@ -60,10 +60,28 @@ function adminGate(request: NextRequest): NextResponse | null {
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // ── Admin and debug: unchanged behaviour, just reached through one entry point now ──
-  if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')
-      || pathname.startsWith('/api/debug-')) {
-    return adminGate(request) ?? NextResponse.next()
+  /*
+   * The path the app will actually SERVE, with any locale prefix taken off.
+   *
+   * This has to be computed before the admin gate, and getting it wrong was an authentication
+   * bypass on production: the gate tested the raw pathname, so /ar/admin/reconcile did not start
+   * with '/admin', skipped the gate entirely, and was then rewritten to /admin/reconcile and
+   * served. Same for the API — /ar/api/admin/reconcile returned 200 with no credentials while
+   * /api/admin/reconcile correctly returned 401.
+   *
+   * A prefix is not a different resource. Anything that decides what a request is ALLOWED to do
+   * has to look at where the request will land, not at how it was spelled.
+   */
+  const prefix = AR_PREFIXES.find(p => pathname === p || pathname.startsWith(`${p}/`))
+  const routed = prefix ? (pathname.slice(prefix.length) || '/') : pathname
+
+  // ── Admin and debug ──
+  if (routed.startsWith('/admin') || routed.startsWith('/api/admin')
+      || routed.startsWith('/api/debug-')) {
+    // Denied stops here. Allowed falls THROUGH, so a prefixed admin path is still rewritten to
+    // the route that serves it rather than 404ing on the prefix it arrived with.
+    const denied = adminGate(request)
+    if (denied) return denied
   }
 
   // ── Locale ────────────────────────────────────────────────────────────────────────
@@ -85,13 +103,11 @@ export function middleware(request: NextRequest) {
     return NextResponse.rewrite(url, { request: { headers } })
   }
 
-  const prefix = AR_PREFIXES.find(p => pathname === p || pathname.startsWith(`${p}/`))
-
   if (prefix) {
     const locale = prefix.slice(1)
     const url    = request.nextUrl.clone()
-    // '/ar' alone is the root page, not an empty path.
-    url.pathname = pathname.slice(prefix.length) || '/'
+    // '/ar' alone is the root page, not an empty path — see `routed` above.
+    url.pathname = routed
 
     const headers = new Headers(request.headers)
     headers.set(LOCALE_HEADER, locale)
