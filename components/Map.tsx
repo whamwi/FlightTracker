@@ -1400,153 +1400,130 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         window.__rnDeselect = () => { selectedCSRef.current = null }
       }
 
-      // ── Syrian airport circles ─────────────────────────────────────────────
       /*
-       * Every airport the map marks, with its code attached rather than trailing in a comment.
+       * ── The airports the map marks, FROM THE SCHEDULE ──────────────────────
        *
-       * The codes used to live only in `// DAM` notes beside each pair, which was fine while
-       * nothing needed them. The airport labels do — see AIRPORT_LABELS below — and a name looked
-       * up from a comment is not a thing.
+       * Fetched, not written out here. The hand-written version drifted: Moscow and Yerevan were
+       * both missing while both were active in route_master, and Cologne and Medina were missing
+       * without anyone having noticed yet. A list maintained by remembering to maintain it is a
+       * list that is wrong. /api/serviced-airports reads route_master, adds the four Syrian
+       * airports whether or not anything is scheduled to them this week, and returns coordinates.
+       *
+       * Async, so the circles and names arrive a moment after the map. They are context rather
+       * than content — the aircraft, the panel and the basemap do not wait on them — and Leaflet
+       * is happy to be given layers at any point.
        */
-      const SERVICED: [number, number, string][] = [
-        // Syrian airports
-        [33.4114, 36.5156, 'DAM'],
-        [36.1807, 37.2244, 'ALP'],
-        [35.4011, 35.9488, 'LTK'],
-        [35.2854, 40.1760, 'DEZ'],
+      fetch('/api/serviced-airports')
+        .then(r => r.json())
+        .then((d: { ok?: boolean; airports?: { iata: string; lat: number; lon: number }[] }) => {
+          // The map may already be gone — a fetch outlives the effect that started it, and
+          // adding a layer to a removed map throws.
+          if (mapInstanceRef.current !== map) return
+
+          const SERVICED: [number, number, string][] =
+            (d?.airports ?? []).map(a => [a.lat, a.lon, a.iata])
+          if (!SERVICED.length) return
+
         /*
-         * Active destinations. HAND-MAINTAINED, and it drifts.
+         * Airport names, which stand in for the city labels the basemap no longer draws.
          *
-         * Moscow and Yerevan were both missing while both were active in route_master — DAM-SVO
-         * on Sundays, ALP-EVN on Tuesdays — because this list is written out by hand and nothing
-         * tells it when a route is added. It went unnoticed until someone looked at the map and
-         * asked where Moscow was. Worth generating from route_master rather than curating, next
-         * time this needs touching.
+         * Without them the map is borders and water with nothing named on it: quiet but
+         * disorienting. The things worth naming on a flight tracker are the airports, not the
+         * towns, so the two swapped — no cities, and these instead.
+         *
+         * Leaflet markers rather than a MapLibre layer, deliberately. The names come from our own
+         * geo-data — the localised ones the popups and the panel already use — rather than from
+         * whatever OSM happens to carry, so they read the same everywhere and follow the page's
+         * language. Drawing them in Leaflet also keeps them independent of which basemap is
+         * underneath, which matters the day this is offered on the raster one too.
+         *
+         * The city alone in Arabic — دمشق, بغداد, حلب — not مطار دمشق.
+         *
+         * Every one of these already has a dashed red ring drawn round it, and the panel and the
+         * legend are full of aircraft. Nothing here could be mistaken for a city marker, so the
+         * word مطار was doing no work on twenty-seven labels at once and cost a third of the width
+         * of each. airportLabelFor keeps the prefix because it labels BUTTONS, where a bare city
+         * name genuinely would be ambiguous; on the map the ring says it.
+         *
+         * English keeps the code. DAM is what an English reader scans for, and it is what the
+         * board, the popups and the flight cards all use.
          */
-        [38.2924, 27.1570, 'ADB'],
-        [31.7226, 35.9930, 'AMM'],
-        [52.3086, 4.7639, 'AMS'],
-        [24.4330, 54.6511, 'AUH'],
-        [33.2626, 44.2346, 'BGW'],
-        [26.4712, 49.7979, 'DMM'],
-        [25.2731, 51.6081, 'DOH'],
-        [25.2528, 55.3644, 'DXB'],
-        [36.2376, 43.9631, 'EBL'],
-        [40.1281, 32.9951, 'ESB'],
-        [41.2608, 28.7418, 'IST'],
-        [21.6796, 39.1565, 'JED'],
-        [29.2267, 47.9689, 'KWI'],
-        [23.5933, 58.2844, 'MCT'],
-        [32.8942, 13.2759, 'MJI'],
-        [44.5711, 26.0850, 'OTP'],
-        [24.9578, 46.6989, 'RUH'],
-        [40.8986, 29.3092, 'SAW'],
-        [25.3285, 55.5172, 'SHJ'],
-        [51.2895, 6.7668, 'DUS'],
-        [52.3667, 13.5033, 'BER'],
-        [36.8987, 30.7999, 'AYT'],
-        [55.9736, 37.4125, 'SVO'],
-        [40.1473, 44.3959, 'EVN'],
-      ]
+        /*
+         * Two airports serving one city share a name, so the code breaks the tie.
+         *
+         * Kept as a SAFETY NET rather than an active fix. Istanbul used to need it — IST and SAW
+         * both resolved to إسطنبول — and AIRPORT_LABEL_AR now names SAW صبيحة instead, so nothing
+         * currently collides. The next city with two served airports will, and this catches it
+         * without anyone noticing the day it happens.
+         *
+         * Only duplicates are disambiguated: appending the code to every label would clutter the
+         * twenty-odd already unambiguous ones to fix the two that were not.
+         */
+        // Plain objects, not Maps: inside THIS file `Map` is the React component, so `new Map()`
+        // resolves to the component and fails to compile. A rare collision, and a confusing error.
+        /*
+         * Airports whose CITY does not identify them.
+         *
+         * Istanbul has two, so cityFor returns إسطنبول for both and the dedupe below was reduced to
+         * hanging the IATA code off each — accurate, and a poor way to name an airport people know
+         * by name. صبيحة is what Sabiha Gökçen is actually called, so it says more than
+         * "إسطنبول (SAW)" ever did and lets IST go back to plain إسطنبول.
+         *
+         * Only here, not in cityFor: SAW's city genuinely IS Istanbul, and the board, the popups
+         * and the flight cards are all right to say so. This is the map, where two rings a
+         * centimetre apart need telling apart.
+         */
+        const AIRPORT_LABEL_AR: Record<string, string> = { SAW: 'صبيحة' }
 
-      /*
-       * Airport names, shown only when the reader has turned the city labels OFF.
-       *
-       * Turning cities off leaves a map of borders and water with nothing named on it, which is
-       * quiet but disorienting — and the things worth naming on a flight tracker are the airports,
-       * not the towns. So the two swap: lose the cities, gain the airports.
-       *
-       * Leaflet markers rather than a MapLibre layer, deliberately. The names come from our own
-       * geo-data — the localised ones the popups and the panel already use — rather than from
-       * whatever OSM happens to carry, so they read the same everywhere and follow the page's
-       * language. Drawing them in Leaflet also keeps them independent of which basemap is
-       * underneath, which matters the day this is offered on the raster one too.
-       *
-       * The city alone in Arabic — دمشق, بغداد, حلب — not مطار دمشق.
-       *
-       * Every one of these already has a dashed red ring drawn round it, and the panel and the
-       * legend are full of aircraft. Nothing here could be mistaken for a city marker, so the
-       * word مطار was doing no work on twenty-seven labels at once and cost a third of the width
-       * of each. airportLabelFor keeps the prefix because it labels BUTTONS, where a bare city
-       * name genuinely would be ambiguous; on the map the ring says it.
-       *
-       * English keeps the code. DAM is what an English reader scans for, and it is what the
-       * board, the popups and the flight cards all use.
-       */
-      /*
-       * Two airports serving one city share a name, so the code breaks the tie.
-       *
-       * Kept as a SAFETY NET rather than an active fix. Istanbul used to need it — IST and SAW
-       * both resolved to إسطنبول — and AIRPORT_LABEL_AR now names SAW صبيحة instead, so nothing
-       * currently collides. The next city with two served airports will, and this catches it
-       * without anyone noticing the day it happens.
-       *
-       * Only duplicates are disambiguated: appending the code to every label would clutter the
-       * twenty-odd already unambiguous ones to fix the two that were not.
-       */
-      // Plain objects, not Maps: inside THIS file `Map` is the React component, so `new Map()`
-      // resolves to the component and fails to compile. A rare collision, and a confusing error.
-      /*
-       * Airports whose CITY does not identify them.
-       *
-       * Istanbul has two, so cityFor returns إسطنبول for both and the dedupe below was reduced to
-       * hanging the IATA code off each — accurate, and a poor way to name an airport people know
-       * by name. صبيحة is what Sabiha Gökçen is actually called, so it says more than
-       * "إسطنبول (SAW)" ever did and lets IST go back to plain إسطنبول.
-       *
-       * Only here, not in cityFor: SAW's city genuinely IS Istanbul, and the board, the popups
-       * and the flight cards are all right to say so. This is the map, where two rings a
-       * centimetre apart need telling apart.
-       */
-      const AIRPORT_LABEL_AR: Record<string, string> = { SAW: 'صبيحة' }
+        const nameOf = (iata: string) =>
+          getActiveLocale() === 'ar' ? (AIRPORT_LABEL_AR[iata] ?? cityFor(iata)) : iata
 
-      const nameOf = (iata: string) =>
-        getActiveLocale() === 'ar' ? (AIRPORT_LABEL_AR[iata] ?? cityFor(iata)) : iata
+        const nameCounts: Record<string, number> = {}
+        for (const [, , iata] of SERVICED) {
+          const name = nameOf(iata)
+          nameCounts[name] = (nameCounts[name] ?? 0) + 1
+        }
+        const labelFor: Record<string, string> = {}
+        for (const [, , iata] of SERVICED) {
+          const name = nameOf(iata)
+          labelFor[iata] = nameCounts[name] > 1 ? `${name} (${iata})` : name
+        }
 
-      const nameCounts: Record<string, number> = {}
-      for (const [, , iata] of SERVICED) {
-        const name = nameOf(iata)
-        nameCounts[name] = (nameCounts[name] ?? 0) + 1
-      }
-      const labelFor: Record<string, string> = {}
-      for (const [, , iata] of SERVICED) {
-        const name = nameOf(iata)
-        labelFor[iata] = nameCounts[name] > 1 ? `${name} (${iata})` : name
-      }
+        const airportLabels = L.layerGroup()
+        for (const [lat, lon, iata] of SERVICED) {
+          airportLabels.addLayer(L.marker([lat, lon], {
+            interactive: false,
+            keyboard: false,
+            icon: L.divIcon({
+              className: '',
+              // Wide and centred on the circle, with the text pushed below it: a label sitting on
+              // top of its own marker is unreadable against the dashed ring.
+              iconSize: [120, 34],
+              iconAnchor: [60, -6],
+              html: `<div style="text-align:center;font:600 10px/1.2 ui-sans-serif,system-ui,sans-serif;
+                       color:#8a3b3b;text-shadow:0 0 3px #f4f5f0,0 0 3px #f4f5f0,0 0 3px #f4f5f0;
+                       white-space:nowrap">${labelFor[iata] ?? iata}</div>`,
+            }),
+          }))
+        }
+        airportLabelsRef.current = airportLabels
+        // Always on, now that the city labels they stand in for are always off.
+        airportLabels.addTo(map)
 
-      const airportLabels = L.layerGroup()
-      for (const [lat, lon, iata] of SERVICED) {
-        airportLabels.addLayer(L.marker([lat, lon], {
-          interactive: false,
-          keyboard: false,
-          icon: L.divIcon({
-            className: '',
-            // Wide and centred on the circle, with the text pushed below it: a label sitting on
-            // top of its own marker is unreadable against the dashed ring.
-            iconSize: [120, 34],
-            iconAnchor: [60, -6],
-            html: `<div style="text-align:center;font:600 10px/1.2 ui-sans-serif,system-ui,sans-serif;
-                     color:#8a3b3b;text-shadow:0 0 3px #f4f5f0,0 0 3px #f4f5f0,0 0 3px #f4f5f0;
-                     white-space:nowrap">${labelFor[iata] ?? iata}</div>`,
-          }),
-        }))
-      }
-      airportLabelsRef.current = airportLabels
-      // Always on, now that the city labels they stand in for are always off.
-      airportLabels.addTo(map)
-
-      for (const [lat, lon] of SERVICED) {
-        L.circle([lat, lon], {
-          radius:      8000,
-          color:       '#e53e3e',
-          fillColor:   '#e53e3e',
-          fillOpacity: 0.08,
-          weight:      2,
-          dashArray:   '4 4',
-          opacity:     0.75,
-          interactive: false,
-        }).addTo(map)
-      }
+        for (const [lat, lon] of SERVICED) {
+          L.circle([lat, lon], {
+            radius:      8000,
+            color:       '#e53e3e',
+            fillColor:   '#e53e3e',
+            fillOpacity: 0.08,
+            weight:      2,
+            dashArray:   '4 4',
+            opacity:     0.75,
+            interactive: false,
+          }).addTo(map)
+        }
+        })
+        .catch(() => { /* No circles and no names. The map still tracks flights, which is its job. */ })
 
       // Syria boundary overlay
       fetch('/syria_adm0.geojson')
