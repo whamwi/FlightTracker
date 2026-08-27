@@ -598,6 +598,42 @@ def test_a_missing_airport_leaves_that_end_alone():
 def test_an_empty_path_stays_empty():
     assert _anchored([], DAM, SHJ) == []
 
+
+def test_the_corridor_hands_back_to_the_fix_near_the_destination():
+    """
+    ABY352 into Sharjah, 27 Aug, watched live. It crossed abeam the field, ran 20 km downwind,
+    turned and came back — because it arrives from the north-west and runway 30 is approached from
+    the south-east. gc_fraction saturated at 1.0 the moment it drew level, so the marker sat on the
+    airport for five minutes while the aeroplane was 20 km away, then froze when the ETA passed.
+
+    A corridor is a line from A to B; a circuit is not expressible on one. Inside TERMINAL_KM the
+    fix is both denser and exact, so the corridor gives way.
+    """
+    from main import draws_on_corridor
+    near = {"lat": 25.40, "lon": 55.40, "on_ground": False}    # ~13 km from SHJ
+    far  = {"lat": 27.50, "lon": 53.00, "on_ground": False}    # ~350 km out
+    assert draws_on_corridor("learned", far, SHJ) is True
+    assert draws_on_corridor("learned", near, SHJ) is False
+
+
+def test_without_a_destination_the_handback_cannot_fire():
+    # No arrival coordinates means no distance to test. The corridor keeps its other guards
+    # rather than being switched off on a measurement nobody could take.
+    from main import draws_on_corridor
+    airborne = {"lat": 25.40, "lon": 55.40, "on_ground": False}
+    assert draws_on_corridor("learned", airborne, None) is True
+
+
+def test_the_handback_boundary_is_the_named_constant():
+    # Guards against the threshold drifting away from what the comment claims.
+    import math
+    from main import draws_on_corridor, TERMINAL_KM
+    # A degree of latitude is ~111 km, so this sits just outside the ring due north of SHJ.
+    outside = {"lat": SHJ[0] + (TERMINAL_KM + 10) / 111.0, "lon": SHJ[1], "on_ground": False}
+    inside  = {"lat": SHJ[0] + (TERMINAL_KM - 10) / 111.0, "lon": SHJ[1], "on_ground": False}
+    assert draws_on_corridor("learned", outside, SHJ) is True
+    assert draws_on_corridor("learned", inside, SHJ) is False
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in sorted(globals().items()):

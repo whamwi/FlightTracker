@@ -44,6 +44,7 @@ import arrivals
 import learn
 from geo import (
     gc_fraction,
+    haversine_km,
     is_plausible_fix,
     drop_sentinel_fixes,
     fix_contradicts_flight,
@@ -595,7 +596,29 @@ def draws_on_map(phase: str, landed_at_ms: float | None = None,
     return True
 
 
-def draws_on_corridor(path_source: str | None, pos: dict | None) -> bool:
+# How close to the destination the corridor stops being the better answer.
+#
+# Forty kilometres, and the number comes from what an arrival actually looks like. ABY352 into
+# Sharjah on 27 Aug: it crossed abeam the field, ran twenty kilometres downwind, turned and came
+# back — because it arrives from the north-west and runway 30 must be approached from the
+# south-east. That is not a detour, it is how the aeroplane lands.
+#
+# A corridor cannot express it. gc_fraction is monotonic along the great circle, so it saturates at
+# 1.0 the moment the aircraft draws level with the airport, and the whole circuit collapses onto a
+# single point. Watched live, the marker sat on the field for five minutes while the aeroplane was
+# up to 20 km away, then froze when the ETA passed and the rate was withheld.
+#
+# Forty is also roughly where the corridor stops being observation. The last binned waypoint sits
+# a median 45 km out, so inside that the path is the straight line anchored() draws to the airport
+# — a reasonable guess, and worse than a fix taken ten seconds ago.
+TERMINAL_KM = 40.0
+
+
+def draws_on_corridor(
+    path_source: str | None,
+    pos: dict | None,
+    arr_c: tuple[float, float] | None = None,
+) -> bool:
     """
     Whether the client should draw this flight ALONG its corridor rather than at its fix.
 
@@ -616,12 +639,23 @@ def draws_on_corridor(path_source: str | None, pos: dict | None) -> bool:
     accuracy gate producing the right answer for an unrelated reason, which would have stopped
     the day the learner promoted that route. Two conditions because there are two reasons.
 
+    THE AIRCRAFT MUST NOT BE ARRIVING. Inside TERMINAL_KM of the destination the corridor is worse
+    than the fix on both counts: it has run out of observations, and the manoeuvre it is trying to
+    describe — circuit, hold, runway alignment — is not something a line from A to B can hold. The
+    fix is dense and exact there, which is the reverse of the cruise where this whole idea earns
+    its place.
+
     A flight with no fix at all is decided by the caller, not here — it has nothing to be wrong
     about, so it follows whatever path it has.
     """
     if path_source != "learned":
         return False
-    return not bool(pos and pos.get("on_ground"))
+    if pos and pos.get("on_ground"):
+        return False
+    if arr_c and pos and pos.get("lat") is not None:
+        if haversine_km((pos["lat"], pos["lon"]), arr_c) <= TERMINAL_KM:
+            return False
+    return True
 
 
 def derive_phase(f: dict, pos: dict | None,
@@ -1546,8 +1580,8 @@ async def build_live() -> dict:
         # follows whatever path it has, stored or otherwise: a hand-imported corridor beats a
         # straight line, and both beat nothing.
         #
-        # See draws_on_corridor for the second half of the rule.
-        draw_on_path = draws_on_corridor(path_source, pos)
+        # See draws_on_corridor for the rest of the rule — airborne, and not yet arriving.
+        draw_on_path = draws_on_corridor(path_source, pos, arr_c)
 
         # Where the fix sits ALONG the route, measured the way the corridor is parameterised.
         #
