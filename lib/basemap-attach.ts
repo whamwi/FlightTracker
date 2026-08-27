@@ -33,9 +33,21 @@ export function storeBasemap(kind: BasemapKind): void {
 
 const CITIES_KEY = 'flysyria:basemap-cities'
 
-/** City labels on unless the reader turned them off. Only 'off' is stored as a decision. */
+/**
+ * City labels OFF unless the reader asked for them. Only 'on' counts as a decision.
+ *
+ * The map opens showing our own airport names instead — دمشق, حلب, بغداد and the rest — which is
+ * what someone opening a flight tracker came to find. OSM's cities are the alternative on offer,
+ * not the starting point: they crowd the map with towns nobody is flying to, which is the whole
+ * reason the toggle exists.
+ *
+ * The polarity of the stored value matters for people who already have one. Reading only 'on' as
+ * a decision means a reader who had turned cities off keeps them off, one who had turned them on
+ * keeps them on, and everyone who never touched the control gets the new default — rather than
+ * being pinned to the old one by a value they never chose.
+ */
 export function storedCities(): boolean {
-  try { return localStorage.getItem(CITIES_KEY) !== 'off' } catch { return true }
+  try { return localStorage.getItem(CITIES_KEY) === 'on' } catch { return false }
 }
 
 export function storeCities(on: boolean): void {
