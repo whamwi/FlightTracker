@@ -54,7 +54,23 @@ async function flightNumbers(): Promise<string[]> {
   try {
     const res = await fetch(
       `${SB_URL}/rest/v1/route_master?active=eq.true&select=flight_lookup(iata_number)`,
-      { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }, next: { revalidate } },
+      {
+        headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+        next: { revalidate },
+        /*
+         * A TIMEOUT, because the catch below cannot fire without one.
+         *
+         * This runs at BUILD time, and fetch waits forever by default. When the build environment
+         * could not reach Supabase the call did not fail — it hung, past Next's 60-second
+         * prerender limit, three attempts, and took the whole build down. Every Git-triggered
+         * preview failed that way on 27 Aug while the CLI deploys beside them went green.
+         *
+         * The catch was always the right idea; it just never got the chance to run. Ten seconds
+         * is far beyond a healthy round trip to Supabase and far inside the limit that was
+         * killing the build.
+         */
+        signal: AbortSignal.timeout(10_000),
+      },
     )
     if (!res.ok) return []
     const rows: { flight_lookup: { iata_number: string } | null }[] = await res.json()
