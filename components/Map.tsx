@@ -1474,7 +1474,15 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         [36.1807, 37.2244, 'ALP'],
         [35.4011, 35.9488, 'LTK'],
         [35.2854, 40.1760, 'DEZ'],
-        // Active destinations (last 7 days)
+        /*
+         * Active destinations. HAND-MAINTAINED, and it drifts.
+         *
+         * Moscow and Yerevan were both missing while both were active in route_master — DAM-SVO
+         * on Sundays, ALP-EVN on Tuesdays — because this list is written out by hand and nothing
+         * tells it when a route is added. It went unnoticed until someone looked at the map and
+         * asked where Moscow was. Worth generating from route_master rather than curating, next
+         * time this needs touching.
+         */
         [38.2924, 27.1570, 'ADB'],
         [31.7226, 35.9930, 'AMM'],
         [52.3086, 4.7639, 'AMS'],
@@ -1497,6 +1505,8 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         [51.2895, 6.7668, 'DUS'],
         [52.3667, 13.5033, 'BER'],
         [36.8987, 30.7999, 'AYT'],
+        [55.9736, 37.4125, 'SVO'],
+        [40.1473, 44.3959, 'EVN'],
       ]
 
       /*
@@ -1526,16 +1536,32 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
       /*
        * Two airports serving one city share a name, so the code breaks the tie.
        *
-       * Istanbul has both IST and SAW, and in Arabic both resolve to إسطنبول — two identical
-       * labels a few centimetres apart, naming different airports. English never had the problem
-       * because it shows the code, which is unique by construction.
+       * Kept as a SAFETY NET rather than an active fix. Istanbul used to need it — IST and SAW
+       * both resolved to إسطنبول — and AIRPORT_LABEL_AR now names SAW صبيحة instead, so nothing
+       * currently collides. The next city with two served airports will, and this catches it
+       * without anyone noticing the day it happens.
        *
-       * Only the duplicates are disambiguated: appending the code to every label would clutter
-       * the twenty-odd that were already unambiguous to fix the two that were not.
+       * Only duplicates are disambiguated: appending the code to every label would clutter the
+       * twenty-odd already unambiguous ones to fix the two that were not.
        */
       // Plain objects, not Maps: inside THIS file `Map` is the React component, so `new Map()`
       // resolves to the component and fails to compile. A rare collision, and a confusing error.
-      const nameOf = (iata: string) => (getActiveLocale() === 'ar' ? cityFor(iata) : iata)
+      /*
+       * Airports whose CITY does not identify them.
+       *
+       * Istanbul has two, so cityFor returns إسطنبول for both and the dedupe below was reduced to
+       * hanging the IATA code off each — accurate, and a poor way to name an airport people know
+       * by name. صبيحة is what Sabiha Gökçen is actually called, so it says more than
+       * "إسطنبول (SAW)" ever did and lets IST go back to plain إسطنبول.
+       *
+       * Only here, not in cityFor: SAW's city genuinely IS Istanbul, and the board, the popups
+       * and the flight cards are all right to say so. This is the map, where two rings a
+       * centimetre apart need telling apart.
+       */
+      const AIRPORT_LABEL_AR: Record<string, string> = { SAW: 'صبيحة' }
+
+      const nameOf = (iata: string) =>
+        getActiveLocale() === 'ar' ? (AIRPORT_LABEL_AR[iata] ?? cityFor(iata)) : iata
 
       const nameCounts: Record<string, number> = {}
       for (const [, , iata] of SERVICED) {
