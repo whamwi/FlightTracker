@@ -338,7 +338,10 @@ export default function MapV3() {
         const target = advance(f.motion ?? null, elapsed)
         if (target === null) continue
         // Eased from wherever this marker actually is, never snapped — see lib/v3-motion.
-        const fraction = ease(shownRef.current.get(cs) ?? null, target, dt)
+        // The rate is passed so the marker flies at the aircraft's own speed and only the
+        // residual error is eased — see lib/v3-motion.
+        const fraction = ease(shownRef.current.get(cs) ?? null, target, dt,
+                              f.motion?.fraction_per_sec ?? 0)
         shownRef.current.set(cs, fraction)
         const at = pointAt(path, fraction)
         if (at) marker.setLatLng([at.lat, at.lon])

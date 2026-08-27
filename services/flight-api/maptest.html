@@ -594,12 +594,22 @@ function pointAt(path, f) {
 const CATCH_UP = 60, TAU = CATCH_UP / 3, MAX_EASE = 0.25
 const drawnAt = new Map()
 
-function ease(shown, target) {
+function ease(shown, target, ratePerSec) {
   if (shown === undefined || shown === null) return target
-  const gap = target - shown
-  if (Math.abs(gap) > MAX_EASE || Math.abs(gap) < 1e-6) return target
-  if (gap < 0) return shown
-  return Math.min(target, target - gap * Math.exp(-1 / TAU))
+
+  // FLY FIRST: the aircraft's own motion is not an error to be damped. Feeding a continuously
+  // advancing target into the filter damped the speed along with the correction, so a newly
+  // drawn marker crawled — SYR444 measured at 7% of its true rate 30s after appearing, 27 Aug.
+  const predicted = shown + Math.max(0, ratePerSec || 0)
+  const error = target - predicted
+  if (Math.abs(error) > MAX_EASE) return target
+  if (Math.abs(error) < 1e-9) return Math.min(1, Math.max(0, predicted))
+
+  // THEN correct the residual, exponentially.
+  const corrected = predicted + error * (1 - Math.exp(-1 / TAU))
+  // Never backwards, though slowing is fine: a marker that slows is invisible, one that stops
+  // reads as broken.
+  return Math.min(1, Math.max(shown, corrected))
 }
 
 function frame() {
@@ -610,7 +620,7 @@ function frame() {
     if (!mk || !st.motion || !st.path || !st.eligible) continue
     const elapsed = Math.max(0, (now - st.at) / 1000)
     const target = Math.min(1, Math.max(0, st.motion.fraction + st.motion.fraction_per_sec * elapsed))
-    const f = ease(drawnAt.get(cs), target)
+    const f = ease(drawnAt.get(cs), target, st.motion.fraction_per_sec)
     drawnAt.set(cs, f)
     const pt = pointAt(st.path, f)
     if (pt) mk.setLatLng([pt.lat, pt.lon])

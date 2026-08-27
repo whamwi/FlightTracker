@@ -41,6 +41,17 @@ export type Motion = {
  * It is a rate adjustment, never a teleport. The marker keeps flying; it simply flies a little
  * faster or slower until it agrees with the server again.
  *
+ * IT EASES THE ERROR, NOT THE MOTION, and getting that wrong was a real artefact. The first
+ * version fed a continuously advancing target into an exponential filter, so the filter damped
+ * the aircraft's own speed along with any correction: it closed about 5% of the gap per second,
+ * which meant a newly drawn marker crawled at a fraction of the true rate and took roughly a
+ * minute to converge. Measured on the web on 27 Aug — SYR444 was at 7% of its own rate thirty
+ * seconds after appearing.
+ *
+ * So the two are separated. The marker advances by the server's rate because that is what the
+ * aeroplane is doing, and only the residual error between that and the server's fraction is
+ * eased. Correction stays smooth; motion stays honest.
+ *
  * EXPONENTIAL, not linear, and the difference bit me. A step of gap/60 per second sounds like it
  * closes in sixty seconds and does not: the gap shrinks as it goes, so after a minute 36% still
  * remains. Worse, repeated small steps and one large step give different answers, which makes the
@@ -96,25 +107,45 @@ export function advance(motion: Motion | null | undefined, elapsedSec: number): 
  * what keeps a 1 Hz client and a 60 Hz one in the same place, and what stops a 120 Hz screen
  * running at double speed.
  */
-export function ease(shown: number | null, target: number, dt: number): number {
+export function ease(
+  shown: number | null,
+  target: number,
+  dt: number,
+  /**
+   * The server's own rate. Motion and correction are different things, and conflating them was
+   * the bug — see the note above.
+   */
+  ratePerSec = 0,
+): number {
   // Nothing to ease from: first sighting, so place it.
   if (shown === null || !Number.isFinite(shown)) return target
 
-  const gap = target - shown
+  const step = Math.max(0, dt)
+
+  // FLY FIRST. The aircraft's own motion is not an error to be damped — it is what it is doing.
+  const predicted = shown + Math.max(0, ratePerSec) * step
+  const error = target - predicted
+
   // Too far to be a correction — this is a different flight, or one back after a long silence.
-  if (Math.abs(gap) > MAX_EASE_FRACTION) return target
+  if (Math.abs(error) > MAX_EASE_FRACTION) return target
   // Close enough to call it caught up, and stops an asymptote that never quite lands.
-  if (Math.abs(gap) < 1e-6) return target
+  if (Math.abs(error) < 1e-9) return Math.min(1, Math.max(0, predicted))
 
-  // Ahead: hold. Slowing to a stop is invisible; reversing is not, and the target only ever
-  // advances, so waiting is the shorter path back to agreement.
-  if (gap < 0) return shown
+  /*
+   * THEN CORRECT, exponentially. Frame-rate independent by construction: four one-second steps
+   * and one four-second step agree, because exp adds in the exponent.
+   */
+  const corrected = predicted + error * (1 - Math.exp(-step / TAU))
 
-  // Behind: close the gap by exp(-dt/tau). Frame-rate independent by construction — four
-  // one-second steps and one four-second step give the same answer, because exp adds in the
-  // exponent.
-  const remaining = gap * Math.exp(-Math.max(0, dt) / TAU)
-  return Math.min(target, target - remaining)
+  /*
+   * Never backwards, but slowing is allowed.
+   *
+   * The previous version held the marker completely still whenever it was ahead, which was
+   * heavier than needed: an aeroplane that slows is invisible, one that stops is not. Clamping to
+   * `shown` keeps the guarantee that matters — the marker never reverses — while letting a
+   * marker that has run ahead simply ease off until the server catches up with it.
+   */
+  return Math.min(1, Math.max(shown, corrected))
 }
 
 /**
