@@ -16,7 +16,17 @@ import Wordmark from '@/components/Wordmark'
 import SiteNav from '@/components/SiteNav'
 import { markerHub, MARKER_ACCENT } from '@/lib/syria-airports'
 
+import MapVariantToggle from '@/components/MapVariantToggle'
+import {
+  storedVariant, storeVariant, DEFAULT_VARIANT, type MapVariant,
+} from '@/lib/map-variant'
+
 const Map = dynamic(() => import('@/components/Map'), { ssr: false })
+/*
+ * V3 loads only when chosen. It is a separate chunk, so a reader on V2 — which is everyone by
+ * default — downloads none of it.
+ */
+const MapV3 = dynamic(() => import('@/components/MapV3'), { ssr: false })
 
 const C = {
   surface:    '#FFFFFF',
@@ -1051,6 +1061,21 @@ function InAirPanel({ selectedFlight, open, setOpen, onSelect, onClear }: { sele
 
 // ── Main map page ────────────────────────────────────────────────────────────
 function HomeInner() {
+  /*
+   * Which map, while V3 is being built alongside V2.
+   *
+   * Read AFTER mount, never during render. localStorage does not exist on the server, so seeding
+   * state from it directly gives the server one answer and the client another and React discards
+   * the tree — the classic hydration mismatch. Everyone starts on the default for a frame and the
+   * stored choice arrives immediately after, which nobody can see and nothing can break.
+   */
+  const [variant, setVariant] = useState<MapVariant>(DEFAULT_VARIANT)
+  useEffect(() => { setVariant(storedVariant()) }, [])
+  const chooseVariant = useCallback((v: MapVariant) => {
+    setVariant(v)
+    storeVariant(v)
+  }, [])
+
   const searchParams = useSearchParams()
   const urlFlight = searchParams.get('flight') ?? undefined
   // Seeded from the URL so deep links keep working, but state is the source of truth from then
@@ -1124,7 +1149,12 @@ function HomeInner() {
 
       {/* Map area */}
       <main style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
-        <Map targetFlight={flight} panelOpen={panelOpen} />
+        {variant === 'v3'
+          ? <MapV3 />
+          : <Map targetFlight={flight} panelOpen={panelOpen} />}
+
+        {/* Temporary: goes with lib/map-variant once V3 is the only map. */}
+        <MapVariantToggle value={variant} onChange={chooseVariant} />
 
         {/* In-air side panel */}
         {isPhone
