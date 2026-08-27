@@ -3350,14 +3350,23 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         />
         {/* Directly under the photo box, and only where there is room for it. */}
         {!isPhone && <AirportLegend />}
-        {/* And the basemap choice under the key, the last thing in the stack. */}
-        {!isPhone && (
-          <BasemapSwitcher
-            value={basemap} onChange={chooseBasemap}
-            cities={cities} onCitiesChange={chooseCities}
-            citiesAvailable={citiesAvailable}
-          />
-        )}
+        {/*
+          * The basemap choice, on the phone as well as the desktop.
+          *
+          * The legend above stays desktop-only — it is a wide key that explains a colour, and a
+          * phone has no room for a caption nobody opened the map to read. This is different: it
+          * is a CONTROL, it collapses to one icon, and the phone is where it earns most. 72% of
+          * this site's traffic is a phone, and those readers had no way to reach the plain map or
+          * to turn the city labels off.
+          *
+          * It sits at the top of the stack on a phone rather than under the key, because on a
+          * phone the video and photo boxes are portalled into the header and the stack is empty.
+          */}
+        <BasemapSwitcher
+          value={basemap} onChange={chooseBasemap}
+          cities={cities} onCitiesChange={chooseCities}
+          citiesAvailable={citiesAvailable}
+        />
         </div>
       )}
       {!embed && isPhone && actionSlot && createPortal(
