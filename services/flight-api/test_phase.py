@@ -540,8 +540,11 @@ def _anchored(path, dep, arr):
     return anchored(path, dep, arr)
 
 
-DAM = {"lat": 33.4114, "lon": 36.5156}
-SHJ = {"lat": 25.3285, "lon": 55.5172}
+# (lat, lon) TUPLES — the shape airports() returns. The first version of these tests used dicts,
+# which passed happily while the shipped code read dict keys off a tuple and quietly anchored
+# nothing. A test that agrees with the code about the wrong contract proves only that they agree.
+DAM = (33.4114, 36.5156)
+SHJ = (25.3285, 55.5172)
 
 
 def test_a_learned_corridor_is_extended_to_both_airports():
@@ -552,8 +555,8 @@ def test_a_learned_corridor_is_extended_to_both_airports():
     """
     learned = [{"f": 0.0125, "lat": 33.2, "lon": 36.8}, {"f": 0.9875, "lat": 25.57, "lon": 55.26}]
     out = _anchored(learned, DAM, SHJ)
-    assert out[0]["f"] == 0.0 and out[0]["lat"] == DAM["lat"]
-    assert out[-1]["f"] == 1.0 and out[-1]["lat"] == SHJ["lat"]
+    assert out[0]["f"] == 0.0 and out[0]["lat"] == DAM[0] and out[0]["lon"] == DAM[1]
+    assert out[-1]["f"] == 1.0 and out[-1]["lat"] == SHJ[0] and out[-1]["lon"] == SHJ[1]
     assert len(out) == 4, "the observed points are kept, not replaced"
 
 

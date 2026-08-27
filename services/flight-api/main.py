@@ -1792,7 +1792,11 @@ async def cached(key: str, ttl: int, build):
     return doc
 
 
-def anchored(path: list[dict], dep_c: dict | None, arr_c: dict | None) -> list[dict]:
+def anchored(
+    path: list[dict],
+    dep_c: tuple[float, float] | None,
+    arr_c: tuple[float, float] | None,
+) -> list[dict]:
     """
     Extend a corridor to the airports at either end.
 
@@ -1820,6 +1824,11 @@ def anchored(path: list[dict], dep_c: dict | None, arr_c: dict | None) -> list[d
 
     Idempotent: a path already reaching an end is left alone, so stored and great-circle paths
     pass through untouched.
+
+    dep_c and arr_c are (lat, lon) TUPLES, the shape `airports()` returns and great_circle_path
+    already takes. Worth stating because the first version of this took dicts and read ["lat"] off
+    them — which type-checks nowhere, raised nothing in the tests because the tests handed it
+    dicts too, and simply left every corridor unanchored in production.
     """
     if not path:
         return path
@@ -1829,9 +1838,9 @@ def anchored(path: list[dict], dep_c: dict | None, arr_c: dict | None) -> list[d
     # purposes, and prepending a second point there would create a zero-length first segment
     # whose bearing is undefined.
     if dep_c and out[0].get("f", 0) > 0.001:
-        out.insert(0, {"f": 0.0, "lat": dep_c["lat"], "lon": dep_c["lon"]})
+        out.insert(0, {"f": 0.0, "lat": dep_c[0], "lon": dep_c[1]})
     if arr_c and out[-1].get("f", 1) < 0.999:
-        out.append({"f": 1.0, "lat": arr_c["lat"], "lon": arr_c["lon"]})
+        out.append({"f": 1.0, "lat": arr_c[0], "lon": arr_c[1]})
     return out
 
 
