@@ -532,6 +532,69 @@ def test_a_flight_already_there_sits_still():
     assert m["fraction_per_sec"] == 0.0, "nowhere left to go is zero, not a creep"
 
 
+
+# ── Corridors reach their airports ────────────────────────────────────────────
+
+def _anchored(path, dep, arr):
+    from main import anchored
+    return anchored(path, dep, arr)
+
+
+DAM = {"lat": 33.4114, "lon": 36.5156}
+SHJ = {"lat": 25.3285, "lon": 55.5172}
+
+
+def test_a_learned_corridor_is_extended_to_both_airports():
+    """
+    Bins are addressed by their CENTRES, so a 40-bin corridor spans 0.0125 to 0.9875 and reaches
+    neither end. For DAM-SHJ that left the last waypoint 45 km out over the Gulf, and a client
+    clamping to it drew an arriving aircraft over the sea with its nose away from the field.
+    """
+    learned = [{"f": 0.0125, "lat": 33.2, "lon": 36.8}, {"f": 0.9875, "lat": 25.57, "lon": 55.26}]
+    out = _anchored(learned, DAM, SHJ)
+    assert out[0]["f"] == 0.0 and out[0]["lat"] == DAM["lat"]
+    assert out[-1]["f"] == 1.0 and out[-1]["lat"] == SHJ["lat"]
+    assert len(out) == 4, "the observed points are kept, not replaced"
+
+
+def test_a_path_that_already_reaches_the_ends_is_untouched():
+    # The stored corridors run 0.0000 to 1.0000 — hand-imported whole tracks. Anchoring them
+    # again would add a zero-length first segment whose bearing is undefined.
+    stored = [{"f": 0.0, "lat": 33.4114, "lon": 36.5156}, {"f": 1.0, "lat": 25.3285, "lon": 55.5172}]
+    assert _anchored(stored, DAM, SHJ) == stored
+
+
+def test_the_final_segment_then_points_at_the_airport():
+    """
+    The whole point. Before, the last segment ran between two coarse bins and pointed wherever
+    that happened to face — 110 degrees for DAM-SHJ, while the aircraft was tracking 304.
+    """
+    import math
+    from main import anchored
+    learned = [{"f": 0.0125, "lat": 33.2, "lon": 36.8}, {"f": 0.9875, "lat": 25.57, "lon": 55.26}]
+    out = anchored(learned, DAM, SHJ)
+    a, b = out[-2], out[-1]
+    r = math.pi / 180
+    dLon = (b["lon"] - a["lon"]) * r
+    y = math.sin(dLon) * math.cos(b["lat"] * r)
+    x = (math.cos(a["lat"] * r) * math.sin(b["lat"] * r)
+         - math.sin(a["lat"] * r) * math.cos(b["lat"] * r) * math.cos(dLon))
+    brg = (math.atan2(y, x) / r + 360) % 360
+    # South-east, from the last bin down onto Sharjah.
+    assert 100 < brg < 140, f"expected the final leg to point at SHJ, got {brg:.0f}"
+
+
+def test_a_missing_airport_leaves_that_end_alone():
+    # No coordinates means no anchor. Better a corridor that stops short than one that runs to 0,0.
+    learned = [{"f": 0.0125, "lat": 33.2, "lon": 36.8}, {"f": 0.9875, "lat": 25.57, "lon": 55.26}]
+    out = _anchored(learned, None, SHJ)
+    assert out[0]["f"] == 0.0125
+    assert out[-1]["f"] == 1.0
+
+
+def test_an_empty_path_stays_empty():
+    assert _anchored([], DAM, SHJ) == []
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in sorted(globals().items()):

@@ -1792,6 +1792,49 @@ async def cached(key: str, ttl: int, build):
     return doc
 
 
+def anchored(path: list[dict], dep_c: dict | None, arr_c: dict | None) -> list[dict]:
+    """
+    Extend a corridor to the airports at either end.
+
+    A LEARNED corridor never reaches them. consensus_path is built from binned medians and a bin
+    is addressed by its CENTRE, so a 40-bin path spans f=0.0125 to f=0.9875 and by construction
+    stops short at both ends. In kilometres that is not a rounding detail:
+
+        DAM-SHJ   45 km short      DAM-DXB   47 km short
+        DAM-DOH   60 km short      DAM-KWI   99 km short
+        JED-DAM  130 km short
+
+    A client draws the marker at pointAt(fraction), which clamps to the last waypoint — correctly,
+    since a corridor beginning at 0.05 must not extrapolate onto a runway it never saw. So an
+    arriving aircraft parked 45 km out over the Gulf, pointing along an arbitrary bin-to-bin
+    bearing rather than at the airport. ABY364 into Sharjah on 27 Aug was the case: drawn over the
+    sea with its nose away from the field while it was on short final.
+
+    The STORED corridors never showed this. Hand-imported as whole FR24 tracks, they run 0.0000 to
+    1.0000 and end on the airport — which is exactly why the map was right before learned
+    corridors were adopted.
+
+    Done HERE rather than in the learner on purpose. route_paths_learned should hold what was
+    observed and nothing else; endpoints are a rendering concern, and an airport whose coordinates
+    are corrected in the airports table then fixes itself without relearning anything.
+
+    Idempotent: a path already reaching an end is left alone, so stored and great-circle paths
+    pass through untouched.
+    """
+    if not path:
+        return path
+
+    out = list(path)
+    # 0.001 rather than 0: a corridor starting at 0.0005 is already at the airport for drawing
+    # purposes, and prepending a second point there would create a zero-length first segment
+    # whose bearing is undefined.
+    if dep_c and out[0].get("f", 0) > 0.001:
+        out.insert(0, {"f": 0.0, "lat": dep_c["lat"], "lon": dep_c["lon"]})
+    if arr_c and out[-1].get("f", 1) < 0.999:
+        out.append({"f": 1.0, "lat": arr_c["lat"], "lon": arr_c["lon"]})
+    return out
+
+
 @app.get("/v2/live")
 async def live(paths: int = Query(0)):
     """
@@ -1821,17 +1864,23 @@ async def live(paths: int = Query(0)):
 
     out: dict[str, list[dict]] = {}
     for key in used:
+        # Every key is dep|arr or dep|arr|operator, so the endpoints are always readable from it.
+        parts = key.split("|")
+        dep_c, arr_c = aps.get(parts[0]), aps.get(parts[1]) if len(parts) > 1 else None
+
         if key in learned:
-            out[key] = learned[key]
+            # Anchored: a learned corridor stops tens of kilometres short at both ends. See
+            # anchored() for what that looked like on the map.
+            out[key] = anchored(learned[key], dep_c, arr_c)
         elif key in stored:
-            out[key] = stored[key]
+            # Already gate to gate, so anchored() is a no-op — applied anyway rather than
+            # trusted, since "hand-imported" is not a guarantee about the first and last f.
+            out[key] = anchored(stored[key], dep_c, arr_c)
         elif key.endswith("|gc"):
-            dep, arr, _ = key.split("|")
-            dc, ac = aps.get(dep), aps.get(arr)
             # Rebuilt rather than stored: a great circle is a function of its endpoints, and
             # keeping a copy would be a second place for it to go stale.
-            if dc and ac:
-                out[key] = great_circle_path(dc, ac)
+            if dep_c and arr_c:
+                out[key] = great_circle_path(dep_c, arr_c)
     return {**doc, "paths": out}
 
 
