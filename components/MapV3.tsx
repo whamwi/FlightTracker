@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import 'leaflet/dist/leaflet.css'
 import { attachBasemap, type BasemapHandle } from '@/lib/basemap-attach'
 import { getActiveLocale, cityFor } from '@/lib/geo-data'
+import { buildV3Popup, type PopupFlight } from '@/lib/v3-popup'
 
 /**
  * The map that draws what the server says, and nothing else.
@@ -37,7 +38,7 @@ type LivePos = {
   track_deg: number | null; on_ground: boolean | null
   fix_at: string | null; pos_source: string | null
 }
-type LiveFlight = {
+type LiveFlight = PopupFlight & {
   callsign: string | null; iata_number: string | null
   dep_iata: string | null; arr_iata: string | null
   phase: string; position: LivePos | null
@@ -173,6 +174,9 @@ export default function MapV3() {
     const flights = docRef.current
     if (!mapReady || !map || !L || !flights) return
 
+    // One instant for the whole pass, so two popups built microseconds apart do not report
+    // different fix ages for fixes that arrived together.
+    const nowMs = Date.now()
     const seen = new Set<string>()
 
     for (const f of flights) {
@@ -197,9 +201,27 @@ export default function MapV3() {
                  color:${colour};white-space:nowrap">${cs}</div>`,
       })
 
+      /*
+       * The popup is rebuilt on every poll, not bound once.
+       *
+       * Its contents are the flight's live state — phase, altitude, how old the fix is — so a
+       * popup bound at first sighting would go on describing a flight that had since landed.
+       * setPopupContent on an OPEN popup updates it in place, which is what a reader watching an
+       * approach should see.
+       */
+      const html = buildV3Popup(f, nowMs)
+
       const existing = markersRef.current.get(cs)
-      if (existing) { existing.setLatLng([p.lat, p.lon]); existing.setIcon(icon) }
-      else markersRef.current.set(cs, L.marker([p.lat, p.lon], { icon }).addTo(map))
+      if (existing) {
+        existing.setLatLng([p.lat, p.lon])
+        existing.setIcon(icon)
+        existing.setPopupContent(html)
+      } else {
+        markersRef.current.set(
+          cs,
+          L.marker([p.lat, p.lon], { icon }).addTo(map).bindPopup(html, { closeButton: true }),
+        )
+      }
     }
 
     // A flight that leaves the document leaves the map. One rule, in one place.
