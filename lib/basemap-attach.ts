@@ -15,67 +15,30 @@ import {
 /** `vector` is ours, styled in the browser. `grey` is Esri's raster canvas — also the fallback. */
 export type BasemapKind = 'vector' | 'grey'
 
-export const BASEMAP_KINDS: BasemapKind[] = ['vector', 'grey']
-
-const STORE_KEY = 'flysyria:basemap'
-
-/** The reader's last choice, or the vector map. Storage can throw in private mode. */
-export function storedBasemap(): BasemapKind {
-  try {
-    const v = localStorage.getItem(STORE_KEY)
-    return v === 'grey' || v === 'vector' ? v : 'vector'
-  } catch { return 'vector' }
-}
-
-export function storeBasemap(kind: BasemapKind): void {
-  try { localStorage.setItem(STORE_KEY, kind) } catch { /* private mode; the choice is per-visit */ }
-}
-
-const CITIES_KEY = 'flysyria:basemap-cities'
-
-/**
- * City labels OFF unless the reader asked for them. Only 'on' counts as a decision.
+/*
+ * There is no stored preference any more, and no BASEMAP_KINDS list.
  *
- * The map opens showing our own airport names instead — دمشق, حلب, بغداد and the rest — which is
- * what someone opening a flight tracker came to find. OSM's cities are the alternative on offer,
- * not the starting point: they crowd the map with towns nobody is flying to, which is the whole
- * reason the toggle exists.
- *
- * The polarity of the stored value matters for people who already have one. Reading only 'on' as
- * a decision means a reader who had turned cities off keeps them off, one who had turned them on
- * keeps them on, and everyone who never touched the control gets the new default — rather than
- * being pinned to the old one by a value they never chose.
+ * Both existed for a control that has been removed: the basemap is fixed at the vector style
+ * with the city labels off. `grey` survives as a KIND because the raster fallback still needs a
+ * name — it is what this serves where WebGL cannot run, which is a substitution rather than a
+ * choice, so nothing needs to remember it between visits.
  */
-export function storedCities(): boolean {
-  try { return localStorage.getItem(CITIES_KEY) === 'on' } catch { return false }
-}
-
-export function storeCities(on: boolean): void {
-  try { localStorage.setItem(CITIES_KEY, on ? 'on' : 'off') } catch { /* per-visit, then */ }
-}
 
 /** What attachBasemap hands back. */
 export type BasemapHandle = {
   /** Take this basemap off the map, whatever it actually ended up being. */
   remove(): void
-  /**
-   * Show or hide the city labels. Only the vector map can do this — its labels are a layer we
-   * own, so they come off while borders and coastlines stay. Esri bakes cities and borders into
-   * one raster tile, so there this is a no-op and the UI disables the control.
-   */
-  setCities(on: boolean): void
 }
 
 export type BasemapOpts = {
-  /** Start with city labels shown. Ignored on raster, which cannot honour it either way. */
-  cities?: boolean
   /**
-   * Called if the vector map could not be used and raster was substituted.
+   * Draw the city labels. False everywhere today — the map shows our own airport names instead,
+   * and OSM's towns would collide with them. Kept as an option rather than deleted from the
+   * style, so turning them back on is a call site rather than a rewrite.
    *
-   * The UI needs this: a reader who asked for the vector map and silently got raster would
-   * otherwise be left with an enabled Cities control that does nothing.
+   * Ignored on raster, which bakes its labels into the tile and cannot honour it either way.
    */
-  onFallback?: () => void
+  cities?: boolean
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -92,9 +55,9 @@ export function attachBasemap(
 ): BasemapHandle {
   const layers: any[] = []
   let cancelled = false
-  let cities = opts.cities !== false
+  const cities = opts.cities !== false
   // The live GL map, once there is one. Null on every raster path, which is what makes
-  // setCities a no-op there rather than a crash.
+  // applyCities a no-op there rather than a crash.
   let gl: any = null
 
   /*
@@ -123,9 +86,6 @@ export function attachBasemap(
     // want to know about; one warn on an exceptional path is not noise.
     if (kind === 'vector') {
       console.warn(`[map] raster basemap: ${why}`)
-      // Tell the caller the vector map is not what is on screen, so the Cities control can grey
-      // itself out instead of pretending to work.
-      opts.onFallback?.()
     }
     add(L.tileLayer(BASEMAP_FALLBACK.url, BASEMAP_FALLBACK.options))
     add(L.tileLayer(BASEMAP_FALLBACK_LABELS.url, BASEMAP_FALLBACK_LABELS.options))
@@ -269,12 +229,6 @@ export function attachBasemap(
         try { map.removeLayer(layer) } catch { /* map already torn down */ }
       }
       layers.length = 0
-    },
-    setCities(on: boolean) {
-      cities = on
-      // Remembered even when there is no GL map yet: the preference is applied the moment one
-      // exists, so toggling while MapLibre is still downloading is not lost.
-      applyCities()
     },
   }
 }

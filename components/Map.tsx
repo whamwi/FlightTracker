@@ -13,10 +13,7 @@ import { FlightPredictor } from '@/lib/flight-predictor'
 import type { LivePosition as PredictorLivePos } from '@/lib/flight-predictor'
 import { airlineLogo, LOGO_WHITE_BG } from '@/lib/airlines'
 import { TrackerStore, type FlightInput } from '@/lib/tracker-store'
-import {
-  attachBasemap, storedBasemap, storeBasemap, storedCities, storeCities,
-  type BasemapKind, type BasemapHandle,
-} from '@/lib/basemap-attach'
+import { attachBasemap, type BasemapHandle } from '@/lib/basemap-attach'
 import VideoBox from './VideoBox'
 
 // Path-anchored motion: markers are positioned by the animation loop rather than written
@@ -24,7 +21,6 @@ import VideoBox from './VideoBox'
 const RAF_MOTION = true
 import PhotoBox from './PhotoBox'
 import AirportLegend from './AirportLegend'
-import BasemapSwitcher from './BasemapSwitcher'
 import { PANEL } from './MapBox'
 import { translate, counted } from '@/lib/i18n'
 import { getActiveLocale, cityFor } from '@/lib/geo-data'
@@ -1102,73 +1098,21 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
   const mapInstanceRef  = useRef<any>(null)
 
   /*
-   * Which basemap is showing, and the pieces needed to change it.
+   * The basemap is fixed: our vector style, city labels off, airport names on.
    *
-   * The kind is mirrored into a ref because the map's init effect runs once and must not re-run
-   * when the reader picks a different basemap — tearing down and rebuilding the whole map to
-   * change what is underneath it would drop every marker and the open popup with them.
+   * There used to be a control for this — two basemaps and a Cities toggle. It went once the
+   * default was settled, because the default IS the answer: a quiet canvas with the airports
+   * named on it is what someone opening a flight tracker wants, and a menu offering them a
+   * busier map is furniture rather than a service.
    *
-   * Leaflet itself is kept too. It arrives through a dynamic import inside that effect, and the
-   * switcher runs long afterwards; re-importing the library to add a tile layer would be absurd.
+   * The handle is kept so the map's teardown can take the basemap off with it. basemap-attach
+   * still knows how to serve raster and still will where WebGL is unavailable — that is a
+   * fallback nobody asks for, not a choice.
    */
-  const [basemap, setBasemap] = useState<BasemapKind>(() => storedBasemap())
-  const [cities, setCities] = useState<boolean>(() => storedCities())
-  /*
-   * Whether the Cities control can do anything, which is not the same as which basemap was asked
-   * for. A vector choice can end as raster — no WebGL, a failed load — and the reader would then
-   * be left toggling a checkbox that does nothing. attachBasemap reports that, and the control
-   * greys itself out.
-   */
-  const [citiesAvailable, setCitiesAvailable] = useState(true)
-  const citiesRef       = useRef<boolean>(cities)
-  const basemapKindRef  = useRef<BasemapKind>(basemap)
-  const basemapRef      = useRef<BasemapHandle | null>(null)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const leafletRef      = useRef<any>(null)
-  /* The airport-name layer, shown in place of the city labels when those are switched off. */
+  const basemapRef = useRef<BasemapHandle | null>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const airportLabelsRef = useRef<any>(null)
 
-  const chooseBasemap = useCallback((kind: BasemapKind) => {
-    if (kind === basemapKindRef.current) return
-    basemapKindRef.current = kind
-    setBasemap(kind)
-    storeBasemap(kind)
-
-    const map = mapInstanceRef.current
-    const L = leafletRef.current
-    // Before the map exists there is nothing to swap; the init effect will read the ref.
-    if (!map || !L) return
-    // Off before on. attachBasemap's handle tracks the layers actually added rather than the ones
-    // requested — a vector choice can end as raster — so this removes whatever is really there.
-    basemapRef.current?.remove()
-    setCitiesAvailable(kind === 'vector')
-    basemapRef.current = attachBasemap(L, map, kind, {
-      cities: citiesRef.current,
-      onFallback: () => setCitiesAvailable(false),
-    })
-  }, [])
-
-  const chooseCities = useCallback((on: boolean) => {
-    citiesRef.current = on
-    setCities(on)
-    storeCities(on)
-    // Straight at the live basemap: hiding a label layer is not worth rebuilding a map for.
-    basemapRef.current?.setCities(on)
-
-    /*
-     * The airport names take the cities' place rather than joining them.
-     *
-     * Both sets of labels at once is the crowding this control exists to relieve — and the two
-     * would collide, since Damascus the city and مطار دمشق sit within a few kilometres.
-     */
-    const map = mapInstanceRef.current
-    const labels = airportLabelsRef.current
-    if (map && labels) {
-      if (on) map.removeLayer(labels)
-      else labels.addTo(map)
-    }
-  }, [])
 
   /*
    * Is this map object still the live one, and still attached?
@@ -1431,11 +1375,7 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
        * L is kept for the same reason — the switcher runs long after this effect has finished,
        * and re-importing Leaflet to add a tile layer would be absurd.
        */
-      leafletRef.current = L
-      basemapRef.current = attachBasemap(L, map, basemapKindRef.current, {
-        cities: citiesRef.current,
-        onFallback: () => setCitiesAvailable(false),
-      })
+      basemapRef.current = attachBasemap(L, map, 'vector', { cities: false })
 
       mapInstanceRef.current = map
 
@@ -1592,9 +1532,8 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         }))
       }
       airportLabelsRef.current = airportLabels
-      // Cities on is the default, so the airport names start hidden and appear when they are
-      // switched off. citiesRef rather than state: this runs once, inside the init effect.
-      if (!citiesRef.current) airportLabels.addTo(map)
+      // Always on, now that the city labels they stand in for are always off.
+      airportLabels.addTo(map)
 
       for (const [lat, lon] of SERVICED) {
         L.circle([lat, lon], {
@@ -3350,23 +3289,6 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
         />
         {/* Directly under the photo box, and only where there is room for it. */}
         {!isPhone && <AirportLegend />}
-        {/*
-          * The basemap choice, on the phone as well as the desktop.
-          *
-          * The legend above stays desktop-only — it is a wide key that explains a colour, and a
-          * phone has no room for a caption nobody opened the map to read. This is different: it
-          * is a CONTROL, it collapses to one icon, and the phone is where it earns most. 72% of
-          * this site's traffic is a phone, and those readers had no way to reach the plain map or
-          * to turn the city labels off.
-          *
-          * It sits at the top of the stack on a phone rather than under the key, because on a
-          * phone the video and photo boxes are portalled into the header and the stack is empty.
-          */}
-        <BasemapSwitcher
-          value={basemap} onChange={chooseBasemap}
-          cities={cities} onCitiesChange={chooseCities}
-          citiesAvailable={citiesAvailable}
-        />
         </div>
       )}
       {!embed && isPhone && actionSlot && createPortal(
