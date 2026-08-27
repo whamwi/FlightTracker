@@ -577,8 +577,14 @@ def draws_on_map(phase: str, landed_at_ms: float | None = None,
     of it — the arrangement that let an outlier filter in learn.py look tested while the real
     path went the other way.
     """
-    if phase == "arrived":
+    if phase in ("arrived", "bags_on_belt"):
         return False
+    # bags_on_belt is MORE finished than arrived, not less — derive_phase returns it in place of
+    # arrived once FR24 publishes the belt. Withholding only "arrived" meant the better-informed
+    # state kept its marker while the poorer one lost it: FDB1116 sat over the Gulf on 27 Aug with
+    # its bags already on the belt at Dubai. The more we knew about a flight, the longer it stayed
+    # on the map, which is exactly backwards.
+    #
     # The same rule at the other end of the trip, and it was missing.
     #
     # A flight that has not departed is no more map traffic than one that has finished. FR24

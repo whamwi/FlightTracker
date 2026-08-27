@@ -372,6 +372,15 @@ def test_every_phase_between_pushback_and_the_gate_keeps_its_marker():
         assert _drawable(phase) is True, phase
 
 
+def test_bags_on_the_belt_is_as_finished_as_arrived():
+    """
+    derive_phase returns bags_on_belt INSTEAD of arrived once FR24 publishes the belt, so a rule
+    naming only "arrived" let the better-informed state keep its marker. FDB1116 on 27 Aug was
+    drawn over the Gulf with its bags already delivered at Dubai.
+    """
+    assert _drawable("bags_on_belt") is False
+
+
 def test_a_flight_that_has_not_departed_has_no_marker():
     """
     The same rule as `arrived`, at the other end — and this test used to assert the opposite.
