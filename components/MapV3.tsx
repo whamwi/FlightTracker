@@ -61,7 +61,7 @@ const POLL_MS = 15_000
 
 const SYRIAN = new Set(['DAM', 'ALP', 'DEZ', 'LTK'])
 
-export default function MapV3() {
+export default function MapV3({ targetFlight }: { targetFlight?: string }) {
   const elRef = useRef<HTMLDivElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapRef = useRef<any>(null)
@@ -90,6 +90,28 @@ export default function MapV3() {
   /** Bumped on each poll, purely to re-run the draw effect. */
   const [tick, setTick] = useState(0)
   const [status, setStatus] = useState<'loading' | 'ok' | 'offline'>('loading')
+
+  /*
+   * The selected flight, matched on EITHER identifier.
+   *
+   * Comparing against iata_number alone silently excluded Fly Cham on V2: the panel lists it by
+   * its broadcast callsign (FYC489) while the document carries the ticketed number (XH489), so
+   * the equality never held. The aircraft drew normally but never highlighted, never panned and
+   * never opened — which looked intermittent rather than broken, because every other airline
+   * broadcasts what it tickets.
+   */
+  const targetRef = useRef<string | undefined>(targetFlight)
+  targetRef.current = targetFlight
+  const matchesTarget = useCallback((f: LiveFlight) => {
+    const t = targetRef.current?.trim().toUpperCase()
+    if (!t) return false
+    return [f.callsign, f.iata_number].some(id => id?.trim().toUpperCase() === t)
+  }, [])
+  /** Which selection we have already panned to. See the note on the pan effect. */
+  const pannedToRef = useRef<string | null>(null)
+  /** The marker whose popup WE opened, so clearing the selection can close it again. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const autoOpenedRef = useRef<any>(null)
   const [count, setCount] = useState(0)
 
   useEffect(() => {
@@ -233,8 +255,11 @@ export default function MapV3() {
       if (!cs) continue
       seen.add(cs)
 
+      const selected = matchesTarget(f)
       const syrian = SYRIAN.has(f.dep_iata ?? '') || SYRIAN.has(f.arr_iata ?? '')
-      const colour = syrian ? '#2f6b3c' : '#6b7280'
+      // Selection outranks the route colour: a reader who asked for one flight needs to find it,
+      // and which end of the route it serves is the lesser fact while they are looking.
+      const colour = selected ? '#c0392b' : syrian ? '#2f6b3c' : '#6b7280'
       const faded = p.pos_source === 'projected'
       const icon = L.divIcon({
         className: '',
@@ -305,7 +330,54 @@ export default function MapV3() {
       if (!seen.has(cs)) { m.remove(); markersRef.current.delete(cs) }
     }
     setCount(seen.size)
-  }, [mapReady, tick, animatable])
+  }, [mapReady, tick, animatable, matchesTarget, targetFlight])
+
+  /*
+   * Pan to a SELECTION, never to a position.
+   *
+   * Once per chosen flight, not once per poll. Panning on every document would drag the map out
+   * from under anyone who scrolled away from a moving aircraft, and there is no way to tell that
+   * apart from the reader having lost interest. The ref remembers which selection has already
+   * been honoured, so a flight that moves does not re-centre.
+   *
+   * Clearing the selection deliberately does not move the map back: the reader is looking at
+   * wherever they last were, and returning them somewhere else is not a kindness.
+   */
+  useEffect(() => {
+    if (!mapReady) return
+    const map = mapRef.current
+    const flights = docRef.current
+    if (!map || !flights) return
+
+    if (!targetFlight) {
+      pannedToRef.current = null
+      /*
+       * Close the popup we opened ourselves.
+       *
+       * It belonged to the selection, so it goes with it — leaving it up says a flight is still
+       * chosen when the panel says none is. A popup the READER opened by tapping the marker is
+       * not ours to close, which is why only the one we opened is tracked.
+       */
+      autoOpenedRef.current?.closePopup()
+      autoOpenedRef.current = null
+      return
+    }
+    if (pannedToRef.current === targetFlight) return
+
+    const f = flights.find(x => matchesTarget(x))
+    const p = f?.position
+    if (!f || !p || p.lat == null) return
+
+    pannedToRef.current = targetFlight
+    const cs = (f.callsign || f.iata_number || '').trim()
+    // Where the marker actually IS, which for an animated flight is its eased position on the
+    // corridor rather than its last fix. Panning to the fix would leave it off-centre.
+    const marker = markersRef.current.get(cs)
+    const at = marker ? marker.getLatLng() : { lat: p.lat, lng: p.lon }
+    map.flyTo([at.lat, at.lng], Math.max(map.getZoom(), 7), { duration: 0.8 })
+    marker?.openPopup()
+    autoOpenedRef.current = marker ?? null
+  }, [mapReady, targetFlight, tick, matchesTarget])
 
   /*
    * The animation, once a second.

@@ -1150,7 +1150,7 @@ function HomeInner() {
       {/* Map area */}
       <main style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
         {variant === 'v3'
-          ? <MapV3 />
+          ? <MapV3 targetFlight={flight} />
           : <Map targetFlight={flight} panelOpen={panelOpen} />}
 
         {/* Temporary: goes with lib/map-variant once V3 is the only map. */}
