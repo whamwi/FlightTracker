@@ -4,6 +4,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import 'leaflet/dist/leaflet.css'
 import { attachBasemap, type BasemapHandle } from '@/lib/basemap-attach'
 import { getActiveLocale, cityFor } from '@/lib/geo-data'
+import { translate } from '@/lib/i18n'
+import { PANEL } from './MapBox'
+import { overflightsInSyria } from '@/lib/overflight'
+import { overflightIconHtml, overflightPopupHtml } from '@/lib/overflight-popup'
 import { statusBadge, type PopupFlight } from '@/lib/v3-popup'
 import { buildPopup, type Aircraft } from '@/lib/flight-popup'
 import { advance, ease, pointAt, type Waypoint, type Motion } from '@/lib/v3-motion'
@@ -61,6 +65,18 @@ const POLL_MS = 15_000
 
 const SYRIAN = new Set(['DAM', 'ALP', 'DEZ', 'LTK'])
 
+/**
+ * Over Syria polls faster than the board does.
+ *
+ * These are raw ADS-B fixes and nothing here projects them forward, so a marker is only ever as
+ * current as its last poll — the freshness the board gets from motion has to come from the clock
+ * instead. Thirty seconds is about half a fix interval, which keeps the lag under one fix without
+ * asking for the same aircraft twice.
+ */
+const AIRSPACE_POLL_MS = 30_000
+
+const T = (k: string) => translate(getActiveLocale(), k)
+
 export default function MapV3({ targetFlight }: { targetFlight?: string }) {
   const elRef = useRef<HTMLDivElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -113,6 +129,27 @@ export default function MapV3({ targetFlight }: { targetFlight?: string }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const autoOpenedRef = useRef<any>(null)
   const [count, setCount] = useState(0)
+
+  /*
+   * OVER SYRIA — aircraft crossing Syrian airspace that are not on the board.
+   *
+   * Off by default and remembered nowhere, matching V2. It answers a question a reader asks
+   * deliberately ("what else is up there?") rather than one the map should answer unprompted, and
+   * turning it on doubles the markers over Syria at the zoom most people open at.
+   *
+   * WHY THIS IS NOT A VIOLATION of the rule that V3 draws only what the server asserts: these are
+   * observed fixes, not worked-out ones. What V3 refuses is dead reckoning — continuing to move a
+   * marker after the fixes stop — and nothing here moves at all between polls. An aircraft that
+   * goes quiet simply stops being returned, and its marker is removed rather than coasting on.
+   */
+  const [overSyriaOn, setOverSyriaOn] = useState(false)
+  /** Kept apart from the board's markers: different feed, different lifetime, different key. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const overMarkersRef = useRef<Map<string, any>>(new Map())
+  /** The geofence, fetched once on first use. Null until it lands — see isInSyria. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const syriaGeoRef = useRef<any>(null)
+  const [overCount, setOverCount] = useState(0)
 
   useEffect(() => {
     if (!elRef.current || mapRef.current) return
@@ -422,9 +459,140 @@ export default function MapV3({ targetFlight }: { targetFlight?: string }) {
     return () => clearInterval(id)
   }, [mapReady, animatable])
 
+  /*
+   * OVER SYRIA: poll only while it is on, and leave nothing behind when it goes off.
+   *
+   * The whole effect is gated on `overSyriaOn`, so turning it off tears the interval down rather
+   * than leaving it running against a hidden layer — this feed is a good deal larger than the
+   * board's, and polling it for a layer nobody is looking at is bandwidth spent on nothing.
+   */
+  useEffect(() => {
+    const map = mapRef.current
+    const L = LRef.current
+
+    // Clearing runs on the way out of every render of this effect, including the one where the
+    // toggle goes off. Markers are removed from the map AND forgotten, so turning it back on
+    // rebuilds from the feed rather than resurrecting positions from minutes ago.
+    const clear = () => {
+      for (const [, m] of overMarkersRef.current) m.remove()
+      overMarkersRef.current.clear()
+      setOverCount(0)
+    }
+
+    if (!overSyriaOn || !mapReady || !map || !L) { clear(); return }
+
+    let stop = false
+
+    const poll = async () => {
+      try {
+        // The fence is fetched once, on first use rather than at mount — most readers never turn
+        // this on, and the file is not small.
+        if (!syriaGeoRef.current) {
+          const g = await fetch('/syria_adm0.geojson', { cache: 'force-cache' })
+          if (stop) return
+          syriaGeoRef.current = await g.json()
+        }
+        const r = await fetch('/api/airspace', { cache: 'no-store' })
+        const doc = await r.json()
+        if (stop) return
+        /*
+         * A FEED ERROR IS NOT AN EMPTY SKY.
+         *
+         * The endpoint answers 200 with ok:false when its upstream fails, and the aircraft list is
+         * then empty or absent. Falling through would remove every marker, which draws the same
+         * picture as genuinely clear airspace — the reader cannot tell the two apart, and over
+         * Syria "nothing is flying" is a claim worth being careful with. Leave the last positions
+         * up and let the next poll correct them.
+         */
+        if (!doc?.ok) return
+
+        const seen = new Set<string>()
+        for (const a of overflightsInSyria(doc?.aircraft ?? [], syriaGeoRef.current)) {
+          const cs = (a.flight ?? '').trim()
+          seen.add(cs)
+          /*
+           * NOT rotated by -90 like the board's markers.
+           *
+           * Those draw the ✈ glyph, which points east, so their heading is track minus a quarter
+           * turn. This icon is an SVG that already points north, and V2 has always passed the
+           * track straight through. Copying the board's offset here would have every overflight
+           * flying ninety degrees left of where it is actually going.
+           */
+          const trackDeg = typeof a.track === 'number' ? a.track : 0
+          const icon = L.divIcon({
+            className: '',
+            html: overflightIconHtml(trackDeg),
+            iconSize: [26, 26], iconAnchor: [13, 13],
+          })
+          const html = overflightPopupHtml(a, trackDeg)
+          const existing = overMarkersRef.current.get(cs)
+          if (existing) {
+            // Straight to the fix, with no easing. There is no motion model behind an overflight
+            // — no corridor, no fraction — so the honest thing is to show where it was last seen.
+            existing.setLatLng([a.lat, a.lon])
+            existing.setIcon(icon)
+            existing.setPopupContent(html)
+          } else {
+            overMarkersRef.current.set(
+              cs,
+              // Below the board's markers: a flight someone is waiting for outranks traffic
+              // passing overhead when the two overlap.
+              L.marker([a.lat, a.lon], { icon, zIndexOffset: -200 })
+                .addTo(map)
+                .bindPopup(html, { className: 'fp-popup', closeButton: false, maxWidth: 280 }),
+            )
+          }
+        }
+
+        for (const [cs, m] of overMarkersRef.current) {
+          if (!seen.has(cs)) { m.remove(); overMarkersRef.current.delete(cs) }
+        }
+        setOverCount(seen.size)
+      } catch {
+        // A failed poll leaves the last positions alone, as the board's does. The next one
+        // corrects, and an empty layer would read as "nothing overhead" rather than "we missed".
+      }
+    }
+
+    poll()
+    const id = setInterval(poll, AIRSPACE_POLL_MS)
+    return () => { stop = true; clearInterval(id); clear() }
+  }, [overSyriaOn, mapReady])
+
   return (
     <>
+      <style>{`
+        /* Desktop only, matching V2: on a phone the top-right stack is most of what you can see,
+           and this is a power-user view of non-board traffic rather than anything a passenger
+           needs. */
+        .mapv3-oversyria { display: none; }
+        @media (min-width: 768px) { .mapv3-oversyria { display: flex; } }
+      `}</style>
       <div ref={elRef} className="w-full h-full" />
+      {/* Same corner and same styling as V2's, so the control does not jump when the reader
+          switches between the two maps mid-comparison. */}
+      <button
+        className="mapv3-oversyria"
+        onClick={() => setOverSyriaOn(v => !v)}
+        aria-pressed={overSyriaOn}
+        title="Show non-board aircraft currently inside Syrian airspace"
+        style={{
+          position: 'absolute', right: 12, bottom: 24, zIndex: 1000,
+          background: overSyriaOn ? PANEL.forest : PANEL.bg,
+          color:      overSyriaOn ? '#fff'       : PANEL.secondary,
+          backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+          border: `1px solid ${overSyriaOn ? PANEL.forest : PANEL.border}`,
+          borderRadius: 12, padding: '8px 12px',
+          font: `600 12px/1 'Instrument Sans', system-ui`, letterSpacing: '-.01em',
+          cursor: 'pointer', alignItems: 'center', gap: 6, whiteSpace: 'nowrap',
+          boxShadow: '0 4px 28px rgba(0,0,0,.13)',
+        }}
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
+        </svg>
+        {T('map.over_syria')}
+      </button>
       {/*
         * Always present, and it says which of the three states this is.
         *
@@ -442,7 +610,9 @@ export default function MapV3({ targetFlight }: { targetFlight?: string }) {
       }}>
         {status === 'loading' ? 'v3 · loading…'
           : status === 'offline' ? 'v3 · no data'
-          : `v3 · ${count} drawn`}
+          /* The two counts are kept apart rather than summed: they come from different feeds and
+             mean different things, and one number would make a quiet board look busy. */
+          : `v3 · ${count} drawn${overSyriaOn ? ` · ${overCount} over` : ''}`}
       </div>
     </>
   )

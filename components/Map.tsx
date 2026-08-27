@@ -38,6 +38,9 @@ import {
   schedArrDeltaMin, greatCircleKm, airlineIataFor, airlineNameFor, iataCity, RTL,
   FINAL_RING_KM, type Aircraft, type FlightStatus,
 } from '@/lib/flight-popup'
+// The Over Syria layer, shared with MapV3 so both maps draw the same aircraft the same way.
+import { isInSyria } from '@/lib/overflight'
+import { overflightIconHtml, overflightPopupHtml } from '@/lib/overflight-popup'
 import { markerHub, MARKER_ACCENT, isSyrianAirport, SYRIA_AIRPORT_SET, type BoardAirport } from '@/lib/syria-airports'
 
 /*
@@ -574,28 +577,6 @@ function buildEmbedFlight(callsign: string, se: ScheduleEntry | null, fs: Flight
     arr_delay_min:   fs?.arr_delay_min   ?? null,
     photoUrl:        photoUrl           ?? null,
   }
-}
-
-// ── Over-Syria geofence ──────────────────────────────────────────────────────
-function _raycast(lat: number, lon: number, ring: number[][]): boolean {
-  let inside = false
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const [xi, yi] = ring[i], [xj, yj] = ring[j]
-    if (((yi > lat) !== (yj > lat)) && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi)
-      inside = !inside
-  }
-  return inside
-}
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function isInSyria(lat: number, lon: number, geo: any): boolean {
-  if (!geo) return false
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  for (const feat of (geo.features ?? [{ geometry: geo }])) {
-    const g = feat.geometry ?? feat
-    if (g.type === 'Polygon'      && _raycast(lat, lon, g.coordinates[0]))              return true
-    if (g.type === 'MultiPolygon' && g.coordinates.some((p: number[][][]) => _raycast(lat, lon, p[0]))) return true
-  }
-  return false
 }
 
 // Header buttons for the media boxes: sized to the hamburger beside them so the row reads
@@ -2671,49 +2652,11 @@ export default function Map({ embed = false, targetFlight, panelOpen }: { embed?
             const trackDeg = a.track ?? 0
             const icon = L.divIcon({
               className: '',
-              html: `<div style="width:26px;height:26px;background:#475569;border:2px solid rgba(255,255,255,.9);border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 6px rgba(0,0,0,.45)"><svg width="13" height="13" viewBox="0 0 24 24" fill="#fff" style="transform:rotate(${trackDeg}deg)"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg></div>`,
+              html: overflightIconHtml(trackDeg),
               iconSize:   [26, 26],
               iconAnchor: [13, 13],
             })
-            const altNum  = typeof a.alt_baro === 'number' ? Math.round(a.alt_baro / 100) * 100 : null
-            const altDisp = altNum != null ? altNum.toLocaleString() : '—'
-            const spdDisp = a.gs ? Math.round(a.gs).toString() : '—'
-            const acType  = a.t ?? null
-            const reg     = a.r ?? null
-            const aiata   = airlineIataFor(cs)
-            const alName  = airlineNameFor(aiata)
-            const logoUrl = aiata ? airlineLogo(aiata) : null
-            const logoWhiteBg = aiata ? LOGO_WHITE_BG.has(aiata) : false
-            // Header left: airline logo when known, else a rotated plane icon
-            const logoHtml = logoUrl
-              ? `<img src="${logoUrl}" style="width:46px;height:46px;border-radius:10px;object-fit:contain;${logoWhiteBg ? 'background:#fff;' : 'background:#1e293b;'}padding:4px;flex-shrink:0" onerror="this.src='https://images.flightsfrom.com/airlines/100/${aiata}_100px.png';this.onerror=null">`
-              : `<div style="width:46px;height:46px;border-radius:10px;background:#1e293b;flex-shrink:0;display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="#64748b" style="transform:rotate(${trackDeg}deg)"><path d="M21 16v-2l-8-5V3.5C13 2.67 12.33 2 11.5 2S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg></div>`
-            // Primary line: airline name when known, else callsign
-            const primaryLine = alName
-              ? `<div style="font-size:14px;font-weight:700;color:#f9fafb;line-height:1.2;letter-spacing:-.01em">${alName}</div>
-                 <div style="font-size:11.5px;color:#9ca3af;margin-top:3px;font-variant-numeric:tabular-nums">${cs}${acType ? ' · ' + acType : ''}</div>`
-              : `<div style="font-size:15px;font-weight:700;color:#f9fafb;line-height:1.2;letter-spacing:-.01em;font-variant-numeric:tabular-nums">${cs}</div>
-                 <div style="font-size:11px;color:#6b7280;margin-top:3px">${[acType, reg].filter(Boolean).join(' · ') || T('map.unknown_airline')}</div>`
-            const popup = `<div dir="${RTL() ? 'rtl' : 'ltr'}" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;width:260px">
-              <div style="display:flex;align-items:flex-start;gap:11px;padding:14px 14px 11px">
-                ${logoHtml}
-                <div style="flex:1;min-width:0;text-align:start">${primaryLine}</div>
-                <span style="background:#0f172a;border:1px solid #334155;color:#94a3b8;font-size:9px;font-weight:700;padding:3px 8px;border-radius:99px;flex-shrink:0;letter-spacing:${RTL() ? 'normal' : '.04em'};white-space:nowrap;margin-top:1px">${RTL() ? T('map.overflight') : T('map.overflight').toUpperCase()}</span>
-              </div>
-              <div style="display:grid;grid-template-columns:1fr 1px 1fr;background:#1f2937;border-radius:0 0 14px 14px">
-                <div style="text-align:center;padding:14px 8px">
-                  <div style="font-size:9px;color:#4b5563;font-weight:700;text-transform:uppercase;letter-spacing:${RTL() ? 'normal' : '.7px'};margin-bottom:6px">${T('map.altitude')}</div>
-                  <div style="font-size:22px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums;line-height:1">${altDisp}</div>
-                  <div style="font-size:10px;color:#6b7280;margin-top:4px">${T('unit.ft')}</div>
-                </div>
-                <div style="background:#374151"></div>
-                <div style="text-align:center;padding:14px 8px">
-                  <div style="font-size:9px;color:#4b5563;font-weight:700;text-transform:uppercase;letter-spacing:${RTL() ? 'normal' : '.7px'};margin-bottom:6px">${T('map.speed')}</div>
-                  <div style="font-size:22px;font-weight:700;color:#f9fafb;font-variant-numeric:tabular-nums;line-height:1">${spdDisp}</div>
-                  <div style="font-size:10px;color:#6b7280;margin-top:4px">${T('unit.kt')}</div>
-                </div>
-              </div>
-            </div>`
+            const popup = overflightPopupHtml(a, trackDeg)
             const mk = L.marker([a.lat, a.lon], { icon, zIndexOffset: -200 })
             mk.bindPopup(popup, { className: 'fp-popup', closeButton: false, maxWidth: 280 })
             addToMap(mk, map)
