@@ -51,6 +51,23 @@ const STATIC: { path: string; changeFrequency: MetadataRoute.Sitemap[number]['ch
 ]
 
 async function flightNumbers(): Promise<string[]> {
+  /*
+   * NO CREDENTIALS, NO FETCH — and this is the actual cause of the failed preview builds.
+   *
+   * SUPABASE_URL and SUPABASE_ANON_KEY are scoped to Production in the Vercel project, so a
+   * preview build has neither. `process.env.SUPABASE_URL!` asserts otherwise but cannot make it
+   * true: SB_URL was the string "undefined", the template produced "undefined/rest/v1/…", and a
+   * relative URL sent Next looking for a host that does not exist during a build. It hung there
+   * past the 60-second prerender limit, three attempts, and failed the build.
+   *
+   * The `!` is what hid it. It silences the type system about a value the environment genuinely
+   * may not supply, so the missing-variable case never had to be thought about.
+   *
+   * Checked rather than assumed, and it returns the same [] the catch below returns — a sitemap
+   * without the flight pages, which is what a build with no database access can honestly produce.
+   */
+  if (!SB_URL || !SB_KEY) return []
+
   try {
     const res = await fetch(
       `${SB_URL}/rest/v1/route_master?active=eq.true&select=flight_lookup(iata_number)`,
