@@ -33,18 +33,26 @@ create extension if not exists pg_cron;
 
 -- ── The prune ────────────────────────────────────────────────────────────────
 --
--- Batched rather than one statement. The first run has ~142k rows to clear and a single DELETE
--- would hold row locks on all of them for its whole duration, against a table the harvester is
--- inserting into every few minutes. Every run after that has only a day's worth to remove, so the
--- loop exits on its first pass and the batching costs nothing.
+-- A PROCEDURE, not a function, and the distinction is the whole point. A plpgsql FUNCTION runs
+-- inside the caller's transaction and cannot COMMIT, so batching inside one would hold every
+-- batch's locks until the last batch finished — precisely the single long lock the batching
+-- exists to avoid. Only a procedure may commit mid-run. This was written as a function first and
+-- the error was caught before the backlog run, not after.
 --
--- Returns the count so a caller — or cron.job_run_details — can see what happened rather than
--- trusting that it did.
-create or replace function prune_fr24_flight_raw(
-  retain_days   integer default 30,
-  batch_size    integer default 10000,
-  max_batches   integer default 100
-) returns bigint
+-- Each batch therefore lands on its own: the harvester gets a gap between them, and a run that is
+-- interrupted keeps the work already done instead of rolling all of it back. Every run after the
+-- first has a day's worth to remove and exits on its second pass, where the batching costs
+-- nothing.
+--
+-- NOTE for anyone calling this by hand: a procedure can only COMMIT when it is NOT inside an
+-- explicit transaction block. Tools that wrap every statement in BEGIN/COMMIT — including some
+-- SQL consoles — will fail with "invalid transaction termination". pg_cron does not wrap, so the
+-- scheduled path is unaffected; to run it manually, use a client that does not open a transaction,
+-- or issue the batched DELETE directly.
+create or replace procedure prune_fr24_flight_raw(
+  retain_days integer default 30,
+  batch_size  integer default 10000
+)
 language plpgsql
 security definer
 set search_path = public
@@ -53,7 +61,6 @@ declare
   cutoff     timestamptz := now() - make_interval(days => retain_days);
   removed    bigint := 0;
   this_batch bigint;
-  i          integer := 0;
 begin
   -- A guard, not politeness: called with retain_days => 0 through a typo this would empty the
   -- tape, and the tape is the only thing that can rebuild `flight`.
@@ -62,9 +69,6 @@ begin
   end if;
 
   loop
-    i := i + 1;
-    exit when i > max_batches;
-
     delete from fr24_flight_raw
     where id in (
       select id from fr24_flight_raw
@@ -75,19 +79,20 @@ begin
 
     get diagnostics this_batch = row_count;
     removed := removed + this_batch;
+    commit;
     exit when this_batch = 0;
   end loop;
 
   raise notice 'prune_fr24_flight_raw: removed % rows older than %', removed, cutoff;
-  return removed;
 end;
 $$;
 
-comment on function prune_fr24_flight_raw(integer, integer, integer) is
+comment on procedure prune_fr24_flight_raw(integer, integer) is
   'Deletes fr24_flight_raw rows older than retain_days (default 30, minimum 7), in batches so the '
   'first catch-up run does not lock the table against the harvester. Safe because '
   'fr24_raw_to_flight() distils each row into `flight` on insert; nothing reads the tape after '
-  'that except re-derivation. Returns the number of rows removed.';
+  'that except re-derivation. Commits per batch, so it must not be called inside an\n'
+  'explicit transaction block.';
 
 -- ── Schedule ─────────────────────────────────────────────────────────────────
 --
@@ -102,7 +107,7 @@ where exists (select 1 from cron.job where jobname = 'prune-fr24-raw');
 select cron.schedule(
   'prune-fr24-raw',
   '15 3 * * *',
-  $$select public.prune_fr24_flight_raw(30)$$
+  $$call public.prune_fr24_flight_raw(30)$$
 );
 
 commit;
@@ -111,7 +116,7 @@ commit;
 --
 -- The first scheduled run clears the ~142k row backlog. To do it now instead, and see the count:
 --
---   select prune_fr24_flight_raw(30);
+--   call prune_fr24_flight_raw(30);   -- not inside a transaction block
 --
 -- To confirm the job is registered and check its history:
 --
