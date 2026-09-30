@@ -5,10 +5,11 @@ node_modules/
 .next/
 out/
 
-# env files
+# env files — every variant, because .env.dev and .env.prod slipped past the
+# old list and were committed to a PUBLIC repo with live keys in them.
 .env
-.env.local
-.env*.local
+.env.*
+!.env.example
 
 # Vercel
 .vercel

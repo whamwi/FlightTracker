@@ -4,15 +4,35 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 // ── Airport live-data Supabase sources ────────────────────────────────────────
-const AIRPORT_SOURCES: Record<string, { url: string; key: string }> = {
-  DAM: {
-    url: 'https://ognrupehzbbckimkaikb.supabase.co',
-    key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9nbnJ1cGVoemJiY2tpbWthaWtiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ2ODc3NTIsImV4cCI6MjA4MDI2Mzc1Mn0.cBh06V2W7ocx8etUixo2lcdl1XH5RR4pTjXNOG59Xsg',
-  },
-  ALP: {
-    url: 'https://ttqpvffxbouowufwbfze.supabase.co',
-    key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR0cXB2ZmZ4Ym91b3d1ZndiZnplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY3ODU3NDMsImV4cCI6MjA4MjM2MTc0M30.A3j9iny8RusFtUt8J5mAyaj33cKEQJW9EPJw8iLtVWc',
-  },
+/*
+ * THIRD-PARTY credentials, read from the environment rather than held in source.
+ *
+ * These belong to damascusairport.com, not to us. They sat hardcoded in this file
+ * until 30 Sep 2026 on a repository that is public, so they were world-readable for
+ * as long as that was true. Whatever replaces them must not come back into the file:
+ * someone else's key in our source is a disclosure we have no right to make, and a
+ * public repo makes it immediate.
+ *
+ * An unknown airport returns null, which the caller already treats as "not
+ * configured". A KNOWN airport with missing variables throws instead, so a
+ * misconfigured deploy fails loudly at the route that needs it rather than syncing
+ * nothing and leaving the board to look merely quiet — the difference between a gap
+ * in the data and a gap we know about.
+ */
+type AirportSource = { url: string; key: string }
+
+const AIRPORT_CODES: readonly string[] = ['DAM', 'ALP']
+
+function airportSource(iata: string): AirportSource | null {
+  if (!AIRPORT_CODES.includes(iata)) return null
+  const url = process.env[`AIRPORT_SRC_${iata}_URL`]
+  const key = process.env[`AIRPORT_SRC_${iata}_KEY`]
+  if (!url || !key) {
+    throw new Error(
+      `damairport sync: AIRPORT_SRC_${iata}_URL and AIRPORT_SRC_${iata}_KEY must be set`,
+    )
+  }
+  return { url, key }
 }
 
 // ── Our own Supabase ───────────────────────────────────────────────────────────
@@ -93,7 +113,7 @@ interface DacFlight {
 
 // ── Fetch from airport Supabase source ────────────────────────────────────────
 async function fetchAirport(airport: string, date: string): Promise<{ arrivals: DacFlight[]; departures: DacFlight[] }> {
-  const src = AIRPORT_SOURCES[airport]
+  const src = airportSource(airport)
   if (!src) throw new Error(`No source configured for ${airport}`)
   const res = await fetch(
     `${src.url}/rest/v1/flight_cache?id=eq.main&select=payload`,
